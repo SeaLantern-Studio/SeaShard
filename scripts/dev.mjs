@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const electronEntry = join(root, "apps/desktop/dist/main/index.js");
 const mainConfig = join(root, "apps/desktop/vite.main.config.ts");
 const preloadConfig = join(root, "apps/desktop/vite.preload.config.ts");
+const pluginHostConfig = join(root, "apps/plugin-host/vite.config.ts");
 const rendererConfig = join(root, "vite.config.ts");
 
 const bundleWatchers = [];
@@ -34,6 +35,7 @@ async function main() {
   const records = await Promise.all([
     startBundleWatcher("main", mainConfig),
     startBundleWatcher("preload", preloadConfig),
+    startBundleWatcher("plugin-host", pluginHostConfig),
   ]);
   bundleWatchers.push(...records.map((record) => record.watcher));
   await Promise.all(records.map((record) => record.initialBuild));

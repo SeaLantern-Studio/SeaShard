@@ -1,0 +1,19 @@
+{
+  "id": "seashard.smoke-plugin",
+  "version": "1.0.0",
+  "publisher": "sealantern-studio",
+  "entries": [
+    {
+      "id": "smoke-plugin.host",
+      "runtime": "host",
+      "module": "./dist/host.js",
+      "hostProfiles": ["electron", "node", "docker"],
+      "activationScopes": ["global"],
+      "permissions": ["seashard.smoke.marker"],
+      "upgradeMode": "hot-swap"
+    }
+  ],
+  "compatibility": {
+    "seaShard": ">=0.0.0 <1.0.0"
+  }
+}

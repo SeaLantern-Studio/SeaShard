@@ -5,10 +5,10 @@
   "type": "module",
   "main": "dist/main/index.js",
   "dependencies": {
-    "@seashard/bootstrap-status": "workspace:*",
-    "@seashard/component-supervisor": "workspace:*",
     "@seashard/contracts": "workspace:*",
     "@seashard/desktop-gateway": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
     "cmzya-modern-ui": "0.6.1",
     "cordis": "4.0.0-rc.8",
     "lucide-vue-next": "0.400.0",

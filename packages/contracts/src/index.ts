@@ -1,15 +1,8 @@
+export type RuntimePhase = "active" | "updating" | "blocked" | "failed";
+
 export const desktopChannels = {
   runtimeSnapshot: "seashard.runtime.snapshot",
 } as const;
-
-export type RuntimePhase =
-  | "discovered"
-  | "starting"
-  | "active"
-  | "quiescing"
-  | "stopping"
-  | "failed"
-  | "disabled";
 
 export interface ComponentSnapshot {
   id: string;

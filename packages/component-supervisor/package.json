@@ -7,7 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@seashard/contracts": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@seashard/plugin-sdk": "workspace:*"
   }
 }

@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@seashard/contracts": "workspace:*",
-    "cordis": "4.0.0-rc.8"
+    "@seashard/plugin-sdk": "workspace:*"
   },
   "peerDependencies": {
     "electron": "43.4.0"

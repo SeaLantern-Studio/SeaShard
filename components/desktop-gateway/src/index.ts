@@ -1,6 +1,6 @@
 import { desktopChannels, type RuntimeSnapshot } from "@seashard/contracts";
+import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
-import type { Context, Plugin } from "cordis";
 
 export interface DesktopGatewayConfig {
   authorize(event: IpcMainInvokeEvent): boolean;
@@ -8,22 +8,43 @@ export interface DesktopGatewayConfig {
   onRuntimeSnapshotServed?(snapshot: RuntimeSnapshot): void;
 }
 
-export const desktopGatewayPlugin = {
-  name: "seashard.desktop-gateway",
-  apply(ctx: Context, config: DesktopGatewayConfig) {
-    ctx.effect(() => {
-      ipcMain.handle(desktopChannels.runtimeSnapshot, (event) => {
-        if (!config.authorize(event)) {
-          throw new Error("runtime snapshot request rejected");
-        }
-        const snapshot = config.getRuntimeSnapshot();
-        config.onRuntimeSnapshotServed?.(snapshot);
-        return snapshot;
-      });
-
-      return () => {
-        ipcMain.removeHandler(desktopChannels.runtimeSnapshot);
-      };
-    }, "desktop runtime snapshot contract");
+export const desktopGatewayManifest: PluginManifest = {
+  id: "seashard.desktop-gateway",
+  version: "0.0.0",
+  publisher: "sealantern-studio",
+  entries: [
+    {
+      id: "desktop-gateway.host",
+      runtime: "host",
+      module: "./dist/host.js",
+      hostProfiles: ["electron"],
+      activationScopes: ["global"],
+      permissions: [],
+      upgradeMode: "stop-first",
+    },
+  ],
+  compatibility: {
+    seaShard: ">=0.0.0 <1.0.0",
   },
-} satisfies Plugin<DesktopGatewayConfig>;
+};
+
+export function createDesktopGatewayModule(config: DesktopGatewayConfig): PluginModule {
+  return {
+    apply(ctx) {
+      ctx.effect(() => {
+        ipcMain.handle(desktopChannels.runtimeSnapshot, (event) => {
+          if (!config.authorize(event)) {
+            throw new Error("runtime snapshot request rejected");
+          }
+          const snapshot = config.getRuntimeSnapshot();
+          config.onRuntimeSnapshotServed?.(snapshot);
+          return snapshot;
+        });
+
+        return () => {
+          ipcMain.removeHandler(desktopChannels.runtimeSnapshot);
+        };
+      }, "desktop runtime snapshot contract");
+    },
+  };
+}

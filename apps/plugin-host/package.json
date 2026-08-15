@@ -1,0 +1,12 @@
+{
+  "name": "@seashard/plugin-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "dependencies": {
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  }
+}
