@@ -1,0 +1,25 @@
+# Local architecture notes
+DESIGN.md
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+
+# Runtime data
+.data/
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

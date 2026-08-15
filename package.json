@@ -1,0 +1,26 @@
+{
+  "name": "seashard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts",
+    "dev": "node scripts/dev.mjs",
+    "check": "vp check && vue-tsc --noEmit",
+    "start": "electron apps/desktop/dist/main/index.js",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "@vitejs/plugin-vue": "6.0.8",
+    "electron": "43.4.0",
+    "typescript": "5.9.3",
+    "vite": "8.2.1",
+    "vite-plus": "0.2.9",
+    "vue-tsc": "3.3.10"
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "packageManager": "pnpm@10.13.1"
+}
