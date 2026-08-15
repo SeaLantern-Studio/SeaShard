@@ -3,6 +3,7 @@ import type {
   JsonValue,
   PluginContext,
   PluginModule,
+  PluginStoredDocument,
   ServiceProvider,
 } from "@seashard/plugin-sdk";
 import type {
@@ -13,6 +14,9 @@ import type {
   ProtocolResponse,
   ProviderInvocationPayload,
   ServiceCallPayload,
+  StorageDeletePayload,
+  StorageGetPayload,
+  StoragePutPayload,
 } from "@seashard/plugin-system";
 import { Context, type Fiber } from "cordis";
 
@@ -135,6 +139,32 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
     execution: state.execution,
     runtimeId: state.runtimeId,
     generation: state.generation,
+    storage: {
+      async get(key) {
+        return (await request("storage-get", {
+          key,
+        } satisfies StorageGetPayload)) as unknown as PluginStoredDocument | undefined;
+      },
+      async put(key, value, options) {
+        const result = await request("storage-put", {
+          key,
+          value,
+          ...(options ? { options } : {}),
+        } satisfies StoragePutPayload);
+        if (!result) throw new Error("plugin storage put returned no document");
+        return result as unknown as PluginStoredDocument;
+      },
+      async delete(key, options) {
+        const result = await request("storage-delete", {
+          key,
+          ...(options ? { options } : {}),
+        } satisfies StorageDeletePayload);
+        if (typeof result !== "boolean") {
+          throw new Error("plugin storage delete returned an invalid result");
+        }
+        return result;
+      },
+    },
     effect(execute, label) {
       cordisContext.effect(async () => (await execute()) ?? (() => {}), label);
     },

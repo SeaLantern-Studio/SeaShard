@@ -1,0 +1,12 @@
+{
+  "name": "@seashard/bootstrap-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.8"
+  }
+}

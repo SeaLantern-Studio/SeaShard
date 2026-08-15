@@ -34,8 +34,13 @@ export class PluginRegistry {
     private readonly seaShardVersion: string,
   ) {}
 
-  registerBuiltIn(registration: BuiltInPackageRegistration): PluginPackageRecord {
+  async registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
     const manifest = parsePluginManifest(registration.manifest, this.seaShardVersion);
+    for (const entry of manifest.entries) {
+      if (!registration.loaders[entry.id]) {
+        throw new Error(`missing built-in loader: ${manifest.id}/${entry.id}`);
+      }
+    }
     const digest = createHash("sha256")
       .update(JSON.stringify(manifest))
       .update("\0builtin")
@@ -48,16 +53,14 @@ export class PluginRegistry {
       trust: "builtin",
       installedAt: new Date().toISOString(),
     };
-    this.store.registerPackage(record);
-    this.store.setCurrentVersion(manifest.id, manifest.version, digest);
+    await this.store.registerPackage(record);
+    await this.store.setCurrentVersion(manifest.id, manifest.version, digest);
 
     for (const entry of manifest.entries) {
-      const loader = registration.loaders[entry.id];
-      if (!loader) throw new Error(`missing built-in loader: ${manifest.id}/${entry.id}`);
-      this.builtInLoaders.set(`${manifest.id}/${entry.id}`, loader);
+      this.builtInLoaders.set(`${manifest.id}/${entry.id}`, registration.loaders[entry.id]!);
     }
     for (const binding of registration.bindings) {
-      this.upsertBinding({ ...binding, pluginId: manifest.id });
+      await this.upsertBinding({ ...binding, pluginId: manifest.id });
     }
     return record;
   }
@@ -65,23 +68,27 @@ export class PluginRegistry {
   getBuiltInLoader(pluginId: string, entryId: string): BuiltInModuleLoader | undefined {
     return this.builtInLoaders.get(`${pluginId}/${entryId}`);
   }
-  selectPackageVersion(record: PluginPackageRecord): void {
-    this.store.setCurrentVersion(record.manifest.id, record.manifest.version, record.digest);
-  }
-  clearPackageSelection(pluginId: string): void {
-    this.store.clearCurrentVersion(pluginId);
+
+  selectPackageVersion(record: PluginPackageRecord): Promise<void> {
+    return this.store.setCurrentVersion(record.manifest.id, record.manifest.version, record.digest);
   }
 
-  upsertBinding(binding: PluginBinding): void {
-    if (!bindingIdPattern.test(binding.id))
+  clearPackageSelection(pluginId: string): Promise<void> {
+    return this.store.clearCurrentVersion(pluginId);
+  }
+
+  async upsertBinding(binding: PluginBinding): Promise<void> {
+    if (!bindingIdPattern.test(binding.id)) {
       throw new Error(`invalid plugin binding id: ${binding.id}`);
-    const current = this.store
-      .listCurrentPackages()
-      .find((record) => record.manifest.id === binding.pluginId);
+    }
+    const current = (await this.store.listCurrentPackages()).find(
+      (record) => record.manifest.id === binding.pluginId,
+    );
     if (!current) throw new Error(`plugin is not selected: ${binding.pluginId}`);
     const entry = current.manifest.entries.find((candidate) => candidate.id === binding.entryId);
-    if (!entry)
+    if (!entry) {
       throw new Error(`plugin entry does not exist: ${binding.pluginId}/${binding.entryId}`);
+    }
     if (!entry.activationScopes.includes(binding.scopeType)) {
       throw new Error(
         `entry ${binding.pluginId}/${binding.entryId} does not support ${binding.scopeType} scope`,
@@ -91,31 +98,31 @@ export class PluginRegistry {
       throw new Error("global plugin bindings must use scopeId 'global'");
     }
     JSON.stringify(binding.config);
-    this.store.upsertBinding(binding);
+    await this.store.upsertBinding(binding);
   }
 
-  deleteBinding(bindingId: string): void {
-    this.store.deleteBinding(bindingId);
+  deleteBinding(bindingId: string): Promise<void> {
+    return this.store.deleteBinding(bindingId);
   }
 
-  listBindings(pluginId?: string): PluginBinding[] {
+  listBindings(pluginId?: string): Promise<PluginBinding[]> {
     return this.store.listBindings(pluginId);
   }
 
-  resolve(options: {
+  async resolve(options: {
     hostProfile: HostProfile;
     clientTarget?: ClientTarget;
     platform: OperatingSystem;
     architecture: CpuArchitecture;
-  }): ResolvedEntry[] {
+  }): Promise<ResolvedEntry[]> {
     const packages = new Map(
-      this.store.listCurrentPackages().map((record) => [record.manifest.id, record]),
+      (await this.store.listCurrentPackages()).map((record) => [record.manifest.id, record]),
     );
     const issues: string[] = [];
     const entries: ResolvedEntry[] = [];
     const runtimeIds = new Set<string>();
 
-    for (const binding of this.store.listBindings()) {
+    for (const binding of await this.store.listBindings()) {
       const record = packages.get(binding.pluginId);
       if (!record) {
         issues.push(`binding ${binding.id} references unavailable plugin ${binding.pluginId}`);
@@ -164,11 +171,11 @@ export class PluginRegistry {
     return entries.sort((left, right) => left.runtimeId.localeCompare(right.runtimeId));
   }
 
-  listPackages(pluginId?: string): PluginPackageRecord[] {
+  listPackages(pluginId?: string): Promise<PluginPackageRecord[]> {
     return this.store.listPackages(pluginId);
   }
 
-  listCurrentPackages(): PluginPackageRecord[] {
+  listCurrentPackages(): Promise<PluginPackageRecord[]> {
     return this.store.listCurrentPackages();
   }
 }

@@ -1,15 +1,16 @@
 import { ComponentSupervisor } from "@seashard/component-supervisor";
+import type { DatabaseService } from "@seashard/database";
 import type {
   ExecutionContext,
   JsonValue,
   PluginBinding,
+  PluginStorageBroker,
   RuntimeControlSnapshot,
   ScopeAddress,
   ServiceProvider,
 } from "@seashard/plugin-sdk";
 import { Context } from "cordis";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { PluginInstaller } from "./installer";
 import { PluginRegistry } from "./registry";
 import { PluginRuntimeBackend } from "./runtime-backend";
@@ -35,10 +36,12 @@ export interface PluginKernelOptions {
   clientTarget?: "desktop" | "web" | "mobile";
   platform: "win32" | "darwin" | "linux" | "aix" | "freebsd" | "openbsd" | "sunos";
   architecture: "x64" | "arm64" | "ia32" | "arm" | "riscv64" | "ppc64" | "s390x";
+  root: Context;
+  database: DatabaseService;
+  pluginStorage: PluginStorageBroker;
 }
 
 export class PluginKernel {
-  readonly store: PluginStore;
   readonly installer: PluginInstaller;
   readonly registry: PluginRegistry;
   readonly publications = new RuntimePublicationRegistry();
@@ -46,36 +49,37 @@ export class PluginKernel {
   readonly contributions = new ContributionRegistry(this.publications);
   readonly events = new PluginEventBus(this.publications);
 
-  private readonly root = new Context();
   private readonly supervisor: ComponentSupervisor;
   private readonly coreDisposers: Array<() => void> = [];
   private clientEntries: ResolvedEntry[] = [];
   private disposeTask?: Promise<void>;
 
-  private constructor(private readonly options: PluginKernelOptions) {
-    this.store = new PluginStore(
-      join(options.dataRoot, "seashard.sqlite3"),
-      options.seaShardVersion,
-    );
+  private constructor(
+    private readonly options: PluginKernelOptions,
+    readonly store: PluginStore,
+  ) {
     this.installer = new PluginInstaller(this.store, options.dataRoot, options.seaShardVersion);
     this.registry = new PluginRegistry(this.store, options.seaShardVersion);
-    this.store.interruptRuntimeOperations();
-    this.store.invalidateRuntimePublications();
-    for (const publication of this.store.listRuntimePublications()) {
-      this.publications.seedEpoch(publication.runtimeId, publication.epoch);
-    }
     let supervisor: ComponentSupervisor;
     const backend = new PluginRuntimeBackend(
-      this.root,
+      options.root,
       this.registry,
       {
         publications: this.publications,
         services: this.services,
         contributions: this.contributions,
         events: this.events,
+        storage: options.pluginStorage,
       },
       options.pluginHostEntry,
-      (runtimeId, generation, error) => supervisor.runtimeFailed(runtimeId, generation, error),
+      (runtimeId, generation, error) => {
+        void supervisor.runtimeFailed(runtimeId, generation, error).catch((failure) => {
+          console.error(
+            `failed to persist runtime failure for ${runtimeId}@${generation}`,
+            failure,
+          );
+        });
+      },
     );
     supervisor = new ComponentSupervisor(backend, this.store);
     this.supervisor = supervisor;
@@ -83,10 +87,17 @@ export class PluginKernel {
 
   static async create(options: PluginKernelOptions): Promise<PluginKernel> {
     await mkdir(options.dataRoot, { recursive: true });
-    return new PluginKernel(options);
+    const store = await PluginStore.create(options.database, options.seaShardVersion);
+    await store.interruptRuntimeOperations();
+    await store.invalidateRuntimePublications();
+    const kernel = new PluginKernel(options, store);
+    for (const publication of await store.listRuntimePublications()) {
+      kernel.publications.seedEpoch(publication.runtimeId, publication.epoch);
+    }
+    return kernel;
   }
 
-  registerBuiltIn(registration: BuiltInPackageRegistration): PluginPackageRecord {
+  registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
     return this.registry.registerBuiltIn(registration);
   }
 
@@ -104,23 +115,22 @@ export class PluginKernel {
     return this.installer.prepareArchive(archivePath);
   }
 
-  upsertBinding(binding: PluginBinding): void {
-    this.registry.upsertBinding(binding);
+  upsertBinding(binding: PluginBinding): Promise<void> {
+    return this.registry.upsertBinding(binding);
   }
 
-  deleteBinding(bindingId: string): void {
-    this.registry.deleteBinding(bindingId);
+  deleteBinding(bindingId: string): Promise<void> {
+    return this.registry.deleteBinding(bindingId);
   }
 
   async selectPackageVersion(record: PluginPackageRecord): Promise<void> {
-    const previous = this.registry
-      .listCurrentPackages()
-      .find((candidate) => candidate.manifest.id === record.manifest.id);
-    this.registry.selectPackageVersion(record);
+    const previous = (await this.registry.listCurrentPackages()).find(
+      (candidate) => candidate.manifest.id === record.manifest.id,
+    );
+    await this.registry.selectPackageVersion(record);
     try {
       await this.reconcile();
-      const enabledHostBindings = this.registry
-        .listBindings(record.manifest.id)
+      const enabledHostBindings = (await this.registry.listBindings(record.manifest.id))
         .filter((binding) => binding.enabled)
         .filter((binding) =>
           record.manifest.entries.some(
@@ -154,9 +164,9 @@ export class PluginKernel {
       }
     } catch (error) {
       if (previous) {
-        this.registry.selectPackageVersion(previous);
+        await this.registry.selectPackageVersion(previous);
       } else {
-        this.registry.clearPackageSelection(record.manifest.id);
+        await this.registry.clearPackageSelection(record.manifest.id);
       }
       await this.reconcile();
       throw error;
@@ -178,6 +188,7 @@ export class PluginKernel {
   resolvedClientEntries(): readonly ResolvedEntry[] {
     return this.clientEntries;
   }
+
   diagnostics(): {
     services: number;
     contributions: number;
@@ -214,7 +225,7 @@ export class PluginKernel {
   }
 
   private async reconcile(): Promise<void> {
-    const entries = this.registry.resolve({
+    const entries = await this.registry.resolve({
       hostProfile: this.options.hostProfile,
       clientTarget: this.options.clientTarget,
       platform: this.options.platform,
@@ -227,7 +238,6 @@ export class PluginKernel {
   private async disposeKernel(): Promise<void> {
     await this.supervisor.dispose();
     for (const dispose of this.coreDisposers.reverse()) dispose();
-    this.store.close();
   }
 }
 

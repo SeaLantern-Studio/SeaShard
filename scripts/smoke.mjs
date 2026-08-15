@@ -69,6 +69,7 @@ async function runElectron(label, extraEnvironment) {
   const required = [
     "SEASHARD_PLUGIN_SMOKE_ECHO core-smoke:probe",
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
+    "SEASHARD_PLUGIN_SMOKE_STORAGE",
     "SEASHARD_SMOKE_READY components=2",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
     "SEASHARD_PLUGIN_HOST_DISPOSED runtime=smoke.external-plugin",

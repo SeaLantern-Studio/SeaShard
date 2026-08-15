@@ -1,0 +1,10 @@
+{
+  "name": "@seashard/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker-protocol": "./src/worker-protocol.ts"
+  }
+}

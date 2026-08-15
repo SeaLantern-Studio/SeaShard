@@ -1,4 +1,9 @@
-import type { ExecutionContext, JsonValue } from "@seashard/plugin-sdk";
+import type {
+  ExecutionContext,
+  JsonValue,
+  PluginStorageDeleteOptions,
+  PluginStoragePutOptions,
+} from "@seashard/plugin-sdk";
 
 export interface ProtocolRequest {
   type: "request";
@@ -73,4 +78,19 @@ export interface ProviderInvocationPayload {
 export interface EventDispatchPayload {
   registrationId: string;
   payload: JsonValue;
+}
+
+export interface StorageGetPayload {
+  key: string;
+}
+
+export interface StoragePutPayload {
+  key: string;
+  value: JsonValue;
+  options?: PluginStoragePutOptions;
+}
+
+export interface StorageDeletePayload {
+  key: string;
+  options?: PluginStorageDeleteOptions;
 }

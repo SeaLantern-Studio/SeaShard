@@ -49,11 +49,11 @@ export interface RuntimeBackend {
 }
 
 export interface RuntimeStateStore {
-  nextGeneration(runtimeId: string): number;
-  saveRuntimeGeneration(snapshot: RuntimeGenerationSnapshot): void;
-  saveRuntimePublication(snapshot: RuntimePublicationSnapshot): void;
-  saveRuntimeOperation(snapshot: RuntimeOperationSnapshot): void;
-  appendJournal(category: string, aggregateId: string, payload: JsonValue): number;
+  nextGeneration(runtimeId: string): Promise<number>;
+  saveRuntimeGeneration(snapshot: RuntimeGenerationSnapshot): Promise<void>;
+  saveRuntimePublication(snapshot: RuntimePublicationSnapshot): Promise<void>;
+  saveRuntimeOperation(snapshot: RuntimeOperationSnapshot): Promise<void>;
+  appendJournal(category: string, aggregateId: string, payload: JsonValue): Promise<number>;
 }
 
 interface RuntimeGeneration {
@@ -141,7 +141,7 @@ export class ComponentSupervisor {
     }
   }
 
-  runtimeFailed(runtimeId: string, generation: number, error: Error): void {
+  async runtimeFailed(runtimeId: string, generation: number, error: Error): Promise<void> {
     const slot = this.slots.get(runtimeId);
     const failed = slot?.generations.get(generation);
     if (!slot || !failed || failed.phase === "failed" || failed.phase === "terminated") return;
@@ -150,17 +150,17 @@ export class ComponentSupervisor {
     failed.error = error.message;
     failed.handle = undefined;
     failed.prepared = undefined;
-    this.persistGeneration(failed);
+    await this.persistGeneration(failed);
 
     if (slot.published?.generation === generation) {
       const publication = this.backend.withdraw(runtimeId, generation);
       slot.publication = publication;
       slot.published = undefined;
-      this.persistPublication(publication);
+      await this.persistPublication(publication);
     }
     if (slot.candidate?.generation === generation) slot.candidate = undefined;
     if (slot.operation?.status === "running") {
-      this.failOperation(slot.operation, error.message, slot.published === undefined);
+      await this.failOperation(slot.operation, error.message, slot.published === undefined);
     }
   }
 
@@ -200,7 +200,7 @@ export class ComponentSupervisor {
     identity: string,
     kind: RuntimeOperationKind,
   ): Promise<void> {
-    const generationNumber = this.store.nextGeneration(entry.runtimeId);
+    const generationNumber = await this.store.nextGeneration(entry.runtimeId);
     const operation: RuntimeOperationSnapshot = {
       id: `${entry.runtimeId}:${generationNumber}:${randomUUID()}`,
       runtimeId: entry.runtimeId,
@@ -213,7 +213,7 @@ export class ComponentSupervisor {
       attentionRequired: false,
     };
     slot.operation = operation;
-    this.persistOperation(operation);
+    await this.persistOperation(operation);
 
     try {
       const prepared = await this.backend.prepare(entry, generationNumber);
@@ -228,7 +228,7 @@ export class ComponentSupervisor {
       };
       slot.generations.set(generationNumber, generation);
       slot.candidate = generation;
-      this.persistGeneration(generation);
+      await this.persistGeneration(generation);
     } catch (error) {
       const message = formatError(error);
       const generation: RuntimeGeneration = {
@@ -241,8 +241,8 @@ export class ComponentSupervisor {
         error: message,
       };
       slot.generations.set(generationNumber, generation);
-      this.persistGeneration(generation);
-      this.failOperation(operation, message, slot.published === undefined);
+      await this.persistGeneration(generation);
+      await this.failOperation(operation, message, slot.published === undefined);
     }
   }
 
@@ -259,8 +259,8 @@ export class ComponentSupervisor {
         );
         if (missing.length) {
           candidate.error = `waiting for services: ${missing.join(", ")}`;
-          this.setOperationStep(slot.operation, "wait-dependencies");
-          this.persistGeneration(candidate);
+          await this.setOperationStep(slot.operation, "wait-dependencies");
+          await this.persistGeneration(candidate);
           continue;
         }
         candidate.error = undefined;
@@ -274,7 +274,7 @@ export class ComponentSupervisor {
     const operation = requiredOperation(slot);
 
     if (previous && candidate.entry.entry.upgradeMode === "stop-first") {
-      this.withdraw(slot, previous);
+      await this.withdraw(slot, previous);
       try {
         await this.stopPrevious(operation, previous);
       } catch (error) {
@@ -286,8 +286,8 @@ export class ComponentSupervisor {
           candidate.phase = "terminated";
           candidate.error = message;
           slot.candidate = undefined;
-          this.persistGeneration(candidate);
-          this.failOperation(operation, message, true);
+          await this.persistGeneration(candidate);
+          await this.failOperation(operation, message, true);
         }
         return false;
       }
@@ -295,12 +295,12 @@ export class ComponentSupervisor {
 
     try {
       await this.startCandidate(operation, candidate);
-      this.setOperationStep(operation, "publish");
+      await this.setOperationStep(operation, "publish");
       const publication = this.backend.publish(candidate.entry.runtimeId, candidate.generation);
       slot.publication = publication;
       slot.published = candidate;
       slot.candidate = undefined;
-      this.persistPublication(publication);
+      await this.persistPublication(publication);
     } catch (error) {
       const message = formatError(error);
       await this.rejectCandidate(candidate, message);
@@ -308,7 +308,7 @@ export class ComponentSupervisor {
       if (previous && candidate.entry.entry.upgradeMode === "stop-first") {
         await this.rollback(slot, previous, operation, message);
       } else {
-        this.failOperation(operation, message, slot.published === undefined);
+        await this.failOperation(operation, message, slot.published === undefined);
       }
       return false;
     }
@@ -325,8 +325,8 @@ export class ComponentSupervisor {
           const publication = this.backend.publish(previous.entry.runtimeId, previous.generation);
           slot.publication = publication;
           slot.published = previous;
-          this.persistPublication(publication);
-          this.failOperation(
+          await this.persistPublication(publication);
+          await this.failOperation(
             operation,
             candidate.error ?? "candidate failed before previous generation stopped",
             false,
@@ -334,7 +334,7 @@ export class ComponentSupervisor {
           return false;
         }
       } catch (error) {
-        this.failOperation(
+        await this.failOperation(
           operation,
           `new generation is published but previous cleanup failed: ${formatError(error)}`,
           true,
@@ -346,7 +346,7 @@ export class ComponentSupervisor {
     operation.status = "completed";
     operation.attentionRequired = false;
     operation.error = undefined;
-    this.persistOperation(operation);
+    await this.persistOperation(operation);
     return true;
   }
 
@@ -359,14 +359,14 @@ export class ComponentSupervisor {
         `runtime generation is not prepared: ${candidate.entry.runtimeId}@${candidate.generation}`,
       );
     }
-    this.setOperationStep(operation, "start-candidate");
+    await this.setOperationStep(operation, "start-candidate");
     candidate.handle = await candidate.prepared.start();
     candidate.prepared = undefined;
     if (candidate.phase === "failed") {
       throw new Error(candidate.error ?? "runtime generation failed during startup");
     }
     candidate.phase = "running";
-    this.persistGeneration(candidate);
+    await this.persistGeneration(candidate);
   }
 
   private async stopPrevious(
@@ -375,10 +375,10 @@ export class ComponentSupervisor {
     mayStop?: () => boolean,
   ): Promise<boolean> {
     if (!previous.handle) return true;
-    this.setOperationStep(operation, "drain-previous");
+    await this.setOperationStep(operation, "drain-previous");
     await previous.handle.drain();
     if (mayStop && !mayStop()) return false;
-    this.setOperationStep(operation, "stop-previous");
+    await this.setOperationStep(operation, "stop-previous");
     try {
       await previous.handle.stop();
       previous.phase = "terminated";
@@ -390,7 +390,7 @@ export class ComponentSupervisor {
       throw error;
     } finally {
       previous.handle = undefined;
-      this.persistGeneration(previous);
+      await this.persistGeneration(previous);
     }
   }
 
@@ -410,7 +410,7 @@ export class ComponentSupervisor {
       candidate.prepared = undefined;
       candidate.phase = "failed";
       candidate.error = error;
-      this.persistGeneration(candidate);
+      await this.persistGeneration(candidate);
     }
   }
 
@@ -420,8 +420,8 @@ export class ComponentSupervisor {
     operation: RuntimeOperationSnapshot,
     candidateError: string,
   ): Promise<void> {
-    this.setOperationStep(operation, "rollback");
-    const generationNumber = this.store.nextGeneration(previous.entry.runtimeId);
+    await this.setOperationStep(operation, "rollback");
+    const generationNumber = await this.store.nextGeneration(previous.entry.runtimeId);
     let restored: RuntimeGeneration | undefined;
     try {
       const prepared = await this.backend.prepare(previous.entry, generationNumber);
@@ -435,13 +435,13 @@ export class ComponentSupervisor {
         prepared,
       };
       slot.generations.set(generationNumber, restored);
-      this.persistGeneration(restored);
+      await this.persistGeneration(restored);
       await this.startCandidate(operation, restored);
       const publication = this.backend.publish(restored.entry.runtimeId, restored.generation);
       slot.publication = publication;
       slot.published = restored;
-      this.persistPublication(publication);
-      this.failOperation(
+      await this.persistPublication(publication);
+      await this.failOperation(
         operation,
         `candidate failed and previous specification was restored: ${candidateError}`,
         false,
@@ -461,9 +461,9 @@ export class ComponentSupervisor {
           error: rollbackError,
         };
         slot.generations.set(generationNumber, restored);
-        this.persistGeneration(restored);
+        await this.persistGeneration(restored);
       }
-      this.failOperation(
+      await this.failOperation(
         operation,
         `candidate failed: ${candidateError}; rollback failed: ${rollbackError}`,
         true,
@@ -471,11 +471,11 @@ export class ComponentSupervisor {
     }
   }
 
-  private withdraw(slot: RuntimeSlot, generation: RuntimeGeneration): void {
+  private async withdraw(slot: RuntimeSlot, generation: RuntimeGeneration): Promise<void> {
     const publication = this.backend.withdraw(generation.entry.runtimeId, generation.generation);
     slot.publication = publication;
     if (slot.published?.generation === generation.generation) slot.published = undefined;
-    this.persistPublication(publication);
+    await this.persistPublication(publication);
   }
 
   private async abandonCandidate(slot: RuntimeSlot, reason: string): Promise<void> {
@@ -492,11 +492,11 @@ export class ComponentSupervisor {
     candidate.phase = "terminated";
     candidate.error = reason;
     slot.candidate = undefined;
-    this.persistGeneration(candidate);
+    await this.persistGeneration(candidate);
     if (slot.operation?.status === "running") {
       slot.operation.status = "interrupted";
       slot.operation.error = reason;
-      this.persistOperation(slot.operation);
+      await this.persistOperation(slot.operation);
     }
   }
 
@@ -504,21 +504,21 @@ export class ComponentSupervisor {
     await this.abandonCandidate(slot, "binding was disabled or removed");
     const current = slot.published;
     if (!current) return;
-    const operation = this.createDeactivateOperation(slot, current);
-    this.withdraw(slot, current);
+    const operation = await this.createDeactivateOperation(slot, current);
+    await this.withdraw(slot, current);
     try {
       await this.stopPrevious(operation, current);
       operation.status = "completed";
-      this.persistOperation(operation);
+      await this.persistOperation(operation);
     } catch (error) {
-      this.failOperation(operation, formatError(error), true);
+      await this.failOperation(operation, formatError(error), true);
     }
   }
 
-  private createDeactivateOperation(
+  private async createDeactivateOperation(
     slot: RuntimeSlot,
     current: RuntimeGeneration,
-  ): RuntimeOperationSnapshot {
+  ): Promise<RuntimeOperationSnapshot> {
     const operation: RuntimeOperationSnapshot = {
       id: `${current.entry.runtimeId}:deactivate:${randomUUID()}`,
       runtimeId: current.entry.runtimeId,
@@ -531,7 +531,7 @@ export class ComponentSupervisor {
       attentionRequired: false,
     };
     slot.operation = operation;
-    this.persistOperation(operation);
+    await this.persistOperation(operation);
     return operation;
   }
 
@@ -571,54 +571,54 @@ export class ComponentSupervisor {
         candidate.phase = "failed";
         candidate.error = message;
         slot.candidate = undefined;
-        this.persistGeneration(candidate);
-        this.failOperation(requiredOperation(slot), message, slot.published === undefined);
+        await this.persistGeneration(candidate);
+        await this.failOperation(requiredOperation(slot), message, slot.published === undefined);
       }
     }
   }
 
-  private setOperationStep(
+  private async setOperationStep(
     operation: RuntimeOperationSnapshot | undefined,
     step: RuntimeOperationStep,
-  ): void {
+  ): Promise<void> {
     if (!operation || operation.status !== "running" || operation.step === step) return;
     operation.step = step;
-    this.persistOperation(operation);
+    await this.persistOperation(operation);
   }
 
-  private failOperation(
+  private async failOperation(
     operation: RuntimeOperationSnapshot,
     error: string,
     attentionRequired: boolean,
-  ): void {
+  ): Promise<void> {
     operation.status = "failed";
     operation.error = error;
     operation.attentionRequired = attentionRequired;
-    this.persistOperation(operation);
+    await this.persistOperation(operation);
   }
 
-  private persistGeneration(generation: RuntimeGeneration): void {
+  private async persistGeneration(generation: RuntimeGeneration): Promise<void> {
     const snapshot = this.toSnapshot(generation);
-    this.store.saveRuntimeGeneration(snapshot);
-    this.store.appendJournal(
+    await this.store.saveRuntimeGeneration(snapshot);
+    await this.store.appendJournal(
       "plugin.runtime.generation",
       `${snapshot.runtimeId}@${snapshot.generation}`,
       snapshot as unknown as JsonValue,
     );
   }
 
-  private persistPublication(publication: RuntimePublicationSnapshot): void {
-    this.store.saveRuntimePublication(publication);
-    this.store.appendJournal(
+  private async persistPublication(publication: RuntimePublicationSnapshot): Promise<void> {
+    await this.store.saveRuntimePublication(publication);
+    await this.store.appendJournal(
       "plugin.runtime.publication",
       publication.runtimeId,
       publication as unknown as JsonValue,
     );
   }
 
-  private persistOperation(operation: RuntimeOperationSnapshot): void {
-    this.store.saveRuntimeOperation(operation);
-    this.store.appendJournal(
+  private async persistOperation(operation: RuntimeOperationSnapshot): Promise<void> {
+    await this.store.saveRuntimeOperation(operation);
+    await this.store.appendJournal(
       "plugin.runtime.operation",
       operation.id,
       operation as unknown as JsonValue,

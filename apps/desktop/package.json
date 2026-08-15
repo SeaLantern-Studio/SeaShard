@@ -5,7 +5,9 @@
   "type": "module",
   "main": "dist/main/index.js",
   "dependencies": {
+    "@seashard/bootstrap-runtime": "workspace:*",
     "@seashard/contracts": "workspace:*",
+    "@seashard/database-sqlite": "workspace:*",
     "@seashard/desktop-gateway": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/plugin-system": "workspace:*",

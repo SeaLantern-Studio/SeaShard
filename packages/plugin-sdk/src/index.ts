@@ -90,11 +90,41 @@ export interface ExecutionContext {
 
 export type ServiceMethod = (...args: JsonValue[]) => Awaitable<JsonValue | void>;
 export type ServiceProvider = Record<string, ServiceMethod>;
+export interface PluginStoredDocument {
+  readonly value: JsonValue;
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly expiresAt?: string;
+}
+
+export interface PluginStoragePutOptions {
+  readonly expectedRevision?: number | null;
+  readonly ttlMs?: number;
+}
+
+export interface PluginStorageDeleteOptions {
+  readonly expectedRevision?: number;
+}
+
+export interface PluginStorage {
+  get(key: string): Promise<PluginStoredDocument | undefined>;
+  put(
+    key: string,
+    value: JsonValue,
+    options?: PluginStoragePutOptions,
+  ): Promise<PluginStoredDocument>;
+  delete(key: string, options?: PluginStorageDeleteOptions): Promise<boolean>;
+}
+
+export interface PluginStorageBroker {
+  for(execution: ExecutionContext): PluginStorage;
+}
 
 export interface PluginContext {
   readonly execution: ExecutionContext;
   readonly runtimeId: string;
   readonly generation: number;
+  readonly storage: PluginStorage;
   effect(execute: () => Awaitable<Disposable | void>, label?: string): void;
   provide(contract: string, provider: ServiceProvider): void;
   service<T extends object>(contract: string): T;

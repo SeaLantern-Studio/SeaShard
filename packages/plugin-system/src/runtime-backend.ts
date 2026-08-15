@@ -9,6 +9,7 @@ import type {
   JsonValue,
   PluginContext,
   PluginModule,
+  PluginStorageBroker,
   ScopeAddress,
   ServiceProvider,
 } from "@seashard/plugin-sdk";
@@ -28,6 +29,9 @@ import type {
   ServiceCallPayload,
   ServiceRegistrationPayload,
   ServiceUnregistrationPayload,
+  StorageDeletePayload,
+  StorageGetPayload,
+  StoragePutPayload,
 } from "./host-protocol";
 import { PluginRegistry } from "./registry";
 import {
@@ -42,6 +46,7 @@ interface RuntimeRegistries {
   services: ServiceRegistry;
   contributions: ContributionRegistry;
   events: PluginEventBus;
+  storage: PluginStorageBroker;
 }
 
 export class PluginRuntimeBackend implements RuntimeBackend {
@@ -318,6 +323,21 @@ class PluginHostSession {
           execution: ExecutionContext;
         };
         await this.registries.events.emit(payload.event, payload.payload, payload.execution);
+      } else if (message.command === "storage-get") {
+        const payload = message.payload as unknown as StorageGetPayload;
+        const result = await this.registries.storage.for(this.execution).get(payload.key);
+        value = result as unknown as JsonValue | undefined;
+      } else if (message.command === "storage-put") {
+        const payload = message.payload as unknown as StoragePutPayload;
+        const result = await this.registries.storage
+          .for(this.execution)
+          .put(payload.key, payload.value, payload.options);
+        value = result as unknown as JsonValue;
+      } else if (message.command === "storage-delete") {
+        const payload = message.payload as unknown as StorageDeletePayload;
+        value = await this.registries.storage
+          .for(this.execution)
+          .delete(payload.key, payload.options);
       } else {
         throw new Error(`unknown child request: ${message.command}`);
       }
@@ -457,6 +477,7 @@ function createLocalPluginContext(
     execution,
     runtimeId: entry.runtimeId,
     generation,
+    storage: registries.storage.for(execution),
     effect(execute, label) {
       cordisContext.effect(async () => (await execute()) ?? (() => {}), label);
     },

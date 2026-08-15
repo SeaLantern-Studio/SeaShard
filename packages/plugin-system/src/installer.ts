@@ -44,8 +44,8 @@ export class PluginInstaller {
       trust: "local-full-trust",
       installedAt: new Date().toISOString(),
     };
-    this.store.registerPackage(record);
-    this.store.grantTrust(record);
+    await this.store.registerPackage(record);
+    await this.store.grantTrust(record);
     return record;
   }
 
@@ -97,8 +97,8 @@ export class PluginInstaller {
               trust: "package-full-trust",
               installedAt: new Date().toISOString(),
             };
-            this.store.registerPackage(record);
-            this.store.grantTrust(record);
+            await this.store.registerPackage(record);
+            await this.store.grantTrust(record);
             return record;
           } catch (error) {
             await rm(staging, { recursive: true, force: true });
@@ -118,7 +118,7 @@ export class PluginInstaller {
   }
 
   async uninstall(pluginId: string, version: string, digest: string): Promise<void> {
-    const record = this.store.getPackage(pluginId, version, digest);
+    const record = await this.store.getPackage(pluginId, version, digest);
     if (!record) return;
     if (record.source !== "installed") {
       throw new Error(
@@ -131,7 +131,7 @@ export class PluginInstaller {
     if (!child || child.startsWith("..") || isAbsolute(child)) {
       throw new Error(`refusing to remove path outside plugin store: ${root}`);
     }
-    this.store.removePackage(pluginId, version, digest);
+    await this.store.removePackage(pluginId, version, digest);
     await rm(root, { recursive: true, force: true });
   }
 }

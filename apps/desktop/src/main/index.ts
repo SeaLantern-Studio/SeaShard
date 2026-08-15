@@ -1,11 +1,14 @@
+import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
 import type { RuntimeSnapshot } from "@seashard/contracts";
+import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
   PluginKernel,
   type PluginKernelOptions,
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
+import { Context } from "cordis";
 import { app, BrowserWindow } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +22,7 @@ if (developmentUrl) installDevelopmentControl();
 
 let mainWindow: BrowserWindow | null = null;
 let kernel: PluginKernel | undefined;
+let bootstrapLoader: BootstrapLoader | undefined;
 let shutdownTask: Promise<void> | undefined;
 let shutdownComplete = false;
 let smokeQuitScheduled = false;
@@ -50,6 +54,14 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
   const host = resolveHost();
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(app.getPath("userData"), "core");
+  const root = new Context();
+  bootstrapLoader = new BootstrapLoader(root);
+  await bootstrapLoader.start([
+    createSQLiteBootstrapDescriptor({
+      dataRoot,
+      workerEntry: join(moduleDirectory, "../../../database-worker/dist/index.js"),
+    }),
+  ]);
   kernel = await PluginKernel.create({
     dataRoot,
     seaShardVersion: "0.0.0",
@@ -58,6 +70,9 @@ async function bootstrap(): Promise<void> {
     clientTarget: "desktop",
     platform: host.platform,
     architecture: host.architecture,
+    root,
+    database: root.database,
+    pluginStorage: root.pluginStorage,
   });
   if (smokeMode) {
     kernel.registerCoreService("seashard.smoke.marker", {
@@ -67,7 +82,7 @@ async function bootstrap(): Promise<void> {
       },
     });
   }
-  kernel.registerBuiltIn({
+  await kernel.registerBuiltIn({
     manifest: desktopGatewayManifest,
     loaders: {
       "desktop-gateway.host": {
@@ -104,16 +119,21 @@ async function bootstrap(): Promise<void> {
         `external plugin service returned unexpected value: ${JSON.stringify(echo) ?? "undefined"}`,
       );
     }
+    const activationBefore = await kernel.callService("seashard.smoke.echo", "activationCount", []);
     const before = publishedGeneration(kernel.runtimeSnapshot(), "smoke.external-plugin");
     await kernel.reload("smoke.external-plugin");
     const after = publishedGeneration(kernel.runtimeSnapshot(), "smoke.external-plugin");
     const reloadedEcho = await kernel.callService("seashard.smoke.echo", "echo", ["reload"]);
+    const activationAfter = await kernel.callService("seashard.smoke.echo", "activationCount", []);
     if (
       !before ||
       !after ||
       after.generation <= before.generation ||
       after.phase !== "running" ||
       reloadedEcho !== "core-smoke:reload" ||
+      typeof activationBefore !== "number" ||
+      typeof activationAfter !== "number" ||
+      activationAfter !== activationBefore + 1 ||
       kernel.diagnostics().contributions !== 1
     ) {
       throw new Error("external plugin reload did not preserve a single published generation");
@@ -121,6 +141,9 @@ async function bootstrap(): Promise<void> {
     console.log(`SEASHARD_PLUGIN_SMOKE_ECHO ${echo}`);
     console.log(
       `SEASHARD_PLUGIN_SMOKE_RELOADED before=${before.generation} after=${after.generation}`,
+    );
+    console.log(
+      `SEASHARD_PLUGIN_SMOKE_STORAGE before=${activationBefore} after=${activationAfter}`,
     );
   }
 
@@ -159,10 +182,10 @@ async function registerSmokePlugin(pluginKernel: PluginKernel): Promise<void> {
       acknowledgeFullMachineAccess: true,
     });
   }
-  pluginKernel.registry.selectPackageVersion(record);
+  await pluginKernel.registry.selectPackageVersion(record);
   const entry = record.manifest.entries.find((candidateEntry) => candidateEntry.runtime === "host");
   if (!entry) throw new Error("smoke plugin must contain a host entry");
-  pluginKernel.upsertBinding({
+  await pluginKernel.upsertBinding({
     id: "smoke.external-plugin",
     pluginId: record.manifest.id,
     entryId: entry.id,
@@ -298,25 +321,29 @@ function projectComponents(snapshot: RuntimeControlSnapshot): RuntimeSnapshot["c
 async function shutdown(): Promise<void> {
   shutdownTask ??= (async () => {
     stopping = true;
-    await kernel?.dispose();
-    const activeUnits =
-      kernel
-        ?.runtimeSnapshot()
-        .publications.filter((publication) => publication.generation !== null).length ?? 0;
-    const diagnostics = kernel?.diagnostics() ?? {
-      services: 0,
-      contributions: 0,
-      clientEntries: 0,
-    };
-    if (smokeMode) {
-      console.log(
-        `SEASHARD_SMOKE_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services} contributions=${diagnostics.contributions}`,
-      );
-    }
-    if (developmentUrl) {
-      console.log(
-        `SEASHARD_DEV_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services}`,
-      );
+    try {
+      await kernel?.dispose();
+      const activeUnits =
+        kernel
+          ?.runtimeSnapshot()
+          .publications.filter((publication) => publication.generation !== null).length ?? 0;
+      const diagnostics = kernel?.diagnostics() ?? {
+        services: 0,
+        contributions: 0,
+        clientEntries: 0,
+      };
+      if (smokeMode) {
+        console.log(
+          `SEASHARD_SMOKE_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services} contributions=${diagnostics.contributions}`,
+        );
+      }
+      if (developmentUrl) {
+        console.log(
+          `SEASHARD_DEV_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services}`,
+        );
+      }
+    } finally {
+      await bootstrapLoader?.dispose();
     }
   })();
   return shutdownTask;

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@seashard/component-supervisor": "workspace:*",
+    "@seashard/database": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "cordis": "4.0.0-rc.8",
     "fflate": "0.8.3",

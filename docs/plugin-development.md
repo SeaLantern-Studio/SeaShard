@@ -129,12 +129,29 @@ export async function apply(ctx: PluginContext, rawConfig: JsonValue) {
 | `ctx.effect(setup, label?)`                           | 注册监听器、定时器、文件句柄、子进程等副作用及其清理函数 |
 | `ctx.provide(contract, provider)`                     | 发布服务；注册和撤销由运行时跟踪                         |
 | `ctx.service(contract)`                               | 获取服务代理；方法调用应始终 `await`                     |
+| `ctx.storage`                                         | 当前 binding 独占的托管 JSON 文档存储                    |
 | `ctx.contribute(kind, value)`                         | 发布声明式贡献，例如命令或菜单描述                       |
 | `ctx.on(event, handler)` / `ctx.emit(event, payload)` | 订阅和发送范围内事件                                     |
 
 配置、服务参数与返回值、Contribution、事件 payload 都必须是 JSON 值：`null`、布尔值、数字、字符串、数组或普通对象。不要跨边界传递函数、类实例、`Buffer`、流或循环引用。
 
 contract、Contribution kind 和事件名只能使用小写字母、数字及 `.`、`*`、`:`、`-`。建议使用发布者命名空间，例如 `acme.greeter`。
+
+### 托管文档存储
+
+`ctx.storage` 默认可用，不需要额外权限。SeaShard 根据插件 ID 和 `runtimeId` 确定存储命名空间；插件不能指定命名空间，也不能读取同一插件其他 binding 的数据。数据写入独立的 `plugin-data/documents.sqlite3`，不进入核心状态数据库。
+
+```ts
+const current = await ctx.storage.get("state/session");
+const saved = await ctx.storage.put(
+  "state/session",
+  { cursor: 42 },
+  { expectedRevision: current?.revision ?? null },
+);
+await ctx.storage.delete("state/session", { expectedRevision: saved.revision });
+```
+
+`expectedRevision: null` 表示仅在文档不存在时创建；传入数字执行 CAS 更新，版本不匹配会拒绝写入；省略则无条件写入。可用 `ttlMs` 设置最长 365 天的过期时间。key 最长 255 个字符，可使用字母、数字、`.`、`_`、`-`、`/`，但不能包含空路径段、`.` 或 `..`。单个 JSON 文档最大 1 MiB。
 
 ## 5. 生命周期与升级模式
 
@@ -145,7 +162,7 @@ contract、Contribution kind 和事件名只能使用小写字母、数字及 `.
 - **`hot-swap`**：新旧 generation 会短暂同时运行，新版本发布后旧版本才排空并停止。仅适合能够并存的实现；不要争抢固定端口、全局 IPC handler、唯一文件锁等资源。
 - **`stop-first`**：先撤下并停止旧版本，再启动新版本。适合独占资源，但升级期间可能短暂无服务；新版本失败时，SeaShard 会重新启动旧规格。
 
-不确定时选择 `stop-first`。不要把 `generation` 当作持久数据主键；持久状态必须自行版本化，并能承受升级失败或回滚。
+不确定时选择 `stop-first`。不要把 `generation` 当作持久数据主键；需要跨 reload 保留的普通状态优先使用 `ctx.storage`，并通过 revision CAS 处理并发更新。
 
 ## 6. 打包与发布
 

@@ -36,11 +36,23 @@ importers:
         specifier: 3.3.10
         version: 3.3.10(typescript@5.9.3)
 
+  apps/database-worker:
+    dependencies:
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+
   apps/desktop:
     dependencies:
+      '@seashard/bootstrap-runtime':
+        specifier: workspace:*
+        version: link:../../packages/bootstrap-runtime
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@seashard/database-sqlite':
+        specifier: workspace:*
+        version: link:../../components/database-sqlite
       '@seashard/desktop-gateway':
         specifier: workspace:*
         version: link:../../components/desktop-gateway
@@ -75,6 +87,21 @@ importers:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
 
+  components/database-sqlite:
+    dependencies:
+      '@seashard/bootstrap-runtime':
+        specifier: workspace:*
+        version: link:../../packages/bootstrap-runtime
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
+
   components/desktop-gateway:
     dependencies:
       '@seashard/contracts':
@@ -86,6 +113,12 @@ importers:
       electron:
         specifier: 43.4.0
         version: 43.4.0
+
+  packages/bootstrap-runtime:
+    dependencies:
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
 
   packages/component-supervisor:
     dependencies:
@@ -99,6 +132,8 @@ importers:
         specifier: workspace:*
         version: link:../plugin-sdk
 
+  packages/database: {}
+
   packages/plugin-sdk: {}
 
   packages/plugin-system:
@@ -106,6 +141,9 @@ importers:
       '@seashard/component-supervisor':
         specifier: workspace:*
         version: link:../component-supervisor
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../database
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk

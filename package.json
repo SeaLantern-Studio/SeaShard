@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts && vite build --config apps/plugin-host/vite.config.ts",
+    "build": "vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts && vite build --config apps/plugin-host/vite.config.ts && vite build --config apps/database-worker/vite.config.ts",
     "dev": "node scripts/dev.mjs",
     "check": "vp check && vue-tsc --noEmit",
     "start": "electron apps/desktop/dist/main/index.js",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "vite build --config apps/database-worker/vite.config.ts && tsx --test tests/*.test.ts",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {

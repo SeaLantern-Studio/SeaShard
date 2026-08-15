@@ -1,4 +1,11 @@
 import type {
+  DatabaseCommandResult,
+  DatabaseRow,
+  DatabaseService,
+  DatabaseValue,
+  RegisteredDataCapsule,
+} from "@seashard/database";
+import type {
   JsonValue,
   PluginBinding,
   PluginSourceKind,
@@ -7,7 +14,7 @@ import type {
   RuntimeOperationSnapshot,
   RuntimePublicationSnapshot,
 } from "@seashard/plugin-sdk";
-import { DatabaseSync } from "node:sqlite";
+import { pluginSystemDataCapsule } from "./data-capsule";
 import { parsePluginManifest } from "./manifest";
 import type {
   JournalRecord,
@@ -17,7 +24,7 @@ import type {
   StoredRuntimePublication,
 } from "./types";
 
-interface PackageRow {
+interface PackageRow extends DatabaseRow {
   plugin_id: string;
   version: string;
   digest: string;
@@ -29,7 +36,7 @@ interface PackageRow {
   installed_at: string;
 }
 
-interface BindingRow {
+interface BindingRow extends DatabaseRow {
   id: string;
   plugin_id: string;
   entry_id: string;
@@ -39,7 +46,7 @@ interface BindingRow {
   config_json: string;
 }
 
-interface GenerationRow {
+interface GenerationRow extends DatabaseRow {
   runtime_id: string;
   plugin_id: string;
   plugin_version: string;
@@ -59,14 +66,14 @@ interface GenerationRow {
   updated_at: string;
 }
 
-interface PublicationRow {
+interface PublicationRow extends DatabaseRow {
   runtime_id: string;
   generation: number | null;
   epoch: number;
   updated_at: string;
 }
 
-interface OperationRow {
+interface OperationRow extends DatabaseRow {
   id: string;
   runtime_id: string;
   kind: RuntimeOperationSnapshot["kind"];
@@ -81,14 +88,7 @@ interface OperationRow {
   updated_at: string;
 }
 
-interface StoredManifestRow {
-  plugin_id: string;
-  version: string;
-  digest: string;
-  manifest_json: string;
-}
-
-interface JournalRow {
+interface JournalRow extends DatabaseRow {
   id: number;
   occurred_at: string;
   category: string;
@@ -97,40 +97,21 @@ interface JournalRow {
 }
 
 export class PluginStore {
-  private readonly database: DatabaseSync;
-
-  constructor(
-    databasePath: string,
+  private constructor(
+    private readonly repository: RegisteredDataCapsule,
     private readonly seaShardVersion: string,
-  ) {
-    this.database = new DatabaseSync(databasePath, {
-      enableForeignKeyConstraints: true,
-      timeout: 5_000,
-      defensive: true,
-    });
-    this.database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
-    this.migrate();
+  ) {}
+
+  static async create(database: DatabaseService, seaShardVersion: string): Promise<PluginStore> {
+    const repository = await database.registerCapsule(pluginSystemDataCapsule);
+    return new PluginStore(repository, seaShardVersion);
   }
 
-  close(): void {
-    this.database.close();
-  }
-
-  registerPackage(record: PluginPackageRecord): void {
-    this.transaction(() => {
-      this.database
-        .prepare(
-          `INSERT INTO plugin_packages (
-             plugin_id, version, digest, publisher, source_kind, trust_level,
-             root_path, manifest_json, installed_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(plugin_id, version, digest) DO UPDATE SET
-             source_kind = excluded.source_kind,
-             trust_level = excluded.trust_level,
-             root_path = excluded.root_path,
-             manifest_json = excluded.manifest_json`,
-        )
-        .run(
+  async registerPackage(record: PluginPackageRecord): Promise<void> {
+    await this.repository.transaction([
+      {
+        command: "package.upsert",
+        parameters: [
           record.manifest.id,
           record.manifest.version,
           record.digest,
@@ -140,142 +121,86 @@ export class PluginStore {
           record.rootPath,
           JSON.stringify(record.manifest),
           record.installedAt,
-        );
-      this.appendJournalInternal("plugin.package.registered", record.manifest.id, {
+        ],
+      },
+      journalCommand("plugin.package.registered", record.manifest.id, {
         version: record.manifest.version,
         digest: record.digest,
         source: record.source,
         trust: record.trust,
-      });
-    });
+      }),
+    ]);
   }
 
-  grantTrust(record: PluginPackageRecord): void {
-    this.database
-      .prepare(
-        `INSERT INTO plugin_trust (
-           plugin_id, version, digest, source_kind, source_root, trust_level, granted_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(plugin_id, version, digest) DO UPDATE SET
-           source_kind = excluded.source_kind,
-           source_root = excluded.source_root,
-           trust_level = excluded.trust_level,
-           granted_at = excluded.granted_at`,
-      )
-      .run(
-        record.manifest.id,
-        record.manifest.version,
-        record.digest,
-        record.source,
-        record.rootPath,
-        record.trust,
-        record.installedAt,
-      );
+  async grantTrust(record: PluginPackageRecord): Promise<void> {
+    await this.run("trust.upsert", [
+      record.manifest.id,
+      record.manifest.version,
+      record.digest,
+      record.source,
+      record.rootPath,
+      record.trust,
+      record.installedAt,
+    ]);
   }
 
-  setCurrentVersion(pluginId: string, version: string, digest: string): void {
-    this.transaction(() => {
-      const record = this.getPackage(pluginId, version, digest);
-      if (!record)
-        throw new Error(`plugin package not installed: ${pluginId}@${version}#${digest}`);
-      this.database
-        .prepare(
-          `INSERT INTO plugin_current (plugin_id, version, digest, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(plugin_id) DO UPDATE SET
-             version = excluded.version,
-             digest = excluded.digest,
-             updated_at = excluded.updated_at`,
-        )
-        .run(pluginId, version, digest, now());
-      this.appendJournalInternal("plugin.version.selected", pluginId, { version, digest });
-    });
-  }
-  clearCurrentVersion(pluginId: string): void {
-    this.transaction(() => {
-      this.database.prepare("DELETE FROM plugin_current WHERE plugin_id = ?").run(pluginId);
-      this.appendJournalInternal("plugin.version.cleared", pluginId, {});
-    });
+  async setCurrentVersion(pluginId: string, version: string, digest: string): Promise<void> {
+    const record = await this.getPackage(pluginId, version, digest);
+    if (!record) throw new Error(`plugin package not installed: ${pluginId}@${version}#${digest}`);
+    await this.repository.transaction([
+      {
+        command: "package.current.set",
+        parameters: [pluginId, version, digest, now()],
+      },
+      journalCommand("plugin.version.selected", pluginId, { version, digest }),
+    ]);
   }
 
-  getPackage(pluginId: string, version: string, digest: string): PluginPackageRecord | undefined {
-    const row = this.database
-      .prepare(
-        `SELECT plugin_id, version, digest, publisher, source_kind, trust_level,
-                root_path, manifest_json, installed_at
-           FROM plugin_packages
-          WHERE plugin_id = ? AND version = ? AND digest = ?`,
-      )
-      .get(pluginId, version, digest) as unknown as PackageRow | undefined;
+  async clearCurrentVersion(pluginId: string): Promise<void> {
+    await this.repository.transaction([
+      { command: "package.current.clear", parameters: [pluginId] },
+      journalCommand("plugin.version.cleared", pluginId, {}),
+    ]);
+  }
+
+  async getPackage(
+    pluginId: string,
+    version: string,
+    digest: string,
+  ): Promise<PluginPackageRecord | undefined> {
+    const row = (await this.get("package.get", [pluginId, version, digest])) as
+      | PackageRow
+      | undefined;
     return row ? this.decodePackage(row) : undefined;
   }
 
-  listPackages(pluginId?: string): PluginPackageRecord[] {
-    const rows = (pluginId
-      ? this.database
-          .prepare(
-            `SELECT plugin_id, version, digest, publisher, source_kind, trust_level,
-                    root_path, manifest_json, installed_at
-               FROM plugin_packages WHERE plugin_id = ?
-              ORDER BY installed_at, version, digest`,
-          )
-          .all(pluginId)
-      : this.database
-          .prepare(
-            `SELECT plugin_id, version, digest, publisher, source_kind, trust_level,
-                    root_path, manifest_json, installed_at
-               FROM plugin_packages ORDER BY plugin_id, installed_at, version, digest`,
-          )
-          .all()) as unknown as PackageRow[];
+  async listPackages(pluginId?: string): Promise<PluginPackageRecord[]> {
+    const rows = (await this.all(
+      pluginId ? "package.list-by-plugin" : "package.list",
+      pluginId ? [pluginId] : [],
+    )) as PackageRow[];
     return rows.map((row) => this.decodePackage(row));
   }
 
-  listCurrentPackages(): PluginPackageRecord[] {
-    const rows = this.database
-      .prepare(
-        `SELECT p.plugin_id, p.version, p.digest, p.publisher, p.source_kind, p.trust_level,
-                p.root_path, p.manifest_json, p.installed_at
-           FROM plugin_current AS c
-           JOIN plugin_packages AS p
-             ON p.plugin_id = c.plugin_id AND p.version = c.version AND p.digest = c.digest
-          ORDER BY p.plugin_id`,
-      )
-      .all() as unknown as PackageRow[];
+  async listCurrentPackages(): Promise<PluginPackageRecord[]> {
+    const rows = (await this.all("package.list-current")) as PackageRow[];
     return rows.map((row) => this.decodePackage(row));
   }
 
-  removePackage(pluginId: string, version: string, digest: string): void {
-    this.transaction(() => {
-      const current = this.database
-        .prepare(
-          "SELECT 1 AS present FROM plugin_current WHERE plugin_id = ? AND version = ? AND digest = ?",
-        )
-        .get(pluginId, version, digest);
-      if (current) throw new Error(`cannot remove current plugin version: ${pluginId}@${version}`);
-      this.database
-        .prepare("DELETE FROM plugin_packages WHERE plugin_id = ? AND version = ? AND digest = ?")
-        .run(pluginId, version, digest);
-      this.appendJournalInternal("plugin.package.removed", pluginId, { version, digest });
-    });
+  async removePackage(pluginId: string, version: string, digest: string): Promise<void> {
+    const current = await this.get("package.current-is", [pluginId, version, digest]);
+    if (current) throw new Error(`cannot remove current plugin version: ${pluginId}@${version}`);
+    await this.repository.transaction([
+      { command: "package.delete", parameters: [pluginId, version, digest] },
+      journalCommand("plugin.package.removed", pluginId, { version, digest }),
+    ]);
   }
 
-  upsertBinding(binding: PluginBinding): void {
-    this.transaction(() => {
-      this.database
-        .prepare(
-          `INSERT INTO plugin_bindings (
-             id, plugin_id, entry_id, scope_type, scope_id, enabled, config_json, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             plugin_id = excluded.plugin_id,
-             entry_id = excluded.entry_id,
-             scope_type = excluded.scope_type,
-             scope_id = excluded.scope_id,
-             enabled = excluded.enabled,
-             config_json = excluded.config_json,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
+  async upsertBinding(binding: PluginBinding): Promise<void> {
+    await this.repository.transaction([
+      {
+        command: "binding.upsert",
+        parameters: [
           binding.id,
           binding.pluginId,
           binding.entryId,
@@ -284,36 +209,24 @@ export class PluginStore {
           binding.enabled ? 1 : 0,
           JSON.stringify(binding.config),
           now(),
-        );
-      this.appendJournalInternal(
-        "plugin.binding.updated",
-        binding.id,
-        binding as unknown as JsonValue,
-      );
-    });
+        ],
+      },
+      journalCommand("plugin.binding.updated", binding.id, binding as unknown as JsonValue),
+    ]);
   }
 
-  deleteBinding(bindingId: string): void {
-    this.transaction(() => {
-      this.database.prepare("DELETE FROM plugin_bindings WHERE id = ?").run(bindingId);
-      this.appendJournalInternal("plugin.binding.deleted", bindingId, {});
-    });
+  async deleteBinding(bindingId: string): Promise<void> {
+    await this.repository.transaction([
+      { command: "binding.delete", parameters: [bindingId] },
+      journalCommand("plugin.binding.deleted", bindingId, {}),
+    ]);
   }
 
-  listBindings(pluginId?: string): PluginBinding[] {
-    const rows = (pluginId
-      ? this.database
-          .prepare(
-            `SELECT id, plugin_id, entry_id, scope_type, scope_id, enabled, config_json
-               FROM plugin_bindings WHERE plugin_id = ? ORDER BY id`,
-          )
-          .all(pluginId)
-      : this.database
-          .prepare(
-            `SELECT id, plugin_id, entry_id, scope_type, scope_id, enabled, config_json
-               FROM plugin_bindings ORDER BY id`,
-          )
-          .all()) as unknown as BindingRow[];
+  async listBindings(pluginId?: string): Promise<PluginBinding[]> {
+    const rows = (await this.all(
+      pluginId ? "binding.list-by-plugin" : "binding.list",
+      pluginId ? [pluginId] : [],
+    )) as BindingRow[];
     return rows.map((row) => ({
       id: row.id,
       pluginId: row.plugin_id,
@@ -325,76 +238,40 @@ export class PluginStore {
     }));
   }
 
-  nextGeneration(runtimeId: string): number {
-    const row = this.database
-      .prepare(
-        `INSERT INTO plugin_runtime_counters (runtime_id, last_generation)
-         VALUES (?, 1)
-         ON CONFLICT(runtime_id) DO UPDATE SET
-           last_generation = plugin_runtime_counters.last_generation + 1
-         RETURNING last_generation`,
-      )
-      .get(runtimeId) as { last_generation: number };
-    return row.last_generation;
+  async nextGeneration(runtimeId: string): Promise<number> {
+    const row = await this.get("generation.next", [runtimeId]);
+    if (!row) throw new Error(`generation counter returned no value: ${runtimeId}`);
+    return toNumber(row.last_generation, "last_generation");
   }
 
-  saveRuntimeGeneration(snapshot: RuntimeGenerationSnapshot): void {
+  async saveRuntimeGeneration(snapshot: RuntimeGenerationSnapshot): Promise<void> {
     const timestamp = now();
-    this.database
-      .prepare(
-        `INSERT INTO plugin_runtime_generations (
-           runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-           trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-           host_kind, dependencies_json, error, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(runtime_id, generation) DO UPDATE SET
-           phase = excluded.phase,
-           dependencies_json = excluded.dependencies_json,
-           error = excluded.error,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        snapshot.runtimeId,
-        snapshot.pluginId,
-        snapshot.pluginVersion,
-        snapshot.entryId,
-        snapshot.bindingId,
-        snapshot.source,
-        snapshot.trust,
-        snapshot.scopeType,
-        snapshot.scopeId,
-        snapshot.generation,
-        snapshot.phase,
-        snapshot.upgradeMode,
-        snapshot.host,
-        JSON.stringify(snapshot.dependencies),
-        snapshot.error ?? null,
-        timestamp,
-        timestamp,
-      );
+    await this.run("generation.save", [
+      snapshot.runtimeId,
+      snapshot.pluginId,
+      snapshot.pluginVersion,
+      snapshot.entryId,
+      snapshot.bindingId,
+      snapshot.source,
+      snapshot.trust,
+      snapshot.scopeType,
+      snapshot.scopeId,
+      snapshot.generation,
+      snapshot.phase,
+      snapshot.upgradeMode,
+      snapshot.host,
+      JSON.stringify(snapshot.dependencies),
+      snapshot.error ?? null,
+      timestamp,
+      timestamp,
+    ]);
   }
 
-  listRuntimeGenerations(runtimeId?: string): StoredRuntimeGeneration[] {
-    const rows = (runtimeId
-      ? this.database
-          .prepare(
-            `SELECT runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-                    trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-                    host_kind, dependencies_json, error, created_at, updated_at
-               FROM plugin_runtime_generations
-              WHERE runtime_id = ?
-              ORDER BY generation`,
-          )
-          .all(runtimeId)
-      : this.database
-          .prepare(
-            `SELECT runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-                    trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-                    host_kind, dependencies_json, error, created_at, updated_at
-               FROM plugin_runtime_generations
-              ORDER BY runtime_id, generation`,
-          )
-          .all()) as unknown as GenerationRow[];
+  async listRuntimeGenerations(runtimeId?: string): Promise<StoredRuntimeGeneration[]> {
+    const rows = (await this.all(
+      runtimeId ? "generation.list-by-runtime" : "generation.list",
+      runtimeId ? [runtimeId] : [],
+    )) as GenerationRow[];
     return rows.map((row) => ({
       runtimeId: row.runtime_id,
       pluginId: row.plugin_id,
@@ -416,27 +293,17 @@ export class PluginStore {
     }));
   }
 
-  saveRuntimePublication(snapshot: RuntimePublicationSnapshot): void {
-    this.database
-      .prepare(
-        `INSERT INTO plugin_runtime_publications (runtime_id, generation, epoch, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(runtime_id) DO UPDATE SET
-           generation = excluded.generation,
-           epoch = excluded.epoch,
-           updated_at = excluded.updated_at`,
-      )
-      .run(snapshot.runtimeId, snapshot.generation, snapshot.epoch, now());
+  async saveRuntimePublication(snapshot: RuntimePublicationSnapshot): Promise<void> {
+    await this.run("publication.save", [
+      snapshot.runtimeId,
+      snapshot.generation,
+      snapshot.epoch,
+      now(),
+    ]);
   }
 
-  listRuntimePublications(): StoredRuntimePublication[] {
-    const rows = this.database
-      .prepare(
-        `SELECT runtime_id, generation, epoch, updated_at
-           FROM plugin_runtime_publications
-          ORDER BY runtime_id`,
-      )
-      .all() as unknown as PublicationRow[];
+  async listRuntimePublications(): Promise<StoredRuntimePublication[]> {
+    const rows = (await this.all("publication.list")) as PublicationRow[];
     return rows.map((row) => ({
       runtimeId: row.runtime_id,
       generation: row.generation,
@@ -445,58 +312,29 @@ export class PluginStore {
     }));
   }
 
-  saveRuntimeOperation(snapshot: RuntimeOperationSnapshot): void {
+  async saveRuntimeOperation(snapshot: RuntimeOperationSnapshot): Promise<void> {
     const timestamp = now();
-    this.database
-      .prepare(
-        `INSERT INTO plugin_runtime_operations (
-           id, runtime_id, kind, mode, status, step, current_generation,
-           candidate_generation, attention_required, error, started_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           status = excluded.status,
-           step = excluded.step,
-           current_generation = excluded.current_generation,
-           candidate_generation = excluded.candidate_generation,
-           attention_required = excluded.attention_required,
-           error = excluded.error,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        snapshot.id,
-        snapshot.runtimeId,
-        snapshot.kind,
-        snapshot.mode,
-        snapshot.status,
-        snapshot.step,
-        snapshot.currentGeneration,
-        snapshot.candidateGeneration,
-        snapshot.attentionRequired ? 1 : 0,
-        snapshot.error ?? null,
-        timestamp,
-        timestamp,
-      );
+    await this.run("operation.save", [
+      snapshot.id,
+      snapshot.runtimeId,
+      snapshot.kind,
+      snapshot.mode,
+      snapshot.status,
+      snapshot.step,
+      snapshot.currentGeneration,
+      snapshot.candidateGeneration,
+      snapshot.attentionRequired ? 1 : 0,
+      snapshot.error ?? null,
+      timestamp,
+      timestamp,
+    ]);
   }
 
-  listRuntimeOperations(runtimeId?: string): StoredRuntimeOperation[] {
-    const rows = (runtimeId
-      ? this.database
-          .prepare(
-            `SELECT id, runtime_id, kind, mode, status, step, current_generation,
-                    candidate_generation, attention_required, error, started_at, updated_at
-               FROM plugin_runtime_operations
-              WHERE runtime_id = ?
-              ORDER BY started_at, id`,
-          )
-          .all(runtimeId)
-      : this.database
-          .prepare(
-            `SELECT id, runtime_id, kind, mode, status, step, current_generation,
-                    candidate_generation, attention_required, error, started_at, updated_at
-               FROM plugin_runtime_operations
-              ORDER BY started_at, id`,
-          )
-          .all()) as unknown as OperationRow[];
+  async listRuntimeOperations(runtimeId?: string): Promise<StoredRuntimeOperation[]> {
+    const rows = (await this.all(
+      runtimeId ? "operation.list-by-runtime" : "operation.list",
+      runtimeId ? [runtimeId] : [],
+    )) as OperationRow[];
     return rows.map((row) => ({
       id: row.id,
       runtimeId: row.runtime_id,
@@ -513,41 +351,26 @@ export class PluginStore {
     }));
   }
 
-  invalidateRuntimePublications(): void {
-    this.database
-      .prepare(
-        `UPDATE plugin_runtime_publications
-            SET generation = NULL,
-                epoch = epoch + 1,
-                updated_at = ?
-          WHERE generation IS NOT NULL`,
-      )
-      .run(now());
+  async invalidateRuntimePublications(): Promise<void> {
+    await this.run("publication.invalidate", [now()]);
   }
 
-  interruptRuntimeOperations(): void {
-    this.database
-      .prepare(
-        `UPDATE plugin_runtime_operations
-            SET status = 'interrupted',
-                error = COALESCE(error, 'SeaShard stopped before the operation completed'),
-                updated_at = ?
-          WHERE status = 'running'`,
-      )
-      .run(now());
+  async interruptRuntimeOperations(): Promise<void> {
+    await this.run("operation.interrupt", [now()]);
   }
 
-  appendJournal(category: string, aggregateId: string, payload: JsonValue): number {
-    return this.appendJournalInternal(category, aggregateId, payload);
+  async appendJournal(category: string, aggregateId: string, payload: JsonValue): Promise<number> {
+    const result = await this.run("journal.append", [
+      now(),
+      category,
+      aggregateId,
+      JSON.stringify(payload),
+    ]);
+    return toNumber(result.lastInsertRowid, "lastInsertRowid");
   }
 
-  listJournal(afterId = 0): JournalRecord[] {
-    const rows = this.database
-      .prepare(
-        `SELECT id, occurred_at, category, aggregate_id, payload_json
-           FROM operation_journal WHERE id > ? ORDER BY id`,
-      )
-      .all(afterId) as unknown as JournalRow[];
+  async listJournal(afterId = 0): Promise<JournalRecord[]> {
+    const rows = (await this.all("journal.list", [afterId])) as JournalRow[];
     return rows.map((row) => ({
       id: row.id,
       occurredAt: row.occurred_at,
@@ -557,14 +380,28 @@ export class PluginStore {
     }));
   }
 
-  private appendJournalInternal(category: string, aggregateId: string, payload: JsonValue): number {
-    const result = this.database
-      .prepare(
-        `INSERT INTO operation_journal (occurred_at, category, aggregate_id, payload_json)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(now(), category, aggregateId, JSON.stringify(payload));
-    return Number(result.lastInsertRowid);
+  private async run(command: string, parameters: readonly DatabaseValue[] = []) {
+    const result = await this.repository.execute(command, parameters);
+    if (result.kind !== "run") throw unexpectedResult(command, result);
+    return result;
+  }
+
+  private async get(
+    command: string,
+    parameters: readonly DatabaseValue[] = [],
+  ): Promise<DatabaseRow | undefined> {
+    const result = await this.repository.execute(command, parameters);
+    if (result.kind !== "get") throw unexpectedResult(command, result);
+    return result.row ?? undefined;
+  }
+
+  private async all(
+    command: string,
+    parameters: readonly DatabaseValue[] = [],
+  ): Promise<DatabaseRow[]> {
+    const result = await this.repository.execute(command, parameters);
+    if (result.kind !== "all") throw unexpectedResult(command, result);
+    return result.rows;
   }
 
   private decodePackage(row: PackageRow): PluginPackageRecord {
@@ -577,214 +414,27 @@ export class PluginStore {
       installedAt: row.installed_at,
     };
   }
-
-  private transaction<T>(execute: () => T): T {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      const result = execute();
-      this.database.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  private migrate(): void {
-    this.database.exec(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at TEXT NOT NULL
-      ) STRICT;
-    `);
-    const row = this.database
-      .prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")
-      .get() as { version: number };
-    if (row.version > 2) throw new Error(`database schema ${row.version} is newer than this build`);
-
-    if (row.version < 1) {
-      this.transaction(() => {
-        this.database.exec(`
-          CREATE TABLE plugin_packages (
-            plugin_id TEXT NOT NULL,
-            version TEXT NOT NULL,
-            digest TEXT NOT NULL,
-            publisher TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            trust_level TEXT NOT NULL,
-            root_path TEXT NOT NULL,
-            manifest_json TEXT NOT NULL,
-            installed_at TEXT NOT NULL,
-            PRIMARY KEY (plugin_id, version, digest)
-          ) STRICT;
-
-          CREATE TABLE plugin_current (
-            plugin_id TEXT PRIMARY KEY,
-            version TEXT NOT NULL,
-            digest TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (plugin_id, version, digest)
-              REFERENCES plugin_packages(plugin_id, version, digest) ON DELETE RESTRICT
-          ) STRICT;
-
-          CREATE TABLE plugin_trust (
-            plugin_id TEXT NOT NULL,
-            version TEXT NOT NULL,
-            digest TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            source_root TEXT NOT NULL,
-            trust_level TEXT NOT NULL,
-            granted_at TEXT NOT NULL,
-            PRIMARY KEY (plugin_id, version, digest)
-          ) STRICT;
-
-          CREATE TABLE plugin_bindings (
-            id TEXT PRIMARY KEY,
-            plugin_id TEXT NOT NULL,
-            entry_id TEXT NOT NULL,
-            scope_type TEXT NOT NULL,
-            scope_id TEXT NOT NULL,
-            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-            config_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          ) STRICT;
-
-          CREATE TABLE plugin_runtime_units (
-            runtime_id TEXT PRIMARY KEY,
-            plugin_id TEXT NOT NULL,
-            plugin_version TEXT NOT NULL,
-            entry_id TEXT NOT NULL,
-            binding_id TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            trust_level TEXT NOT NULL,
-            scope_type TEXT NOT NULL,
-            scope_id TEXT NOT NULL,
-            generation INTEGER NOT NULL,
-            desired_state TEXT NOT NULL,
-            actual_state TEXT NOT NULL,
-            reload_policy TEXT NOT NULL,
-            host_kind TEXT NOT NULL,
-            dependencies_json TEXT NOT NULL,
-            error TEXT,
-            updated_at TEXT NOT NULL
-          ) STRICT;
-
-          CREATE TABLE operation_journal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            occurred_at TEXT NOT NULL,
-            category TEXT NOT NULL,
-            aggregate_id TEXT NOT NULL,
-            payload_json TEXT NOT NULL
-          ) STRICT;
-
-          CREATE INDEX plugin_bindings_plugin_idx ON plugin_bindings(plugin_id);
-          CREATE INDEX runtime_units_binding_idx ON plugin_runtime_units(binding_id);
-          CREATE INDEX journal_aggregate_idx ON operation_journal(aggregate_id, id);
-        `);
-        this.database
-          .prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)")
-          .run(now());
-      });
-    }
-
-    if (row.version < 2) {
-      this.transaction(() => {
-        const manifests = this.database
-          .prepare("SELECT plugin_id, version, digest, manifest_json FROM plugin_packages")
-          .all() as unknown as StoredManifestRow[];
-        const updateManifest = this.database.prepare(
-          `UPDATE plugin_packages
-              SET manifest_json = ?
-            WHERE plugin_id = ? AND version = ? AND digest = ?`,
-        );
-        for (const manifest of manifests) {
-          updateManifest.run(
-            migrateStoredManifest(manifest.manifest_json),
-            manifest.plugin_id,
-            manifest.version,
-            manifest.digest,
-          );
-        }
-
-        this.database.exec(`
-          CREATE TABLE plugin_runtime_counters (
-            runtime_id TEXT PRIMARY KEY,
-            last_generation INTEGER NOT NULL
-          ) STRICT;
-
-          INSERT INTO plugin_runtime_counters (runtime_id, last_generation)
-          SELECT runtime_id, MAX(generation)
-            FROM plugin_runtime_units
-           GROUP BY runtime_id;
-
-          DROP TABLE plugin_runtime_units;
-
-          CREATE TABLE plugin_runtime_generations (
-            runtime_id TEXT NOT NULL,
-            plugin_id TEXT NOT NULL,
-            plugin_version TEXT NOT NULL,
-            entry_id TEXT NOT NULL,
-            binding_id TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            trust_level TEXT NOT NULL,
-            scope_type TEXT NOT NULL,
-            scope_id TEXT NOT NULL,
-            generation INTEGER NOT NULL,
-            phase TEXT NOT NULL,
-            upgrade_mode TEXT NOT NULL,
-            host_kind TEXT NOT NULL,
-            dependencies_json TEXT NOT NULL,
-            error TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (runtime_id, generation)
-          ) STRICT;
-
-          CREATE TABLE plugin_runtime_publications (
-            runtime_id TEXT PRIMARY KEY,
-            generation INTEGER,
-            epoch INTEGER NOT NULL,
-            updated_at TEXT NOT NULL
-          ) STRICT;
-
-          CREATE TABLE plugin_runtime_operations (
-            id TEXT PRIMARY KEY,
-            runtime_id TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            status TEXT NOT NULL,
-            step TEXT NOT NULL,
-            current_generation INTEGER,
-            candidate_generation INTEGER,
-            attention_required INTEGER NOT NULL CHECK (attention_required IN (0, 1)),
-            error TEXT,
-            started_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          ) STRICT;
-
-          CREATE INDEX runtime_generations_binding_idx
-            ON plugin_runtime_generations(binding_id, generation);
-          CREATE INDEX runtime_operations_runtime_idx
-            ON plugin_runtime_operations(runtime_id, started_at);
-        `);
-        this.database
-          .prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)")
-          .run(now());
-      });
-    }
-  }
 }
 
-function migrateStoredManifest(value: string): string {
-  const manifest = JSON.parse(value) as {
-    entries?: Array<Record<string, unknown>>;
+function journalCommand(category: string, aggregateId: string, payload: JsonValue) {
+  return {
+    command: "journal.append",
+    parameters: [now(), category, aggregateId, JSON.stringify(payload)] as DatabaseValue[],
   };
-  for (const entry of manifest.entries ?? []) {
-    if (entry.upgradeMode !== undefined || typeof entry.reloadPolicy !== "string") continue;
-    entry.upgradeMode = entry.reloadPolicy === "hot" ? "hot-swap" : "stop-first";
-    delete entry.reloadPolicy;
+}
+
+function unexpectedResult(command: string, result: DatabaseCommandResult): Error {
+  return new Error(`database command ${command} returned ${result.kind}`);
+}
+
+function toNumber(value: DatabaseValue | undefined, field: string): number {
+  if (typeof value !== "number" && typeof value !== "bigint") {
+    throw new TypeError(`database field ${field} is not an integer`);
   }
-  return JSON.stringify(manifest);
+  const result = Number(value);
+  if (!Number.isSafeInteger(result))
+    throw new RangeError(`database field ${field} is out of range`);
+  return result;
 }
 
 function parseJson(value: string): JsonValue {
