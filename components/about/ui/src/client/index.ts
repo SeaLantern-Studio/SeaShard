@@ -1,24 +1,26 @@
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { Info } from "lucide-vue-next";
-import { defineComponent } from "vue";
+import { defineComponent, h } from "vue";
+import { aboutUiManifest } from "../index";
+import AboutPage from "./AboutPage.vue";
 
-const AboutPage = defineComponent({
+const AboutFeaturePage = defineComponent({
   name: "AboutFeaturePage",
-  render: () => null,
+  setup: () => () => h(AboutPage, { version: aboutUiManifest.version }),
 });
 
 export default defineClientUiModule({
   apply(context) {
     context.contribute("navigation.page", {
       id: "about",
-      path: "/about",
+      path: "/settings/about",
       label: "关于",
       description: "关于 SeaShard",
       order: 20,
       icon: Info,
       navigation: true,
-      placement: "bottom",
-      component: AboutPage,
+      placement: "settings",
+      component: AboutFeaturePage,
     });
   },
 });

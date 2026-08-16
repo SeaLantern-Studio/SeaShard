@@ -38,7 +38,7 @@ export interface NavigationPageContribution {
   order?: number;
   icon?: Component;
   navigation?: boolean;
-  placement?: "main" | "bottom";
+  placement?: "main" | "settings";
   component: Component;
 }
 

@@ -21,6 +21,7 @@ import type { WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
   workspace: WorkspaceMode;
+  settingsMode: boolean;
   rightPanelOpen: boolean;
 }>();
 const emit = defineEmits<{
@@ -54,7 +55,9 @@ async function closeWindow(): Promise<void> {
 <template>
   <header class="app-header">
     <div class="header-workspace">
+      <div v-if="props.settingsMode" class="settings-header-title">设置</div>
       <div
+        v-else
         class="workspace-switcher"
         role="tablist"
         aria-label="工作区"
@@ -139,6 +142,7 @@ async function closeWindow(): Promise<void> {
       </div>
 
       <button
+        v-if="!props.settingsMode"
         type="button"
         class="panel-toggle"
         :class="{ active: props.rightPanelOpen }"

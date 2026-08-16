@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { useClientUiRuntime } from "@seashard/ui-runtime";
-import { ChevronDown, Folder, MessageSquare, SquarePen } from "lucide-vue-next";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Folder,
+  MessageSquare,
+  Settings,
+  SquarePen,
+} from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import logoSvg from "./assets/logo.svg";
@@ -8,6 +15,7 @@ import type { WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
   workspace: WorkspaceMode;
+  settingsMode: boolean;
 }>();
 
 const runtime = useClientUiRuntime();
@@ -15,15 +23,14 @@ const router = useRouter();
 const route = useRoute();
 const sidebarNav = ref<HTMLElement>();
 const navIndicator = ref<HTMLElement>();
-const visiblePages = computed(() =>
-  runtime.pages.value.filter((page) => page.navigation !== false),
+const lastWorkspacePath = ref("/");
+const settingsPages = computed(() =>
+  runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "settings"),
 );
+const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
 const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
 const expandedProjects = ref<Set<string>>(new Set(agentProjects.map((project) => project.name)));
-const bottomPages = computed(() =>
-  visiblePages.value.filter((page) => page.placement === "bottom"),
-);
 let indicatorFrame: number | undefined;
 
 function navigate(path: string): void {
@@ -31,7 +38,16 @@ function navigate(path: string): void {
 }
 
 function isActive(path: string): boolean {
-  return path === "/" ? route.path === "/" : route.path.startsWith(path);
+  return route.path === path || route.path.startsWith(`${path}/`);
+}
+
+function openSettings(): void {
+  const path = settingsEntryPath.value;
+  if (path) navigate(path);
+}
+
+function leaveSettings(): void {
+  navigate(lastWorkspacePath.value);
 }
 
 function isProjectExpanded(name: string): boolean {
@@ -69,7 +85,15 @@ function updateNavIndicator(): void {
 }
 
 watch(
-  [() => route.path, () => props.workspace, visiblePages],
+  () => route.fullPath,
+  (path) => {
+    if (!path.startsWith("/settings/")) lastWorkspacePath.value = path;
+  },
+  { immediate: true },
+);
+
+watch(
+  [() => route.path, () => props.workspace, settingsPages],
   () => void nextTick(updateNavIndicator),
   {
     flush: "post",
@@ -96,10 +120,43 @@ onUnmounted(() => {
       <span class="logo-text">SeaShard</span>
     </div>
 
-    <nav ref="sidebarNav" class="sidebar-nav" aria-label="主导航">
+    <nav
+      ref="sidebarNav"
+      class="sidebar-nav"
+      :aria-label="props.settingsMode ? '设置导航' : '主导航'"
+    >
       <div ref="navIndicator" class="nav-active-indicator"></div>
 
-      <div v-if="props.workspace === 'agent'" class="agent-workspace-nav">
+      <div v-if="props.settingsMode" class="settings-mode-nav">
+        <button type="button" class="workspace-row settings-back" @click="leaveSettings">
+          <ArrowLeft :size="16" :stroke-width="1.8" />
+          <span>返回工作区</span>
+        </button>
+
+        <section class="settings-section" aria-labelledby="settings-label">
+          <h3 id="settings-label" class="workspace-section-title">设置</h3>
+          <button
+            v-for="page in settingsPages"
+            :key="page.id"
+            type="button"
+            class="nav-item settings-nav-item"
+            :class="{ active: isActive(page.path) }"
+            :aria-current="isActive(page.path) ? 'page' : undefined"
+            @click="navigate(page.path)"
+          >
+            <component
+              :is="page.icon"
+              v-if="page.icon"
+              class="nav-icon"
+              :size="19"
+              :stroke-width="1.8"
+            />
+            <span class="nav-label">{{ page.label }}</span>
+          </button>
+        </section>
+      </div>
+
+      <div v-else-if="props.workspace === 'agent'" class="agent-workspace-nav">
         <button type="button" class="workspace-action">
           <SquarePen :size="16" :stroke-width="1.8" />
           <span>新建对话</span>
@@ -160,23 +217,10 @@ onUnmounted(() => {
         </section>
       </div>
 
-      <div v-if="bottomPages.length" class="nav-group lower-side">
-        <button
-          v-for="page in bottomPages"
-          :key="page.id"
-          type="button"
-          class="nav-item"
-          :class="{ active: isActive(page.path) }"
-          @click="navigate(page.path)"
-        >
-          <component
-            :is="page.icon"
-            v-if="page.icon"
-            class="nav-icon"
-            :size="20"
-            :stroke-width="1.8"
-          />
-          <span class="nav-label">{{ page.label }}</span>
+      <div v-if="!props.settingsMode" class="nav-group lower-side">
+        <button type="button" class="nav-item" :disabled="!settingsEntryPath" @click="openSettings">
+          <Settings class="nav-icon" :size="20" :stroke-width="1.8" />
+          <span class="nav-label">设置</span>
         </button>
       </div>
     </nav>

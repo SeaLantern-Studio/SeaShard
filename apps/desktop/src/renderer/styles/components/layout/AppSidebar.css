@@ -69,6 +69,41 @@
   gap: var(--sl-space-md);
 }
 
+.settings-mode-nav,
+.settings-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-mode-nav {
+  gap: var(--sl-space-md);
+}
+
+.settings-section {
+  gap: 2px;
+}
+
+.settings-back {
+  min-height: 40px;
+  border: 1px solid var(--sl-border-light);
+  background: color-mix(in srgb, var(--sl-surface) 72%, transparent);
+  color: var(--sl-text-secondary);
+  font-weight: 600;
+}
+
+.settings-back svg {
+  color: var(--sl-text-secondary);
+}
+
+.settings-nav-item {
+  margin-top: 2px;
+}
+
+.nav-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .workspace-action,
 .workspace-row {
   display: flex;

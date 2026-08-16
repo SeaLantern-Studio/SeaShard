@@ -101,7 +101,7 @@ async function bootstrap(): Promise<void> {
       },
     });
   }
-  // “关于”是独立内置 Client UI 功能；页面暂时为空，但不写死进静态 Shell。
+  // “关于”作为可独立启停的内置 Client UI 功能，进入统一设置导航。
   await activeKernel.registerBuiltIn({
     manifest: aboutUiManifest,
     loaders: {},
@@ -116,7 +116,7 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
-  // 个性化页面是可独立启停的内置 Client UI 功能，不进入静态桌面外壳。
+  // 个性化作为可独立启停的内置 Client UI 功能，进入统一设置导航。
   await activeKernel.registerBuiltIn({
     manifest: personalizationUiManifest,
     loaders: {},

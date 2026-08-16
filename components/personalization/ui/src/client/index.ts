@@ -17,13 +17,13 @@ export default defineClientUiModule({
 
     context.contribute("navigation.page", {
       id: "personalization",
-      path: "/personalization",
+      path: "/settings/personalization",
       label: "个性化",
       description: "颜色主题与外观",
       order: 10,
       icon: PaintRoller,
       navigation: true,
-      placement: "bottom",
+      placement: "settings",
       component: page,
     });
   },
