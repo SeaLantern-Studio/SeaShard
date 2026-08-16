@@ -69,6 +69,37 @@
   gap: var(--sl-space-md);
 }
 
+.instance-workspace-nav,
+.instance-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.instance-workspace-nav {
+  gap: 10px;
+}
+
+.instance-nav-group {
+  gap: 2px;
+}
+
+.instance-nav-item {
+  margin-top: 0;
+}
+
+.instance-primary-item {
+  min-height: 42px;
+  font-weight: 600;
+}
+
+.instance-section-divider {
+  height: 1px;
+  margin: 2px var(--sl-space-sm);
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-border);
+  opacity: 0.72;
+}
+
 .settings-mode-nav,
 .settings-section {
   display: flex;

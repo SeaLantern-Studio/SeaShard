@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { useClientUiRuntime } from "@seashard/ui-runtime";
 import {
+  Archive,
   ArrowLeft,
   ChevronDown,
+  Download,
   Folder,
+  Image,
+  LayoutDashboard,
   MessageSquare,
+  Package,
+  Play,
+  Puzzle,
   Settings,
   SquarePen,
+  Terminal,
+  Upload,
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -30,6 +39,40 @@ const settingsPages = computed(() =>
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
 const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
+const instancePrimaryItems = [
+  { id: "launch", label: "启动", icon: Play },
+  { id: "download", label: "下载", icon: Download },
+] as const;
+const launcherManagementItems = [
+  { id: "overview", label: "概览", icon: LayoutDashboard },
+  { id: "settings", label: "设置", icon: Settings },
+  { id: "export", label: "导出", icon: Upload },
+  { id: "saves", label: "存档", icon: Archive },
+  { id: "screenshots", label: "截图", icon: Image },
+  { id: "mods", label: "Mod", icon: Puzzle },
+  { id: "resource-packs", label: "资源包", icon: Package },
+] as const;
+const serverManagementItems = [
+  { id: "overview", label: "概览", icon: LayoutDashboard },
+  { id: "console", label: "控制台", icon: Terminal },
+  { id: "settings", label: "设置", icon: Settings },
+  { id: "export", label: "导出", icon: Upload },
+  { id: "saves", label: "存档", icon: Archive },
+  { id: "mods", label: "Mod", icon: Puzzle },
+] as const;
+type InstanceItemId =
+  | (typeof instancePrimaryItems)[number]["id"]
+  | (typeof launcherManagementItems)[number]["id"]
+  | (typeof serverManagementItems)[number]["id"];
+const activeLauncherItem = ref<InstanceItemId>("launch");
+const activeServerItem = ref<InstanceItemId>("launch");
+const activeInstanceItem = computed(() =>
+  props.workspace === "server" ? activeServerItem.value : activeLauncherItem.value,
+);
+const instanceManagementItems = computed(() =>
+  props.workspace === "server" ? serverManagementItems : launcherManagementItems,
+);
+const instanceWorkspaceLabel = computed(() => (props.workspace === "server" ? "服务器" : "启动器"));
 const expandedProjects = ref<Set<string>>(new Set(agentProjects.map((project) => project.name)));
 let indicatorFrame: number | undefined;
 
@@ -48,6 +91,14 @@ function openSettings(): void {
 
 function leaveSettings(): void {
   navigate(lastWorkspacePath.value);
+}
+
+function selectInstanceItem(id: InstanceItemId): void {
+  if (props.workspace === "server") {
+    activeServerItem.value = id;
+  } else if (props.workspace === "launcher") {
+    activeLauncherItem.value = id;
+  }
 }
 
 function isProjectExpanded(name: string): boolean {
@@ -93,7 +144,7 @@ watch(
 );
 
 watch(
-  [() => route.path, () => props.workspace, settingsPages],
+  [() => route.path, () => props.workspace, settingsPages, activeInstanceItem],
   () => void nextTick(updateNavIndicator),
   {
     flush: "post",
@@ -215,6 +266,43 @@ onUnmounted(() => {
             <span>{{ chat }}</span>
           </button>
         </section>
+      </div>
+
+      <div
+        v-else-if="props.workspace === 'server' || props.workspace === 'launcher'"
+        class="instance-workspace-nav"
+      >
+        <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}主要操作`">
+          <button
+            v-for="item in instancePrimaryItems"
+            :key="item.id"
+            type="button"
+            class="nav-item instance-nav-item instance-primary-item"
+            :class="{ active: activeInstanceItem === item.id }"
+            :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
+            @click="selectInstanceItem(item.id)"
+          >
+            <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
+            <span class="nav-label">{{ item.label }}</span>
+          </button>
+        </div>
+
+        <div class="instance-section-divider" role="separator"></div>
+
+        <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}管理`">
+          <button
+            v-for="item in instanceManagementItems"
+            :key="item.id"
+            type="button"
+            class="nav-item instance-nav-item"
+            :class="{ active: activeInstanceItem === item.id }"
+            :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
+            @click="selectInstanceItem(item.id)"
+          >
+            <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
+            <span class="nav-label">{{ item.label }}</span>
+          </button>
+        </div>
       </div>
 
       <div v-if="!props.settingsMode" class="nav-group lower-side">
