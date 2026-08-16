@@ -28,6 +28,7 @@ export class PluginResolutionError extends Error {
 
 export class PluginRegistry {
   private readonly builtInLoaders = new Map<string, BuiltInModuleLoader>();
+  private readonly registeredBuiltInPluginIds = new Set<string>();
 
   constructor(
     private readonly store: PluginStore,
@@ -62,7 +63,37 @@ export class PluginRegistry {
     for (const binding of registration.bindings) {
       await this.upsertBinding({ ...binding, pluginId: manifest.id });
     }
+    this.registeredBuiltInPluginIds.add(manifest.id);
     return record;
+  }
+
+  /**
+   * 让持久化的内建插件集合服从本次宿主实际注册的编译期清单。
+   *
+   * 内建插件没有独立安装来源；代码中已经移除的 Provider 不应继续留下 Binding，
+   * 否则重启后会反复生成“loader missing”的失败 Runtime。
+   */
+  async synchronizeBuiltIns(): Promise<void> {
+    const retired = (await this.store.listCurrentPackages()).filter(
+      (record) =>
+        record.source === "builtin" && !this.registeredBuiltInPluginIds.has(record.manifest.id),
+    );
+
+    for (const record of retired) {
+      for (const binding of await this.store.listBindings(record.manifest.id)) {
+        await this.store.deleteBinding(binding.id);
+      }
+      await this.store.clearCurrentVersion(record.manifest.id);
+      for (const stored of await this.store.listPackages(record.manifest.id)) {
+        if (stored.source === "builtin") {
+          await this.store.removePackage(
+            stored.manifest.id,
+            stored.manifest.version,
+            stored.digest,
+          );
+        }
+      }
+    }
   }
 
   getBuiltInLoader(pluginId: string, entryId: string): BuiltInModuleLoader | undefined {

@@ -1,5 +1,5 @@
 {
-  "name": "@seashard/plugin-storage-sqlite",
+  "name": "@seashard/plugin-foundation",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,7 @@
     "@seashard/database": "workspace:*",
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
     "cordis": "4.0.0-rc.8"
   }
 }

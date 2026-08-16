@@ -1,12 +1,16 @@
 import {
-  desktopWindowHostContract,
-  type DesktopWindowHostService,
+  desktopChannels,
+  desktopShellContract,
+  runtimeDiagnosticsContract,
+  type DesktopShellService,
+  type RuntimeDiagnosticsService,
+  type RuntimeSnapshot,
 } from "../packages/contracts/src/index.ts";
 import {
-  createDesktopWindowHostModule,
-  type DesktopWindowHostConfig,
-  type DesktopWindowRuntime,
-} from "../components/desktop-window-host/src/index.ts";
+  createDesktopShellModule,
+  type DesktopShellConfig,
+  type DesktopShellRuntime,
+} from "../components/desktop/shell/src/index.ts";
 import type {
   Disposable,
   PluginContext,
@@ -15,7 +19,7 @@ import type {
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import type { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
+import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent } from "electron";
 
 class FakeBrowserWindow extends EventEmitter {
   readonly webContents: {
@@ -83,8 +87,9 @@ class FakeBrowserWindow extends EventEmitter {
   }
 }
 
-class FakeDesktopWindowRuntime extends EventEmitter implements DesktopWindowRuntime {
+class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntime {
   readonly windows: FakeBrowserWindow[] = [];
+  readonly handlers = new Map<string, (event: IpcMainInvokeEvent) => unknown>();
   quitCount = 0;
 
   constructor(readonly platform: NodeJS.Platform) {
@@ -117,19 +122,42 @@ class FakeDesktopWindowRuntime extends EventEmitter implements DesktopWindowRunt
     this.off("window-all-closed", listener);
   }
 
+  handle(channel: string, listener: (event: IpcMainInvokeEvent) => unknown): void {
+    if (this.handlers.has(channel)) throw new Error(`duplicate handler: ${channel}`);
+    this.handlers.set(channel, listener);
+  }
+
+  removeHandler(channel: string): void {
+    this.handlers.delete(channel);
+  }
+
+  async invoke(channel: string, senderId: number): Promise<unknown> {
+    const handler = this.handlers.get(channel);
+    if (!handler) throw new Error(`missing handler: ${channel}`);
+    return handler({ sender: { id: senderId } } as IpcMainInvokeEvent);
+  }
+
   quit(): void {
     this.quitCount += 1;
   }
 }
 
-async function activateWindowHost(
-  config: DesktopWindowHostConfig,
-): Promise<{ service: DesktopWindowHostService; dispose: () => Promise<void> }> {
-  const providers = new Map<string, ServiceProvider>();
+async function activateDesktopShell(
+  config: DesktopShellConfig,
+  diagnostics: RuntimeDiagnosticsService,
+): Promise<{ service: DesktopShellService; dispose: () => Promise<void> }> {
+  const providers = new Map<string, ServiceProvider>([
+    [runtimeDiagnosticsContract, diagnostics as unknown as ServiceProvider],
+  ]);
   const disposers: Disposable[] = [];
   const context = {
     provide(contract: string, provider: ServiceProvider) {
       providers.set(contract, provider);
+    },
+    service(contract: string) {
+      const provider = providers.get(contract);
+      if (!provider) throw new Error(`missing service: ${contract}`);
+      return provider;
     },
     effect(execute: () => void | Disposable | Promise<void | Disposable>) {
       const result = execute();
@@ -138,30 +166,46 @@ async function activateWindowHost(
     },
   } as unknown as PluginContext;
 
-  await createDesktopWindowHostModule(config).apply(context, null);
-  const service = providers.get(desktopWindowHostContract);
-  assert.ok(service, "window host must publish its service");
+  await createDesktopShellModule(config).apply(context, null);
+  const service = providers.get(desktopShellContract);
+  assert.ok(service, "desktop shell must publish its service");
 
   return {
-    service: service as unknown as DesktopWindowHostService,
+    service: service as unknown as DesktopShellService,
     dispose: async () => {
       for (const disposer of disposers.reverse()) await disposer();
     },
   };
 }
 
-await test("desktop window host owns the primary window lifecycle and security boundary", async () => {
-  const runtime = new FakeDesktopWindowRuntime("win32");
-  const failures: unknown[] = [];
-  const host = await activateWindowHost({
-    runtime,
-    preloadPath: "C:/SeaShard/preload.cjs",
-    rendererFile: "C:/SeaShard/index.html",
-    smokeMode: false,
-    reportOpenFailure: (error) => failures.push(error),
-  });
+const snapshot: RuntimeSnapshot = {
+  protocolVersion: 1,
+  host: "electron",
+  state: "active",
+  startedAt: "2026-08-16T00:00:00.000Z",
+  components: [],
+};
 
-  await Promise.all([host.service.openPrimary(), host.service.openPrimary()]);
+await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
+  const runtime = new FakeDesktopShellRuntime("win32");
+  const failures: unknown[] = [];
+  const served: RuntimeSnapshot[] = [];
+  const shell = await activateDesktopShell(
+    {
+      runtime,
+      preloadPath: "C:/SeaShard/preload.cjs",
+      rendererFile: "C:/SeaShard/index.html",
+      smokeMode: false,
+      reportOpenFailure: (error) => failures.push(error),
+      onRuntimeSnapshotServed: (value) => served.push(value),
+    },
+    { getSnapshot: async () => snapshot },
+  );
+
+  assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), true);
+  await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 1), /request rejected/);
+
+  await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
   const first = runtime.windows[0];
   assert.equal(first.loadedFile, "C:/SeaShard/index.html");
@@ -177,8 +221,10 @@ await test("desktop window host owns the primary window lifecycle and security b
     permissionAllowed = allowed;
   });
   assert.equal(permissionAllowed, false);
-  assert.equal(await host.service.ownsWebContents(1), true);
-  assert.equal(await host.service.ownsWebContents(999), false);
+
+  assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
+  await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
+  assert.deepEqual(served, [snapshot]);
 
   first.emit("ready-to-show");
   assert.equal(first.shown, true);
@@ -188,24 +234,28 @@ await test("desktop window host owns the primary window lifecycle and security b
 
   runtime.emit("window-all-closed");
   assert.equal(runtime.quitCount, 1);
-  await host.dispose();
+  await shell.dispose();
   assert.equal(runtime.windows[1].destroyed, true);
   assert.equal(runtime.listenerCount("activate"), 0);
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
+  assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
   assert.deepEqual(failures, []);
 });
 
-await test("desktop window host keeps macOS alive after the last window closes", async () => {
-  const runtime = new FakeDesktopWindowRuntime("darwin");
-  const host = await activateWindowHost({
-    runtime,
-    preloadPath: "/SeaShard/preload.cjs",
-    rendererFile: "/SeaShard/index.html",
-    smokeMode: true,
-    reportOpenFailure: () => {},
-  });
+await test("desktop shell keeps macOS alive after the last window closes", async () => {
+  const runtime = new FakeDesktopShellRuntime("darwin");
+  const shell = await activateDesktopShell(
+    {
+      runtime,
+      preloadPath: "/SeaShard/preload.cjs",
+      rendererFile: "/SeaShard/index.html",
+      smokeMode: true,
+      reportOpenFailure: () => {},
+    },
+    { getSnapshot: async () => snapshot },
+  );
 
   runtime.emit("window-all-closed");
   assert.equal(runtime.quitCount, 0);
-  await host.dispose();
+  await shell.dispose();
 });

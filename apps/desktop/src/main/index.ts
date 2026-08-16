@@ -1,14 +1,12 @@
-import { desktopWindowHostContract } from "@seashard/contracts";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
-import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
-import {
-  createDesktopWindowHostModule,
-  createElectronDesktopWindowRuntime,
-  desktopWindowHostManifest,
-} from "@seashard/desktop-window-host";
+import { desktopShellContract } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
-import { createSQLitePluginStorageBootstrapDescriptor } from "@seashard/plugin-storage-sqlite";
-import { createPluginSystemFoundationBootstrapDescriptor } from "@seashard/plugin-system-foundation";
+import {
+  createDesktopShellModule,
+  createElectronDesktopShellRuntime,
+  desktopShellManifest,
+} from "@seashard/desktop-shell";
+import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
   PluginKernel,
@@ -20,7 +18,7 @@ import {
   runtimeDiagnosticsManifest,
 } from "@seashard/runtime-diagnostics";
 import { Context } from "cordis";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,11 +71,11 @@ async function bootstrap(): Promise<void> {
       dataRoot,
       workerEntry: databaseWorkerEntry,
     }),
-    createSQLitePluginStorageBootstrapDescriptor({
+    createPluginFoundationBootstrapDescriptor({
       dataRoot,
       workerEntry: databaseWorkerEntry,
+      seaShardVersion,
     }),
-    createPluginSystemFoundationBootstrapDescriptor({ seaShardVersion }),
   ]);
   kernel = await PluginKernel.create({
     dataRoot,
@@ -88,8 +86,8 @@ async function bootstrap(): Promise<void> {
     platform: host.platform,
     architecture: host.architecture,
     root,
-    store: root["plugin-system-foundation"].store,
-    pluginStorage: root["plugin-storage"],
+    store: root["plugin-foundation"].store,
+    pluginStorage: root["plugin-foundation"].storage,
   });
   const activeKernel = kernel;
   if (smokeMode) {
@@ -125,40 +123,19 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
-  // BrowserWindow 是可热替换的宿主能力；Main 只注入 Electron 进程对象和构建产物位置。
+  // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
   await activeKernel.registerBuiltIn({
-    manifest: desktopWindowHostManifest,
+    manifest: desktopShellManifest,
     loaders: {
-      "desktop-window-host.host": {
+      "desktop-shell.host": {
         load: async () =>
-          createDesktopWindowHostModule({
-            runtime: createElectronDesktopWindowRuntime(app, BrowserWindow),
+          createDesktopShellModule({
+            runtime: createElectronDesktopShellRuntime(app, BrowserWindow, ipcMain),
             preloadPath: join(moduleDirectory, "../preload/index.cjs"),
             rendererFile: join(moduleDirectory, "../renderer/index.html"),
             ...(developmentUrl ? { developmentUrl } : {}),
             smokeMode,
             reportOpenFailure: (error) => console.error("Desktop window open failed", error),
-          }),
-      },
-    },
-    bindings: [
-      {
-        id: "core.desktop-window-host",
-        entryId: "desktop-window-host.host",
-        scopeType: "global",
-        scopeId: "global",
-        enabled: true,
-        config: null,
-      },
-    ],
-  });
-  // Gateway 通过 Service 依赖诊断组件；实际启动顺序由 Supervisor 的依赖图决定。
-  await activeKernel.registerBuiltIn({
-    manifest: desktopGatewayManifest,
-    loaders: {
-      "desktop-gateway.host": {
-        load: async () =>
-          createDesktopGatewayModule({
             onRuntimeSnapshotServed: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;
@@ -170,8 +147,8 @@ async function bootstrap(): Promise<void> {
     },
     bindings: [
       {
-        id: "core.desktop-gateway",
-        entryId: "desktop-gateway.host",
+        id: "core.desktop-shell",
+        entryId: "desktop-shell.host",
         scopeType: "global",
         scopeId: "global",
         enabled: true,
@@ -216,8 +193,8 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  // Renderer 只在所有 Gateway 发布后加载，避免首个 preload 调用撞上尚未注册的 IPC handler。
-  await activeKernel.callService(desktopWindowHostContract, "openPrimary", []);
+  // 全部组件发布后再加载 Renderer，Preload 的首个调用必定命中已注册的 Shell Handler。
+  await activeKernel.callService(desktopShellContract, "openPrimary", []);
   if (developmentUrl) console.log(`SEASHARD_DEV_WINDOW_READY ${developmentUrl}`);
 }
 

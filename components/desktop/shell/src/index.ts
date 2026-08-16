@@ -1,14 +1,21 @@
-import { desktopWindowHostContract } from "@seashard/contracts";
+import {
+  desktopChannels,
+  desktopShellContract,
+  runtimeDiagnosticsContract,
+  type RuntimeDiagnosticsService,
+  type RuntimeSnapshot,
+} from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
-import type { App, BrowserWindow, BrowserWindowConstructorOptions } from "electron";
+import type {
+  App,
+  BrowserWindow,
+  BrowserWindowConstructorOptions,
+  IpcMain,
+  IpcMainInvokeEvent,
+} from "electron";
 
-/**
- * Electron 全局对象的最小适配面。
- *
- * Component 决定窗口策略和清理顺序；Desktop Main 只把不可组件化的 Electron 进程对象
- * 适配进来，避免测试必须启动真实 Electron。
- */
-export interface DesktopWindowRuntime {
+/** Electron 全局对象的最小适配面，便于在不启动 Electron 的情况下验证完整 Shell。 */
+export interface DesktopShellRuntime {
   readonly platform: NodeJS.Platform;
   createWindow(options: BrowserWindowConstructorOptions): BrowserWindow;
   getWindowCount(): number;
@@ -16,23 +23,27 @@ export interface DesktopWindowRuntime {
   offActivate(listener: () => void): void;
   onWindowAllClosed(listener: () => void): void;
   offWindowAllClosed(listener: () => void): void;
+  handle(channel: string, listener: (event: IpcMainInvokeEvent) => unknown): void;
+  removeHandler(channel: string): void;
   quit(): void;
 }
 
-export interface DesktopWindowHostConfig {
-  readonly runtime: DesktopWindowRuntime;
+export interface DesktopShellConfig {
+  readonly runtime: DesktopShellRuntime;
   readonly preloadPath: string;
   readonly rendererFile: string;
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
+  onRuntimeSnapshotServed?(snapshot: RuntimeSnapshot): void;
 }
 
-/** 把不可序列化的 Electron 进程对象收窄成 Window Host 唯一需要的适配面。 */
-export function createElectronDesktopWindowRuntime(
+/** 把不可序列化的 Electron 进程对象收窄成 Desktop Shell 唯一需要的适配面。 */
+export function createElectronDesktopShellRuntime(
   electronApp: App,
   BrowserWindowClass: typeof BrowserWindow,
-): DesktopWindowRuntime {
+  electronIpcMain: IpcMain,
+): DesktopShellRuntime {
   return {
     platform: process.platform,
     createWindow: (options) => new BrowserWindowClass(options),
@@ -41,23 +52,25 @@ export function createElectronDesktopWindowRuntime(
     offActivate: (listener) => electronApp.off("activate", listener),
     onWindowAllClosed: (listener) => electronApp.on("window-all-closed", listener),
     offWindowAllClosed: (listener) => electronApp.off("window-all-closed", listener),
+    handle: (channel, listener) => electronIpcMain.handle(channel, listener),
+    removeHandler: (channel) => electronIpcMain.removeHandler(channel),
     quit: () => electronApp.quit(),
   };
 }
 
-export const desktopWindowHostManifest: PluginManifest = {
-  id: "seashard.desktop-window-host",
+export const desktopShellManifest: PluginManifest = {
+  id: "seashard.desktop-shell",
   version: "0.0.0",
   publisher: "sealantern-studio",
   entries: [
     {
-      id: "desktop-window-host.host",
+      id: "desktop-shell.host",
       runtime: "host",
       module: "./dist/host.js",
       hostProfiles: ["electron"],
       activationScopes: ["global"],
-      permissions: [],
-      // BrowserWindow 是独占宿主资源；替换时必须先销毁旧窗口，不能短暂双开。
+      permissions: [runtimeDiagnosticsContract],
+      // BrowserWindow 和 ipcMain Channel 都是 Electron 进程级独占资源。
       upgradeMode: "stop-first",
     },
   ],
@@ -67,20 +80,22 @@ export const desktopWindowHostManifest: PluginManifest = {
 };
 
 /**
- * 创建主窗口宿主组件。
+ * 创建完整 Desktop Shell。
  *
- * 组件拥有 BrowserWindow、安全策略、Renderer 装载、macOS 重新激活和窗口清理。
- * 初次打开通过 Service 显式触发，使 Main 可以等全部 IPC Gateway 发布后再加载 Renderer；
- * 后续 UI Shell 组件也可以复用同一入口，而不接触 Electron 对象。
+ * 窗口、Sender 所有权和 IPC Handler 属于同一个不可拆分的 Electron 生命周期；
+ * Runtime Diagnostics 保持独立，只通过类型化 Service 提供跨 Host 的投影结果。
  */
-export function createDesktopWindowHostModule(config: DesktopWindowHostConfig): PluginModule {
+export function createDesktopShellModule(config: DesktopShellConfig): PluginModule {
   return {
-    provides: [desktopWindowHostContract],
+    inject: [runtimeDiagnosticsContract],
+    provides: [desktopShellContract],
     apply(ctx) {
+      const diagnostics = ctx.service<RuntimeDiagnosticsService>(runtimeDiagnosticsContract);
       let primaryWindow: BrowserWindow | undefined;
       let opening: Promise<void> | undefined;
 
       const ownsWebContents = (webContentsId: number): boolean =>
+        Number.isSafeInteger(webContentsId) &&
         primaryWindow !== undefined &&
         !primaryWindow.isDestroyed() &&
         primaryWindow.webContents.id === webContentsId;
@@ -103,7 +118,6 @@ export function createDesktopWindowHostModule(config: DesktopWindowHostConfig): 
         });
         primaryWindow = window;
 
-        // Renderer 只能通过预定义 preload contract 与 Core 通信；窗口本身不获得新窗口或权限能力。
         window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
         window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
           callback(false),
@@ -122,7 +136,6 @@ export function createDesktopWindowHostModule(config: DesktopWindowHostConfig): 
             await window.loadFile(config.rendererFile);
           }
         } catch (error) {
-          // 失败窗口不能继续占据授权身份；销毁后下一次 activate/openPrimary 可以干净重试。
           if (primaryWindow === window) primaryWindow = undefined;
           if (!window.isDestroyed()) window.destroy();
           throw error;
@@ -154,29 +167,29 @@ export function createDesktopWindowHostModule(config: DesktopWindowHostConfig): 
         if (config.runtime.platform !== "darwin") config.runtime.quit();
       };
 
-      ctx.provide(desktopWindowHostContract, {
-        openPrimary,
-        ownsWebContents: (webContentsId) => {
-          if (typeof webContentsId !== "number" || !Number.isSafeInteger(webContentsId)) {
-            throw new TypeError("webContentsId must be a safe integer");
-          }
-          return ownsWebContents(webContentsId);
-        },
-      });
-
+      ctx.provide(desktopShellContract, { openPrimary });
       ctx.effect(() => {
+        config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("runtime snapshot request rejected");
+          }
+          const snapshot = await diagnostics.getSnapshot();
+          config.onRuntimeSnapshotServed?.(snapshot);
+          return snapshot;
+        });
         config.runtime.onActivate(handleActivate);
         config.runtime.onWindowAllClosed(handleWindowAllClosed);
 
         return () => {
-          // 先移除 app 监听，再销毁窗口；否则组件热替换会被误判为用户关闭全部窗口并退出应用。
+          // 先停止产生窗口的事件，再销毁授权窗口，最后撤销 IPC 入口。
           config.runtime.offActivate(handleActivate);
           config.runtime.offWindowAllClosed(handleWindowAllClosed);
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
+          config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
         };
-      }, "desktop primary window lifecycle");
+      }, "desktop shell lifecycle");
     },
   };
 }

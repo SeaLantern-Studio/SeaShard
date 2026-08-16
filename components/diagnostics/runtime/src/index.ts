@@ -48,7 +48,7 @@ export const runtimeDiagnosticsManifest: PluginManifest = {
 /**
  * 创建可重载的运行诊断内建组件。
  *
- * 组件通过类型化 Service 发布投影结果；Desktop Gateway 只消费该 Service，
+ * 组件通过类型化 Service 发布投影结果；Desktop Shell 只消费该 Service，
  * 不再理解 Generation、Publication 和 Operation 的组合规则。
  */
 export function createRuntimeDiagnosticsModule(config: RuntimeDiagnosticsConfig): PluginModule {

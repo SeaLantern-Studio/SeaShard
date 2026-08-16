@@ -14,11 +14,10 @@ import {
 import {
   createSQLiteBootstrapDescriptor,
   SQLiteDatabaseBroker,
-} from "../components/database-sqlite/src/index.ts";
+} from "../components/data/database-sqlite/src/index.ts";
+import { projectRuntimeSnapshot } from "../components/diagnostics/runtime/src/index.ts";
+import { createPluginFoundationBootstrapDescriptor } from "../components/plugin/foundation/src/index.ts";
 import { defineDataCapsule } from "../packages/database/src/index.ts";
-import { createPluginSystemFoundationBootstrapDescriptor } from "../components/plugin-system-foundation/src/index.ts";
-import { createSQLitePluginStorageBootstrapDescriptor } from "../components/plugin-storage-sqlite/src/index.ts";
-import { projectRuntimeSnapshot } from "../components/runtime-diagnostics/src/index.ts";
 import type {
   ExecutionContext,
   JsonValue,
@@ -30,6 +29,7 @@ import type {
   UpgradeMode,
 } from "../packages/plugin-sdk/src/index.ts";
 import { parsePluginManifest } from "../packages/plugin-system/src/manifest.ts";
+import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import { PluginStore } from "../packages/plugin-system/src/store.ts";
 import {
   RuntimePublicationRegistry,
@@ -314,10 +314,78 @@ await test("plugin system starts from the current schema without legacy migratio
   }
 });
 
-await test("plugin system foundation boots after database and repairs persisted runtime state", async () => {
+await test("built-in inventory removes retired packages and bindings before reconciliation", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-builtins-"));
+  const broker = await SQLiteDatabaseBroker.create({
+    databasePath: join(directory, "seashard.sqlite3"),
+    workerEntry: databaseWorkerEntry,
+    readWorkers: 1,
+  });
+
+  const registration = (pluginId: string, entryId: string, bindingId: string) => ({
+    manifest: {
+      ...validManifest,
+      id: pluginId,
+      entries: [
+        {
+          ...validManifest.entries[0]!,
+          id: entryId,
+          permissions: [],
+        },
+      ],
+    },
+    loaders: {
+      [entryId]: { load: async () => ({}) },
+    },
+    bindings: [
+      {
+        id: bindingId,
+        entryId,
+        scopeType: "global" as const,
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+
+  try {
+    const store = await PluginStore.create(broker, "0.0.0");
+    const previous = new PluginRegistry(store, "0.0.0");
+    await previous.registerBuiltIn(
+      registration("seashard.retired-builtin", "retired.host", "core.retired-builtin"),
+    );
+
+    const current = new PluginRegistry(store, "0.0.0");
+    await current.registerBuiltIn(
+      registration("seashard.current-builtin", "current.host", "core.current-builtin"),
+    );
+    await current.synchronizeBuiltIns();
+
+    assert.deepEqual(
+      (await store.listCurrentPackages()).map((record) => record.manifest.id),
+      ["seashard.current-builtin"],
+    );
+    assert.deepEqual(await store.listBindings("seashard.retired-builtin"), []);
+    assert.deepEqual(await store.listPackages("seashard.retired-builtin"), []);
+    assert.equal(
+      (await store.listBindings("seashard.current-builtin"))[0]?.id,
+      "core.current-builtin",
+    );
+  } finally {
+    await broker.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("plugin foundation boots after database and repairs persisted runtime state", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-foundation-"));
   const descriptors = () => [
-    createPluginSystemFoundationBootstrapDescriptor({ seaShardVersion: "0.0.0" }),
+    createPluginFoundationBootstrapDescriptor({
+      dataRoot: directory,
+      workerEntry: databaseWorkerEntry,
+      seaShardVersion: "0.0.0",
+    }),
     createSQLiteBootstrapDescriptor({
       dataRoot: directory,
       workerEntry: databaseWorkerEntry,
@@ -332,10 +400,10 @@ await test("plugin system foundation boots after database and repairs persisted 
       await firstLoader.start(descriptors());
       assert.deepEqual(
         firstLoader.snapshot().map((component) => component.id),
-        ["seashard.database-sqlite", "seashard.plugin-system-foundation"],
+        ["seashard.database-sqlite", "seashard.plugin-foundation"],
       );
 
-      const store = firstRoot["plugin-system-foundation"].store;
+      const store = firstRoot["plugin-foundation"].store;
       await store.saveRuntimePublication({
         runtimeId: "example.runtime",
         generation: 3,
@@ -360,7 +428,7 @@ await test("plugin system foundation boots after database and repairs persisted 
     const secondLoader = new BootstrapLoader(secondRoot);
     try {
       await secondLoader.start(descriptors());
-      const store = secondRoot["plugin-system-foundation"].store;
+      const store = secondRoot["plugin-foundation"].store;
       const publication = (await store.listRuntimePublications())[0];
       assert.equal(publication?.generation, null);
       assert.equal(publication?.epoch, 8);
@@ -747,15 +815,16 @@ await test("failed worker migration rolls back before a corrected retry", async 
   }
 });
 
-await test("managed plugin storage boots separately, isolates runtimes, and rejects stale revisions", async () => {
+await test("plugin foundation exposes managed storage with runtime isolation and revisions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-storage-"));
   const root = new Context();
   const loader = new BootstrapLoader(root);
   try {
     await loader.start([
-      createSQLitePluginStorageBootstrapDescriptor({
+      createPluginFoundationBootstrapDescriptor({
         dataRoot: directory,
         workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
       }),
       createSQLiteBootstrapDescriptor({
         dataRoot: directory,
@@ -765,10 +834,10 @@ await test("managed plugin storage boots separately, isolates runtimes, and reje
     ]);
     assert.deepEqual(
       loader.snapshot().map((component) => component.id),
-      ["seashard.database-sqlite", "seashard.plugin-storage-sqlite"],
+      ["seashard.database-sqlite", "seashard.plugin-foundation"],
     );
 
-    const storage = root["plugin-storage"];
+    const storage = root["plugin-foundation"].storage;
     const baseExecution: ExecutionContext = {
       actorType: "plugin",
       actorId: "example.plugin",

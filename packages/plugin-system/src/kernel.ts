@@ -170,6 +170,7 @@ export class PluginKernel {
   }
 
   async start(): Promise<void> {
+    await this.registry.synchronizeBuiltIns();
     await this.reconcile();
   }
 

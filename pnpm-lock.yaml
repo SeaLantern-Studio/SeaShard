@@ -55,28 +55,22 @@ importers:
         version: link:../../packages/contracts
       '@seashard/database-sqlite':
         specifier: workspace:*
-        version: link:../../components/database-sqlite
-      '@seashard/desktop-gateway':
+        version: link:../../components/data/database-sqlite
+      '@seashard/desktop-shell':
         specifier: workspace:*
-        version: link:../../components/desktop-gateway
-      '@seashard/desktop-window-host':
+        version: link:../../components/desktop/shell
+      '@seashard/plugin-foundation':
         specifier: workspace:*
-        version: link:../../components/desktop-window-host
+        version: link:../../components/plugin/foundation
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
-      '@seashard/plugin-storage-sqlite':
-        specifier: workspace:*
-        version: link:../../components/plugin-storage-sqlite
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
-      '@seashard/plugin-system-foundation':
-        specifier: workspace:*
-        version: link:../../components/plugin-system-foundation
       '@seashard/runtime-diagnostics':
         specifier: workspace:*
-        version: link:../../components/runtime-diagnostics
+        version: link:../../components/diagnostics/runtime
       cmzya-modern-ui:
         specifier: 0.6.1
         version: 0.6.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -102,83 +96,59 @@ importers:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
 
-  components/database-sqlite:
+  components/data/database-sqlite:
     dependencies:
       '@seashard/bootstrap-runtime':
         specifier: workspace:*
-        version: link:../../packages/bootstrap-runtime
+        version: link:../../../packages/bootstrap-runtime
       '@seashard/database':
         specifier: workspace:*
-        version: link:../../packages/database
+        version: link:../../../packages/database
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
 
-  components/desktop-gateway:
+  components/desktop/shell:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk
       electron:
         specifier: 43.4.0
         version: 43.4.0
 
-  components/desktop-window-host:
+  components/diagnostics/runtime:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../packages/plugin-sdk
-      electron:
-        specifier: 43.4.0
-        version: 43.4.0
+        version: link:../../../packages/plugin-sdk
 
-  components/plugin-storage-sqlite:
+  components/plugin/foundation:
     dependencies:
       '@seashard/bootstrap-runtime':
         specifier: workspace:*
-        version: link:../../packages/bootstrap-runtime
+        version: link:../../../packages/bootstrap-runtime
       '@seashard/database':
         specifier: workspace:*
-        version: link:../../packages/database
+        version: link:../../../packages/database
       '@seashard/database-sqlite':
         specifier: workspace:*
-        version: link:../database-sqlite
+        version: link:../../data/database-sqlite
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../packages/plugin-sdk
-      cordis:
-        specifier: 4.0.0-rc.8
-        version: 4.0.0-rc.8
-
-  components/plugin-system-foundation:
-    dependencies:
-      '@seashard/bootstrap-runtime':
-        specifier: workspace:*
-        version: link:../../packages/bootstrap-runtime
-      '@seashard/database':
-        specifier: workspace:*
-        version: link:../../packages/database
+        version: link:../../../packages/plugin-sdk
       '@seashard/plugin-system':
         specifier: workspace:*
-        version: link:../../packages/plugin-system
+        version: link:../../../packages/plugin-system
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
-
-  components/runtime-diagnostics:
-    dependencies:
-      '@seashard/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@seashard/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
 
   packages/bootstrap-runtime:
     dependencies:

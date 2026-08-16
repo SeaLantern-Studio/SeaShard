@@ -7,8 +7,8 @@ export const desktopChannels = {
 /** 内建运行诊断组件发布的类型化 Service contract。 */
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 
-/** Desktop Window Host 发布的窗口所有权与主窗口生命周期 Service contract。 */
-export const desktopWindowHostContract = "seashard.desktop-window-host";
+/** Desktop Shell 发布的主窗口生命周期 Service contract。 */
+export const desktopShellContract = "seashard.desktop-shell";
 
 /** 面向客户端的单个 runtime 投影视图。 */
 export type ComponentSnapshot = {
@@ -33,10 +33,9 @@ export interface RuntimeDiagnosticsService {
   getSnapshot(): Promise<RuntimeSnapshot>;
 }
 
-/** Desktop Window Host Service 的消费者契约。 */
-export interface DesktopWindowHostService {
+/** Desktop Shell Service 的宿主消费者契约。 */
+export interface DesktopShellService {
   openPrimary(): Promise<void>;
-  ownsWebContents(webContentsId: number): boolean | Promise<boolean>;
 }
 
 export interface SeaShardDesktopApi {
