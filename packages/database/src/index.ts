@@ -26,7 +26,6 @@ export interface DataMigration {
 
 export interface DataCapsule {
   readonly namespace: string;
-  readonly legacyVersionTable?: string;
   readonly schemaVersion: number;
   readonly compatibilityFloor: number;
   readonly tables: readonly string[];
@@ -123,9 +122,6 @@ export function validateDataCapsule(capsule: DataCapsule): void {
     }
     if (tables.has(table)) throw new TypeError(`duplicate capsule table: ${table}`);
     tables.add(table);
-  }
-  if (capsule.legacyVersionTable && !identifierPattern.test(capsule.legacyVersionTable)) {
-    throw new TypeError(`invalid legacy version table for ${capsule.namespace}`);
   }
   if (!tables.size) throw new TypeError(`data capsule ${capsule.namespace} must own a table`);
 

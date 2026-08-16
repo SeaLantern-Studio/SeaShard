@@ -206,9 +206,7 @@ function registerCapsule(capsule: DataCapsule, digest: string): void {
   let namespace = database
     .prepare("SELECT version FROM seashard_schema_namespaces WHERE namespace = ?")
     .get(capsule.namespace) as NamespaceRow | undefined;
-  let adoptedLegacy = false;
   if (!namespace) {
-    const legacyVersion = readLegacyVersion(capsule);
     const timestamp = now();
     database.exec("BEGIN IMMEDIATE");
     try {
@@ -216,22 +214,12 @@ function registerCapsule(capsule: DataCapsule, digest: string): void {
         .prepare(
           `INSERT INTO seashard_schema_namespaces (
              namespace, version, compatibility_floor, capsule_digest, updated_at
-           ) VALUES (?, ?, ?, ?, ?)`,
+           ) VALUES (?, 0, ?, ?, ?)`,
         )
-        .run(capsule.namespace, legacyVersion, capsule.compatibilityFloor, digest, timestamp);
-      for (let version = 1; version <= legacyVersion; version += 1) {
-        database
-          .prepare(
-            `INSERT INTO seashard_schema_migrations (
-               namespace, version, migration_digest, applied_at
-             ) VALUES (?, ?, ?, ?)`,
-          )
-          .run(capsule.namespace, version, legacyDigest(capsule.namespace, version), timestamp);
-      }
+        .run(capsule.namespace, capsule.compatibilityFloor, digest, timestamp);
       for (const table of capsule.tables) claimTable(capsule.namespace, table);
       database.exec("COMMIT");
-      namespace = { version: legacyVersion };
-      adoptedLegacy = legacyVersion > 0;
+      namespace = { version: 0 };
     } catch (error) {
       database.exec("ROLLBACK");
       throw error;
@@ -263,32 +251,7 @@ function registerCapsule(capsule: DataCapsule, digest: string): void {
         WHERE namespace = ?`,
     )
     .run(capsule.compatibilityFloor, digest, now(), capsule.namespace);
-  if (adoptedLegacy && capsule.legacyVersionTable) {
-    database.exec(`DROP TABLE ${quoteIdentifier(capsule.legacyVersionTable)}`);
-  }
   capsules.set(digest, compileCapsule(capsule));
-}
-
-function readLegacyVersion(capsule: DataCapsule): number {
-  if (!capsule.legacyVersionTable) return 0;
-  const existing = database
-    .prepare("SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = ?")
-    .get(capsule.legacyVersionTable);
-  if (!existing) return 0;
-  const row = database
-    .prepare(
-      `SELECT COALESCE(MAX(version), 0) AS version FROM ${quoteIdentifier(capsule.legacyVersionTable)}`,
-    )
-    .get() as { version: number };
-  if (!Number.isSafeInteger(row.version) || row.version < 0) {
-    throw new Error(`invalid legacy schema version for ${capsule.namespace}`);
-  }
-  if (row.version > capsule.schemaVersion) {
-    throw new Error(
-      `legacy database schema ${row.version} is newer than ${capsule.namespace} schema ${capsule.schemaVersion}`,
-    );
-  }
-  return row.version;
 }
 
 function claimTable(namespace: string, table: string): void {
@@ -318,11 +281,8 @@ function verifyAppliedMigrations(capsule: DataCapsule, currentVersion: number): 
     if (!stored) throw new Error(`missing migration ledger: ${capsule.namespace}@${version}`);
     const migration = capsule.migrations[version - 1];
     const expected = migrationDigest(migration);
-    if (stored !== expected && stored !== legacyDigest(capsule.namespace, version)) {
+    if (stored !== expected) {
       throw new Error(`migration digest changed: ${capsule.namespace}@${version}`);
-    }
-    if (stored === legacyDigest(capsule.namespace, version)) {
-      withAuthorizer(capsule, "migration", () => verifyMigration(capsule, migration));
     }
   }
 }
@@ -538,14 +498,6 @@ function assertRole(expected: DatabaseWorkerData["role"]): void {
 
 function migrationDigest(migration: DataCapsule["migrations"][number]): string {
   return createHash("sha256").update(JSON.stringify(migration)).digest("hex");
-}
-
-function legacyDigest(namespace: string, version: number): string {
-  return createHash("sha256").update(`legacy\0${namespace}\0${version}`).digest("hex");
-}
-
-function quoteIdentifier(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function sameValue(left: DatabaseValue | undefined, right: DatabaseValue): boolean {

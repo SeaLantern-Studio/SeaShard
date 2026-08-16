@@ -255,115 +255,11 @@ await test("runtime diagnostics projects publications, operations, and host stat
   });
   assert.equal(stopping.state, "stopping");
 });
-await test("schema v1 migrates runtime counters and manifest upgrade mode", async () => {
+await test("plugin system starts from the current schema without legacy migration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-store-"));
   const databasePath = join(directory, "seashard.sqlite3");
-  const database = new DatabaseSync(databasePath);
-  const legacyManifest = JSON.parse(JSON.stringify(validManifest)) as {
-    entries: Array<Record<string, unknown>>;
-  };
-  legacyManifest.entries[0].reloadPolicy = "quiesce";
-  delete legacyManifest.entries[0].upgradeMode;
-  database.exec(`
-    CREATE TABLE schema_migrations (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    ) STRICT;
-    INSERT INTO schema_migrations (version, applied_at) VALUES (1, 'legacy');
-
-    CREATE TABLE plugin_packages (
-      plugin_id TEXT NOT NULL,
-      version TEXT NOT NULL,
-      digest TEXT NOT NULL,
-      publisher TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      trust_level TEXT NOT NULL,
-      root_path TEXT NOT NULL,
-      manifest_json TEXT NOT NULL,
-      installed_at TEXT NOT NULL,
-      PRIMARY KEY (plugin_id, version, digest)
-    ) STRICT;
-    CREATE TABLE plugin_current (
-      plugin_id TEXT PRIMARY KEY,
-      version TEXT NOT NULL,
-      digest TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (plugin_id, version, digest)
-        REFERENCES plugin_packages(plugin_id, version, digest) ON DELETE RESTRICT
-    ) STRICT;
-    CREATE TABLE plugin_trust (
-      plugin_id TEXT NOT NULL,
-      version TEXT NOT NULL,
-      digest TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_root TEXT NOT NULL,
-      trust_level TEXT NOT NULL,
-      granted_at TEXT NOT NULL,
-      PRIMARY KEY (plugin_id, version, digest)
-    ) STRICT;
-    CREATE TABLE plugin_bindings (
-      id TEXT PRIMARY KEY,
-      plugin_id TEXT NOT NULL,
-      entry_id TEXT NOT NULL,
-      scope_type TEXT NOT NULL,
-      scope_id TEXT NOT NULL,
-      enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-      config_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
-    CREATE TABLE plugin_runtime_units (
-      runtime_id TEXT PRIMARY KEY,
-      plugin_id TEXT NOT NULL DEFAULT 'legacy',
-      plugin_version TEXT NOT NULL DEFAULT 'legacy',
-      entry_id TEXT NOT NULL DEFAULT 'legacy',
-      binding_id TEXT NOT NULL DEFAULT 'legacy',
-      source_kind TEXT NOT NULL DEFAULT 'installed',
-      trust_level TEXT NOT NULL DEFAULT 'package-full-trust',
-      scope_type TEXT NOT NULL DEFAULT 'global',
-      scope_id TEXT NOT NULL DEFAULT 'global',
-      generation INTEGER NOT NULL,
-      desired_state TEXT NOT NULL DEFAULT 'running',
-      actual_state TEXT NOT NULL DEFAULT 'running',
-      reload_policy TEXT NOT NULL DEFAULT 'quiesce',
-      host_kind TEXT NOT NULL DEFAULT 'node-plugin-host',
-      dependencies_json TEXT NOT NULL DEFAULT '[]',
-      error TEXT,
-      updated_at TEXT NOT NULL DEFAULT 'legacy'
-    ) STRICT;
-    CREATE TABLE operation_journal (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      occurred_at TEXT NOT NULL,
-      category TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    ) STRICT;
-    CREATE INDEX plugin_bindings_plugin_idx ON plugin_bindings(plugin_id);
-    CREATE INDEX runtime_units_binding_idx ON plugin_runtime_units(binding_id);
-    CREATE INDEX journal_aggregate_idx ON operation_journal(aggregate_id, id);
-    INSERT INTO plugin_runtime_units (runtime_id, generation)
-    VALUES ('example.runtime', 7);
-  `);
-  database
-    .prepare(
-      `INSERT INTO plugin_packages (
-         plugin_id, version, digest, publisher, source_kind, trust_level,
-         root_path, manifest_json, installed_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      validManifest.id,
-      validManifest.version,
-      "a".repeat(64),
-      validManifest.publisher,
-      "installed",
-      "package-full-trust",
-      directory,
-      JSON.stringify(legacyManifest),
-      "legacy",
-    );
-  database.close();
-
   let broker: SQLiteDatabaseBroker | undefined;
+
   try {
     broker = await SQLiteDatabaseBroker.create({
       databasePath,
@@ -371,9 +267,47 @@ await test("schema v1 migrates runtime counters and manifest upgrade mode", asyn
       readWorkers: 1,
     });
     const store = await PluginStore.create(broker, "0.0.0");
-    assert.equal((await store.listPackages())[0]?.manifest.entries[0]?.upgradeMode, "stop-first");
-    assert.equal(await store.nextGeneration("example.runtime"), 8);
-    assert.deepEqual(await store.listRuntimeGenerations(), []);
+    assert.equal(await store.nextGeneration("example.runtime"), 1);
+    await broker.close();
+    broker = undefined;
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const namespace = database
+        .prepare(
+          `SELECT version, compatibility_floor
+             FROM seashard_schema_namespaces
+            WHERE namespace = 'plugin_system'`,
+        )
+        .get() as { version: number; compatibility_floor: number };
+      const currentTables = database
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM sqlite_schema
+            WHERE type = 'table'
+              AND name IN (
+                'plugin_packages', 'plugin_current', 'plugin_trust',
+                'plugin_bindings', 'plugin_runtime_counters',
+                'plugin_runtime_generations', 'plugin_runtime_publications',
+                'plugin_runtime_operations', 'operation_journal'
+              )`,
+        )
+        .get() as { count: number };
+      const legacyTable = database
+        .prepare(
+          `SELECT 1 AS present
+             FROM sqlite_schema
+            WHERE type = 'table' AND name IN ('schema_migrations', 'plugin_runtime_units')`,
+        )
+        .get();
+
+      assert.equal(namespace.version, 1);
+      assert.equal(namespace.compatibility_floor, 1);
+      assert.equal(currentTables.count, 9);
+      assert.equal(legacyTable, undefined);
+    } finally {
+      database.close();
+    }
   } finally {
     await broker?.close();
     await rm(directory, { recursive: true, force: true });

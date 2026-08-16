@@ -2,15 +2,13 @@ import { defineDataCapsule } from "@seashard/database";
 
 export const pluginSystemDataCapsule = defineDataCapsule({
   namespace: "plugin_system",
-  legacyVersionTable: "schema_migrations",
-  schemaVersion: 2,
-  compatibilityFloor: 2,
+  schemaVersion: 1,
+  compatibilityFloor: 1,
   tables: [
     "plugin_packages",
     "plugin_current",
     "plugin_trust",
     "plugin_bindings",
-    "plugin_runtime_units",
     "plugin_runtime_counters",
     "plugin_runtime_generations",
     "plugin_runtime_publications",
@@ -61,90 +59,10 @@ export const pluginSystemDataCapsule = defineDataCapsule({
           config_json TEXT NOT NULL,
           updated_at TEXT NOT NULL
         ) STRICT`,
-        `CREATE TABLE plugin_runtime_units (
-          runtime_id TEXT PRIMARY KEY,
-          plugin_id TEXT NOT NULL,
-          plugin_version TEXT NOT NULL,
-          entry_id TEXT NOT NULL,
-          binding_id TEXT NOT NULL,
-          source_kind TEXT NOT NULL,
-          trust_level TEXT NOT NULL,
-          scope_type TEXT NOT NULL,
-          scope_id TEXT NOT NULL,
-          generation INTEGER NOT NULL,
-          desired_state TEXT NOT NULL,
-          actual_state TEXT NOT NULL,
-          reload_policy TEXT NOT NULL,
-          host_kind TEXT NOT NULL,
-          dependencies_json TEXT NOT NULL,
-          error TEXT,
-          updated_at TEXT NOT NULL
-        ) STRICT`,
-        `CREATE TABLE operation_journal (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          occurred_at TEXT NOT NULL,
-          category TEXT NOT NULL,
-          aggregate_id TEXT NOT NULL,
-          payload_json TEXT NOT NULL
-        ) STRICT`,
-        "CREATE INDEX plugin_bindings_plugin_idx ON plugin_bindings(plugin_id)",
-        "CREATE INDEX runtime_units_binding_idx ON plugin_runtime_units(binding_id)",
-        "CREATE INDEX journal_aggregate_idx ON operation_journal(aggregate_id, id)",
-      ],
-      verify: [
-        {
-          sql: `SELECT COUNT(*) = 6 AS valid
-                  FROM sqlite_schema
-                 WHERE type = 'table'
-                   AND name IN (
-                     'plugin_packages', 'plugin_current', 'plugin_trust',
-                     'plugin_bindings', 'plugin_runtime_units', 'operation_journal'
-                   )`,
-          column: "valid",
-          equals: 1,
-        },
-      ],
-    },
-    {
-      version: 2,
-      statements: [
-        `UPDATE plugin_packages
-            SET manifest_json = json_set(
-              manifest_json,
-              '$.entries',
-              json((
-                SELECT json_group_array(
-                  json(
-                    CASE
-                      WHEN json_type(value, '$.upgradeMode') IS NULL
-                       AND json_type(value, '$.reloadPolicy') = 'text'
-                      THEN json_remove(
-                        json_set(
-                          value,
-                          '$.upgradeMode',
-                          CASE json_extract(value, '$.reloadPolicy')
-                            WHEN 'hot' THEN 'hot-swap'
-                            ELSE 'stop-first'
-                          END
-                        ),
-                        '$.reloadPolicy'
-                      )
-                      ELSE value
-                    END
-                  )
-                )
-                  FROM json_each(manifest_json, '$.entries')
-              ))
-            )`,
         `CREATE TABLE plugin_runtime_counters (
           runtime_id TEXT PRIMARY KEY,
           last_generation INTEGER NOT NULL
         ) STRICT`,
-        `INSERT INTO plugin_runtime_counters (runtime_id, last_generation)
-         SELECT runtime_id, MAX(generation)
-           FROM plugin_runtime_units
-          GROUP BY runtime_id`,
-        "DROP TABLE plugin_runtime_units",
         `CREATE TABLE plugin_runtime_generations (
           runtime_id TEXT NOT NULL,
           plugin_id TEXT NOT NULL,
@@ -185,28 +103,30 @@ export const pluginSystemDataCapsule = defineDataCapsule({
           started_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         ) STRICT`,
-        `CREATE INDEX runtime_generations_binding_idx
-           ON plugin_runtime_generations(binding_id, generation)`,
-        `CREATE INDEX runtime_operations_runtime_idx
-           ON plugin_runtime_operations(runtime_id, started_at)`,
+        `CREATE TABLE operation_journal (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          occurred_at TEXT NOT NULL,
+          category TEXT NOT NULL,
+          aggregate_id TEXT NOT NULL,
+          payload_json TEXT NOT NULL
+        ) STRICT`,
+        "CREATE INDEX plugin_bindings_plugin_idx ON plugin_bindings(plugin_id)",
+        "CREATE INDEX runtime_generations_binding_idx ON plugin_runtime_generations(binding_id, generation)",
+        "CREATE INDEX runtime_operations_runtime_idx ON plugin_runtime_operations(runtime_id, started_at)",
+        "CREATE INDEX journal_aggregate_idx ON operation_journal(aggregate_id, id)",
       ],
       verify: [
         {
-          sql: `SELECT COUNT(*) = 4 AS valid
+          sql: `SELECT COUNT(*) = 9 AS valid
                   FROM sqlite_schema
                  WHERE type = 'table'
                    AND name IN (
-                     'plugin_runtime_counters', 'plugin_runtime_generations',
-                     'plugin_runtime_publications', 'plugin_runtime_operations'
+                     'plugin_packages', 'plugin_current', 'plugin_trust',
+                     'plugin_bindings', 'plugin_runtime_counters',
+                     'plugin_runtime_generations', 'plugin_runtime_publications',
+                     'plugin_runtime_operations', 'operation_journal'
                    )`,
           column: "valid",
-          equals: 1,
-        },
-        {
-          sql: `SELECT COUNT(*) = 0 AS removed
-                  FROM sqlite_schema
-                 WHERE type = 'table' AND name = 'plugin_runtime_units'`,
-          column: "removed",
           equals: 1,
         },
       ],
