@@ -55,6 +55,46 @@
   -webkit-user-select: none;
 }
 
+.sidebar-menu-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/*
+ * 根节点只负责让 Vue 正确等待整段波浪结束；真正可见的位移发生在菜单项上。
+ * 离场不声明动画，因此旧菜单会同步消失。
+ */
+.sidebar-menu-enter-active {
+  animation: sidebar-menu-enter-window 720ms linear;
+}
+
+.sidebar-menu-enter-active .sidebar-menu-enter-item {
+  animation: sidebar-menu-wave-in 430ms cubic-bezier(0.22, 0.78, 0.18, 1) both;
+  animation-delay: calc(var(--sidebar-enter-index, 0) * 27.2ms);
+  will-change: transform, opacity;
+}
+
+@keyframes sidebar-menu-enter-window {
+  from,
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sidebar-menu-wave-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(-20px, 0, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 .nav-group {
   margin-bottom: var(--sl-space-sm);
 }
@@ -354,4 +394,11 @@
 .nav-label {
   font-size: 0.875rem;
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-menu-enter-active,
+  .sidebar-menu-enter-active .sidebar-menu-enter-item {
+    animation: none;
+  }
 }

@@ -53,6 +53,11 @@ const sidebarLabel = computed(() => {
   if (props.downloadMode) return "下载导航";
   return "主导航";
 });
+const sidebarMenuKey = computed(() => {
+  if (props.settingsMode) return "settings";
+  if (props.downloadMode) return "server-download";
+  return `workspace:${props.workspace}`;
+});
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
 const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
@@ -92,6 +97,14 @@ const instanceManagementItems = computed(() =>
 const instanceWorkspaceLabel = computed(() => (props.workspace === "server" ? "服务器" : "启动器"));
 const expandedProjects = ref<Set<string>>(new Set(agentProjects.map((project) => project.name)));
 let indicatorFrame: number | undefined;
+let sidebarMenuEntering = false;
+const sidebarMenuItemSelector = [
+  ".workspace-action",
+  ".workspace-section-title",
+  ".workspace-row",
+  ".nav-item",
+  ".instance-section-divider",
+].join(",");
 
 function navigate(path: string): void {
   void router.push(path);
@@ -143,6 +156,35 @@ function toggleProject(name: string): void {
   }
   expandedProjects.value = next;
 }
+function hideNavIndicatorForMenuSwap(): void {
+  const indicator = navIndicator.value;
+  if (!indicator) return;
+  indicator.style.transition = "none";
+  indicator.style.opacity = "0";
+}
+
+/** 为新菜单按真实 DOM 顺序写入波浪延迟，避免各分组重新从零开始。 */
+function prepareSidebarMenuEnter(element: Element): void {
+  sidebarMenuEntering = true;
+  hideNavIndicatorForMenuSwap();
+  const items = element.querySelectorAll<HTMLElement>(sidebarMenuItemSelector);
+  items.forEach((item, index) => {
+    item.classList.add("sidebar-menu-enter-item");
+    item.style.setProperty("--sidebar-enter-index", String(index));
+  });
+}
+
+/** 离场没有补间；先隐藏指示条，旧菜单会由 Transition 同步移除。 */
+function prepareSidebarMenuLeave(): void {
+  sidebarMenuEntering = true;
+  hideNavIndicatorForMenuSwap();
+}
+
+function finishSidebarMenuEnter(): void {
+  navIndicator.value?.style.removeProperty("transition");
+  sidebarMenuEntering = false;
+  void nextTick(updateNavIndicator);
+}
 
 function updateNavIndicator(): void {
   if (indicatorFrame !== undefined) cancelAnimationFrame(indicatorFrame);
@@ -150,8 +192,12 @@ function updateNavIndicator(): void {
     indicatorFrame = undefined;
     const nav = sidebarNav.value;
     const indicator = navIndicator.value;
-    const item = nav?.querySelector<HTMLElement>(".nav-item.active");
     if (!nav || !indicator) return;
+    if (sidebarMenuEntering) {
+      indicator.style.opacity = "0";
+      return;
+    }
+    const item = nav.querySelector<HTMLElement>(".nav-item.active");
     if (!item) {
       indicator.style.opacity = "0";
       return;
@@ -204,189 +250,206 @@ onUnmounted(() => {
     <nav ref="sidebarNav" class="sidebar-nav" :aria-label="sidebarLabel">
       <div ref="navIndicator" class="nav-active-indicator"></div>
 
-      <div v-if="props.settingsMode" class="settings-mode-nav">
-        <button type="button" class="workspace-row mode-back" @click="leaveSettings">
-          <ArrowLeft :size="16" :stroke-width="1.8" />
-          <span>返回工作区</span>
-        </button>
-
-        <section class="settings-section" aria-labelledby="settings-label">
-          <h3 id="settings-label" class="workspace-section-title">设置</h3>
-          <button
-            v-for="page in settingsPages"
-            :key="page.id"
-            type="button"
-            class="nav-item settings-nav-item"
-            :class="{ active: isActive(page.path) }"
-            :aria-current="isActive(page.path) ? 'page' : undefined"
-            @click="navigate(page.path)"
-          >
-            <component
-              :is="page.icon"
-              v-if="page.icon"
-              class="nav-icon"
-              :size="19"
-              :stroke-width="1.8"
-            />
-            <span class="nav-label">{{ page.label }}</span>
-          </button>
-        </section>
-      </div>
-
-      <div v-else-if="props.downloadMode" class="download-mode-nav">
-        <button type="button" class="workspace-row mode-back" @click="leaveDownload">
-          <ArrowLeft :size="16" :stroke-width="1.8" />
-          <span>返回服务器</span>
-        </button>
-
-        <section class="download-section" aria-labelledby="download-label">
-          <h3 id="download-label" class="workspace-section-title">下载</h3>
-          <button
-            v-if="serverCoreDownloadPage"
-            type="button"
-            class="nav-item download-nav-item"
-            :class="{ active: isDownloadPageActive(serverCoreDownloadPage.path) }"
-            :aria-current="isDownloadPageActive(serverCoreDownloadPage.path) ? 'page' : undefined"
-            @click="navigate(serverCoreDownloadPage.path)"
-          >
-            <component
-              :is="serverCoreDownloadPage.icon"
-              v-if="serverCoreDownloadPage.icon"
-              class="nav-icon"
-              :size="19"
-              :stroke-width="1.8"
-            />
-            <span class="nav-label">{{ serverCoreDownloadPage.label }}</span>
-          </button>
-        </section>
-
-        <section class="download-section" aria-labelledby="other-resources-label">
-          <h3 id="other-resources-label" class="workspace-section-title">其他资源</h3>
-          <button
-            v-for="page in otherDownloadPages"
-            :key="page.id"
-            type="button"
-            class="nav-item download-nav-item"
-            :class="{ active: isDownloadPageActive(page.path) }"
-            :aria-current="isDownloadPageActive(page.path) ? 'page' : undefined"
-            @click="navigate(page.path)"
-          >
-            <component
-              :is="page.icon"
-              v-if="page.icon"
-              class="nav-icon"
-              :size="19"
-              :stroke-width="1.8"
-            />
-            <span class="nav-label">{{ page.label }}</span>
-          </button>
-        </section>
-      </div>
-
-      <div v-else-if="props.workspace === 'agent'" class="agent-workspace-nav">
-        <button type="button" class="workspace-action">
-          <SquarePen :size="16" :stroke-width="1.8" />
-          <span>新建对话</span>
-        </button>
-
-        <section class="workspace-section" aria-labelledby="projects-label">
-          <h3 id="projects-label" class="workspace-section-title">项目</h3>
-          <div v-for="project in agentProjects" :key="project.name" class="workspace-project">
-            <button
-              type="button"
-              class="workspace-row workspace-project-row"
-              :aria-expanded="isProjectExpanded(project.name)"
-              :aria-controls="`project-${project.name}-threads`"
-              @click="toggleProject(project.name)"
-            >
-              <Folder :size="15" :stroke-width="1.8" />
-              <span>{{ project.name }}</span>
-              <ChevronDown
-                class="workspace-project-chevron"
-                :class="{ expanded: isProjectExpanded(project.name) }"
-                :size="15"
-                :stroke-width="1.8"
-              />
+      <Transition
+        name="sidebar-menu"
+        mode="out-in"
+        @before-leave="prepareSidebarMenuLeave"
+        @before-enter="prepareSidebarMenuEnter"
+        @after-enter="finishSidebarMenuEnter"
+      >
+        <div :key="sidebarMenuKey" class="sidebar-menu-stage">
+          <div v-if="props.settingsMode" class="settings-mode-nav">
+            <button type="button" class="workspace-row mode-back" @click="leaveSettings">
+              <ArrowLeft :size="16" :stroke-width="1.8" />
+              <span>返回工作区</span>
             </button>
-            <div
-              :id="`project-${project.name}-threads`"
-              class="workspace-project-threads"
-              :class="{ expanded: isProjectExpanded(project.name) }"
-              :aria-hidden="!isProjectExpanded(project.name)"
-              :inert="!isProjectExpanded(project.name)"
-            >
-              <div class="workspace-project-threads-inner">
+
+            <section class="settings-section" aria-labelledby="settings-label">
+              <h3 id="settings-label" class="workspace-section-title">设置</h3>
+              <button
+                v-for="page in settingsPages"
+                :key="page.id"
+                type="button"
+                class="nav-item settings-nav-item"
+                :class="{ active: isActive(page.path) }"
+                :aria-current="isActive(page.path) ? 'page' : undefined"
+                @click="navigate(page.path)"
+              >
+                <component
+                  :is="page.icon"
+                  v-if="page.icon"
+                  class="nav-icon"
+                  :size="19"
+                  :stroke-width="1.8"
+                />
+                <span class="nav-label">{{ page.label }}</span>
+              </button>
+            </section>
+          </div>
+
+          <div v-else-if="props.downloadMode" class="download-mode-nav">
+            <button type="button" class="workspace-row mode-back" @click="leaveDownload">
+              <ArrowLeft :size="16" :stroke-width="1.8" />
+              <span>返回服务器</span>
+            </button>
+
+            <section class="download-section" aria-labelledby="download-label">
+              <h3 id="download-label" class="workspace-section-title">下载</h3>
+              <button
+                v-if="serverCoreDownloadPage"
+                type="button"
+                class="nav-item download-nav-item"
+                :class="{ active: isDownloadPageActive(serverCoreDownloadPage.path) }"
+                :aria-current="
+                  isDownloadPageActive(serverCoreDownloadPage.path) ? 'page' : undefined
+                "
+                @click="navigate(serverCoreDownloadPage.path)"
+              >
+                <component
+                  :is="serverCoreDownloadPage.icon"
+                  v-if="serverCoreDownloadPage.icon"
+                  class="nav-icon"
+                  :size="19"
+                  :stroke-width="1.8"
+                />
+                <span class="nav-label">{{ serverCoreDownloadPage.label }}</span>
+              </button>
+            </section>
+
+            <section class="download-section" aria-labelledby="other-resources-label">
+              <h3 id="other-resources-label" class="workspace-section-title">其他资源</h3>
+              <button
+                v-for="page in otherDownloadPages"
+                :key="page.id"
+                type="button"
+                class="nav-item download-nav-item"
+                :class="{ active: isDownloadPageActive(page.path) }"
+                :aria-current="isDownloadPageActive(page.path) ? 'page' : undefined"
+                @click="navigate(page.path)"
+              >
+                <component
+                  :is="page.icon"
+                  v-if="page.icon"
+                  class="nav-icon"
+                  :size="19"
+                  :stroke-width="1.8"
+                />
+                <span class="nav-label">{{ page.label }}</span>
+              </button>
+            </section>
+          </div>
+
+          <div v-else-if="props.workspace === 'agent'" class="agent-workspace-nav">
+            <button type="button" class="workspace-action">
+              <SquarePen :size="16" :stroke-width="1.8" />
+              <span>新建对话</span>
+            </button>
+
+            <section class="workspace-section" aria-labelledby="projects-label">
+              <h3 id="projects-label" class="workspace-section-title">项目</h3>
+              <div v-for="project in agentProjects" :key="project.name" class="workspace-project">
                 <button
-                  v-for="thread in project.threads"
-                  :key="thread"
                   type="button"
-                  class="workspace-row workspace-thread-row"
+                  class="workspace-row workspace-project-row"
+                  :aria-expanded="isProjectExpanded(project.name)"
+                  :aria-controls="`project-${project.name}-threads`"
+                  @click="toggleProject(project.name)"
                 >
-                  <MessageSquare :size="14" :stroke-width="1.8" />
-                  <span>{{ thread }}</span>
+                  <Folder :size="15" :stroke-width="1.8" />
+                  <span>{{ project.name }}</span>
+                  <ChevronDown
+                    class="workspace-project-chevron"
+                    :class="{ expanded: isProjectExpanded(project.name) }"
+                    :size="15"
+                    :stroke-width="1.8"
+                  />
                 </button>
+                <div
+                  :id="`project-${project.name}-threads`"
+                  class="workspace-project-threads"
+                  :class="{ expanded: isProjectExpanded(project.name) }"
+                  :aria-hidden="!isProjectExpanded(project.name)"
+                  :inert="!isProjectExpanded(project.name)"
+                >
+                  <div class="workspace-project-threads-inner">
+                    <button
+                      v-for="thread in project.threads"
+                      :key="thread"
+                      type="button"
+                      class="workspace-row workspace-thread-row"
+                    >
+                      <MessageSquare :size="14" :stroke-width="1.8" />
+                      <span>{{ thread }}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
+            </section>
+
+            <section class="workspace-section" aria-labelledby="chats-label">
+              <h3 id="chats-label" class="workspace-section-title">对话</h3>
+              <button
+                v-for="chat in agentChats"
+                :key="chat"
+                type="button"
+                class="workspace-row workspace-chat-row"
+              >
+                <MessageSquare :size="14" :stroke-width="1.8" />
+                <span>{{ chat }}</span>
+              </button>
+            </section>
+          </div>
+
+          <div
+            v-else-if="props.workspace === 'server' || props.workspace === 'launcher'"
+            class="instance-workspace-nav"
+          >
+            <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}主要操作`">
+              <button
+                v-for="item in instancePrimaryItems"
+                :key="item.id"
+                type="button"
+                class="nav-item instance-nav-item instance-primary-item"
+                :class="{ active: activeInstanceItem === item.id }"
+                :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
+                @click="selectInstanceItem(item.id)"
+              >
+                <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
+                <span class="nav-label">{{ item.label }}</span>
+              </button>
+            </div>
+
+            <div class="instance-section-divider" role="separator"></div>
+
+            <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}管理`">
+              <button
+                v-for="item in instanceManagementItems"
+                :key="item.id"
+                type="button"
+                class="nav-item instance-nav-item"
+                :class="{ active: activeInstanceItem === item.id }"
+                :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
+                @click="selectInstanceItem(item.id)"
+              >
+                <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
+                <span class="nav-label">{{ item.label }}</span>
+              </button>
             </div>
           </div>
-        </section>
 
-        <section class="workspace-section" aria-labelledby="chats-label">
-          <h3 id="chats-label" class="workspace-section-title">对话</h3>
-          <button
-            v-for="chat in agentChats"
-            :key="chat"
-            type="button"
-            class="workspace-row workspace-chat-row"
-          >
-            <MessageSquare :size="14" :stroke-width="1.8" />
-            <span>{{ chat }}</span>
-          </button>
-        </section>
-      </div>
-
-      <div
-        v-else-if="props.workspace === 'server' || props.workspace === 'launcher'"
-        class="instance-workspace-nav"
-      >
-        <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}主要操作`">
-          <button
-            v-for="item in instancePrimaryItems"
-            :key="item.id"
-            type="button"
-            class="nav-item instance-nav-item instance-primary-item"
-            :class="{ active: activeInstanceItem === item.id }"
-            :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
-            @click="selectInstanceItem(item.id)"
-          >
-            <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
-            <span class="nav-label">{{ item.label }}</span>
-          </button>
+          <div v-if="!props.settingsMode && !props.downloadMode" class="nav-group lower-side">
+            <button
+              type="button"
+              class="nav-item"
+              :disabled="!settingsEntryPath"
+              @click="openSettings"
+            >
+              <Settings class="nav-icon" :size="20" :stroke-width="1.8" />
+              <span class="nav-label">设置</span>
+            </button>
+          </div>
         </div>
-
-        <div class="instance-section-divider" role="separator"></div>
-
-        <div class="instance-nav-group" :aria-label="`${instanceWorkspaceLabel}管理`">
-          <button
-            v-for="item in instanceManagementItems"
-            :key="item.id"
-            type="button"
-            class="nav-item instance-nav-item"
-            :class="{ active: activeInstanceItem === item.id }"
-            :aria-current="activeInstanceItem === item.id ? 'page' : undefined"
-            @click="selectInstanceItem(item.id)"
-          >
-            <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
-            <span class="nav-label">{{ item.label }}</span>
-          </button>
-        </div>
-      </div>
-
-      <div v-if="!props.settingsMode && !props.downloadMode" class="nav-group lower-side">
-        <button type="button" class="nav-item" :disabled="!settingsEntryPath" @click="openSettings">
-          <Settings class="nav-icon" :size="20" :stroke-width="1.8" />
-          <span class="nav-label">设置</span>
-        </button>
-      </div>
+      </Transition>
     </nav>
   </aside>
 </template>
