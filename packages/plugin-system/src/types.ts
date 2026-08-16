@@ -45,6 +45,11 @@ export interface ResolvedEntry {
   host: "core" | "node-plugin-host" | "client";
 }
 
+export interface ResolvedClientEntrySnapshot {
+  revision: number;
+  entries: readonly ResolvedEntry[];
+}
+
 export interface StoredRuntimeGeneration extends RuntimeGenerationSnapshot {
   createdAt: string;
   updatedAt: string;

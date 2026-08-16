@@ -13,9 +13,11 @@
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/plugin-system": "workspace:*",
     "@seashard/runtime-diagnostics": "workspace:*",
-    "cmzya-modern-ui": "0.6.1",
+    "@seashard/ui-runtime": "workspace:*",
+    "cmzya-modern-ui": "0.6.2",
     "cordis": "4.0.0-rc.8",
     "lucide-vue-next": "0.400.0",
-    "vue": "3.5.41"
+    "vue": "3.5.41",
+    "vue-router": "5.0.3"
   }
 }

@@ -2,6 +2,8 @@ import {
   desktopChannels,
   desktopShellContract,
   runtimeDiagnosticsContract,
+  type ClientEntryPublication,
+  type DesktopClientBootstrap,
   type DesktopShellService,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
@@ -24,6 +26,7 @@ import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent
 class FakeBrowserWindow extends EventEmitter {
   readonly webContents: {
     readonly id: number;
+    send: (channel: string, payload: unknown) => void;
     setWindowOpenHandler: (handler: () => unknown) => void;
     readonly session: {
       setPermissionRequestHandler: (
@@ -45,6 +48,7 @@ class FakeBrowserWindow extends EventEmitter {
     permission: string,
     callback: (allowed: boolean) => void,
   ) => void;
+  readonly sent: Array<{ channel: string; payload: unknown }> = [];
 
   constructor(
     id: number,
@@ -53,6 +57,9 @@ class FakeBrowserWindow extends EventEmitter {
     super();
     this.webContents = {
       id,
+      send: (channel, payload) => {
+        this.sent.push({ channel, payload });
+      },
       setWindowOpenHandler: (handler) => {
         this.windowOpenHandler = handler;
       },
@@ -186,10 +193,28 @@ const snapshot: RuntimeSnapshot = {
   components: [],
 };
 
+const clientEntries: ClientEntryPublication = {
+  revision: 1,
+  entries: [
+    {
+      runtimeId: "core.runtime-diagnostics.ui",
+      pluginId: "seashard.runtime-diagnostics",
+      pluginVersion: "0.0.0",
+      entryId: "runtime-diagnostics.client",
+      moduleKey: "seashard.runtime-diagnostics/runtime-diagnostics.client",
+      integrity: "a".repeat(64),
+      scopeType: "global",
+      scopeId: "global",
+      config: null,
+    },
+  ],
+};
+
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
   const served: RuntimeSnapshot[] = [];
+  let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
   const shell = await activateDesktopShell(
     {
       runtime,
@@ -198,12 +223,21 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       smokeMode: false,
       reportOpenFailure: (error) => failures.push(error),
       onRuntimeSnapshotServed: (value) => served.push(value),
+      readClientEntryPublication: () => clientEntries,
+      onClientEntriesChanged: (listener) => {
+        clientEntryListener = listener;
+        return () => {
+          if (clientEntryListener === listener) clientEntryListener = undefined;
+        };
+      },
     },
     { getSnapshot: async () => snapshot },
   );
 
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), true);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 1), /request rejected/);
+  assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), true);
+  await assert.rejects(runtime.invoke(desktopChannels.clientBootstrap, 1), /request rejected/);
 
   await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
@@ -225,6 +259,32 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
   assert.deepEqual(served, [snapshot]);
+  assert.deepEqual(await runtime.invoke(desktopChannels.clientBootstrap, 1), {
+    protocolVersion: 1,
+    ...clientEntries,
+    clientSession: {
+      id: "desktop-primary:1",
+      target: "desktop",
+      surface: "primary",
+    },
+  } satisfies DesktopClientBootstrap);
+  await assert.rejects(runtime.invoke(desktopChannels.clientBootstrap, 999), /request rejected/);
+  const updatedEntries = { ...clientEntries, revision: 2 };
+  clientEntryListener?.(updatedEntries);
+  assert.deepEqual(first.sent, [
+    {
+      channel: desktopChannels.clientBootstrapChanged,
+      payload: {
+        protocolVersion: 1,
+        ...updatedEntries,
+        clientSession: {
+          id: "desktop-primary:1",
+          target: "desktop",
+          surface: "primary",
+        },
+      },
+    },
+  ]);
 
   first.emit("ready-to-show");
   assert.equal(first.shown, true);
@@ -239,6 +299,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.listenerCount("activate"), 0);
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
+  assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
+  assert.equal(clientEntryListener, undefined);
   assert.deepEqual(failures, []);
 });
 
@@ -251,6 +313,8 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       rendererFile: "/SeaShard/index.html",
       smokeMode: true,
       reportOpenFailure: () => {},
+      readClientEntryPublication: () => ({ revision: 0, entries: [] }),
+      onClientEntriesChanged: () => () => {},
     },
     { getSnapshot: async () => snapshot },
   );

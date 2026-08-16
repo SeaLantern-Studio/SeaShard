@@ -10,6 +10,7 @@ import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foun
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
   PluginKernel,
+  projectClientEntryPublication,
   type PluginKernelOptions,
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
@@ -121,6 +122,14 @@ async function bootstrap(): Promise<void> {
         enabled: true,
         config: null,
       },
+      {
+        id: "core.runtime-diagnostics.ui",
+        entryId: "runtime-diagnostics.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
     ],
   });
   // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
@@ -136,6 +145,12 @@ async function bootstrap(): Promise<void> {
             ...(developmentUrl ? { developmentUrl } : {}),
             smokeMode,
             reportOpenFailure: (error) => console.error("Desktop window open failed", error),
+            readClientEntryPublication: () =>
+              projectClientEntryPublication(activeKernel.clientEntrySnapshot()),
+            onClientEntriesChanged: (listener) =>
+              activeKernel.onClientEntriesChanged((snapshot) =>
+                listener(projectClientEntryPublication(snapshot)),
+              ),
             onRuntimeSnapshotServed: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;

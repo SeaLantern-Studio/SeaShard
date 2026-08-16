@@ -23,6 +23,7 @@ import { PluginStore } from "./store";
 import type {
   BuiltInPackageRegistration,
   PluginPackageRecord,
+  ResolvedClientEntrySnapshot,
   ResolvedEntry,
   TrustGrant,
 } from "./types";
@@ -50,7 +51,12 @@ export class PluginKernel {
 
   private readonly supervisor: ComponentSupervisor;
   private readonly coreDisposers: Array<() => void> = [];
+  private readonly clientEntryListeners = new Set<
+    (snapshot: ResolvedClientEntrySnapshot) => void
+  >();
   private clientEntries: ResolvedEntry[] = [];
+  private clientEntryFingerprint = "";
+  private clientEntryRevision = 0;
   private disposeTask?: Promise<void>;
 
   private constructor(
@@ -182,8 +188,16 @@ export class PluginKernel {
     return this.supervisor.snapshot();
   }
 
-  resolvedClientEntries(): readonly ResolvedEntry[] {
-    return this.clientEntries;
+  clientEntrySnapshot(): ResolvedClientEntrySnapshot {
+    return {
+      revision: this.clientEntryRevision,
+      entries: this.clientEntries,
+    };
+  }
+
+  onClientEntriesChanged(listener: (snapshot: ResolvedClientEntrySnapshot) => void): () => void {
+    this.clientEntryListeners.add(listener);
+    return () => this.clientEntryListeners.delete(listener);
   }
 
   diagnostics(): {
@@ -228,13 +242,37 @@ export class PluginKernel {
       platform: this.options.platform,
       architecture: this.options.architecture,
     });
-    this.clientEntries = entries.filter((entry) => entry.host === "client");
+    const clientEntries = entries.filter((entry) => entry.host === "client");
     await this.supervisor.reconcile(entries.filter((entry) => entry.host !== "client"));
+    this.publishClientEntries(clientEntries);
+  }
+
+  private publishClientEntries(entries: ResolvedEntry[]): void {
+    const fingerprint = JSON.stringify(
+      entries.map((entry) => ({
+        runtimeId: entry.runtimeId,
+        pluginId: entry.package.manifest.id,
+        pluginVersion: entry.package.manifest.version,
+        digest: entry.package.digest,
+        entryId: entry.entry.id,
+        scopeType: entry.binding.scopeType,
+        scopeId: entry.binding.scopeId,
+        config: entry.binding.config,
+      })),
+    );
+    if (fingerprint === this.clientEntryFingerprint) return;
+
+    this.clientEntryFingerprint = fingerprint;
+    this.clientEntries = entries;
+    this.clientEntryRevision += 1;
+    const snapshot = this.clientEntrySnapshot();
+    for (const listener of this.clientEntryListeners) listener(snapshot);
   }
 
   private async disposeKernel(): Promise<void> {
     await this.supervisor.dispose();
     for (const dispose of this.coreDisposers.reverse()) dispose();
+    this.clientEntryListeners.clear();
   }
 }
 

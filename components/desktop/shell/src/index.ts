@@ -2,6 +2,8 @@ import {
   desktopChannels,
   desktopShellContract,
   runtimeDiagnosticsContract,
+  type ClientEntryPublication,
+  type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
 } from "@seashard/contracts";
@@ -36,6 +38,8 @@ export interface DesktopShellConfig {
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
   onRuntimeSnapshotServed?(snapshot: RuntimeSnapshot): void;
+  readClientEntryPublication(): ClientEntryPublication;
+  onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
 
 /** 把不可序列化的 Electron 进程对象收窄成 Desktop Shell 唯一需要的适配面。 */
@@ -99,6 +103,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         primaryWindow !== undefined &&
         !primaryWindow.isDestroyed() &&
         primaryWindow.webContents.id === webContentsId;
+
+      const createClientBootstrap = (webContentsId: number): DesktopClientBootstrap => ({
+        protocolVersion: 1,
+        ...config.readClientEntryPublication(),
+        clientSession: {
+          id: `desktop-primary:${webContentsId}`,
+          target: "desktop",
+          surface: "primary",
+        },
+      });
 
       const createAndLoadPrimary = async (): Promise<void> => {
         const window = config.runtime.createWindow({
@@ -169,6 +183,20 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
 
       ctx.provide(desktopShellContract, { openPrimary });
       ctx.effect(() => {
+        const disposeClientEntrySubscription = config.onClientEntriesChanged((publication) => {
+          const window = primaryWindow;
+          if (!window || window.isDestroyed()) return;
+          window.webContents.send(desktopChannels.clientBootstrapChanged, {
+            protocolVersion: 1,
+            ...publication,
+            clientSession: {
+              id: `desktop-primary:${window.webContents.id}`,
+              target: "desktop",
+              surface: "primary",
+            },
+          } satisfies DesktopClientBootstrap);
+        });
+
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("runtime snapshot request rejected");
@@ -177,17 +205,25 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.onRuntimeSnapshotServed?.(snapshot);
           return snapshot;
         });
+        config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("client bootstrap request rejected");
+          }
+          return createClientBootstrap(event.sender.id);
+        });
         config.runtime.onActivate(handleActivate);
         config.runtime.onWindowAllClosed(handleWindowAllClosed);
 
         return () => {
-          // 先停止产生窗口的事件，再销毁授权窗口，最后撤销 IPC 入口。
+          // 先停止产生窗口和推送的事件，再销毁授权窗口，最后撤销 IPC 入口。
           config.runtime.offActivate(handleActivate);
           config.runtime.offWindowAllClosed(handleWindowAllClosed);
+          disposeClientEntrySubscription();
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
+          config.runtime.removeHandler(desktopChannels.clientBootstrap);
         };
       }, "desktop shell lifecycle");
     },

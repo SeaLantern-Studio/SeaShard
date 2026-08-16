@@ -1,17 +1,16 @@
 {
-  "name": "@seashard/runtime-diagnostics",
+  "name": "@seashard/ui-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client/index.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@seashard/contracts": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",
-    "cmzya-modern-ui": "0.6.2",
-    "vue": "3.5.41"
+    "vue": "3.5.41",
+    "vue-router": "5.0.3"
   }
 }

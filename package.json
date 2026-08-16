@@ -21,6 +21,8 @@
     "typescript": "5.9.3",
     "vite": "8.2.1",
     "vite-plus": "0.2.9",
+    "vue": "3.5.41",
+    "vue-router": "5.0.3",
     "vue-tsc": "3.3.10"
   },
   "engines": {

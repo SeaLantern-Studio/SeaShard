@@ -38,7 +38,7 @@ export class PluginRegistry {
   async registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
     const manifest = parsePluginManifest(registration.manifest, this.seaShardVersion);
     for (const entry of manifest.entries) {
-      if (!registration.loaders[entry.id]) {
+      if (entry.runtime === "host" && !registration.loaders[entry.id]) {
         throw new Error(`missing built-in loader: ${manifest.id}/${entry.id}`);
       }
     }
@@ -58,7 +58,8 @@ export class PluginRegistry {
     await this.store.setCurrentVersion(manifest.id, manifest.version, digest);
 
     for (const entry of manifest.entries) {
-      this.builtInLoaders.set(`${manifest.id}/${entry.id}`, registration.loaders[entry.id]!);
+      const loader = registration.loaders[entry.id];
+      if (loader) this.builtInLoaders.set(`${manifest.id}/${entry.id}`, loader);
     }
     for (const binding of registration.bindings) {
       await this.upsertBinding({ ...binding, pluginId: manifest.id });
