@@ -1,3 +1,4 @@
+import { aboutUiManifest } from "@seashard/about-ui";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { desktopShellContract } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
@@ -6,6 +7,7 @@ import {
   createElectronDesktopShellRuntime,
   desktopShellManifest,
 } from "@seashard/desktop-shell";
+import { personalizationUiManifest } from "@seashard/personalization-ui";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
@@ -99,6 +101,36 @@ async function bootstrap(): Promise<void> {
       },
     });
   }
+  // “关于”是独立内置 Client UI 功能；页面暂时为空，但不写死进静态 Shell。
+  await activeKernel.registerBuiltIn({
+    manifest: aboutUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.about.ui",
+        entryId: "about.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 个性化页面是可独立启停的内置 Client UI 功能，不进入静态桌面外壳。
+  await activeKernel.registerBuiltIn({
+    manifest: personalizationUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.personalization.ui",
+        entryId: "personalization.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 运行诊断属于第二阶段可重载组件。Main 只注入原始控制快照和宿主状态，不复制投影策略。
   await activeKernel.registerBuiltIn({
     manifest: runtimeDiagnosticsManifest,

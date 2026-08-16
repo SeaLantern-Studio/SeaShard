@@ -1,7 +1,34 @@
 import type { ClientEntryDescriptor } from "@seashard/contracts";
 import type { Awaitable, Disposable, JsonValue } from "@seashard/plugin-sdk";
-import type { Component } from "vue";
+import type { Component, Ref } from "vue";
 
+export const uiAppearanceContract = "seashard.ui-appearance";
+
+export type UiThemeMode = "auto" | "light" | "dark";
+export type UiColorThemeId = "default" | "ocean" | "rose" | "sunset" | "midnight";
+export type UiAcrylicBlurLevel = "off" | "low" | "medium" | "high";
+export type UiBackgroundSize = "cover" | "contain" | "fill" | "auto";
+
+export interface UiAppearanceSettings {
+  color: UiColorThemeId;
+  theme: UiThemeMode;
+  fontSize: number;
+  fontFamily: string;
+  acrylicEnabled: boolean;
+  acrylicBlurLevel: UiAcrylicBlurLevel;
+  minimalMode: boolean;
+  backgroundImage: string;
+  backgroundOpacity: number;
+  backgroundBlur: number;
+  backgroundBrightness: number;
+  backgroundSize: UiBackgroundSize;
+}
+
+export interface UiAppearanceService {
+  readonly settings: Readonly<Ref<Readonly<UiAppearanceSettings>>>;
+  update(patch: Partial<UiAppearanceSettings>): void;
+  reset(): void;
+}
 /** 一个功能入口贡献给桌面 Shell 的页面及其导航记录。 */
 export interface NavigationPageContribution {
   id: string;
@@ -9,6 +36,9 @@ export interface NavigationPageContribution {
   label: string;
   description?: string;
   order?: number;
+  icon?: Component;
+  navigation?: boolean;
+  placement?: "main" | "bottom";
   component: Component;
 }
 

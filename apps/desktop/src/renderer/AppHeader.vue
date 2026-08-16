@@ -1,30 +1,26 @@
 <script setup lang="ts">
+import { useClientUiRuntime } from "@seashard/ui-runtime";
+import type { UiThemeMode } from "@seashard/ui-sdk";
 import { Copy, Languages, Minus, Monitor, Moon, Square, Sun, X } from "lucide-vue-next";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, ref } from "vue";
+import { useRoute } from "vue-router";
+import { appearanceService } from "./appearance";
 
-type ThemePreference = "auto" | "light" | "dark";
-
-const currentTheme = ref<ThemePreference>("auto");
+const runtime = useClientUiRuntime();
+const route = useRoute();
 const isMaximized = ref(false);
-let systemTheme: MediaQueryList | undefined;
-
+const currentTheme = computed(() => appearanceService.settings.value.theme);
+const pageTitle = computed(() => {
+  if (route.path === "/") return "首页";
+  return runtime.pages.value.find((page) => page.routeName === route.name)?.label ?? "SeaShard";
+});
 const themeIndicatorOffset = computed(() => {
-  const themeOrder: ThemePreference[] = ["auto", "light", "dark"];
+  const themeOrder: UiThemeMode[] = ["auto", "light", "dark"];
   return themeOrder.indexOf(currentTheme.value) * 26;
 });
 
-function applyTheme(theme: ThemePreference): void {
-  const effectiveTheme = theme === "auto" ? (systemTheme?.matches ? "dark" : "light") : theme;
-  document.documentElement.setAttribute("data-theme", effectiveTheme);
-}
-
-function setTheme(theme: ThemePreference): void {
-  currentTheme.value = theme;
-  applyTheme(theme);
-}
-
-function handleSystemThemeChange(): void {
-  if (currentTheme.value === "auto") applyTheme("auto");
+function setTheme(theme: UiThemeMode): void {
+  appearanceService.update({ theme });
 }
 
 async function minimizeWindow(): Promise<void> {
@@ -38,22 +34,12 @@ async function toggleMaximize(): Promise<void> {
 async function closeWindow(): Promise<void> {
   await window.seashard.window.close();
 }
-
-onMounted(() => {
-  systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
-  systemTheme.addEventListener("change", handleSystemThemeChange);
-  applyTheme(currentTheme.value);
-});
-
-onUnmounted(() => {
-  systemTheme?.removeEventListener("change", handleSystemThemeChange);
-});
 </script>
 
 <template>
   <header class="app-header">
     <div class="header-left">
-      <h2 class="page-title">首页</h2>
+      <h2 class="page-title">{{ pageTitle }}</h2>
     </div>
 
     <div class="header-center"></div>

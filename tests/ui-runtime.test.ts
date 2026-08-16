@@ -52,6 +52,9 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
         path: "/test",
         label: "Test",
         component: pageComponent,
+        icon: pageComponent,
+        navigation: false,
+        placement: "bottom",
       });
     },
   };
@@ -67,6 +70,9 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
     runtime.pages.value.map((page) => ({ id: page.id, runtimeId: page.runtimeId })),
     [{ id: "test-page", runtimeId: "test.runtime" }],
   );
+  assert.equal(runtime.pages.value[0]?.icon, pageComponent);
+  assert.equal(runtime.pages.value[0]?.navigation, false);
+  assert.equal(runtime.pages.value[0]?.placement, "bottom");
   assert.equal(router.hasRoute("ui:test.runtime:test-page"), true);
 
   await runtime.reconcile({ revision: 2, entries: [] });

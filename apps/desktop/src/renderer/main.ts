@@ -1,7 +1,9 @@
 import { runtimeDiagnosticsContract } from "@seashard/contracts";
 import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
+import { uiAppearanceContract } from "@seashard/ui-sdk";
 import { createApp } from "vue";
 import "cmzya-modern-ui/style.css";
+import { appearanceService } from "./appearance";
 import App from "./App.vue";
 import { builtInClientModuleLoaders } from "./client-modules";
 import { router } from "./router";
@@ -12,6 +14,7 @@ const runtime = new ClientUiRuntime({
   loaders: builtInClientModuleLoaders,
   services: {
     [runtimeDiagnosticsContract]: window.seashard.runtime,
+    [uiAppearanceContract]: appearanceService,
   },
 });
 
@@ -29,6 +32,7 @@ window.addEventListener(
   () => {
     disposeBootstrapSubscription();
     void runtime.dispose();
+    appearanceService.dispose();
   },
   { once: true },
 );
@@ -53,5 +57,8 @@ async function applyBootstrap(
   }
 
   await runtime.reconcile(snapshot);
-  if (router.currentRoute.value.path !== "/") await router.replace("/");
+  const currentPath = router.currentRoute.value.path;
+  if (currentPath !== "/" && !runtime.pages.value.some((page) => page.path === currentPath)) {
+    await router.replace("/");
+  }
 }

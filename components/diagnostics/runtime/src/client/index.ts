@@ -17,6 +17,7 @@ export default defineClientUiModule({
       label: "运行状态",
       description: "组件生命周期与宿主健康状态",
       order: 100,
+      navigation: false,
       component: page,
     });
   },

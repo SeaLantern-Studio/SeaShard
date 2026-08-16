@@ -127,6 +127,20 @@
   --sl-acrylic-border: rgba(255, 255, 255, 0.06);
 }
 
+[data-minimal="true"] {
+  --sl-transition-fast: 0s;
+  --sl-transition-normal: 0s;
+  --sl-transition-slow: 0s;
+}
+
+[data-animation="off"] *,
+[data-animation="off"] *::before,
+[data-animation="off"] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+}
+
 *,
 *::before,
 *::after {
@@ -213,6 +227,12 @@ img {
   z-index: 0;
   pointer-events: none;
   transition: all 0.3s ease;
+  background-image: var(--sl-background-image, none);
+  background-size: var(--sl-background-size, cover);
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--sl-background-opacity, 0);
+  filter: blur(var(--sl-background-blur, 0px)) brightness(var(--sl-background-brightness, 1));
 }
 
 .app-main {
@@ -238,6 +258,20 @@ img {
   border-radius: var(--sl-radius-lg);
   border: 1px solid var(--sl-border);
   box-shadow: none;
+}
+
+[data-acrylic="on"] .app-layout,
+[data-acrylic]:not([data-acrylic="off"]) .app-layout {
+  background-color: transparent;
+}
+
+[data-acrylic="on"] .app-content,
+[data-acrylic]:not([data-acrylic="off"]) .app-content {
+  background: var(--sl-surface);
+  backdrop-filter: blur(var(--sl-acrylic-blur, 16px)) saturate(var(--sl-saturate-normal, 180%));
+  -webkit-backdrop-filter: blur(var(--sl-acrylic-blur, 16px))
+    saturate(var(--sl-saturate-normal, 180%));
+  border-color: var(--sl-border-light);
 }
 
 .sidebar {
@@ -298,6 +332,10 @@ img {
 
 .nav-group {
   margin-bottom: var(--sl-space-sm);
+}
+
+.lower-side {
+  margin-top: auto;
 }
 
 .nav-item {

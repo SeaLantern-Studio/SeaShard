@@ -224,6 +224,7 @@ export class ClientUiRuntime {
     const routeName = `ui:${runtimeId}:${contribution.id}`;
     const page: RegisteredNavigationPage = {
       ...contribution,
+      ...(contribution.icon ? { icon: markRaw(contribution.icon) } : {}),
       component: markRaw(contribution.component),
       runtimeId,
       routeName,
