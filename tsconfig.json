@@ -19,6 +19,8 @@
     "apps/**/src/**/*.ts",
     "apps/**/src/**/*.vue",
     "packages/**/*.ts",
-    "components/**/*.ts"
+    "components/**/*.ts",
+    "frontend/**/*.ts",
+    "frontend/**/*.vue"
   ]
 }

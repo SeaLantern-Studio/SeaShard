@@ -55,7 +55,7 @@ importers:
     dependencies:
       '@seashard/about-ui':
         specifier: workspace:*
-        version: link:../../components/about/ui
+        version: link:../../frontend/settings/about
       '@seashard/bootstrap-runtime':
         specifier: workspace:*
         version: link:../../packages/bootstrap-runtime
@@ -73,7 +73,7 @@ importers:
         version: link:../../components/network/download
       '@seashard/personalization-ui':
         specifier: workspace:*
-        version: link:../../components/personalization/ui
+        version: link:../../frontend/settings/personalization
       '@seashard/plugin-foundation':
         specifier: workspace:*
         version: link:../../components/plugin/foundation
@@ -86,9 +86,15 @@ importers:
       '@seashard/runtime-diagnostics':
         specifier: workspace:*
         version: link:../../components/diagnostics/runtime
+      '@seashard/runtime-diagnostics-ui':
+        specifier: workspace:*
+        version: link:../../frontend/diagnostics/runtime
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../../components/server/core-source
+      '@seashard/server-download-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/download
       '@seashard/ui-runtime':
         specifier: workspace:*
         version: link:../../packages/ui-runtime
@@ -123,21 +129,6 @@ importers:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
 
-  components/about/ui:
-    dependencies:
-      '@seashard/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
-      '@seashard/ui-sdk':
-        specifier: workspace:*
-        version: link:../../../packages/ui-sdk
-      lucide-vue-next:
-        specifier: 0.400.0
-        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
-      vue:
-        specifier: 3.5.41
-        version: 3.5.41(typescript@5.9.3)
-
   components/data/database-sqlite:
     dependencies:
       '@seashard/bootstrap-runtime':
@@ -170,42 +161,12 @@ importers:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
-      '@seashard/ui-sdk':
-        specifier: workspace:*
-        version: link:../../../packages/ui-sdk
-      cmzya-modern-ui:
-        specifier: 0.6.2
-        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
-      lucide-vue-next:
-        specifier: 0.400.0
-        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
-      vue:
-        specifier: 3.5.41
-        version: 3.5.41(typescript@5.9.3)
 
   components/network/download:
     dependencies:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
-
-  components/personalization/ui:
-    dependencies:
-      '@seashard/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
-      '@seashard/ui-sdk':
-        specifier: workspace:*
-        version: link:../../../packages/ui-sdk
-      cmzya-modern-ui:
-        specifier: 0.6.2
-        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
-      lucide-vue-next:
-        specifier: 0.400.0
-        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
-      vue:
-        specifier: 3.5.41
-        version: 3.5.41(typescript@5.9.3)
 
   components/plugin/foundation:
     dependencies:
@@ -230,6 +191,9 @@ importers:
 
   components/server/core-source:
     dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/database':
         specifier: workspace:*
         version: link:../../../packages/database
@@ -239,6 +203,78 @@ importers:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
+
+  frontend/diagnostics/runtime:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/download:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/settings/about:
+    dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/settings/personalization:
+    dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
 
   packages/bootstrap-runtime:
     dependencies:

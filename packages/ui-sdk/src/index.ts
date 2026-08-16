@@ -38,7 +38,7 @@ export interface NavigationPageContribution {
   order?: number;
   icon?: Component;
   navigation?: boolean;
-  placement?: "main" | "settings";
+  placement?: "main" | "settings" | "server-download";
   component: Component;
 }
 

@@ -1,4 +1,4 @@
-import { runtimeDiagnosticsContract } from "@seashard/contracts";
+import { runtimeDiagnosticsContract, serverCoreSourceContract } from "@seashard/contracts";
 import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
 import { uiAppearanceContract } from "@seashard/ui-sdk";
 import { createApp } from "vue";
@@ -14,6 +14,7 @@ const runtime = new ClientUiRuntime({
   loaders: builtInClientModuleLoaders,
   services: {
     [runtimeDiagnosticsContract]: window.seashard.runtime,
+    [serverCoreSourceContract]: window.seashard.serverCore,
     [uiAppearanceContract]: appearanceService,
   },
 });
@@ -57,8 +58,19 @@ async function applyBootstrap(
   }
 
   await runtime.reconcile(snapshot);
-  const currentPath = router.currentRoute.value.path;
-  if (currentPath !== "/" && !runtime.pages.value.some((page) => page.path === currentPath)) {
+  const currentRoute = router.currentRoute.value;
+  if (currentRoute.path === "/") return;
+  const currentPage = runtime.pages.value.find((page) => page.path === currentRoute.path);
+  if (!currentPage) {
     await router.replace("/");
+    return;
+  }
+  // 首次加载深链接时路由可能先按“未匹配”完成解析；Entry 注册后必须按名称重新解析。
+  if (currentRoute.name !== currentPage.routeName) {
+    await router.replace({
+      name: currentPage.routeName,
+      query: currentRoute.query,
+      hash: currentRoute.hash,
+    });
   }
 }

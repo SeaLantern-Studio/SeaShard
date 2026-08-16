@@ -222,10 +222,10 @@ const clientEntries: ClientEntryPublication = {
   entries: [
     {
       runtimeId: "core.runtime-diagnostics.ui",
-      pluginId: "seashard.runtime-diagnostics",
+      pluginId: "seashard.runtime-diagnostics-ui",
       pluginVersion: "0.0.0",
       entryId: "runtime-diagnostics.client",
-      moduleKey: "seashard.runtime-diagnostics/runtime-diagnostics.client",
+      moduleKey: "seashard.runtime-diagnostics-ui/runtime-diagnostics.client",
       integrity: "a".repeat(64),
       scopeType: "global",
       scopeId: "global",
@@ -250,6 +250,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         readySnapshots.push(value);
       },
       readClientEntryPublication: () => clientEntries,
+      readServerCoreTypes: async () => ["vanilla", "paper"],
       onClientEntriesChanged: (listener) => {
         clientEntryListener = listener;
         return () => {
@@ -300,6 +301,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(first.maximized, false);
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), ["vanilla", "paper"]);
+  await assert.rejects(runtime.invoke(desktopChannels.serverCoreTypes, 999), /request rejected/);
   assert.deepEqual(readySnapshots, []);
   assert.deepEqual(await runtime.invoke(desktopChannels.clientBootstrap, 1), {
     protocolVersion: 1,
@@ -345,6 +348,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.listenerCount("activate"), 0);
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
   assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
@@ -364,6 +368,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       smokeMode: true,
       reportOpenFailure: () => {},
       readClientEntryPublication: () => ({ revision: 0, entries: [] }),
+      readServerCoreTypes: async () => [],
       onClientEntriesChanged: () => () => {},
     },
     { getSnapshot: async () => snapshot },

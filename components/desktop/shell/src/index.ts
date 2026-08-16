@@ -6,6 +6,7 @@ import {
   type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
+  type ServerCoreSourceClientService,
 } from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type {
@@ -38,6 +39,7 @@ export interface DesktopShellConfig {
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
   onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
+  readServerCoreTypes(): ReturnType<ServerCoreSourceClientService["listTypes"]>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
@@ -228,6 +230,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           const snapshot = await diagnostics.getSnapshot();
           return snapshot;
         });
+        config.runtime.handle(desktopChannels.serverCoreTypes, async (event) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("server core types request rejected");
+          }
+          return config.readServerCoreTypes();
+        });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -253,6 +261,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
+          config.runtime.removeHandler(desktopChannels.serverCoreTypes);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

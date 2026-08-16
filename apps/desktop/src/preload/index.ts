@@ -9,6 +9,9 @@ const api: SeaShardDesktopApi = Object.freeze({
   runtime: Object.freeze({
     getSnapshot: () => ipcRenderer.invoke(desktopChannels.runtimeSnapshot),
   }),
+  serverCore: Object.freeze({
+    listTypes: () => ipcRenderer.invoke(desktopChannels.serverCoreTypes),
+  }),
   client: Object.freeze({
     getBootstrap: () => ipcRenderer.invoke(desktopChannels.clientBootstrap),
     onBootstrapChanged: (listener: (snapshot: DesktopClientBootstrap) => void) => {

@@ -10,10 +10,13 @@ export const desktopChannels = {
   windowMinimize: "seashard.window.minimize",
   windowToggleMaximize: "seashard.window.toggle-maximize",
   windowClose: "seashard.window.close",
+  serverCoreTypes: "seashard.server-core.types",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
+/** 服务端核心源面向 Client 的只读 Contract。 */
+export const serverCoreSourceContract = "seashard.server-core-source";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
@@ -76,10 +79,16 @@ export interface DesktopClientBootstrap extends ClientEntryPublication {
   };
 }
 
+/** Renderer 只读的服务端核心目录能力，不暴露下载路径或宿主对象。 */
+export interface ServerCoreSourceClientService {
+  listTypes(): Promise<readonly string[]>;
+}
+
 export interface SeaShardDesktopApi {
   runtime: {
     getSnapshot(): Promise<RuntimeSnapshot>;
   };
+  serverCore: ServerCoreSourceClientService;
   client: {
     getBootstrap(): Promise<DesktopClientBootstrap>;
     onBootstrapChanged(listener: (snapshot: DesktopClientBootstrap) => void): () => void;

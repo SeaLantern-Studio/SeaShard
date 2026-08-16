@@ -39,19 +39,9 @@ export const runtimeDiagnosticsManifest: PluginManifest = {
       permissions: [],
       upgradeMode: "hot-swap",
     },
-    {
-      id: "runtime-diagnostics.client",
-      runtime: "client",
-      module: "./dist/client.js",
-      targets: ["desktop"],
-      activationScopes: ["global"],
-      permissions: [runtimeDiagnosticsContract],
-      upgradeMode: "stop-first",
-    },
   ],
   compatibility: {
     seaShard: ">=0.0.0 <1.0.0",
-    clientProtocol: ">=1 <2",
   },
 };
 

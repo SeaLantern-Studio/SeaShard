@@ -1,4 +1,4 @@
-export const serverCoreSourceContract = "seashard.server-core-source";
+export { serverCoreSourceContract } from "@seashard/contracts";
 
 export const defaultCnbCatalogUrl =
   "https://cnb.cool/SeaLantern-studio/ServerCore-Mirror/-/releases/download/26.02.27/jar_lfs_links.json";

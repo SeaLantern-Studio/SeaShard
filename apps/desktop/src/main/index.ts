@@ -21,10 +21,13 @@ import {
   createRuntimeDiagnosticsModule,
   runtimeDiagnosticsManifest,
 } from "@seashard/runtime-diagnostics";
+import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
 import {
   createServerCoreSourceModule,
+  serverCoreSourceContract,
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
+import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { Context } from "cordis";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { dirname, join } from "node:path";
@@ -137,6 +140,36 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // 服务器下载页是独立 Client Entry；真实核心目录通过收窄的只读 Client Service 提供。
+  await activeKernel.registerBuiltIn({
+    manifest: serverDownloadUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-download.ui",
+        entryId: "server-download.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 诊断页面独立于 Host 投影组件发布，前端目录不再混入 Core 能力包。
+  await activeKernel.registerBuiltIn({
+    manifest: runtimeDiagnosticsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.runtime-diagnostics.ui",
+        entryId: "runtime-diagnostics.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 公共下载组件集中管理所有文件任务；业务组件通过 Service 注入复用，不各自实现传输层。
   await activeKernel.registerBuiltIn({
     manifest: downloadManifest,
@@ -206,14 +239,6 @@ async function bootstrap(): Promise<void> {
         enabled: true,
         config: null,
       },
-      {
-        id: "core.runtime-diagnostics.ui",
-        entryId: "runtime-diagnostics.client",
-        scopeType: "global",
-        scopeId: "global",
-        enabled: true,
-        config: null,
-      },
     ],
   });
   // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
@@ -235,6 +260,20 @@ async function bootstrap(): Promise<void> {
               activeKernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
               ),
+            readServerCoreTypes: async () => {
+              const result = await activeKernel.callService(
+                serverCoreSourceContract,
+                "listTypes",
+                [],
+              );
+              if (
+                !Array.isArray(result) ||
+                result.some((value) => typeof value !== "string" || !value)
+              ) {
+                throw new Error("server core source returned invalid types");
+              }
+              return result as string[];
+            },
             onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;

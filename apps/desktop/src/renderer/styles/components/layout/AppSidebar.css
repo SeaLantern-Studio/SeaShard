@@ -101,20 +101,24 @@
 }
 
 .settings-mode-nav,
-.settings-section {
+.download-mode-nav,
+.settings-section,
+.download-section {
   display: flex;
   flex-direction: column;
 }
 
-.settings-mode-nav {
+.settings-mode-nav,
+.download-mode-nav {
   gap: var(--sl-space-md);
 }
 
-.settings-section {
+.settings-section,
+.download-section {
   gap: 2px;
 }
 
-.settings-back {
+.mode-back {
   min-height: 40px;
   border: 1px solid var(--sl-border-light);
   background: color-mix(in srgb, var(--sl-surface) 72%, transparent);
@@ -122,11 +126,12 @@
   font-weight: 600;
 }
 
-.settings-back svg {
+.mode-back svg {
   color: var(--sl-text-secondary);
 }
 
-.settings-nav-item {
+.settings-nav-item,
+.download-nav-item {
   margin-top: 2px;
 }
 

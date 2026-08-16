@@ -25,6 +25,7 @@ import type { WorkspaceMode } from "./workspace-layout";
 const props = defineProps<{
   workspace: WorkspaceMode;
   settingsMode: boolean;
+  downloadMode: boolean;
 }>();
 
 const runtime = useClientUiRuntime();
@@ -36,6 +37,22 @@ const lastWorkspacePath = ref("/");
 const settingsPages = computed(() =>
   runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "settings"),
 );
+const downloadPages = computed(() =>
+  runtime.pages.value.filter(
+    (page) => page.navigation !== false && page.placement === "server-download",
+  ),
+);
+const serverCoreDownloadPage = computed(() =>
+  downloadPages.value.find((page) => page.path === "/server/download"),
+);
+const otherDownloadPages = computed(() =>
+  downloadPages.value.filter((page) => page.path !== "/server/download"),
+);
+const sidebarLabel = computed(() => {
+  if (props.settingsMode) return "设置导航";
+  if (props.downloadMode) return "下载导航";
+  return "主导航";
+});
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
 const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
@@ -83,6 +100,9 @@ function navigate(path: string): void {
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(`${path}/`);
 }
+function isDownloadPageActive(path: string): boolean {
+  return route.path === path;
+}
 
 function openSettings(): void {
   const path = settingsEntryPath.value;
@@ -92,10 +112,19 @@ function openSettings(): void {
 function leaveSettings(): void {
   navigate(lastWorkspacePath.value);
 }
+function leaveDownload(): void {
+  activeServerItem.value = "launch";
+  navigate("/");
+}
 
 function selectInstanceItem(id: InstanceItemId): void {
   if (props.workspace === "server") {
     activeServerItem.value = id;
+    if (id === "download") {
+      navigate("/server/download");
+    } else if (route.path.startsWith("/server/")) {
+      navigate("/");
+    }
   } else if (props.workspace === "launcher") {
     activeLauncherItem.value = id;
   }
@@ -139,12 +168,13 @@ watch(
   () => route.fullPath,
   (path) => {
     if (!path.startsWith("/settings/")) lastWorkspacePath.value = path;
+    activeServerItem.value = path.startsWith("/server/download") ? "download" : "launch";
   },
   { immediate: true },
 );
 
 watch(
-  [() => route.path, () => props.workspace, settingsPages, activeInstanceItem],
+  [() => route.path, () => props.workspace, settingsPages, downloadPages, activeInstanceItem],
   () => void nextTick(updateNavIndicator),
   {
     flush: "post",
@@ -171,15 +201,11 @@ onUnmounted(() => {
       <span class="logo-text">SeaShard</span>
     </div>
 
-    <nav
-      ref="sidebarNav"
-      class="sidebar-nav"
-      :aria-label="props.settingsMode ? '设置导航' : '主导航'"
-    >
+    <nav ref="sidebarNav" class="sidebar-nav" :aria-label="sidebarLabel">
       <div ref="navIndicator" class="nav-active-indicator"></div>
 
       <div v-if="props.settingsMode" class="settings-mode-nav">
-        <button type="button" class="workspace-row settings-back" @click="leaveSettings">
+        <button type="button" class="workspace-row mode-back" @click="leaveSettings">
           <ArrowLeft :size="16" :stroke-width="1.8" />
           <span>返回工作区</span>
         </button>
@@ -193,6 +219,56 @@ onUnmounted(() => {
             class="nav-item settings-nav-item"
             :class="{ active: isActive(page.path) }"
             :aria-current="isActive(page.path) ? 'page' : undefined"
+            @click="navigate(page.path)"
+          >
+            <component
+              :is="page.icon"
+              v-if="page.icon"
+              class="nav-icon"
+              :size="19"
+              :stroke-width="1.8"
+            />
+            <span class="nav-label">{{ page.label }}</span>
+          </button>
+        </section>
+      </div>
+
+      <div v-else-if="props.downloadMode" class="download-mode-nav">
+        <button type="button" class="workspace-row mode-back" @click="leaveDownload">
+          <ArrowLeft :size="16" :stroke-width="1.8" />
+          <span>返回服务器</span>
+        </button>
+
+        <section class="download-section" aria-labelledby="download-label">
+          <h3 id="download-label" class="workspace-section-title">下载</h3>
+          <button
+            v-if="serverCoreDownloadPage"
+            type="button"
+            class="nav-item download-nav-item"
+            :class="{ active: isDownloadPageActive(serverCoreDownloadPage.path) }"
+            :aria-current="isDownloadPageActive(serverCoreDownloadPage.path) ? 'page' : undefined"
+            @click="navigate(serverCoreDownloadPage.path)"
+          >
+            <component
+              :is="serverCoreDownloadPage.icon"
+              v-if="serverCoreDownloadPage.icon"
+              class="nav-icon"
+              :size="19"
+              :stroke-width="1.8"
+            />
+            <span class="nav-label">{{ serverCoreDownloadPage.label }}</span>
+          </button>
+        </section>
+
+        <section class="download-section" aria-labelledby="other-resources-label">
+          <h3 id="other-resources-label" class="workspace-section-title">其他资源</h3>
+          <button
+            v-for="page in otherDownloadPages"
+            :key="page.id"
+            type="button"
+            class="nav-item download-nav-item"
+            :class="{ active: isDownloadPageActive(page.path) }"
+            :aria-current="isDownloadPageActive(page.path) ? 'page' : undefined"
             @click="navigate(page.path)"
           >
             <component
@@ -305,7 +381,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="!props.settingsMode" class="nav-group lower-side">
+      <div v-if="!props.settingsMode && !props.downloadMode" class="nav-group lower-side">
         <button type="button" class="nav-item" :disabled="!settingsEntryPath" @click="openSettings">
           <Settings class="nav-icon" :size="20" :stroke-width="1.8" />
           <span class="nav-label">设置</span>
