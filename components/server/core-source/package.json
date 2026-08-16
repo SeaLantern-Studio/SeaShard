@@ -1,0 +1,14 @@
+{
+  "name": "@seashard/server-core-source",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/database": "workspace:*",
+    "@seashard/download": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*"
+  }
+}

@@ -2,6 +2,7 @@ import { aboutUiManifest } from "@seashard/about-ui";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { desktopShellContract } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
+import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
   createDesktopShellModule,
   createElectronDesktopShellRuntime,
@@ -20,6 +21,10 @@ import {
   createRuntimeDiagnosticsModule,
   runtimeDiagnosticsManifest,
 } from "@seashard/runtime-diagnostics";
+import {
+  createServerCoreSourceModule,
+  serverCoreSourceManifest,
+} from "@seashard/server-core-source";
 import { Context } from "cordis";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { dirname, join } from "node:path";
@@ -30,6 +35,7 @@ const developmentUrl = resolveDevelopmentUrl();
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const startedAt = new Date().toISOString();
 const seaShardVersion = "0.0.0";
+const downloadFetchProvider = () => globalThis.fetch;
 
 if (developmentUrl) installDevelopmentControl();
 
@@ -124,6 +130,52 @@ async function bootstrap(): Promise<void> {
       {
         id: "core.personalization.ui",
         entryId: "personalization.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 公共下载组件集中管理所有文件任务；业务组件通过 Service 注入复用，不各自实现传输层。
+  await activeKernel.registerBuiltIn({
+    manifest: downloadManifest,
+    loaders: {
+      "download.host": {
+        load: async () =>
+          createDownloadModule({
+            fetchProvider: downloadFetchProvider,
+            defaultHeaders: { "User-Agent": `SeaShard/${seaShardVersion}` },
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.download",
+        entryId: "download.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 服务端核心源作为独立后端能力，当前提供 CNB 目录、持久缓存与受校验的下载任务。
+  await activeKernel.registerBuiltIn({
+    manifest: serverCoreSourceManifest,
+    loaders: {
+      "server-core-source.host": {
+        load: async () =>
+          createServerCoreSourceModule({
+            database: root.database,
+            fetchProvider: downloadFetchProvider,
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-core-source",
+        entryId: "server-core-source.host",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

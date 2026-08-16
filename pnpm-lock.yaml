@@ -68,6 +68,9 @@ importers:
       '@seashard/desktop-shell':
         specifier: workspace:*
         version: link:../../components/desktop/shell
+      '@seashard/download':
+        specifier: workspace:*
+        version: link:../../components/network/download
       '@seashard/personalization-ui':
         specifier: workspace:*
         version: link:../../components/personalization/ui
@@ -83,6 +86,9 @@ importers:
       '@seashard/runtime-diagnostics':
         specifier: workspace:*
         version: link:../../components/diagnostics/runtime
+      '@seashard/server-core-source':
+        specifier: workspace:*
+        version: link:../../components/server/core-source
       '@seashard/ui-runtime':
         specifier: workspace:*
         version: link:../../packages/ui-runtime
@@ -177,6 +183,12 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  components/network/download:
+    dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+
   components/personalization/ui:
     dependencies:
       '@seashard/plugin-sdk':
@@ -215,6 +227,18 @@ importers:
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
+
+  components/server/core-source:
+    dependencies:
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../../packages/database
+      '@seashard/download':
+        specifier: workspace:*
+        version: link:../../network/download
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
 
   packages/bootstrap-runtime:
     dependencies:
