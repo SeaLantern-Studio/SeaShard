@@ -14,6 +14,7 @@ import type {
   BrowserWindow,
   BrowserWindowConstructorOptions,
   IpcMain,
+  Dialog,
   IpcMainInvokeEvent,
 } from "electron";
 
@@ -31,6 +32,7 @@ export interface DesktopShellRuntime {
     listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
   ): void;
   removeHandler(channel: string): void;
+  selectDirectory(window: BrowserWindow): Promise<string | undefined>;
   quit(): void;
 }
 
@@ -59,6 +61,7 @@ export function createElectronDesktopShellRuntime(
   electronApp: App,
   BrowserWindowClass: typeof BrowserWindow,
   electronIpcMain: IpcMain,
+  electronDialog: Dialog,
 ): DesktopShellRuntime {
   return {
     platform: process.platform,
@@ -69,6 +72,14 @@ export function createElectronDesktopShellRuntime(
     onWindowAllClosed: (listener) => electronApp.on("window-all-closed", listener),
     offWindowAllClosed: (listener) => electronApp.off("window-all-closed", listener),
     handle: (channel, listener) => electronIpcMain.handle(channel, listener),
+    selectDirectory: async (window) => {
+      const result = await electronDialog.showOpenDialog(window, {
+        title: "选择资源默认下载地址",
+        buttonLabel: "选择此文件夹",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      return result.canceled ? undefined : result.filePaths[0];
+    },
     removeHandler: (channel) => electronIpcMain.removeHandler(channel),
     quit: () => electronApp.quit(),
   };
@@ -239,6 +250,9 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         config.runtime.handle(desktopChannels.windowClose, (event) => {
           ownedWindow(event.sender.id).close();
         });
+        config.runtime.handle(desktopChannels.dialogSelectDirectory, (event) =>
+          config.runtime.selectDirectory(ownedWindow(event.sender.id)),
+        );
 
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
@@ -305,6 +319,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);
           config.runtime.removeHandler(desktopChannels.windowToggleMaximize);
+          config.runtime.removeHandler(desktopChannels.dialogSelectDirectory);
           config.runtime.removeHandler(desktopChannels.windowClose);
         };
       }, "desktop shell lifecycle");

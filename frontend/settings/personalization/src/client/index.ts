@@ -24,6 +24,7 @@ export default defineClientUiModule({
       icon: PaintRoller,
       navigation: true,
       placement: "settings",
+      settingsGroup: "software",
       component: page,
     });
   },

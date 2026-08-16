@@ -28,8 +28,9 @@ import {
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
+import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 import { Context } from "cordis";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -182,6 +183,21 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // 服务器下载设置只负责目录选择界面；持久化和下载消费留给后续 Host 设置组件。
+  await activeKernel.registerBuiltIn({
+    manifest: serverSettingsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-settings.ui",
+        entryId: "server-settings.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 诊断页面独立于 Host 投影组件发布，前端目录不再混入 Core 能力包。
   await activeKernel.registerBuiltIn({
     manifest: runtimeDiagnosticsUiManifest,
@@ -275,7 +291,7 @@ async function bootstrap(): Promise<void> {
       "desktop-shell.host": {
         load: async () =>
           createDesktopShellModule({
-            runtime: createElectronDesktopShellRuntime(app, BrowserWindow, ipcMain),
+            runtime: createElectronDesktopShellRuntime(app, BrowserWindow, ipcMain, dialog),
             preloadPath: join(moduleDirectory, "../preload/index.cjs"),
             rendererFile: join(moduleDirectory, "../renderer/index.html"),
             ...(developmentUrl ? { developmentUrl } : {}),

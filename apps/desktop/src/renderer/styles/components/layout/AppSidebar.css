@@ -132,7 +132,8 @@
   font-weight: 600;
 }
 
-.instance-section-divider {
+.instance-section-divider,
+.settings-section-divider {
   height: 1px;
   margin: 2px var(--sl-space-sm);
   border-radius: var(--sl-radius-full);

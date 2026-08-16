@@ -20,6 +20,7 @@ export default defineClientUiModule({
       icon: Info,
       navigation: true,
       placement: "settings",
+      settingsGroup: "software",
       component: AboutFeaturePage,
     });
   },

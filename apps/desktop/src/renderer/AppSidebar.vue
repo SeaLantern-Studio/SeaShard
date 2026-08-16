@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useClientUiRuntime } from "@seashard/ui-runtime";
+import type { SettingsNavigationGroup } from "@seashard/ui-sdk";
 import {
   Archive,
   ArrowLeft,
@@ -36,6 +37,18 @@ const navIndicator = ref<HTMLElement>();
 const lastWorkspacePath = ref("/");
 const settingsPages = computed(() =>
   runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "settings"),
+);
+const settingsNavigationGroups = [
+  { id: "agent", label: "Agent 设置" },
+  { id: "server", label: "服务器设置" },
+  { id: "launcher", label: "启动器设置" },
+  { id: "software", label: "软件设置" },
+] as const satisfies readonly { id: SettingsNavigationGroup; label: string }[];
+const groupedSettingsPages = computed(() =>
+  settingsNavigationGroups.map((group) => ({
+    ...group,
+    pages: settingsPages.value.filter((page) => (page.settingsGroup ?? "software") === group.id),
+  })),
 );
 const downloadPages = computed(() =>
   runtime.pages.value.filter(
@@ -104,6 +117,7 @@ const sidebarMenuItemSelector = [
   ".workspace-row",
   ".nav-item",
   ".instance-section-divider",
+  ".settings-section-divider",
 ].join(",");
 
 function navigate(path: string): void {
@@ -264,27 +278,32 @@ onUnmounted(() => {
               <span>返回工作区</span>
             </button>
 
-            <section class="settings-section" aria-labelledby="settings-label">
-              <h3 id="settings-label" class="workspace-section-title">设置</h3>
-              <button
-                v-for="page in settingsPages"
-                :key="page.id"
-                type="button"
-                class="nav-item settings-nav-item"
-                :class="{ active: isActive(page.path) }"
-                :aria-current="isActive(page.path) ? 'page' : undefined"
-                @click="navigate(page.path)"
-              >
-                <component
-                  :is="page.icon"
-                  v-if="page.icon"
-                  class="nav-icon"
-                  :size="19"
-                  :stroke-width="1.8"
-                />
-                <span class="nav-label">{{ page.label }}</span>
-              </button>
-            </section>
+            <template v-for="(group, groupIndex) in groupedSettingsPages" :key="group.id">
+              <div v-if="groupIndex > 0" class="settings-section-divider" role="separator"></div>
+              <section class="settings-section" :aria-labelledby="`settings-${group.id}-label`">
+                <h3 :id="`settings-${group.id}-label`" class="workspace-section-title">
+                  {{ group.label }}
+                </h3>
+                <button
+                  v-for="page in group.pages"
+                  :key="page.id"
+                  type="button"
+                  class="nav-item settings-nav-item"
+                  :class="{ active: isActive(page.path) }"
+                  :aria-current="isActive(page.path) ? 'page' : undefined"
+                  @click="navigate(page.path)"
+                >
+                  <component
+                    :is="page.icon"
+                    v-if="page.icon"
+                    class="nav-icon"
+                    :size="19"
+                    :stroke-width="1.8"
+                  />
+                  <span class="nav-label">{{ page.label }}</span>
+                </button>
+              </section>
+            </template>
           </div>
 
           <div v-else-if="props.downloadMode" class="download-mode-nav">

@@ -123,6 +123,8 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
   readonly windows: FakeBrowserWindow[] = [];
   readonly handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
   quitCount = 0;
+  directorySelection = "C:/SeaShard/resources";
+  directorySelectionWindow?: BrowserWindow;
 
   constructor(readonly platform: NodeJS.Platform) {
     super();
@@ -170,6 +172,11 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     const handler = this.handlers.get(channel);
     if (!handler) throw new Error(`missing handler: ${channel}`);
     return handler({ sender: { id: senderId } } as IpcMainInvokeEvent, ...args);
+  }
+
+  async selectDirectory(window: BrowserWindow): Promise<string | undefined> {
+    this.directorySelectionWindow = window;
+    return this.directorySelection;
   }
 
   quit(): void {
@@ -286,6 +293,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.windowMinimize, 1), /request rejected/);
   await assert.rejects(runtime.invoke(desktopChannels.windowToggleMaximize, 1), /request rejected/);
   await assert.rejects(runtime.invoke(desktopChannels.windowClose, 1), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.dialogSelectDirectory, 1),
+    /request rejected/,
+  );
 
   await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
@@ -315,6 +326,15 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(first.maximized, true);
   assert.equal(await runtime.invoke(desktopChannels.windowToggleMaximize, 1), false);
   assert.equal(first.maximized, false);
+  assert.equal(
+    await runtime.invoke(desktopChannels.dialogSelectDirectory, 1),
+    runtime.directorySelection,
+  );
+  assert.equal(runtime.directorySelectionWindow, first as unknown as BrowserWindow);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.dialogSelectDirectory, 999),
+    /request rejected/,
+  );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), ["vanilla", "paper"]);
@@ -395,6 +415,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowToggleMaximize), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowClose), false);
+  assert.equal(runtime.handlers.has(desktopChannels.dialogSelectDirectory), false);
   assert.equal(clientEntryListener, undefined);
   assert.deepEqual(failures, []);
 });

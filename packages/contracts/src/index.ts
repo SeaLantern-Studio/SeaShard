@@ -13,6 +13,7 @@ export const desktopChannels = {
   serverCoreTypes: "seashard.server-core.types",
   serverCoreVersions: "seashard.server-core.versions",
   serverCoreArtifacts: "seashard.server-core.artifacts",
+  dialogSelectDirectory: "seashard.dialog.select-directory",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -103,6 +104,9 @@ export interface SeaShardDesktopApi {
     getSnapshot(): Promise<RuntimeSnapshot>;
   };
   serverCore: ServerCoreSourceClientService;
+  dialog: {
+    selectDirectory(): Promise<string | undefined>;
+  };
   client: {
     getBootstrap(): Promise<DesktopClientBootstrap>;
     onBootstrapChanged(listener: (snapshot: DesktopClientBootstrap) => void): () => void;

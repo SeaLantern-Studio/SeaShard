@@ -16,6 +16,9 @@ const api: SeaShardDesktopApi = Object.freeze({
     listArtifacts: (serverType: string, gameVersion: string) =>
       ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
   }),
+  dialog: Object.freeze({
+    selectDirectory: () => ipcRenderer.invoke(desktopChannels.dialogSelectDirectory),
+  }),
   client: Object.freeze({
     getBootstrap: () => ipcRenderer.invoke(desktopChannels.clientBootstrap),
     onBootstrapChanged: (listener: (snapshot: DesktopClientBootstrap) => void) => {

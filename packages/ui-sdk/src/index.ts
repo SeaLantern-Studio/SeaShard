@@ -29,6 +29,8 @@ export interface UiAppearanceService {
   update(patch: Partial<UiAppearanceSettings>): void;
   reset(): void;
 }
+
+export type SettingsNavigationGroup = "agent" | "server" | "launcher" | "software";
 /** 一个功能入口贡献给桌面 Shell 的页面及其导航记录。 */
 export interface NavigationPageContribution {
   id: string;
@@ -39,6 +41,7 @@ export interface NavigationPageContribution {
   icon?: Component;
   navigation?: boolean;
   placement?: "main" | "settings" | "server-download";
+  settingsGroup?: SettingsNavigationGroup;
   component: Component;
 }
 
