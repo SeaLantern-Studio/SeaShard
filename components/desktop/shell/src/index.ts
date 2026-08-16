@@ -26,7 +26,10 @@ export interface DesktopShellRuntime {
   offActivate(listener: () => void): void;
   onWindowAllClosed(listener: () => void): void;
   offWindowAllClosed(listener: () => void): void;
-  handle(channel: string, listener: (event: IpcMainInvokeEvent) => unknown): void;
+  handle(
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
+  ): void;
   removeHandler(channel: string): void;
   quit(): void;
 }
@@ -40,6 +43,13 @@ export interface DesktopShellConfig {
   reportOpenFailure(error: unknown): void;
   onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
   readServerCoreTypes(): ReturnType<ServerCoreSourceClientService["listTypes"]>;
+  readServerCoreVersions(
+    serverType: string,
+  ): ReturnType<ServerCoreSourceClientService["listVersions"]>;
+  readServerCoreArtifacts(
+    serverType: string,
+    gameVersion: string,
+  ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
@@ -84,6 +94,13 @@ export const desktopShellManifest: PluginManifest = {
     seaShard: ">=0.0.0 <1.0.0",
   },
 };
+
+function expectNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string`);
+  }
+  return value;
+}
 
 /**
  * 创建完整 Desktop Shell。
@@ -236,6 +253,26 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           }
           return config.readServerCoreTypes();
         });
+        config.runtime.handle(desktopChannels.serverCoreVersions, async (event, serverType) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("server core versions request rejected");
+          }
+          return config.readServerCoreVersions(
+            expectNonEmptyString(serverType, "server core type"),
+          );
+        });
+        config.runtime.handle(
+          desktopChannels.serverCoreArtifacts,
+          async (event, serverType, gameVersion) => {
+            if (!ownsWebContents(event.sender.id)) {
+              throw new Error("server core artifacts request rejected");
+            }
+            return config.readServerCoreArtifacts(
+              expectNonEmptyString(serverType, "server core type"),
+              expectNonEmptyString(gameVersion, "game version"),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -262,6 +299,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
           config.runtime.removeHandler(desktopChannels.serverCoreTypes);
+          config.runtime.removeHandler(desktopChannels.serverCoreVersions);
+          config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

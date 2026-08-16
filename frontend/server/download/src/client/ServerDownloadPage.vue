@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import type { ServerCoreSourceClientService } from "@seashard/contracts";
+import type { ServerCoreArtifact, ServerCoreSourceClientService } from "@seashard/contracts";
+import { Cmz_Button, Cmz_Input, Cmz_Tooltip } from "cmzya-modern-ui";
+import { ArrowLeft, ChevronDown, Download, Save } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
+import CoreIcon from "./CoreIcon.vue";
 import type { ResourceCategory } from "./resource-categories";
+
+type CoreView = "catalog" | "versions" | "configuration";
 
 interface CoreCard {
   readonly id: string;
@@ -16,12 +21,30 @@ const props = defineProps<{
 const catalogTypes = ref<readonly string[]>([]);
 const catalogLoading = ref(props.category.id === "server-core");
 const catalogError = ref<string>();
+const activeView = ref<CoreView>("catalog");
+const selectedCore = ref<CoreCard>();
+const versions = ref<readonly string[]>([]);
+const versionsLoading = ref(false);
+const versionsError = ref<string>();
+const expandedVersion = ref<string>();
+const artifactsByVersion = ref<Record<string, readonly ServerCoreArtifact[]>>({});
+const artifactLoadingVersions = ref<Record<string, boolean>>({});
+const artifactErrors = ref<Record<string, string | undefined>>({});
+const selectedArtifact = ref<ServerCoreArtifact>();
+const fileStem = ref("");
+let versionsRequestId = 0;
+
 const coreCards = computed<readonly CoreCard[]>(() => [
   { id: "vanilla", label: "原版核心" },
   ...catalogTypes.value
     .filter((type) => type !== "vanilla")
     .map((type) => ({ id: type, label: formatCoreType(type) })),
 ]);
+
+const configurationTitle = computed(() => {
+  if (!selectedCore.value || !selectedArtifact.value) return "";
+  return `${selectedCore.value.label} ${selectedArtifact.value.gameVersion}`;
+});
 
 onMounted(() => {
   if (props.category.id === "server-core") void loadCatalogTypes();
@@ -33,10 +56,115 @@ async function loadCatalogTypes(): Promise<void> {
   try {
     catalogTypes.value = await props.coreSource.listTypes();
   } catch (error) {
-    catalogError.value = error instanceof Error ? error.message : String(error);
+    catalogError.value = errorMessage(error);
   } finally {
     catalogLoading.value = false;
   }
+}
+
+async function selectCore(core: CoreCard): Promise<void> {
+  selectedCore.value = core;
+  selectedArtifact.value = undefined;
+  versions.value = [];
+  versionsError.value = undefined;
+  expandedVersion.value = undefined;
+  artifactsByVersion.value = {};
+  artifactErrors.value = {};
+  artifactLoadingVersions.value = {};
+  activeView.value = "versions";
+  await loadVersions(core);
+}
+
+async function loadVersions(core = selectedCore.value): Promise<void> {
+  if (!core) return;
+  const requestId = ++versionsRequestId;
+  versionsLoading.value = true;
+  versionsError.value = undefined;
+  try {
+    const result = await props.coreSource.listVersions(core.id);
+    if (requestId === versionsRequestId && selectedCore.value?.id === core.id) {
+      versions.value = result;
+      for (const version of result) void loadArtifacts(version, core, requestId);
+    }
+  } catch (error) {
+    if (requestId === versionsRequestId) versionsError.value = errorMessage(error);
+  } finally {
+    if (requestId === versionsRequestId) versionsLoading.value = false;
+  }
+}
+
+async function toggleVersion(version: string): Promise<void> {
+  if (expandedVersion.value === version) {
+    expandedVersion.value = undefined;
+    return;
+  }
+  expandedVersion.value = version;
+  if (Object.hasOwn(artifactsByVersion.value, version)) return;
+  await loadArtifacts(version);
+}
+
+async function loadArtifacts(
+  version: string,
+  core = selectedCore.value,
+  requestId = versionsRequestId,
+): Promise<void> {
+  if (!core || artifactLoadingVersions.value[version]) return;
+  artifactLoadingVersions.value = { ...artifactLoadingVersions.value, [version]: true };
+  artifactErrors.value = { ...artifactErrors.value, [version]: undefined };
+  try {
+    const artifacts = await props.coreSource.listArtifacts(core.id, version);
+    if (requestId === versionsRequestId && selectedCore.value?.id === core.id) {
+      artifactsByVersion.value = { ...artifactsByVersion.value, [version]: artifacts };
+    }
+  } catch (error) {
+    if (requestId === versionsRequestId) {
+      artifactErrors.value = { ...artifactErrors.value, [version]: errorMessage(error) };
+    }
+  } finally {
+    if (requestId === versionsRequestId) {
+      artifactLoadingVersions.value = {
+        ...artifactLoadingVersions.value,
+        [version]: false,
+      };
+    }
+  }
+}
+
+function configureArtifact(artifact: ServerCoreArtifact): void {
+  selectedArtifact.value = artifact;
+  fileStem.value = stripJarExtension(artifact.fileName);
+  activeView.value = "configuration";
+}
+
+function returnToCatalog(): void {
+  versionsRequestId += 1;
+  activeView.value = "catalog";
+  selectedCore.value = undefined;
+  selectedArtifact.value = undefined;
+  versionsLoading.value = false;
+}
+
+function returnToVersions(): void {
+  activeView.value = "versions";
+  selectedArtifact.value = undefined;
+}
+
+function updateFileStem(value: string): void {
+  fileStem.value = stripJarExtension(value);
+}
+
+function stripJarExtension(fileName: string): string {
+  return fileName.replace(/\.jar$/iu, "");
+}
+
+function artifactCount(version: string): number | undefined {
+  return Object.hasOwn(artifactsByVersion.value, version)
+    ? artifactsByVersion.value[version]?.length
+    : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const coreTypeNames: Readonly<Record<string, string>> = {
@@ -82,181 +210,183 @@ function formatCoreType(type: string): string {
 </script>
 
 <template>
-  <section class="server-download-page" :aria-labelledby="`resource-title-${category.id}`">
-    <h1 :id="`resource-title-${category.id}`">{{ category.label }}</h1>
+  <section
+    class="server-download-page"
+    :class="{ 'configuration-view': activeView === 'configuration' }"
+    :aria-labelledby="`resource-title-${category.id}`"
+  >
+    <template v-if="category.id !== 'server-core'">
+      <h1 :id="`resource-title-${category.id}`" class="plain-title">{{ category.label }}</h1>
+    </template>
 
-    <template v-if="category.id === 'server-core'">
-      <div v-if="catalogLoading" class="core-card-grid" aria-label="正在加载服务器核心">
-        <div v-for="index in 12" :key="index" class="core-card core-card-loading">
-          <div class="core-card-icon"></div>
-          <div class="core-card-label-placeholder"></div>
+    <Transition v-else name="view-shift" mode="out-in">
+      <div v-if="activeView === 'catalog'" key="catalog" class="view-panel">
+        <h1 :id="`resource-title-${category.id}`" class="plain-title">{{ category.label }}</h1>
+
+        <div v-if="catalogLoading" class="core-card-grid" aria-label="正在加载服务器核心">
+          <div v-for="index in 12" :key="index" class="core-card core-card-loading">
+            <div class="core-icon-placeholder"></div>
+            <div class="core-card-label-placeholder"></div>
+          </div>
+        </div>
+
+        <div v-else-if="catalogError" class="catalog-error" role="alert">
+          <p>无法读取服务器核心目录</p>
+          <span>{{ catalogError }}</span>
+          <Cmz_Button variant="outline" size="sm" @click="loadCatalogTypes"> 重新加载 </Cmz_Button>
+        </div>
+
+        <div v-else class="core-card-grid" aria-label="服务器核心列表">
+          <button
+            v-for="core in coreCards"
+            :key="core.id"
+            type="button"
+            class="core-card"
+            :data-core-id="core.id"
+            @click="selectCore(core)"
+          >
+            <CoreIcon :core-id="core.id" :label="core.label" />
+            <span class="core-card-label">{{ core.label }}</span>
+          </button>
         </div>
       </div>
 
-      <div v-else-if="catalogError" class="catalog-error" role="alert">
-        <p>无法读取服务器核心目录</p>
-        <span>{{ catalogError }}</span>
-        <button type="button" @click="loadCatalogTypes">重新加载</button>
+      <div v-else-if="activeView === 'versions' && selectedCore" key="versions" class="view-panel">
+        <div class="view-heading">
+          <button
+            type="button"
+            class="icon-back-button"
+            aria-label="返回服务器核心"
+            @click="returnToCatalog"
+          >
+            <ArrowLeft :size="19" :stroke-width="1.9" />
+          </button>
+          <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="row" />
+          <h1 :id="`resource-title-${category.id}`">{{ selectedCore.label }}</h1>
+        </div>
+
+        <div v-if="versionsLoading" class="version-list" aria-label="正在加载游戏版本">
+          <div v-for="index in 7" :key="index" class="version-row version-row-loading">
+            <div class="version-label-placeholder"></div>
+          </div>
+        </div>
+
+        <div v-else-if="versionsError" class="catalog-error" role="alert">
+          <p>无法读取支持的 Minecraft 版本</p>
+          <span>{{ versionsError }}</span>
+          <Cmz_Button variant="outline" size="sm" @click="loadVersions()"> 重新加载 </Cmz_Button>
+        </div>
+
+        <div v-else-if="versions.length === 0" class="empty-state">
+          <p>当前核心暂未提供可下载版本</p>
+          <span>返回上一级选择其他服务端核心。</span>
+        </div>
+
+        <div v-else class="version-list" aria-label="Minecraft 版本列表">
+          <article
+            v-for="version in versions"
+            :key="version"
+            class="version-row"
+            :class="{ expanded: expandedVersion === version }"
+          >
+            <button
+              type="button"
+              class="version-row-trigger"
+              :aria-expanded="expandedVersion === version"
+              @click="toggleVersion(version)"
+            >
+              <span class="version-summary">
+                <span class="version-number">{{ version }}</span>
+                <span class="version-count">({{ artifactCount(version) ?? "…" }})</span>
+              </span>
+              <ChevronDown class="version-chevron" :size="18" :stroke-width="1.8" />
+            </button>
+
+            <div class="artifact-panel" :aria-hidden="expandedVersion !== version">
+              <div class="artifact-panel-inner">
+                <div v-if="artifactLoadingVersions[version]" class="artifact-loading">
+                  <span v-for="index in 3" :key="index"></span>
+                </div>
+                <div v-else-if="artifactErrors[version]" class="artifact-error" role="alert">
+                  <span>{{ artifactErrors[version] }}</span>
+                  <Cmz_Button variant="ghost" size="sm" @click="loadArtifacts(version)">
+                    重试
+                  </Cmz_Button>
+                </div>
+                <div v-else-if="artifactsByVersion[version]?.length === 0" class="artifact-empty">
+                  该 Minecraft 版本暂无可下载构建
+                </div>
+                <template v-else>
+                  <button
+                    v-for="artifact in artifactsByVersion[version] ?? []"
+                    :key="artifact.fileName"
+                    type="button"
+                    class="artifact-row"
+                    @click="configureArtifact(artifact)"
+                  >
+                    <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="row" />
+                    <strong class="artifact-name">{{
+                      stripJarExtension(artifact.fileName)
+                    }}</strong>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </article>
+        </div>
       </div>
 
-      <div v-else class="core-card-grid" aria-label="服务器核心列表">
-        <article v-for="core in coreCards" :key="core.id" class="core-card" :data-core-id="core.id">
-          <div class="core-card-icon" aria-hidden="true"></div>
-          <h2>{{ core.label }}</h2>
-        </article>
+      <div
+        v-else-if="activeView === 'configuration' && selectedCore && selectedArtifact"
+        key="configuration"
+        class="view-panel configuration-panel"
+      >
+        <div class="configuration-heading">
+          <button
+            type="button"
+            class="icon-back-button"
+            aria-label="返回版本选择"
+            @click="returnToVersions"
+          >
+            <ArrowLeft :size="20" :stroke-width="1.9" />
+          </button>
+          <h1 :id="`resource-title-${category.id}`">{{ configurationTitle }}</h1>
+        </div>
+
+        <div class="configuration-body">
+          <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="detail" />
+          <div class="filename-field">
+            <label class="sr-only" for="server-core-file-name">文件名</label>
+            <Cmz_Input
+              id="server-core-file-name"
+              class="filename-input"
+              :model-value="fileStem"
+              :maxlength="180"
+              @update:model-value="updateFileStem"
+            />
+          </div>
+        </div>
+
+        <div class="download-action-bar" aria-label="下载操作">
+          <Cmz_Button class="download-primary" size="lg">
+            <Download :size="19" :stroke-width="2" />
+            开始下载
+          </Cmz_Button>
+          <Cmz_Tooltip class="save-action-wrap" content="另存为" placement="top">
+            <Cmz_Button
+              class="save-action"
+              variant="outline"
+              size="lg"
+              icon-only
+              aria-label="另存为"
+            >
+              <Save :size="19" :stroke-width="1.9" />
+            </Cmz_Button>
+          </Cmz_Tooltip>
+        </div>
       </div>
-    </template>
+    </Transition>
   </section>
 </template>
 
-<style scoped>
-.server-download-page {
-  min-width: 0;
-  min-height: 100%;
-  padding: 8px clamp(4px, 1.6vw, 18px) 34px;
-}
-
-.server-download-page h1 {
-  margin: 0 0 27px;
-  color: var(--sl-text-primary);
-  font-size: clamp(1.6rem, 2.6vw, 2rem);
-  font-weight: 700;
-  letter-spacing: -0.028em;
-  line-height: 1.15;
-}
-
-.core-card-grid {
-  display: grid;
-  align-items: start;
-  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
-  gap: 14px;
-}
-
-.core-card {
-  display: flex;
-  min-width: 0;
-  min-height: 154px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  padding: 19px 14px 17px;
-  border: 1px solid var(--sl-border-light);
-  border-radius: var(--sl-radius-lg);
-  background: color-mix(in srgb, var(--sl-surface) 82%, var(--sl-bg-secondary));
-}
-
-.core-card-icon {
-  width: 68px;
-  height: 68px;
-  flex: 0 0 68px;
-  border: 1px dashed color-mix(in srgb, var(--sl-border) 78%, transparent);
-  border-radius: var(--sl-radius-md);
-  background: color-mix(in srgb, var(--sl-bg-secondary) 75%, transparent);
-}
-
-.core-card h2 {
-  max-width: 100%;
-  margin: 0;
-  overflow: hidden;
-  color: var(--sl-text-primary);
-  font-size: 0.875rem;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.core-card-loading {
-  border-color: transparent;
-}
-
-.core-card-loading .core-card-icon,
-.core-card-label-placeholder {
-  border: 0;
-  background: linear-gradient(
-    100deg,
-    var(--sl-bg-secondary) 30%,
-    var(--sl-bg-tertiary) 48%,
-    var(--sl-bg-secondary) 66%
-  );
-  background-size: 220% 100%;
-  animation: catalog-loading 1.35s ease-in-out infinite;
-}
-
-.core-card-label-placeholder {
-  width: 72%;
-  height: 12px;
-  border-radius: var(--sl-radius-full);
-}
-
-.catalog-error {
-  max-width: 520px;
-  padding: 20px 22px;
-  border-left: 3px solid #dc6b6b;
-  background: color-mix(in srgb, #dc6b6b 8%, var(--sl-surface));
-}
-
-.catalog-error p {
-  margin: 0;
-  color: var(--sl-text-primary);
-  font-size: 0.9375rem;
-  font-weight: 650;
-}
-
-.catalog-error span {
-  display: block;
-  margin-top: 6px;
-  color: var(--sl-text-secondary);
-  font-size: 0.8125rem;
-  line-height: 1.55;
-}
-
-.catalog-error button {
-  margin-top: 15px;
-  padding: 7px 12px;
-  border: 1px solid var(--sl-border);
-  border-radius: var(--sl-radius-md);
-  background: var(--sl-surface);
-  color: var(--sl-text-primary);
-  font-size: 0.8125rem;
-  font-weight: 600;
-}
-
-.catalog-error button:hover {
-  background: var(--sl-bg-tertiary);
-}
-
-.catalog-error button:focus-visible {
-  outline: 2px solid var(--sl-primary);
-  outline-offset: 2px;
-}
-
-@keyframes catalog-loading {
-  from {
-    background-position: 100% 0;
-  }
-
-  to {
-    background-position: -100% 0;
-  }
-}
-
-@media (max-width: 1120px) {
-  .server-download-page {
-    padding-inline: 4px;
-  }
-
-  .core-card-grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .core-card-loading .core-card-icon,
-  .core-card-label-placeholder {
-    animation: none;
-  }
-}
-</style>
+<style scoped src="./ServerDownloadPage.css"></style>

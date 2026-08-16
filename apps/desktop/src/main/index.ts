@@ -1,6 +1,6 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
-import { desktopShellContract } from "@seashard/contracts";
+import { desktopShellContract, type ServerCoreArtifact } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
@@ -63,6 +63,33 @@ function resolveDevelopmentUrl(): string | undefined {
     throw new Error(`development server must use loopback HTTP: ${candidate}`);
   }
   return url.href;
+}
+
+function expectServerCoreStrings(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item)) {
+    throw new Error(`server core source returned invalid ${label}`);
+  }
+  return value;
+}
+
+function expectServerCoreArtifacts(value: unknown): ServerCoreArtifact[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server core source returned invalid artifacts");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`server core source returned invalid artifact ${index}`);
+    }
+    const artifact = item as Record<string, unknown>;
+    const fields = ["serverType", "gameVersion", "fileName", "url", "sha256"] as const;
+    if (
+      artifact.source !== "cnb" ||
+      fields.some((field) => typeof artifact[field] !== "string" || !artifact[field])
+    ) {
+      throw new Error(`server core source returned invalid artifact ${index}`);
+    }
+    return artifact as unknown as ServerCoreArtifact;
+  });
 }
 
 function installDevelopmentControl(): void {
@@ -260,20 +287,25 @@ async function bootstrap(): Promise<void> {
               activeKernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
               ),
-            readServerCoreTypes: async () => {
-              const result = await activeKernel.callService(
-                serverCoreSourceContract,
-                "listTypes",
-                [],
-              );
-              if (
-                !Array.isArray(result) ||
-                result.some((value) => typeof value !== "string" || !value)
-              ) {
-                throw new Error("server core source returned invalid types");
-              }
-              return result as string[];
-            },
+            readServerCoreTypes: async () =>
+              expectServerCoreStrings(
+                await activeKernel.callService(serverCoreSourceContract, "listTypes", []),
+                "types",
+              ),
+            readServerCoreVersions: async (serverType) =>
+              expectServerCoreStrings(
+                await activeKernel.callService(serverCoreSourceContract, "listVersions", [
+                  serverType,
+                ]),
+                "versions",
+              ),
+            readServerCoreArtifacts: async (serverType, gameVersion) =>
+              expectServerCoreArtifacts(
+                await activeKernel.callService(serverCoreSourceContract, "listArtifacts", [
+                  serverType,
+                  gameVersion,
+                ]),
+              ),
             onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;

@@ -1,17 +1,9 @@
-export { serverCoreSourceContract } from "@seashard/contracts";
+import type { ServerCoreArtifact } from "@seashard/contracts";
+
+export { serverCoreSourceContract, type ServerCoreArtifact } from "@seashard/contracts";
 
 export const defaultCnbCatalogUrl =
   "https://cnb.cool/SeaLantern-studio/ServerCore-Mirror/-/releases/download/26.02.27/jar_lfs_links.json";
-
-/** CNB 目录中的一个可下载服务端核心，SHA-256 来自其 LFS 地址。 */
-export interface ServerCoreArtifact {
-  source: "cnb";
-  serverType: string;
-  gameVersion: string;
-  fileName: string;
-  url: string;
-  sha256: string;
-}
 
 /** 下载任务的完整生命周期；终态为 completed、failed 或 cancelled。 */
 export type ServerCoreSourceTaskState =

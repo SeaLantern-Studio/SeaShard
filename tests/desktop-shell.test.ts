@@ -7,6 +7,7 @@ import {
   type DesktopShellService,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
+  type ServerCoreArtifact,
 } from "../packages/contracts/src/index.ts";
 import {
   createDesktopShellModule,
@@ -120,7 +121,7 @@ class FakeBrowserWindow extends EventEmitter {
 
 class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntime {
   readonly windows: FakeBrowserWindow[] = [];
-  readonly handlers = new Map<string, (event: IpcMainInvokeEvent) => unknown>();
+  readonly handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
   quitCount = 0;
 
   constructor(readonly platform: NodeJS.Platform) {
@@ -153,7 +154,10 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     this.off("window-all-closed", listener);
   }
 
-  handle(channel: string, listener: (event: IpcMainInvokeEvent) => unknown): void {
+  handle(
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
+  ): void {
     if (this.handlers.has(channel)) throw new Error(`duplicate handler: ${channel}`);
     this.handlers.set(channel, listener);
   }
@@ -162,10 +166,10 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     this.handlers.delete(channel);
   }
 
-  async invoke(channel: string, senderId: number): Promise<unknown> {
+  async invoke(channel: string, senderId: number, ...args: unknown[]): Promise<unknown> {
     const handler = this.handlers.get(channel);
     if (!handler) throw new Error(`missing handler: ${channel}`);
-    return handler({ sender: { id: senderId } } as IpcMainInvokeEvent);
+    return handler({ sender: { id: senderId } } as IpcMainInvokeEvent, ...args);
   }
 
   quit(): void {
@@ -234,6 +238,15 @@ const clientEntries: ClientEntryPublication = {
   ],
 };
 
+const paperArtifact = {
+  source: "cnb",
+  serverType: "paper",
+  gameVersion: "1.21.1",
+  fileName: "paper-1.21.1-131.jar",
+  url: "https://example.invalid/paper.jar?sha256=aaaaaaaa",
+  sha256: "a".repeat(64),
+} satisfies ServerCoreArtifact;
+
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
@@ -251,6 +264,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       },
       readClientEntryPublication: () => clientEntries,
       readServerCoreTypes: async () => ["vanilla", "paper"],
+      readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
+      readServerCoreArtifacts: async (serverType, gameVersion) =>
+        serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
       onClientEntriesChanged: (listener) => {
         clientEntryListener = listener;
         return () => {
@@ -303,6 +319,29 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), ["vanilla", "paper"]);
   await assert.rejects(runtime.invoke(desktopChannels.serverCoreTypes, 999), /request rejected/);
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreVersions, 1, "paper"), [
+    "1.21.1",
+  ]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreVersions, 1, ""),
+    /non-empty string/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreVersions, 999, "paper"),
+    /request rejected/,
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverCoreArtifacts, 1, "paper", "1.21.1"),
+    [paperArtifact],
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreArtifacts, 1, "paper", ""),
+    /non-empty string/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreArtifacts, 999, "paper", "1.21.1"),
+    /request rejected/,
+  );
   assert.deepEqual(readySnapshots, []);
   assert.deepEqual(await runtime.invoke(desktopChannels.clientBootstrap, 1), {
     protocolVersion: 1,
@@ -349,6 +388,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreVersions), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
   assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
@@ -369,6 +410,8 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       reportOpenFailure: () => {},
       readClientEntryPublication: () => ({ revision: 0, entries: [] }),
       readServerCoreTypes: async () => [],
+      readServerCoreVersions: async () => [],
+      readServerCoreArtifacts: async () => [],
       onClientEntriesChanged: () => () => {},
     },
     { getSnapshot: async () => snapshot },

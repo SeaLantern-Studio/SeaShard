@@ -11,6 +11,8 @@ export const desktopChannels = {
   windowToggleMaximize: "seashard.window.toggle-maximize",
   windowClose: "seashard.window.close",
   serverCoreTypes: "seashard.server-core.types",
+  serverCoreVersions: "seashard.server-core.versions",
+  serverCoreArtifacts: "seashard.server-core.artifacts",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -79,9 +81,21 @@ export interface DesktopClientBootstrap extends ClientEntryPublication {
   };
 }
 
+/** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */
+export interface ServerCoreArtifact {
+  source: "cnb";
+  serverType: string;
+  gameVersion: string;
+  fileName: string;
+  url: string;
+  sha256: string;
+}
+
 /** Renderer 只读的服务端核心目录能力，不暴露下载路径或宿主对象。 */
 export interface ServerCoreSourceClientService {
   listTypes(): Promise<readonly string[]>;
+  listVersions(serverType: string): Promise<readonly string[]>;
+  listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
 }
 
 export interface SeaShardDesktopApi {

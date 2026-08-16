@@ -11,6 +11,10 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   serverCore: Object.freeze({
     listTypes: () => ipcRenderer.invoke(desktopChannels.serverCoreTypes),
+    listVersions: (serverType: string) =>
+      ipcRenderer.invoke(desktopChannels.serverCoreVersions, serverType),
+    listArtifacts: (serverType: string, gameVersion: string) =>
+      ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
   }),
   client: Object.freeze({
     getBootstrap: () => ipcRenderer.invoke(desktopChannels.clientBootstrap),
