@@ -2,6 +2,7 @@ import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
 import type { RuntimeSnapshot } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
+import { createSQLitePluginStorageBootstrapDescriptor } from "@seashard/plugin-storage-sqlite";
 import { createPluginSystemFoundationBootstrapDescriptor } from "@seashard/plugin-system-foundation";
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
@@ -56,12 +57,17 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
   const host = resolveHost();
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(app.getPath("userData"), "core");
+  const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
   const root = new Context();
   bootstrapLoader = new BootstrapLoader(root);
   await bootstrapLoader.start([
     createSQLiteBootstrapDescriptor({
       dataRoot,
-      workerEntry: join(moduleDirectory, "../../../database-worker/dist/index.js"),
+      workerEntry: databaseWorkerEntry,
+    }),
+    createSQLitePluginStorageBootstrapDescriptor({
+      dataRoot,
+      workerEntry: databaseWorkerEntry,
     }),
     createPluginSystemFoundationBootstrapDescriptor({ seaShardVersion }),
   ]);
@@ -75,7 +81,7 @@ async function bootstrap(): Promise<void> {
     architecture: host.architecture,
     root,
     store: root["plugin-system-foundation"].store,
-    pluginStorage: root.pluginStorage,
+    pluginStorage: root["plugin-storage"],
   });
   if (smokeMode) {
     kernel.registerCoreService("seashard.smoke.marker", {

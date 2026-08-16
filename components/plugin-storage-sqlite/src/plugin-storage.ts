@@ -24,6 +24,12 @@ const maximumDocumentBytes = 1024 * 1024;
 const maximumTtlMs = 365 * 24 * 60 * 60 * 1_000;
 const storageKeyPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9._/-]{0,254})?$/;
 
+/**
+ * 托管 JSON 文档存储的 Data Capsule。
+ *
+ * 主键同时包含插件 owner、runtime binding 和文档 key；namespace 隔离在 SQL 条件中
+ * 固化，不能依赖上层调用者自觉过滤。
+ */
 export const pluginDocumentDataCapsule = defineDataCapsule({
   namespace: "plugin_documents",
   schemaVersion: 1,
@@ -146,9 +152,16 @@ export const pluginDocumentDataCapsule = defineDataCapsule({
   ],
 });
 
+/**
+ * 基于类型化 Data Capsule 的插件文档仓库。
+ *
+ * 该类只接收由 Core 生成的 ExecutionContext，并把插件身份固化进返回的闭包，
+ * 后续 get/put/delete API 不再接受 ownerId 或 runtimeId。
+ */
 export class SQLitePluginDocumentStorage implements PluginStorageBroker {
   constructor(private readonly repository: RegisteredDataCapsule) {}
 
+  /** 为单个插件 runtime 创建命名空间已绑定的存储视图。 */
   for(execution: ExecutionContext): PluginStorage {
     if (execution.actorType !== "plugin" || !execution.runtimeId) {
       throw new Error("managed plugin storage requires a plugin runtime execution context");
@@ -185,6 +198,7 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
     const timestamp = now();
     const expiresAt = resolveExpiry(options.ttlMs, timestamp);
     const expectedRevision = options.expectedRevision;
+    // 未提供 expectedRevision 表示显式接受 last-write-wins，并原子递增 revision。
     if (expectedRevision === undefined) {
       const result = await this.repository.execute("document.put", [
         ownerId,
@@ -196,6 +210,7 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
       ]);
       return requiredDocument("document.put", result);
     }
+    // null 表示 create-only。先在同一事务清理已过期记录，避免过期 key 永久阻塞创建。
     if (expectedRevision === null) {
       const results = await this.repository.transaction([
         {
@@ -212,6 +227,7 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
       if (!result.row) throw new Error(`plugin storage revision conflict: ${key}`);
       return decodeDocument(result.row as DocumentRow);
     }
+    // 数字 revision 走 CAS 更新；不匹配时 SQL 不返回行，调用方得到明确冲突。
     validateRevision(expectedRevision);
     const result = await this.repository.execute("document.update", [
       valueJson,
@@ -228,6 +244,7 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
     return decodeDocument(result.row as DocumentRow);
   }
 
+  /** 删除也支持 revision 前置条件，防止旧 generation 删除新 generation 的数据。 */
   private async delete(
     ownerId: string,
     runtimeId: string,
@@ -265,6 +282,7 @@ function decodeDocument(row: DocumentRow): PluginStoredDocument {
   };
 }
 
+/** 校验可诊断、可导出的层级 key，并拒绝空段及路径穿越语义。 */
 function validateKey(key: string): void {
   if (
     !storageKeyPattern.test(key) ||
@@ -275,6 +293,7 @@ function validateKey(key: string): void {
   }
 }
 
+/** 在进入 Worker 前验证 JSON 形状和字节上限，避免 IPC 携带无效或超大文档。 */
 function serializeValue(value: JsonValue): string {
   assertJsonValue(value, new WeakSet());
   const json = JSON.stringify(value);
@@ -285,6 +304,7 @@ function serializeValue(value: JsonValue): string {
   return json;
 }
 
+/** 递归检查纯 JSON 值，同时用祖先集合识别循环引用。 */
 function assertJsonValue(value: unknown, ancestors: WeakSet<object>): void {
   if (value === null || typeof value === "string" || typeof value === "boolean") return;
   if (typeof value === "number") {
@@ -306,6 +326,7 @@ function assertJsonValue(value: unknown, ancestors: WeakSet<object>): void {
   ancestors.delete(value);
 }
 
+/** 将相对 TTL 固化为 UTC 时间；持久层只比较绝对时间。 */
 function resolveExpiry(ttlMs: number | undefined, timestamp: string): string | null {
   if (ttlMs === undefined) return null;
   if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > maximumTtlMs) {

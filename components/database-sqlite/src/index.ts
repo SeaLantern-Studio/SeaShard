@@ -7,23 +7,21 @@ import type {
   DatabaseService,
   RegisteredDataCapsule,
 } from "@seashard/database";
-import type { ExecutionContext, PluginStorage, PluginStorageBroker } from "@seashard/plugin-sdk";
 import { Context, Service } from "cordis";
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { SQLiteDatabaseBroker } from "./broker";
 import { DataRootLease } from "./data-root-lease";
-import { pluginDocumentDataCapsule, SQLitePluginDocumentStorage } from "./plugin-storage";
 
+/** 核心权威 SQLite 数据库的受保护启动参数。 */
 export interface SQLiteBootstrapOptions {
   readonly dataRoot: string;
   readonly workerEntry: string | URL;
   readonly databasePath?: string;
-  readonly pluginStoragePath?: string;
   readonly readWorkers?: number;
 }
 
+/** 只暴露类型化 Data Capsule 和维护操作，不暴露连接或任意 SQL。 */
 export class SQLiteDatabaseService extends Service implements DatabaseService {
   constructor(
     ctx: Context,
@@ -56,26 +54,19 @@ export class SQLiteDatabaseService extends Service implements DatabaseService {
     return this.broker.close();
   }
 }
-export class SQLitePluginStorageService extends Service implements PluginStorageBroker {
-  constructor(
-    ctx: Context,
-    private readonly storage: SQLitePluginDocumentStorage,
-  ) {
-    super(ctx, "pluginStorage");
-  }
-
-  for(execution: ExecutionContext): PluginStorage {
-    return this.storage.for(execution);
-  }
-}
 
 declare module "cordis" {
   interface Context {
     database: SQLiteDatabaseService;
-    pluginStorage: SQLitePluginStorageService;
   }
 }
 
+/**
+ * 创建核心权威数据库的 Bootstrap Descriptor。
+ *
+ * 该组件拥有 DataRoot Lease，因此必须最先启动、最后停止；其他持久化 Foundation
+ * 通过 inject 依赖它，但各自拥有独立的领域 Repository。
+ */
 export function createSQLiteBootstrapDescriptor(
   options: SQLiteBootstrapOptions,
 ): BootstrapDescriptor {
@@ -83,49 +74,33 @@ export function createSQLiteBootstrapDescriptor(
     id: "seashard.database-sqlite",
     buildDigest: createHash("sha256").update("seashard.database-sqlite.bootstrap.v1").digest("hex"),
     inject: [],
-    provides: ["database", "plugin-storage"],
+    provides: ["database"],
     async load(ctx) {
+      // Lease 覆盖数据库、托管存储和 Foundation 的完整生命周期。
       const lease = await DataRootLease.acquire(options.dataRoot);
-      const pluginStorageRoot = join(options.dataRoot, "plugin-data");
-      let databaseBroker: SQLiteDatabaseBroker | undefined;
-      let storageBroker: SQLiteDatabaseBroker | undefined;
+      let broker: SQLiteDatabaseBroker | undefined;
       try {
-        await mkdir(pluginStorageRoot, { recursive: true });
-        databaseBroker = await SQLiteDatabaseBroker.create({
+        broker = await SQLiteDatabaseBroker.create({
           databasePath: options.databasePath ?? join(options.dataRoot, "seashard.sqlite3"),
           workerEntry: options.workerEntry,
           readWorkers: options.readWorkers,
         });
-        storageBroker = await SQLiteDatabaseBroker.create({
-          databasePath: options.pluginStoragePath ?? join(pluginStorageRoot, "documents.sqlite3"),
-          workerEntry: options.workerEntry,
-          readWorkers: 1,
-        });
-        const storageRepository = await storageBroker.registerCapsule(pluginDocumentDataCapsule);
-        new SQLiteDatabaseService(ctx, databaseBroker);
-        new SQLitePluginStorageService(ctx, new SQLitePluginDocumentStorage(storageRepository));
-        const activeDatabaseBroker = databaseBroker;
-        const activeStorageBroker = storageBroker;
+        // 连接成功后才发布 Database Service，避免依赖者观察到不可用 Broker。
+        new SQLiteDatabaseService(ctx, broker);
+        const activeBroker = broker;
+        // 先关闭 Worker/连接，再释放 DataRoot Lease，防止另一个进程提前接管目录。
         return async () => {
           try {
-            await activeStorageBroker.close();
+            await activeBroker.close();
           } finally {
-            try {
-              await activeDatabaseBroker.close();
-            } finally {
-              await lease.release();
-            }
+            await lease.release();
           }
         };
       } catch (error) {
         try {
-          await storageBroker?.close();
+          await broker?.close();
         } finally {
-          try {
-            await databaseBroker?.close();
-          } finally {
-            await lease.release();
-          }
+          await lease.release();
         }
         throw error;
       }
@@ -135,4 +110,3 @@ export function createSQLiteBootstrapDescriptor(
 
 export { SQLiteDatabaseBroker } from "./broker";
 export { DataRootLease } from "./data-root-lease";
-export { pluginDocumentDataCapsule, SQLitePluginDocumentStorage } from "./plugin-storage";

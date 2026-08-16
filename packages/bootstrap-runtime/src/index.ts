@@ -2,6 +2,12 @@ import { Context, type Fiber } from "cordis";
 
 export type BootstrapDisposer = () => void | Promise<void>;
 
+/**
+ * 编译进 Core 的受保护启动组件描述。
+ *
+ * Bootstrap Descriptor 只描述启动依赖和装载函数，不参与普通插件的
+ * Generation、Publication 与热重载流程。
+ */
 export interface BootstrapDescriptor {
   readonly id: string;
   readonly buildDigest: string;
@@ -20,6 +26,12 @@ const componentIdPattern = /^[a-z][a-z0-9.-]{0,126}$/;
 const contractPattern = /^[a-z][a-z0-9.*:-]{0,126}$/;
 const digestPattern = /^[a-f0-9]{64}$/;
 
+/**
+ * 在普通 ComponentSupervisor 创建前装载受保护组件。
+ *
+ * Loader 只负责固定依赖图、Cordis 生命周期绑定和失败回滚；它不读取插件目录，
+ * 也不根据数据库中的启用状态决定是否启动组件。
+ */
 export class BootstrapLoader {
   private readonly fibers: Fiber[] = [];
   private readonly loadedComponents: LoadedBootstrapComponent[] = [];
@@ -28,20 +40,29 @@ export class BootstrapLoader {
 
   constructor(readonly root: Context) {}
 
+  /**
+   * 校验并启动完整 Descriptor 集合。
+   *
+   * 任一组件启动失败时会逆序释放已经启动的 Fiber，避免留下半初始化数据库、
+   * 文件租约或 Worker。
+   */
   async start(descriptors: readonly BootstrapDescriptor[]): Promise<void> {
     if (this.started) throw new Error("bootstrap loader has already started");
     this.started = true;
+    // 先完成确定性的拓扑排序，避免依赖装载顺序受调用方数组顺序影响。
     const ordered = orderDescriptors(descriptors);
     try {
       for (const descriptor of ordered) {
         const adapter = {
           name: descriptor.id,
+          // Cordis 也必须看到 inject；仅在 Loader 内排序不足以获得 Context 服务访问权。
           inject: descriptor.inject,
           apply: async (ctx: Context) => {
             const dispose = await descriptor.load(ctx);
             if (dispose) ctx.effect(() => dispose, `bootstrap component ${descriptor.id}`);
           },
         };
+        // 每个 Bootstrap Component 仍使用独立 Fiber，统一继承 Cordis 的清理栈。
         const fiber = this.root.plugin(adapter);
         this.fibers.push(fiber);
         await fiber;
@@ -52,11 +73,13 @@ export class BootstrapLoader {
         });
       }
     } catch (error) {
+      // 启动失败不是降级成功：必须先完整回滚，再把原始错误交给宿主。
       await this.dispose();
       throw error;
     }
   }
 
+  /** 返回防御性复制的已启动组件视图，供启动诊断使用。 */
   snapshot(): readonly LoadedBootstrapComponent[] {
     return this.loadedComponents.map((component) => ({
       ...component,
@@ -64,12 +87,14 @@ export class BootstrapLoader {
     }));
   }
 
+  /** 幂等地逆序释放全部受保护组件。 */
   dispose(): Promise<void> {
     this.disposeTask ??= this.disposeFibers();
     return this.disposeTask;
   }
 
   private async disposeFibers(): Promise<void> {
+    // 依赖者必须先于提供者停止，例如 Storage 先停、Database 最后释放 DataRoot Lease。
     const failures: unknown[] = [];
     for (const fiber of this.fibers.reverse()) {
       try {
@@ -84,6 +109,11 @@ export class BootstrapLoader {
   }
 }
 
+/**
+ * 根据 inject/provides 构建稳定的拓扑顺序。
+ *
+ * 相同层级按组件 ID 排序，保证不同平台和不同调用方得到一致的启动结果。
+ */
 export function orderDescriptors(
   descriptors: readonly BootstrapDescriptor[],
 ): readonly BootstrapDescriptor[] {

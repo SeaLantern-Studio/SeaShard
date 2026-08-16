@@ -13,12 +13,11 @@ import {
 } from "../packages/component-supervisor/src/index.ts";
 import {
   createSQLiteBootstrapDescriptor,
-  pluginDocumentDataCapsule,
   SQLiteDatabaseBroker,
-  SQLitePluginDocumentStorage,
 } from "../components/database-sqlite/src/index.ts";
 import { defineDataCapsule } from "../packages/database/src/index.ts";
 import { createPluginSystemFoundationBootstrapDescriptor } from "../components/plugin-system-foundation/src/index.ts";
+import { createSQLitePluginStorageBootstrapDescriptor } from "../components/plugin-storage-sqlite/src/index.ts";
 import type {
   ExecutionContext,
   JsonValue,
@@ -727,16 +726,28 @@ await test("failed worker migration rolls back before a corrected retry", async 
   }
 });
 
-await test("managed plugin storage isolates runtimes and rejects stale revisions", async () => {
+await test("managed plugin storage boots separately, isolates runtimes, and rejects stale revisions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-storage-"));
-  const broker = await SQLiteDatabaseBroker.create({
-    databasePath: join(directory, "documents.sqlite3"),
-    workerEntry: databaseWorkerEntry,
-    readWorkers: 1,
-  });
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
   try {
-    const repository = await broker.registerCapsule(pluginDocumentDataCapsule);
-    const storage = new SQLitePluginDocumentStorage(repository);
+    await loader.start([
+      createSQLitePluginStorageBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    assert.deepEqual(
+      loader.snapshot().map((component) => component.id),
+      ["seashard.database-sqlite", "seashard.plugin-storage-sqlite"],
+    );
+
+    const storage = root["plugin-storage"];
     const baseExecution: ExecutionContext = {
       actorType: "plugin",
       actorId: "example.plugin",
@@ -774,7 +785,7 @@ await test("managed plugin storage isolates runtimes and rejects stale revisions
     assert.equal(await runtimeA.delete("state/session", { expectedRevision: 1 }), false);
     assert.equal(await runtimeA.delete("state/session", { expectedRevision: 2 }), true);
   } finally {
-    await broker.close();
+    await loader.dispose();
     await rm(directory, { recursive: true, force: true });
   }
 });

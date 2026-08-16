@@ -62,6 +62,9 @@ importers:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@seashard/plugin-storage-sqlite':
+        specifier: workspace:*
+        version: link:../../components/plugin-storage-sqlite
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
@@ -101,9 +104,6 @@ importers:
       '@seashard/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@seashard/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
@@ -119,6 +119,24 @@ importers:
       electron:
         specifier: 43.4.0
         version: 43.4.0
+
+  components/plugin-storage-sqlite:
+    dependencies:
+      '@seashard/bootstrap-runtime':
+        specifier: workspace:*
+        version: link:../../packages/bootstrap-runtime
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@seashard/database-sqlite':
+        specifier: workspace:*
+        version: link:../database-sqlite
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
 
   components/plugin-system-foundation:
     dependencies:

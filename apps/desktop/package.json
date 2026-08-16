@@ -10,6 +10,7 @@
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/desktop-gateway": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-storage-sqlite": "workspace:*",
     "@seashard/plugin-system": "workspace:*",
     "@seashard/plugin-system-foundation": "workspace:*",
     "cmzya-modern-ui": "0.6.1",
