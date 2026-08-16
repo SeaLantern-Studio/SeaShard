@@ -21,6 +21,12 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.on(desktopChannels.clientBootstrapChanged, handler);
       return () => ipcRenderer.removeListener(desktopChannels.clientBootstrapChanged, handler);
     },
+    ready: () => ipcRenderer.invoke(desktopChannels.rendererReady),
+  }),
+  window: Object.freeze({
+    minimize: () => ipcRenderer.invoke(desktopChannels.windowMinimize),
+    toggleMaximize: () => ipcRenderer.invoke(desktopChannels.windowToggleMaximize),
+    close: () => ipcRenderer.invoke(desktopChannels.windowClose),
   }),
 });
 

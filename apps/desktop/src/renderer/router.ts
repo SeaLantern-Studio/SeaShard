@@ -11,7 +11,7 @@ export const router = createRouter({
   routes: [
     {
       path: "/",
-      name: "shell-root",
+      name: "home",
       component: EmptyRoute,
     },
   ],

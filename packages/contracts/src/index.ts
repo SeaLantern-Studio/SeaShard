@@ -6,6 +6,10 @@ export const desktopChannels = {
   runtimeSnapshot: "seashard.runtime.snapshot",
   clientBootstrap: "seashard.client.bootstrap",
   clientBootstrapChanged: "seashard.client.bootstrap-changed",
+  rendererReady: "seashard.client.renderer-ready",
+  windowMinimize: "seashard.window.minimize",
+  windowToggleMaximize: "seashard.window.toggle-maximize",
+  windowClose: "seashard.window.close",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -79,5 +83,11 @@ export interface SeaShardDesktopApi {
   client: {
     getBootstrap(): Promise<DesktopClientBootstrap>;
     onBootstrapChanged(listener: (snapshot: DesktopClientBootstrap) => void): () => void;
+    ready(): Promise<void>;
+  };
+  window: {
+    minimize(): Promise<void>;
+    toggleMaximize(): Promise<boolean>;
+    close(): Promise<void>;
   };
 }

@@ -151,7 +151,7 @@ async function bootstrap(): Promise<void> {
               activeKernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
               ),
-            onRuntimeSnapshotServed: (snapshot) => {
+            onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;
               console.log(`SEASHARD_SMOKE_READY components=${snapshot.components.length}`);

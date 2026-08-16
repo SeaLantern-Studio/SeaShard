@@ -37,7 +37,7 @@ export interface DesktopShellConfig {
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
-  onRuntimeSnapshotServed?(snapshot: RuntimeSnapshot): void;
+  onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
@@ -104,6 +104,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         !primaryWindow.isDestroyed() &&
         primaryWindow.webContents.id === webContentsId;
 
+      const ownedWindow = (webContentsId: number): BrowserWindow => {
+        if (!ownsWebContents(webContentsId) || !primaryWindow) {
+          throw new Error("window action request rejected");
+        }
+        return primaryWindow;
+      };
+
       const createClientBootstrap = (webContentsId: number): DesktopClientBootstrap => ({
         protocolVersion: 1,
         ...config.readClientEntryPublication(),
@@ -116,13 +123,14 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
 
       const createAndLoadPrimary = async (): Promise<void> => {
         const window = config.runtime.createWindow({
-          width: 1120,
+          width: 1200,
           height: 720,
-          minWidth: 880,
-          minHeight: 560,
+          minWidth: 1000,
+          minHeight: 625,
           show: false,
           autoHideMenuBar: true,
-          backgroundColor: "#f3f1eb",
+          titleBarStyle: "hidden",
+          backgroundColor: "#f1f5f9",
           webPreferences: {
             preload: config.preloadPath,
             contextIsolation: true,
@@ -197,12 +205,27 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           } satisfies DesktopClientBootstrap);
         });
 
+        config.runtime.handle(desktopChannels.windowMinimize, (event) => {
+          ownedWindow(event.sender.id).minimize();
+        });
+        config.runtime.handle(desktopChannels.windowToggleMaximize, (event) => {
+          const window = ownedWindow(event.sender.id);
+          if (window.isMaximized()) {
+            window.unmaximize();
+          } else {
+            window.maximize();
+          }
+          return window.isMaximized();
+        });
+        config.runtime.handle(desktopChannels.windowClose, (event) => {
+          ownedWindow(event.sender.id).close();
+        });
+
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("runtime snapshot request rejected");
           }
           const snapshot = await diagnostics.getSnapshot();
-          config.onRuntimeSnapshotServed?.(snapshot);
           return snapshot;
         });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
@@ -210,6 +233,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             throw new Error("client bootstrap request rejected");
           }
           return createClientBootstrap(event.sender.id);
+        });
+        config.runtime.handle(desktopChannels.rendererReady, async (event) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("renderer ready request rejected");
+          }
+          const snapshot = await diagnostics.getSnapshot();
+          await config.onRendererReady?.(snapshot);
         });
         config.runtime.onActivate(handleActivate);
         config.runtime.onWindowAllClosed(handleWindowAllClosed);
@@ -224,6 +254,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
+          config.runtime.removeHandler(desktopChannels.rendererReady);
+          config.runtime.removeHandler(desktopChannels.windowMinimize);
+          config.runtime.removeHandler(desktopChannels.windowToggleMaximize);
+          config.runtime.removeHandler(desktopChannels.windowClose);
         };
       }, "desktop shell lifecycle");
     },

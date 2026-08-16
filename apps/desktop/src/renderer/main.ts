@@ -35,7 +35,10 @@ window.addEventListener(
 
 void window.seashard.client
   .getBootstrap()
-  .then(applyBootstrap)
+  .then(async (snapshot) => {
+    await applyBootstrap(snapshot);
+    await window.seashard.client.ready();
+  })
   .catch((error) => runtime.failBootstrap(error));
 
 async function applyBootstrap(
@@ -50,17 +53,5 @@ async function applyBootstrap(
   }
 
   await runtime.reconcile(snapshot);
-  const pages = runtime.pages.value;
-  const currentRuntime = router.currentRoute.value.meta.runtimeId;
-  if (pages.length === 0) {
-    if (router.currentRoute.value.path !== "/") await router.replace("/");
-    return;
-  }
-  if (
-    router.currentRoute.value.path === "/" ||
-    typeof currentRuntime !== "string" ||
-    !pages.some((page) => page.runtimeId === currentRuntime)
-  ) {
-    await router.replace(pages[0]!.path);
-  }
+  if (router.currentRoute.value.path !== "/") await router.replace("/");
 }

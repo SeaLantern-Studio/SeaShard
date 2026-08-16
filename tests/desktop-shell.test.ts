@@ -42,6 +42,9 @@ class FakeBrowserWindow extends EventEmitter {
   loadedUrl?: string;
   shown = false;
   destroyed = false;
+  minimized = false;
+  maximized = false;
+  closeCount = 0;
   windowOpenHandler?: () => unknown;
   permissionRequestHandler?: (
     contents: unknown,
@@ -81,6 +84,27 @@ class FakeBrowserWindow extends EventEmitter {
 
   show(): void {
     this.shown = true;
+  }
+
+  minimize(): void {
+    this.minimized = true;
+  }
+
+  maximize(): void {
+    this.maximized = true;
+  }
+
+  unmaximize(): void {
+    this.maximized = false;
+  }
+
+  isMaximized(): boolean {
+    return this.maximized;
+  }
+
+  close(): void {
+    this.closeCount += 1;
+    this.destroy();
   }
 
   destroy(): void {
@@ -213,7 +237,7 @@ const clientEntries: ClientEntryPublication = {
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
-  const served: RuntimeSnapshot[] = [];
+  const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
   const shell = await activateDesktopShell(
     {
@@ -222,7 +246,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       rendererFile: "C:/SeaShard/index.html",
       smokeMode: false,
       reportOpenFailure: (error) => failures.push(error),
-      onRuntimeSnapshotServed: (value) => served.push(value),
+      onRendererReady: (value) => {
+        readySnapshots.push(value);
+      },
       readClientEntryPublication: () => clientEntries,
       onClientEntriesChanged: (listener) => {
         clientEntryListener = listener;
@@ -238,11 +264,21 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 1), /request rejected/);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), true);
   await assert.rejects(runtime.invoke(desktopChannels.clientBootstrap, 1), /request rejected/);
+  assert.equal(runtime.handlers.has(desktopChannels.rendererReady), true);
+  await assert.rejects(runtime.invoke(desktopChannels.rendererReady, 1), /request rejected/);
+  await assert.rejects(runtime.invoke(desktopChannels.windowMinimize, 1), /request rejected/);
+  await assert.rejects(runtime.invoke(desktopChannels.windowToggleMaximize, 1), /request rejected/);
+  await assert.rejects(runtime.invoke(desktopChannels.windowClose, 1), /request rejected/);
 
   await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
   const first = runtime.windows[0];
   assert.equal(first.loadedFile, "C:/SeaShard/index.html");
+  assert.equal(first.options.width, 1200);
+  assert.equal(first.options.height, 720);
+  assert.equal(first.options.minWidth, 1000);
+  assert.equal(first.options.minHeight, 625);
+  assert.equal(first.options.titleBarStyle, "hidden");
   assert.deepEqual(first.options.webPreferences, {
     preload: "C:/SeaShard/preload.cjs",
     contextIsolation: true,
@@ -256,9 +292,15 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   });
   assert.equal(permissionAllowed, false);
 
+  assert.equal(await runtime.invoke(desktopChannels.windowMinimize, 1), undefined);
+  assert.equal(first.minimized, true);
+  assert.equal(await runtime.invoke(desktopChannels.windowToggleMaximize, 1), true);
+  assert.equal(first.maximized, true);
+  assert.equal(await runtime.invoke(desktopChannels.windowToggleMaximize, 1), false);
+  assert.equal(first.maximized, false);
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
-  assert.deepEqual(served, [snapshot]);
+  assert.deepEqual(readySnapshots, []);
   assert.deepEqual(await runtime.invoke(desktopChannels.clientBootstrap, 1), {
     protocolVersion: 1,
     ...clientEntries,
@@ -269,6 +311,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     },
   } satisfies DesktopClientBootstrap);
   await assert.rejects(runtime.invoke(desktopChannels.clientBootstrap, 999), /request rejected/);
+  assert.equal(await runtime.invoke(desktopChannels.rendererReady, 1), undefined);
+  assert.deepEqual(readySnapshots, [snapshot]);
+  await assert.rejects(runtime.invoke(desktopChannels.rendererReady, 999), /request rejected/);
   const updatedEntries = { ...clientEntries, revision: 2 };
   clientEntryListener?.(updatedEntries);
   assert.deepEqual(first.sent, [
@@ -288,7 +333,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
 
   first.emit("ready-to-show");
   assert.equal(first.shown, true);
-  first.destroy();
+  await runtime.invoke(desktopChannels.windowClose, 1);
+  assert.equal(first.closeCount, 1);
   runtime.emit("activate");
   assert.equal(runtime.windows.length, 2, "activate must recreate a closed primary window");
 
@@ -300,6 +346,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
+  assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
+  assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
+  assert.equal(runtime.handlers.has(desktopChannels.windowToggleMaximize), false);
+  assert.equal(runtime.handlers.has(desktopChannels.windowClose), false);
   assert.equal(clientEntryListener, undefined);
   assert.deepEqual(failures, []);
 });
