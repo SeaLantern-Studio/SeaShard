@@ -1,19 +1,34 @@
 <script setup lang="ts">
-import { useClientUiRuntime } from "@seashard/ui-runtime";
 import type { UiThemeMode } from "@seashard/ui-sdk";
-import { Copy, Languages, Minus, Monitor, Moon, Square, Sun, X } from "lucide-vue-next";
+import {
+  Bot,
+  Copy,
+  Gamepad2,
+  Languages,
+  Minus,
+  Monitor,
+  Moon,
+  PanelRightClose,
+  PanelRightOpen,
+  Server,
+  Square,
+  Sun,
+  X,
+} from "lucide-vue-next";
 import { computed, ref } from "vue";
-import { useRoute } from "vue-router";
 import { appearanceService } from "./appearance";
+import type { WorkspaceMode } from "./workspace-layout";
 
-const runtime = useClientUiRuntime();
-const route = useRoute();
+const props = defineProps<{
+  workspace: WorkspaceMode;
+  rightPanelOpen: boolean;
+}>();
+const emit = defineEmits<{
+  "update:workspace": [value: WorkspaceMode];
+  "toggle-right-panel": [];
+}>();
 const isMaximized = ref(false);
 const currentTheme = computed(() => appearanceService.settings.value.theme);
-const pageTitle = computed(() => {
-  if (route.path === "/") return "首页";
-  return runtime.pages.value.find((page) => page.routeName === route.name)?.label ?? "SeaShard";
-});
 const themeIndicatorOffset = computed(() => {
   const themeOrder: UiThemeMode[] = ["auto", "light", "dark"];
   return themeOrder.indexOf(currentTheme.value) * 26;
@@ -38,11 +53,49 @@ async function closeWindow(): Promise<void> {
 
 <template>
   <header class="app-header">
-    <div class="header-left">
-      <h2 class="page-title">{{ pageTitle }}</h2>
+    <div class="header-workspace">
+      <div
+        class="workspace-switcher"
+        role="tablist"
+        aria-label="工作区"
+        :data-workspace="props.workspace"
+      >
+        <div class="workspace-mode-indicator" aria-hidden="true"></div>
+        <button
+          type="button"
+          role="tab"
+          class="workspace-mode-btn"
+          :class="{ active: props.workspace === 'agent' }"
+          :aria-selected="props.workspace === 'agent'"
+          @click="emit('update:workspace', 'agent')"
+        >
+          <Bot :size="15" :stroke-width="1.8" />
+          <span>Agent</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="workspace-mode-btn"
+          :class="{ active: props.workspace === 'server' }"
+          :aria-selected="props.workspace === 'server'"
+          @click="emit('update:workspace', 'server')"
+        >
+          <Server :size="15" :stroke-width="1.8" />
+          <span>服务器</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="workspace-mode-btn"
+          :class="{ active: props.workspace === 'launcher' }"
+          :aria-selected="props.workspace === 'launcher'"
+          @click="emit('update:workspace', 'launcher')"
+        >
+          <Gamepad2 :size="15" :stroke-width="1.8" />
+          <span>启动器</span>
+        </button>
+      </div>
     </div>
-
-    <div class="header-center"></div>
 
     <div class="header-right">
       <div class="language-selector">
@@ -85,12 +138,18 @@ async function closeWindow(): Promise<void> {
         </button>
       </div>
 
-      <div class="task-capsule">
-        <div class="capsule-idle">
-          <span class="status-dot"></span>
-          <span class="status-text">SeaShard</span>
-        </div>
-      </div>
+      <button
+        type="button"
+        class="panel-toggle"
+        :class="{ active: props.rightPanelOpen }"
+        :title="props.rightPanelOpen ? '收起右侧栏' : '展开右侧栏'"
+        :aria-label="props.rightPanelOpen ? '收起右侧栏' : '展开右侧栏'"
+        :aria-pressed="props.rightPanelOpen"
+        @click="emit('toggle-right-panel')"
+      >
+        <PanelRightClose v-if="props.rightPanelOpen" :size="17" :stroke-width="1.8" />
+        <PanelRightOpen v-else :size="17" :stroke-width="1.8" />
+      </button>
 
       <div class="window-controls">
         <button type="button" class="win-btn" title="最小化" @click="minimizeWindow">

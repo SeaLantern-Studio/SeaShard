@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { useClientUiRuntime } from "@seashard/ui-runtime";
-import { Home } from "lucide-vue-next";
+import { ChevronDown, Folder, MessageSquare, SquarePen } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import logoSvg from "./assets/logo.svg";
+import type { WorkspaceMode } from "./workspace-layout";
+
+const props = defineProps<{
+  workspace: WorkspaceMode;
+}>();
 
 const runtime = useClientUiRuntime();
 const router = useRouter();
@@ -13,7 +18,9 @@ const navIndicator = ref<HTMLElement>();
 const visiblePages = computed(() =>
   runtime.pages.value.filter((page) => page.navigation !== false),
 );
-const mainPages = computed(() => visiblePages.value.filter((page) => page.placement !== "bottom"));
+const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
+const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
+const expandedProjects = ref<Set<string>>(new Set(agentProjects.map((project) => project.name)));
 const bottomPages = computed(() =>
   visiblePages.value.filter((page) => page.placement === "bottom"),
 );
@@ -27,6 +34,20 @@ function isActive(path: string): boolean {
   return path === "/" ? route.path === "/" : route.path.startsWith(path);
 }
 
+function isProjectExpanded(name: string): boolean {
+  return expandedProjects.value.has(name);
+}
+
+function toggleProject(name: string): void {
+  const next = new Set(expandedProjects.value);
+  if (next.has(name)) {
+    next.delete(name);
+  } else {
+    next.add(name);
+  }
+  expandedProjects.value = next;
+}
+
 function updateNavIndicator(): void {
   if (indicatorFrame !== undefined) cancelAnimationFrame(indicatorFrame);
   indicatorFrame = requestAnimationFrame(() => {
@@ -34,7 +55,12 @@ function updateNavIndicator(): void {
     const nav = sidebarNav.value;
     const indicator = navIndicator.value;
     const item = nav?.querySelector<HTMLElement>(".nav-item.active");
-    if (!nav || !indicator || !item) return;
+    if (!nav || !indicator) return;
+    if (!item) {
+      indicator.style.opacity = "0";
+      return;
+    }
+    indicator.style.opacity = "1";
     const navRect = nav.getBoundingClientRect();
     const itemRect = item.getBoundingClientRect();
     const top = itemRect.top - navRect.top + nav.scrollTop + (itemRect.height - 16) / 2;
@@ -42,7 +68,13 @@ function updateNavIndicator(): void {
   });
 }
 
-watch([() => route.path, visiblePages], () => void nextTick(updateNavIndicator), { flush: "post" });
+watch(
+  [() => route.path, () => props.workspace, visiblePages],
+  () => void nextTick(updateNavIndicator),
+  {
+    flush: "post",
+  },
+);
 
 onMounted(() => {
   updateNavIndicator();
@@ -66,34 +98,66 @@ onUnmounted(() => {
 
     <nav ref="sidebarNav" class="sidebar-nav" aria-label="主导航">
       <div ref="navIndicator" class="nav-active-indicator"></div>
-      <div class="nav-group">
-        <button
-          type="button"
-          class="nav-item"
-          :class="{ active: isActive('/') }"
-          @click="navigate('/')"
-        >
-          <Home class="nav-icon" :size="20" :stroke-width="1.8" />
-          <span class="nav-label">首页</span>
+
+      <div v-if="props.workspace === 'agent'" class="agent-workspace-nav">
+        <button type="button" class="workspace-action">
+          <SquarePen :size="16" :stroke-width="1.8" />
+          <span>新建对话</span>
         </button>
 
-        <button
-          v-for="page in mainPages"
-          :key="page.id"
-          type="button"
-          class="nav-item"
-          :class="{ active: isActive(page.path) }"
-          @click="navigate(page.path)"
-        >
-          <component
-            :is="page.icon"
-            v-if="page.icon"
-            class="nav-icon"
-            :size="20"
-            :stroke-width="1.8"
-          />
-          <span class="nav-label">{{ page.label }}</span>
-        </button>
+        <section class="workspace-section" aria-labelledby="projects-label">
+          <h3 id="projects-label" class="workspace-section-title">项目</h3>
+          <div v-for="project in agentProjects" :key="project.name" class="workspace-project">
+            <button
+              type="button"
+              class="workspace-row workspace-project-row"
+              :aria-expanded="isProjectExpanded(project.name)"
+              :aria-controls="`project-${project.name}-threads`"
+              @click="toggleProject(project.name)"
+            >
+              <Folder :size="15" :stroke-width="1.8" />
+              <span>{{ project.name }}</span>
+              <ChevronDown
+                class="workspace-project-chevron"
+                :class="{ expanded: isProjectExpanded(project.name) }"
+                :size="15"
+                :stroke-width="1.8"
+              />
+            </button>
+            <div
+              :id="`project-${project.name}-threads`"
+              class="workspace-project-threads"
+              :class="{ expanded: isProjectExpanded(project.name) }"
+              :aria-hidden="!isProjectExpanded(project.name)"
+              :inert="!isProjectExpanded(project.name)"
+            >
+              <div class="workspace-project-threads-inner">
+                <button
+                  v-for="thread in project.threads"
+                  :key="thread"
+                  type="button"
+                  class="workspace-row workspace-thread-row"
+                >
+                  <MessageSquare :size="14" :stroke-width="1.8" />
+                  <span>{{ thread }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace-section" aria-labelledby="chats-label">
+          <h3 id="chats-label" class="workspace-section-title">对话</h3>
+          <button
+            v-for="chat in agentChats"
+            :key="chat"
+            type="button"
+            class="workspace-row workspace-chat-row"
+          >
+            <MessageSquare :size="14" :stroke-width="1.8" />
+            <span>{{ chat }}</span>
+          </button>
+        </section>
       </div>
 
       <div v-if="bottomPages.length" class="nav-group lower-side">
