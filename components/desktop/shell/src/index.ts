@@ -7,6 +7,7 @@ import {
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
   type ServerCoreSourceClientService,
+  type ServerSettingsClientService,
 } from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type {
@@ -52,6 +53,10 @@ export interface DesktopShellConfig {
     serverType: string,
     gameVersion: string,
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
+  readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;
+  writeResourceDownloadDirectory(
+    directory: string,
+  ): ReturnType<ServerSettingsClientService["setResourceDownloadDirectory"]>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
@@ -110,6 +115,11 @@ function expectNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string`);
   }
+  return value;
+}
+
+function expectString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
   return value;
 }
 
@@ -253,6 +263,19 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         config.runtime.handle(desktopChannels.dialogSelectDirectory, (event) =>
           config.runtime.selectDirectory(ownedWindow(event.sender.id)),
         );
+        config.runtime.handle(desktopChannels.serverSettingsGet, (event) => {
+          ownedWindow(event.sender.id);
+          return config.readServerSettings();
+        });
+        config.runtime.handle(
+          desktopChannels.serverSettingsSetResourceDownloadDirectory,
+          (event, directory) => {
+            ownedWindow(event.sender.id);
+            return config.writeResourceDownloadDirectory(
+              expectString(directory, "resource download directory"),
+            );
+          },
+        );
 
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
@@ -315,6 +338,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreTypes);
           config.runtime.removeHandler(desktopChannels.serverCoreVersions);
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
+          config.runtime.removeHandler(desktopChannels.serverSettingsGet);
+          config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

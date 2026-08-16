@@ -95,6 +95,9 @@ importers:
       '@seashard/server-download-ui':
         specifier: workspace:*
         version: link:../../frontend/server/download
+      '@seashard/server-settings':
+        specifier: workspace:*
+        version: link:../../components/server/settings
       '@seashard/server-settings-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/server
@@ -203,6 +206,15 @@ importers:
       '@seashard/download':
         specifier: workspace:*
         version: link:../../network/download
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+
+  components/server/settings:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk

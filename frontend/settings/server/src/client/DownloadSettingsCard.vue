@@ -1,32 +1,91 @@
 <script setup lang="ts">
+import type { ServerSettingsClientService } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Card, Cmz_Input } from "cmzya-modern-ui";
 import { FolderOpen } from "lucide-vue-next";
-import { ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{
   selectDirectory: () => Promise<string | undefined>;
+  settings: ServerSettingsClientService;
 }>();
 
 const resourceDirectory = ref("");
+const loading = ref(true);
 const selecting = ref(false);
-const selectionError = ref<string>();
+const settingsError = ref<string>();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingDirectory: string | undefined;
+let saveQueue: Promise<void> = Promise.resolve();
+let saveRevision = 0;
+let disposed = false;
+
+onMounted(async () => {
+  try {
+    const snapshot = await props.settings.get();
+    if (!disposed) resourceDirectory.value = snapshot.resourceDownloadDirectory;
+  } catch (error) {
+    if (!disposed) settingsError.value = errorMessage(error);
+  } finally {
+    if (!disposed) loading.value = false;
+  }
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  if (saveTimer !== undefined) clearTimeout(saveTimer);
+  if (pendingDirectory !== undefined) void persistDirectory(pendingDirectory);
+});
+
 function updateResourceDirectory(value: string): void {
   resourceDirectory.value = value;
-  selectionError.value = undefined;
+  settingsError.value = undefined;
+  pendingDirectory = value;
+  if (saveTimer !== undefined) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = undefined;
+    pendingDirectory = undefined;
+    void persistDirectory(value);
+  }, 450);
 }
 
 async function browseDirectory(): Promise<void> {
-  if (selecting.value) return;
+  if (loading.value || selecting.value) return;
   selecting.value = true;
-  selectionError.value = undefined;
+  settingsError.value = undefined;
   try {
     const selectedDirectory = await props.selectDirectory();
-    if (selectedDirectory) resourceDirectory.value = selectedDirectory;
+    if (!selectedDirectory) return;
+    if (saveTimer !== undefined) clearTimeout(saveTimer);
+    saveTimer = undefined;
+    pendingDirectory = undefined;
+    resourceDirectory.value = selectedDirectory;
+    await persistDirectory(selectedDirectory);
   } catch (error) {
-    selectionError.value = error instanceof Error ? error.message : String(error);
+    if (!disposed) settingsError.value = errorMessage(error);
   } finally {
-    selecting.value = false;
+    if (!disposed) selecting.value = false;
   }
+}
+
+function persistDirectory(directory: string): Promise<void> {
+  const revision = ++saveRevision;
+  const task = saveQueue.then(() => props.settings.setResourceDownloadDirectory(directory));
+  saveQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task.then(
+    () => {
+      if (!disposed && revision === saveRevision) settingsError.value = undefined;
+    },
+    (error: unknown) => {
+      if (!disposed && revision === saveRevision) settingsError.value = errorMessage(error);
+    },
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 </script>
 
@@ -46,6 +105,7 @@ async function browseDirectory(): Promise<void> {
           :model-value="resourceDirectory"
           placeholder="输入或选择目录"
           :spellcheck="false"
+          :disabled="loading"
           @update:model-value="updateResourceDirectory"
         />
         <Cmz_Button
@@ -53,6 +113,7 @@ async function browseDirectory(): Promise<void> {
           variant="outline"
           size="sm"
           :loading="selecting"
+          :disabled="loading"
           @click="browseDirectory"
         >
           <FolderOpen :size="16" :stroke-width="1.8" />
@@ -61,8 +122,8 @@ async function browseDirectory(): Promise<void> {
       </div>
     </div>
 
-    <p v-if="selectionError" class="selection-error" role="alert">
-      {{ selectionError }}
+    <p v-if="settingsError" class="settings-error" role="alert">
+      {{ settingsError }}
     </p>
   </Cmz_Card>
 </template>
@@ -127,7 +188,7 @@ async function browseDirectory(): Promise<void> {
   transform: scale(0.97);
 }
 
-.selection-error {
+.settings-error {
   margin: var(--sl-space-sm) 0 0;
   color: var(--sl-error);
   font-size: 0.8125rem;

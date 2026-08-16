@@ -1,14 +1,16 @@
 <script setup lang="ts">
+import type { ServerSettingsClientService } from "@seashard/contracts";
 import DownloadSettingsCard from "./DownloadSettingsCard.vue";
 
 const props = defineProps<{
   selectDirectory: () => Promise<string | undefined>;
+  settings: ServerSettingsClientService;
 }>();
 </script>
 
 <template>
   <div class="settings-view animate-stagger-in">
-    <DownloadSettingsCard :select-directory="props.selectDirectory" />
+    <DownloadSettingsCard :select-directory="props.selectDirectory" :settings="props.settings" />
   </div>
 </template>
 

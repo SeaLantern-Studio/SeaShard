@@ -1,4 +1,8 @@
-import { runtimeDiagnosticsContract, serverCoreSourceContract } from "@seashard/contracts";
+import {
+  runtimeDiagnosticsContract,
+  serverCoreSourceContract,
+  serverSettingsContract,
+} from "@seashard/contracts";
 import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
 import { uiAppearanceContract } from "@seashard/ui-sdk";
 import { createApp } from "vue";
@@ -15,6 +19,7 @@ const runtime = new ClientUiRuntime({
   services: {
     [runtimeDiagnosticsContract]: window.seashard.runtime,
     [serverCoreSourceContract]: window.seashard.serverCore,
+    [serverSettingsContract]: window.seashard.serverSettings,
     [uiAppearanceContract]: appearanceService,
   },
 });

@@ -1,3 +1,4 @@
+import { serverSettingsContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const serverSettingsUiManifest: PluginManifest = {
@@ -11,7 +12,7 @@ export const serverSettingsUiManifest: PluginManifest = {
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [],
+      permissions: [serverSettingsContract],
       upgradeMode: "stop-first",
     },
   ],

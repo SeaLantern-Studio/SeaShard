@@ -1,6 +1,11 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
-import { desktopShellContract, type ServerCoreArtifact } from "@seashard/contracts";
+import {
+  desktopShellContract,
+  serverSettingsContract,
+  type ServerCoreArtifact,
+  type ServerSettingsSnapshot,
+} from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
@@ -29,6 +34,7 @@ import {
 } from "@seashard/server-core-source";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
+import { createServerSettingsModule, serverSettingsManifest } from "@seashard/server-settings";
 import { Context } from "cordis";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { dirname, join } from "node:path";
@@ -91,6 +97,17 @@ function expectServerCoreArtifacts(value: unknown): ServerCoreArtifact[] {
     }
     return artifact as unknown as ServerCoreArtifact;
   });
+}
+
+function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server settings returned an invalid snapshot");
+  }
+  const resourceDownloadDirectory = Reflect.get(value, "resourceDownloadDirectory");
+  if (typeof resourceDownloadDirectory !== "string") {
+    throw new Error("server settings returned an invalid resource download directory");
+  }
+  return { resourceDownloadDirectory };
 }
 
 function installDevelopmentControl(): void {
@@ -183,7 +200,7 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
-  // 服务器下载设置只负责目录选择界面；持久化和下载消费留给后续 Host 设置组件。
+  // 服务器下载设置 UI 只消费收窄的 Client Service；目录由独立 Host 设置组件持久化。
   await activeKernel.registerBuiltIn({
     manifest: serverSettingsUiManifest,
     loaders: {},
@@ -229,6 +246,28 @@ async function bootstrap(): Promise<void> {
       {
         id: "core.download",
         entryId: "download.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 服务器设置使用 Runtime 独占的 SQLite 文档存储，默认资源目录位于应用数据目录。
+  await activeKernel.registerBuiltIn({
+    manifest: serverSettingsManifest,
+    loaders: {
+      "server-settings.host": {
+        load: async () =>
+          createServerSettingsModule({
+            defaultResourceDownloadDirectory: join(dataRoot, "resources"),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-settings",
+        entryId: "server-settings.host",
         scopeType: "global",
         scopeId: "global",
         enabled: true,
@@ -321,6 +360,18 @@ async function bootstrap(): Promise<void> {
                   serverType,
                   gameVersion,
                 ]),
+              ),
+            readServerSettings: async () =>
+              expectServerSettingsSnapshot(
+                await activeKernel.callService(serverSettingsContract, "get", []),
+              ),
+            writeResourceDownloadDirectory: async (directory) =>
+              expectServerSettingsSnapshot(
+                await activeKernel.callService(
+                  serverSettingsContract,
+                  "setResourceDownloadDirectory",
+                  [directory],
+                ),
               ),
             onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;

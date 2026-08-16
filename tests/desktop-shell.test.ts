@@ -259,6 +259,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
+  let serverSettings = { resourceDownloadDirectory: "C:/SeaShard/resources" };
   const shell = await activateDesktopShell(
     {
       runtime,
@@ -274,6 +275,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>
         serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
+      readServerSettings: async () => serverSettings,
+      writeResourceDownloadDirectory: async (directory) => {
+        serverSettings = { resourceDownloadDirectory: directory };
+        return serverSettings;
+      },
       onClientEntriesChanged: (listener) => {
         clientEntryListener = listener;
         return () => {
@@ -295,6 +301,15 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.windowClose, 1), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.dialogSelectDirectory, 1),
+    /request rejected/,
+  );
+  await assert.rejects(runtime.invoke(desktopChannels.serverSettingsGet, 1), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverSettingsSetResourceDownloadDirectory,
+      1,
+      "D:/Servers/resources",
+    ),
     /request rejected/,
   );
 
@@ -333,6 +348,25 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.directorySelectionWindow, first as unknown as BrowserWindow);
   await assert.rejects(
     runtime.invoke(desktopChannels.dialogSelectDirectory, 999),
+    /request rejected/,
+  );
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverSettingsGet, 1), serverSettings);
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverSettingsSetResourceDownloadDirectory,
+      1,
+      "D:/Servers/resources",
+    ),
+    { resourceDownloadDirectory: "D:/Servers/resources" },
+  );
+  assert.deepEqual(serverSettings, { resourceDownloadDirectory: "D:/Servers/resources" });
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 1, 42),
+    /must be a string/,
+  );
+  await assert.rejects(runtime.invoke(desktopChannels.serverSettingsGet, 999), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 999, "E:/Rejected"),
     /request rejected/,
   );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
@@ -410,6 +444,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreVersions), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverSettingsGet), false);
+  assert.equal(
+    runtime.handlers.has(desktopChannels.serverSettingsSetResourceDownloadDirectory),
+    false,
+  );
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
   assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
@@ -433,6 +472,10 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       readServerCoreTypes: async () => [],
       readServerCoreVersions: async () => [],
       readServerCoreArtifacts: async () => [],
+      readServerSettings: async () => ({ resourceDownloadDirectory: "/SeaShard/resources" }),
+      writeResourceDownloadDirectory: async (directory) => ({
+        resourceDownloadDirectory: directory,
+      }),
       onClientEntriesChanged: () => () => {},
     },
     { getSnapshot: async () => snapshot },

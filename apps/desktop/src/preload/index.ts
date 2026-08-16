@@ -16,6 +16,11 @@ const api: SeaShardDesktopApi = Object.freeze({
     listArtifacts: (serverType: string, gameVersion: string) =>
       ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
   }),
+  serverSettings: Object.freeze({
+    get: () => ipcRenderer.invoke(desktopChannels.serverSettingsGet),
+    setResourceDownloadDirectory: (directory: string) =>
+      ipcRenderer.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, directory),
+  }),
   dialog: Object.freeze({
     selectDirectory: () => ipcRenderer.invoke(desktopChannels.dialogSelectDirectory),
   }),

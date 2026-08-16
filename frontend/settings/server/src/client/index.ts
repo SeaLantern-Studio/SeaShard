@@ -1,4 +1,8 @@
-import type { SeaShardDesktopApi } from "@seashard/contracts";
+import {
+  serverSettingsContract,
+  type SeaShardDesktopApi,
+  type ServerSettingsClientService,
+} from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { Download } from "lucide-vue-next";
 import { defineComponent, h } from "vue";
@@ -7,11 +11,13 @@ import ServerDownloadSettingsPage from "./ServerDownloadSettingsPage.vue";
 export default defineClientUiModule({
   apply(context) {
     const desktopApi = (window as Window & { seashard: SeaShardDesktopApi }).seashard;
+    const settings = context.service<ServerSettingsClientService>(serverSettingsContract);
     const page = defineComponent({
       name: "ServerDownloadSettingsFeaturePage",
       setup: () => () =>
         h(ServerDownloadSettingsPage, {
           selectDirectory: () => desktopApi.dialog.selectDirectory(),
+          settings,
         }),
     });
 

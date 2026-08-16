@@ -14,12 +14,17 @@ export const desktopChannels = {
   serverCoreVersions: "seashard.server-core.versions",
   serverCoreArtifacts: "seashard.server-core.artifacts",
   dialogSelectDirectory: "seashard.dialog.select-directory",
+  serverSettingsGet: "seashard.server-settings.get",
+  serverSettingsSetResourceDownloadDirectory:
+    "seashard.server-settings.set-resource-download-directory",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
+/** 服务器设置 Host 组件发布的稳定 Service contract。 */
+export const serverSettingsContract = "seashard.server-settings";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
@@ -98,12 +103,23 @@ export interface ServerCoreSourceClientService {
   listVersions(serverType: string): Promise<readonly string[]>;
   listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
 }
+/** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */
+export interface ServerSettingsSnapshot {
+  resourceDownloadDirectory: string;
+}
+
+/** Renderer 只获得设置读写能力，不接触插件存储或数据库对象。 */
+export interface ServerSettingsClientService {
+  get(): Promise<ServerSettingsSnapshot>;
+  setResourceDownloadDirectory(directory: string): Promise<ServerSettingsSnapshot>;
+}
 
 export interface SeaShardDesktopApi {
   runtime: {
     getSnapshot(): Promise<RuntimeSnapshot>;
   };
   serverCore: ServerCoreSourceClientService;
+  serverSettings: ServerSettingsClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;
   };
