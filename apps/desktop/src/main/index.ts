@@ -2,6 +2,7 @@ import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
 import type { RuntimeSnapshot } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
+import { createPluginSystemFoundationBootstrapDescriptor } from "@seashard/plugin-system-foundation";
 import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
 import {
   PluginKernel,
@@ -17,6 +18,7 @@ const smokeMode = process.env.SEASHARD_SMOKE === "1";
 const developmentUrl = resolveDevelopmentUrl();
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const startedAt = new Date().toISOString();
+const seaShardVersion = "0.0.0";
 
 if (developmentUrl) installDevelopmentControl();
 
@@ -61,17 +63,18 @@ async function bootstrap(): Promise<void> {
       dataRoot,
       workerEntry: join(moduleDirectory, "../../../database-worker/dist/index.js"),
     }),
+    createPluginSystemFoundationBootstrapDescriptor({ seaShardVersion }),
   ]);
   kernel = await PluginKernel.create({
     dataRoot,
-    seaShardVersion: "0.0.0",
+    seaShardVersion,
     pluginHostEntry: join(moduleDirectory, "../../../plugin-host/dist/index.js"),
     hostProfile: "electron",
     clientTarget: "desktop",
     platform: host.platform,
     architecture: host.architecture,
     root,
-    database: root.database,
+    store: root["plugin-system-foundation"].store,
     pluginStorage: root.pluginStorage,
   });
   if (smokeMode) {

@@ -1,5 +1,4 @@
 import { ComponentSupervisor } from "@seashard/component-supervisor";
-import type { DatabaseService } from "@seashard/database";
 import type {
   ExecutionContext,
   JsonValue,
@@ -37,7 +36,7 @@ export interface PluginKernelOptions {
   platform: "win32" | "darwin" | "linux" | "aix" | "freebsd" | "openbsd" | "sunos";
   architecture: "x64" | "arm64" | "ia32" | "arm" | "riscv64" | "ppc64" | "s390x";
   root: Context;
-  database: DatabaseService;
+  store: PluginStore;
   pluginStorage: PluginStorageBroker;
 }
 
@@ -87,11 +86,8 @@ export class PluginKernel {
 
   static async create(options: PluginKernelOptions): Promise<PluginKernel> {
     await mkdir(options.dataRoot, { recursive: true });
-    const store = await PluginStore.create(options.database, options.seaShardVersion);
-    await store.interruptRuntimeOperations();
-    await store.invalidateRuntimePublications();
-    const kernel = new PluginKernel(options, store);
-    for (const publication of await store.listRuntimePublications()) {
+    const kernel = new PluginKernel(options, options.store);
+    for (const publication of await options.store.listRuntimePublications()) {
       kernel.publications.seedEpoch(publication.runtimeId, publication.epoch);
     }
     return kernel;

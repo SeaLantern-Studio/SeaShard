@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { BootstrapLoader } from "../packages/bootstrap-runtime/src/index.ts";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,11 +12,13 @@ import {
   type SupervisedEntry,
 } from "../packages/component-supervisor/src/index.ts";
 import {
+  createSQLiteBootstrapDescriptor,
   pluginDocumentDataCapsule,
   SQLiteDatabaseBroker,
   SQLitePluginDocumentStorage,
 } from "../components/database-sqlite/src/index.ts";
 import { defineDataCapsule } from "../packages/database/src/index.ts";
+import { createPluginSystemFoundationBootstrapDescriptor } from "../components/plugin-system-foundation/src/index.ts";
 import type {
   ExecutionContext,
   JsonValue,
@@ -31,6 +34,7 @@ import {
   RuntimePublicationRegistry,
   ServiceRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
+import { Context } from "cordis";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 
 const validManifest: PluginManifest = {
@@ -286,6 +290,67 @@ await test("schema v1 migrates runtime counters and manifest upgrade mode", asyn
     assert.deepEqual(await store.listRuntimeGenerations(), []);
   } finally {
     await broker?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("plugin system foundation boots after database and repairs persisted runtime state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-foundation-"));
+  const descriptors = () => [
+    createPluginSystemFoundationBootstrapDescriptor({ seaShardVersion: "0.0.0" }),
+    createSQLiteBootstrapDescriptor({
+      dataRoot: directory,
+      workerEntry: databaseWorkerEntry,
+      readWorkers: 1,
+    }),
+  ];
+
+  try {
+    const firstRoot = new Context();
+    const firstLoader = new BootstrapLoader(firstRoot);
+    try {
+      await firstLoader.start(descriptors());
+      assert.deepEqual(
+        firstLoader.snapshot().map((component) => component.id),
+        ["seashard.database-sqlite", "seashard.plugin-system-foundation"],
+      );
+
+      const store = firstRoot["plugin-system-foundation"].store;
+      await store.saveRuntimePublication({
+        runtimeId: "example.runtime",
+        generation: 3,
+        epoch: 7,
+      });
+      await store.saveRuntimeOperation({
+        id: "operation-1",
+        runtimeId: "example.runtime",
+        kind: "reload",
+        mode: "stop-first",
+        status: "running",
+        step: "prepare",
+        currentGeneration: 3,
+        candidateGeneration: 4,
+        attentionRequired: false,
+      });
+    } finally {
+      await firstLoader.dispose();
+    }
+
+    const secondRoot = new Context();
+    const secondLoader = new BootstrapLoader(secondRoot);
+    try {
+      await secondLoader.start(descriptors());
+      const store = secondRoot["plugin-system-foundation"].store;
+      const publication = (await store.listRuntimePublications())[0];
+      assert.equal(publication?.generation, null);
+      assert.equal(publication?.epoch, 8);
+      const operation = (await store.listRuntimeOperations())[0];
+      assert.equal(operation?.status, "interrupted");
+      assert.match(operation?.error ?? "", /stopped before the operation completed/);
+    } finally {
+      await secondLoader.dispose();
+    }
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });

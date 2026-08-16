@@ -36,6 +36,7 @@ export class BootstrapLoader {
       for (const descriptor of ordered) {
         const adapter = {
           name: descriptor.id,
+          inject: descriptor.inject,
           apply: async (ctx: Context) => {
             const dispose = await descriptor.load(ctx);
             if (dispose) ctx.effect(() => dispose, `bootstrap component ${descriptor.id}`);

@@ -153,6 +153,8 @@ await ctx.storage.delete("state/session", { expectedRevision: saved.revision });
 
 `expectedRevision: null` 表示仅在文档不存在时创建；传入数字执行 CAS 更新，版本不匹配会拒绝写入；省略则无条件写入。可用 `ttlMs` 设置最长 365 天的过期时间。key 最长 255 个字符，可使用字母、数字、`.`、`_`、`-`、`/`，但不能包含空路径段、`.` 或 `..`。单个 JSON 文档最大 1 MiB。
 
+SQLite 在 Core 中是受保护的 Bootstrap Component，不是第三方插件可安装、禁用或替换的普通插件。当前第三方持久化接口只有 `ctx.storage`；SDK 不提供 `database.integrated`、原始 SQL 或数据库文件句柄。即使插件已获得完整机器访问信任，也不要直接打开或修改 `seashard.sqlite3`、`plugin-data/documents.sqlite3`，否则可能绕过生命周期、并发控制和备份边界并造成数据损坏。
+
 ## 5. 生命周期与升级模式
 
 不要在模块顶层创建监听器、定时器、进程或其他副作用。全部放进 `apply()`，并通过 `ctx.effect()` 或 `apply()` 返回的清理函数释放。`provide`、`contribute`、`on` 已自动关联生命周期。

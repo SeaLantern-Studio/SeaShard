@@ -14,6 +14,7 @@
   "devDependencies": {
     "@types/node": "26.2.0",
     "@vitejs/plugin-vue": "6.0.8",
+    "cordis": "4.0.0-rc.8",
     "electron": "43.4.0",
     "fflate": "0.8.3",
     "tsx": "4.23.12",
