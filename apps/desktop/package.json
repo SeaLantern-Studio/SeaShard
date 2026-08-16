@@ -13,6 +13,7 @@
     "@seashard/plugin-storage-sqlite": "workspace:*",
     "@seashard/plugin-system": "workspace:*",
     "@seashard/plugin-system-foundation": "workspace:*",
+    "@seashard/runtime-diagnostics": "workspace:*",
     "cmzya-modern-ui": "0.6.1",
     "cordis": "4.0.0-rc.8",
     "lucide-vue-next": "0.400.0",

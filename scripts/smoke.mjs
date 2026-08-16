@@ -70,7 +70,7 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_PLUGIN_SMOKE_ECHO core-smoke:probe",
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
     "SEASHARD_PLUGIN_SMOKE_STORAGE",
-    "SEASHARD_SMOKE_READY components=2",
+    "SEASHARD_SMOKE_READY components=3",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
     "SEASHARD_PLUGIN_HOST_DISPOSED runtime=smoke.external-plugin",
     "SEASHARD_SMOKE_DISPOSED activeUnits=0 services=0 contributions=0",
@@ -110,12 +110,12 @@ function verifyPersistedState(databasePath) {
     const operationCount = Number(operations.count);
     const runningOperationCount = Number(operations.running);
     if (
-      packageCount !== 2 ||
-      bindingCount !== 2 ||
-      generationCount < 6 ||
-      publicationCount !== 2 ||
+      packageCount !== 3 ||
+      bindingCount !== 3 ||
+      generationCount < 8 ||
+      publicationCount !== 3 ||
       activePublicationCount !== 0 ||
-      operationCount < 10 ||
+      operationCount < 12 ||
       runningOperationCount !== 0
     ) {
       throw new Error(

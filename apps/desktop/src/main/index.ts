@@ -1,6 +1,5 @@
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
-import type { RuntimeSnapshot } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createSQLitePluginStorageBootstrapDescriptor } from "@seashard/plugin-storage-sqlite";
 import { createPluginSystemFoundationBootstrapDescriptor } from "@seashard/plugin-system-foundation";
@@ -10,6 +9,10 @@ import {
   type PluginKernelOptions,
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
+import {
+  createRuntimeDiagnosticsModule,
+  runtimeDiagnosticsManifest,
+} from "@seashard/runtime-diagnostics";
 import { Context } from "cordis";
 import { app, BrowserWindow } from "electron";
 import { dirname, join } from "node:path";
@@ -83,6 +86,7 @@ async function bootstrap(): Promise<void> {
     store: root["plugin-system-foundation"].store,
     pluginStorage: root["plugin-storage"],
   });
+  const activeKernel = kernel;
   if (smokeMode) {
     kernel.registerCoreService("seashard.smoke.marker", {
       prefix(value) {
@@ -91,14 +95,39 @@ async function bootstrap(): Promise<void> {
       },
     });
   }
-  await kernel.registerBuiltIn({
+  // 运行诊断属于第二阶段可重载组件。Main 只注入原始控制快照和宿主状态，不复制投影策略。
+  await activeKernel.registerBuiltIn({
+    manifest: runtimeDiagnosticsManifest,
+    loaders: {
+      "runtime-diagnostics.host": {
+        load: async () =>
+          createRuntimeDiagnosticsModule({
+            host: "electron",
+            startedAt,
+            readControlSnapshot: () => activeKernel.runtimeSnapshot(),
+            isStopping: () => stopping,
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.runtime-diagnostics",
+        entryId: "runtime-diagnostics.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Gateway 通过 Service 依赖诊断组件；实际启动顺序由 Supervisor 的依赖图决定。
+  await activeKernel.registerBuiltIn({
     manifest: desktopGatewayManifest,
     loaders: {
       "desktop-gateway.host": {
         load: async () =>
           createDesktopGatewayModule({
             authorize: (event) => event.sender === mainWindow?.webContents,
-            getRuntimeSnapshot,
             onRuntimeSnapshotServed: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;
@@ -244,25 +273,6 @@ async function loadRenderer(window: BrowserWindow): Promise<void> {
   await window.loadFile(join(moduleDirectory, "../renderer/index.html"));
 }
 
-function getRuntimeSnapshot(): RuntimeSnapshot {
-  const control = kernel?.runtimeSnapshot() ?? {
-    generations: [],
-    publications: [],
-    operations: [],
-  };
-  const components = projectComponents(control);
-  return {
-    protocolVersion: 1,
-    host: "electron",
-    state:
-      stopping || components.some((component) => component.phase === "failed")
-        ? "degraded"
-        : "active",
-    startedAt,
-    components,
-  };
-}
-
 function publishedGeneration(
   snapshot: RuntimeControlSnapshot,
   runtimeId: string,
@@ -273,58 +283,6 @@ function publishedGeneration(
     (generation) =>
       generation.runtimeId === runtimeId && generation.generation === publication.generation,
   );
-}
-
-function projectComponents(snapshot: RuntimeControlSnapshot): RuntimeSnapshot["components"] {
-  const publications = new Map(
-    snapshot.publications.map((publication) => [publication.runtimeId, publication]),
-  );
-  const operations = new Map(
-    snapshot.operations.map((operation) => [operation.runtimeId, operation]),
-  );
-  const latest = new Map<string, (typeof snapshot.generations)[number]>();
-  for (const generation of snapshot.generations) {
-    const current = latest.get(generation.runtimeId);
-    if (!current || current.generation < generation.generation) {
-      latest.set(generation.runtimeId, generation);
-    }
-  }
-
-  return [...latest.values()]
-    .flatMap((generation) => {
-      const publication = publications.get(generation.runtimeId);
-      const published =
-        publication?.generation === null || publication?.generation === undefined
-          ? undefined
-          : snapshot.generations.find(
-              (candidate) =>
-                candidate.runtimeId === generation.runtimeId &&
-                candidate.generation === publication.generation,
-            );
-      const operation = operations.get(generation.runtimeId);
-      if (!published && generation.phase === "terminated" && operation?.status === "completed") {
-        return [];
-      }
-      const phase =
-        published?.phase === "running"
-          ? ("active" as const)
-          : operation?.status === "running"
-            ? operation.step === "wait-dependencies"
-              ? ("blocked" as const)
-              : ("updating" as const)
-            : ("failed" as const);
-      const displayed = published ?? generation;
-      return [
-        {
-          id: displayed.runtimeId,
-          displayName: `${displayed.pluginId}/${displayed.entryId}`,
-          generation: displayed.generation,
-          phase,
-          ...(operation?.error ? { error: operation.error } : {}),
-        },
-      ];
-    })
-    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 async function shutdown(): Promise<void> {

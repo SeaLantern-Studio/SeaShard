@@ -71,6 +71,9 @@ importers:
       '@seashard/plugin-system-foundation':
         specifier: workspace:*
         version: link:../../components/plugin-system-foundation
+      '@seashard/runtime-diagnostics':
+        specifier: workspace:*
+        version: link:../../components/runtime-diagnostics
       cmzya-modern-ui:
         specifier: 0.6.1
         version: 0.6.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -152,6 +155,15 @@ importers:
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
+
+  components/runtime-diagnostics:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
 
   packages/bootstrap-runtime:
     dependencies:
