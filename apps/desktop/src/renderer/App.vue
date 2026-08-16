@@ -40,19 +40,19 @@ onBeforeUnmount(() => {
         <span class="mark" aria-hidden="true">S</span>
         <div>
           <p class="eyebrow">SEASHARD</p>
-          <h1>Runtime foundation</h1>
+          <h1>Component runtime</h1>
         </div>
       </div>
-      <Cmz_Badge variant="outline">Electron host</Cmz_Badge>
+      <Cmz_Badge variant="outline">Electron · pre-UI shell</Cmz_Badge>
     </header>
 
     <section class="intro">
       <div>
-        <p class="section-label">FIRST RUNNING SLICE</p>
-        <h2>One host. One lifecycle owner.</h2>
+        <p class="section-label">CURRENT PLATFORM SLICE</p>
+        <h2>Runtime ready for UI components.</h2>
         <p class="intro-copy">
-          Electron provides the desktop shell. Cordis owns component effects and cleanup. The
-          renderer reads a typed projection through the preload boundary.
+          Database and plugin foundations start before the supervisor. The desktop shell and
+          diagnostics service form the current reloadable slice; product UI components mount next.
         </p>
       </div>
       <Cmz_Button variant="outline" size="sm" :disabled="loading" @click="refresh">
@@ -73,7 +73,7 @@ onBeforeUnmount(() => {
     <template v-else-if="snapshot">
       <section class="summary-grid" data-testid="runtime-ready">
         <Cmz_Card class="summary-card">
-          <p class="metric-label">Runtime</p>
+          <p class="metric-label">Host state</p>
           <div class="metric-row">
             <span class="status-dot" :class="`status-dot--${snapshot.state}`"></span>
             <strong>{{ snapshot.state }}</strong>
@@ -81,12 +81,12 @@ onBeforeUnmount(() => {
         </Cmz_Card>
 
         <Cmz_Card class="summary-card">
-          <p class="metric-label">Active components</p>
+          <p class="metric-label">Reloadable entries</p>
           <strong class="metric-value">{{ activeCount }}/{{ snapshot.components.length }}</strong>
         </Cmz_Card>
 
         <Cmz_Card class="summary-card">
-          <p class="metric-label">Contract</p>
+          <p class="metric-label">Snapshot protocol</p>
           <strong class="metric-value">v{{ snapshot.protocolVersion }}</strong>
         </Cmz_Card>
       </section>
@@ -94,8 +94,8 @@ onBeforeUnmount(() => {
       <section class="component-section">
         <div class="section-heading">
           <div>
-            <p class="section-label">LIVE COMPONENTS</p>
-            <h3>Supervisor projection</h3>
+            <p class="section-label">PUBLISHED RUNTIMES</p>
+            <h3>ComponentSupervisor</h3>
           </div>
           <time>{{ new Date(snapshot.startedAt).toLocaleString() }}</time>
         </div>

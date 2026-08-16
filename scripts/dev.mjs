@@ -11,6 +11,7 @@ const preloadConfig = join(root, "apps/desktop/vite.preload.config.ts");
 const pluginHostConfig = join(root, "apps/plugin-host/vite.config.ts");
 const databaseWorkerConfig = join(root, "apps/database-worker/vite.config.ts");
 const rendererConfig = join(root, "vite.config.ts");
+const devtoolsPort = process.env.SEASHARD_DEVTOOLS_PORT ?? "9222";
 
 const bundleWatchers = [];
 const pendingRestartSources = new Set();
@@ -89,7 +90,11 @@ async function startBundleWatcher(name, configFile) {
 function launchElectron(rendererUrl) {
   const child = spawn(
     electronExecutable,
-    [electronEntry, `--seashard-dev-server-url=${rendererUrl}`],
+    [
+      electronEntry,
+      `--remote-debugging-port=${devtoolsPort}`,
+      `--seashard-dev-server-url=${rendererUrl}`,
+    ],
     {
       cwd: root,
       env: {
@@ -102,6 +107,7 @@ function launchElectron(rendererUrl) {
 
   electronProcess = child;
   console.log(`SEASHARD_DEV_ELECTRON_STARTED pid=${child.pid}`);
+  console.log(`SEASHARD_DEVTOOLS_CDP http://127.0.0.1:${devtoolsPort}`);
 
   child.once("error", (error) => {
     console.error("[dev] Electron failed to start", error);
