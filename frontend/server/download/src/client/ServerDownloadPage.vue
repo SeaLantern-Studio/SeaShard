@@ -33,6 +33,10 @@ const artifactErrors = ref<Record<string, string | undefined>>({});
 const selectedArtifact = ref<ServerCoreArtifact>();
 const fileStem = ref("");
 let versionsRequestId = 0;
+const versionCollator = new Intl.Collator("en", {
+  numeric: true,
+  sensitivity: "base",
+});
 
 const coreCards = computed<readonly CoreCard[]>(() => [
   { id: "vanilla", label: "原版核心" },
@@ -82,9 +86,10 @@ async function loadVersions(core = selectedCore.value): Promise<void> {
   versionsError.value = undefined;
   try {
     const result = await props.coreSource.listVersions(core.id);
+    const sortedVersions = [...result].sort((left, right) => versionCollator.compare(right, left));
     if (requestId === versionsRequestId && selectedCore.value?.id === core.id) {
-      versions.value = result;
-      for (const version of result) void loadArtifacts(version, core, requestId);
+      versions.value = sortedVersions;
+      for (const version of sortedVersions) void loadArtifacts(version, core, requestId);
     }
   } catch (error) {
     if (requestId === versionsRequestId) versionsError.value = errorMessage(error);
