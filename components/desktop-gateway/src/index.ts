@@ -1,14 +1,15 @@
 import {
   desktopChannels,
+  desktopWindowHostContract,
   runtimeDiagnosticsContract,
+  type DesktopWindowHostService,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
 } from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
-import { ipcMain, type IpcMainInvokeEvent } from "electron";
+import { ipcMain } from "electron";
 
 export interface DesktopGatewayConfig {
-  authorize(event: IpcMainInvokeEvent): boolean;
   onRuntimeSnapshotServed?(snapshot: RuntimeSnapshot): void;
 }
 
@@ -23,7 +24,7 @@ export const desktopGatewayManifest: PluginManifest = {
       module: "./dist/host.js",
       hostProfiles: ["electron"],
       activationScopes: ["global"],
-      permissions: [runtimeDiagnosticsContract],
+      permissions: [desktopWindowHostContract, runtimeDiagnosticsContract],
       upgradeMode: "stop-first",
     },
   ],
@@ -33,19 +34,21 @@ export const desktopGatewayManifest: PluginManifest = {
 };
 
 /**
- * 创建只负责 Electron IPC 传输和窗口授权的 Desktop Gateway。
+ * 创建只负责 Electron IPC 传输的 Desktop Gateway。
  *
  * Generation/Publication/Operation 的解释规则属于 Runtime Diagnostics Component；
- * Gateway 通过类型化 Service 获取最终快照，不再持有任何投影策略。
+ * BrowserWindow 所有权属于 Desktop Window Host。Gateway 只组合两个类型化 Service，
+ * 不持有 Supervisor 状态或 Electron 窗口对象。
  */
 export function createDesktopGatewayModule(config: DesktopGatewayConfig): PluginModule {
   return {
-    inject: [runtimeDiagnosticsContract],
+    inject: [desktopWindowHostContract, runtimeDiagnosticsContract],
     apply(ctx) {
+      const windows = ctx.service<DesktopWindowHostService>(desktopWindowHostContract);
       const diagnostics = ctx.service<RuntimeDiagnosticsService>(runtimeDiagnosticsContract);
       ctx.effect(() => {
         ipcMain.handle(desktopChannels.runtimeSnapshot, async (event) => {
-          if (!config.authorize(event)) {
+          if (!(await windows.ownsWebContents(event.sender.id))) {
             throw new Error("runtime snapshot request rejected");
           }
 

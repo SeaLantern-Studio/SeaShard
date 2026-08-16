@@ -1,0 +1,16 @@
+{
+  "name": "@seashard/desktop-window-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "electron": "43.4.0"
+  }
+}

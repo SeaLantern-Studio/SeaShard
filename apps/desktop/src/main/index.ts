@@ -1,5 +1,11 @@
+import { desktopWindowHostContract } from "@seashard/contracts";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createDesktopGatewayModule, desktopGatewayManifest } from "@seashard/desktop-gateway";
+import {
+  createDesktopWindowHostModule,
+  createElectronDesktopWindowRuntime,
+  desktopWindowHostManifest,
+} from "@seashard/desktop-window-host";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createSQLitePluginStorageBootstrapDescriptor } from "@seashard/plugin-storage-sqlite";
 import { createPluginSystemFoundationBootstrapDescriptor } from "@seashard/plugin-system-foundation";
@@ -26,7 +32,6 @@ const seaShardVersion = "0.0.0";
 
 if (developmentUrl) installDevelopmentControl();
 
-let mainWindow: BrowserWindow | null = null;
 let kernel: PluginKernel | undefined;
 let bootstrapLoader: BootstrapLoader | undefined;
 let shutdownTask: Promise<void> | undefined;
@@ -120,6 +125,33 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // BrowserWindow 是可热替换的宿主能力；Main 只注入 Electron 进程对象和构建产物位置。
+  await activeKernel.registerBuiltIn({
+    manifest: desktopWindowHostManifest,
+    loaders: {
+      "desktop-window-host.host": {
+        load: async () =>
+          createDesktopWindowHostModule({
+            runtime: createElectronDesktopWindowRuntime(app, BrowserWindow),
+            preloadPath: join(moduleDirectory, "../preload/index.cjs"),
+            rendererFile: join(moduleDirectory, "../renderer/index.html"),
+            ...(developmentUrl ? { developmentUrl } : {}),
+            smokeMode,
+            reportOpenFailure: (error) => console.error("Desktop window open failed", error),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.desktop-window-host",
+        entryId: "desktop-window-host.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // Gateway 通过 Service 依赖诊断组件；实际启动顺序由 Supervisor 的依赖图决定。
   await activeKernel.registerBuiltIn({
     manifest: desktopGatewayManifest,
@@ -127,7 +159,6 @@ async function bootstrap(): Promise<void> {
       "desktop-gateway.host": {
         load: async () =>
           createDesktopGatewayModule({
-            authorize: (event) => event.sender === mainWindow?.webContents,
             onRuntimeSnapshotServed: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;
@@ -185,8 +216,8 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  mainWindow = createWindow();
-  await loadRenderer(mainWindow);
+  // Renderer 只在所有 Gateway 发布后加载，避免首个 preload 调用撞上尚未注册的 IPC handler。
+  await activeKernel.callService(desktopWindowHostContract, "openPrimary", []);
   if (developmentUrl) console.log(`SEASHARD_DEV_WINDOW_READY ${developmentUrl}`);
 }
 
@@ -234,45 +265,6 @@ async function registerSmokePlugin(pluginKernel: PluginKernel): Promise<void> {
   });
 }
 
-function createWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: 1120,
-    height: 720,
-    minWidth: 880,
-    minHeight: 560,
-    show: false,
-    autoHideMenuBar: true,
-    backgroundColor: "#f3f1eb",
-    webPreferences: {
-      preload: join(moduleDirectory, "../preload/index.cjs"),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
-  });
-
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false);
-  });
-  window.once("ready-to-show", () => {
-    if (!smokeMode) window.show();
-  });
-  window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
-  });
-
-  return window;
-}
-
-async function loadRenderer(window: BrowserWindow): Promise<void> {
-  if (developmentUrl) {
-    await window.loadURL(developmentUrl);
-    return;
-  }
-  await window.loadFile(join(moduleDirectory, "../renderer/index.html"));
-}
-
 function publishedGeneration(
   snapshot: RuntimeControlSnapshot,
   runtimeId: string,
@@ -315,17 +307,6 @@ async function shutdown(): Promise<void> {
   })();
   return shutdownTask;
 }
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0 && kernel) {
-    mainWindow = createWindow();
-    void loadRenderer(mainWindow);
-  }
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
 
 app.on("before-quit", (event) => {
   if (shutdownComplete) return;

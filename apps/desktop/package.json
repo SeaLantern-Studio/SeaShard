@@ -9,6 +9,7 @@
     "@seashard/contracts": "workspace:*",
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/desktop-gateway": "workspace:*",
+    "@seashard/desktop-window-host": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/plugin-storage-sqlite": "workspace:*",
     "@seashard/plugin-system": "workspace:*",

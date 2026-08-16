@@ -59,6 +59,9 @@ importers:
       '@seashard/desktop-gateway':
         specifier: workspace:*
         version: link:../../components/desktop-gateway
+      '@seashard/desktop-window-host':
+        specifier: workspace:*
+        version: link:../../components/desktop-window-host
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
@@ -112,6 +115,18 @@ importers:
         version: 4.0.0-rc.8
 
   components/desktop-gateway:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      electron:
+        specifier: 43.4.0
+        version: 43.4.0
+
+  components/desktop-window-host:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
