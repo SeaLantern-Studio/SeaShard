@@ -244,20 +244,6 @@
 }
 
 @media (max-width: 1180px) {
-  .workspace-switcher {
-    --workspace-tab-width: 68px;
-    --workspace-tab-step: 70px;
-  }
-
-  .workspace-mode-btn {
-    gap: 4px;
-    padding: 0 8px;
-  }
-
-  .workspace-mode-btn svg {
-    display: none;
-  }
-
   .header-right {
     gap: var(--sl-space-sm);
   }
