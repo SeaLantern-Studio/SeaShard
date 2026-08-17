@@ -1,9 +1,15 @@
-import type { ServerCoreArtifact } from "@seashard/contracts";
+import type { ServerCoreArtifact, ServerCoreType } from "@seashard/contracts";
 
-export { serverCoreSourceContract, type ServerCoreArtifact } from "@seashard/contracts";
+export {
+  serverCoreSourceContract,
+  type ServerCoreArtifact,
+  type ServerCoreType,
+} from "@seashard/contracts";
 
 export const defaultCnbCatalogUrl =
   "https://cnb.cool/SeaLantern-studio/ServerCore-Mirror/-/releases/download/26.02.27/jar_lfs_links.json";
+export const defaultCnbIconCatalogUrl =
+  "https://cnb.cool/SeaLantern-studio/ServerCore-Mirror/-/releases/download/26.02.27/icon_lfs_links.json";
 
 /** 下载任务的完整生命周期；终态为 completed、failed 或 cancelled。 */
 export type ServerCoreSourceTaskState =
@@ -39,7 +45,9 @@ export interface ServerCoreDownloadTaskSnapshot {
 /** 服务端核心源组件提供给创建、升级、UI 和 Agent 的公共能力。 */
 export interface ServerCoreSourceService {
   /** 列出 CNB 目录中的全部服务端类型。 */
-  listTypes(): Promise<readonly string[]>;
+  listTypes(): Promise<readonly ServerCoreType[]>;
+  /** 将本地协议中的内容哈希解析成已验证缓存文件；不向 Renderer 暴露真实路径。 */
+  resolveIconPath(sha256: string): Promise<string | null>;
   /** 列出指定服务端类型支持的游戏版本。 */
   listVersions(serverType: string): Promise<readonly string[]>;
   /** 返回指定类型和版本下经过校验的下载产物。 */

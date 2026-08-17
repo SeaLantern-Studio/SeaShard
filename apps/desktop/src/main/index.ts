@@ -2,8 +2,11 @@ import { aboutUiManifest } from "@seashard/about-ui";
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import {
   desktopShellContract,
+  serverCoreIconHost,
+  serverCoreIconScheme,
   serverSettingsContract,
   type ServerCoreArtifact,
+  type ServerCoreType,
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
@@ -36,9 +39,19 @@ import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 import { createServerSettingsModule, serverSettingsManifest } from "@seashard/server-settings";
 import { Context } from "cordis";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { dirname, join } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: serverCoreIconScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+    },
+  },
+]);
 
 const smokeMode = process.env.SEASHARD_SMOKE === "1";
 const developmentUrl = resolveDevelopmentUrl();
@@ -70,6 +83,39 @@ function resolveDevelopmentUrl(): string | undefined {
     throw new Error(`development server must use loopback HTTP: ${candidate}`);
   }
   return url.href;
+}
+
+function isServerCoreIconUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === `${serverCoreIconScheme}:` &&
+      url.hostname === serverCoreIconHost &&
+      /^\/[a-f0-9]{64}$/.test(url.pathname) &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+function expectServerCoreTypes(value: unknown): ServerCoreType[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server core source returned invalid types");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`server core source returned invalid type ${index}`);
+    }
+    const id = Reflect.get(item, "id");
+    const iconUrl = Reflect.get(item, "iconUrl");
+    if (typeof id !== "string" || !id || (iconUrl !== undefined && !isServerCoreIconUrl(iconUrl))) {
+      throw new Error(`server core source returned invalid type ${index}`);
+    }
+    return { id, ...(iconUrl ? { iconUrl } : {}) };
+  });
 }
 
 function expectServerCoreStrings(value: unknown, label: string): string[] {
@@ -284,6 +330,7 @@ async function bootstrap(): Promise<void> {
           createServerCoreSourceModule({
             database: root.database,
             fetchProvider: downloadFetchProvider,
+            iconCacheDirectory: join(dataRoot, "cache", "server-core-icons"),
           }),
       },
     },
@@ -330,7 +377,14 @@ async function bootstrap(): Promise<void> {
       "desktop-shell.host": {
         load: async () =>
           createDesktopShellModule({
-            runtime: createElectronDesktopShellRuntime(app, BrowserWindow, ipcMain, dialog),
+            runtime: createElectronDesktopShellRuntime(
+              app,
+              BrowserWindow,
+              ipcMain,
+              dialog,
+              protocol,
+              net,
+            ),
             preloadPath: join(moduleDirectory, "../preload/index.cjs"),
             rendererFile: join(moduleDirectory, "../renderer/index.html"),
             ...(developmentUrl ? { developmentUrl } : {}),
@@ -343,9 +397,8 @@ async function bootstrap(): Promise<void> {
                 listener(projectClientEntryPublication(snapshot)),
               ),
             readServerCoreTypes: async () =>
-              expectServerCoreStrings(
+              expectServerCoreTypes(
                 await activeKernel.callService(serverCoreSourceContract, "listTypes", []),
-                "types",
               ),
             readServerCoreVersions: async (serverType) =>
               expectServerCoreStrings(
@@ -361,6 +414,18 @@ async function bootstrap(): Promise<void> {
                   gameVersion,
                 ]),
               ),
+            resolveServerCoreIconPath: async (sha256) => {
+              const path = await activeKernel.callService(
+                serverCoreSourceContract,
+                "resolveIconPath",
+                [sha256],
+              );
+              if (path === null) return undefined;
+              if (typeof path !== "string" || !isAbsolute(path)) {
+                throw new Error("server core source returned an invalid icon cache path");
+              }
+              return path;
+            },
             readServerSettings: async () =>
               expectServerSettingsSnapshot(
                 await activeKernel.callService(serverSettingsContract, "get", []),

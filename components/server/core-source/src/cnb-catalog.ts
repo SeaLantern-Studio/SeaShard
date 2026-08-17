@@ -1,11 +1,23 @@
 import type { DownloadFetchProvider } from "@seashard/download";
 import type { CnbCatalogCache, CnbCatalogCacheRecord } from "./catalog-cache";
-import { defaultCnbCatalogUrl, type ServerCoreArtifact } from "./types";
+import {
+  defaultCnbCatalogUrl,
+  defaultCnbIconCatalogUrl,
+  type ServerCoreArtifact,
+  type ServerCoreType,
+} from "./types";
 
 interface CatalogData {
   readonly types: readonly string[];
   readonly versionsByType: ReadonlyMap<string, readonly string[]>;
   readonly artifactsByTypeAndVersion: ReadonlyMap<string, readonly ServerCoreArtifact[]>;
+}
+
+/** 经过来源和对象身份校验的远端核心图标。 */
+export interface CnbServerCoreIcon {
+  readonly serverType: string;
+  readonly url: string;
+  readonly sha256: string;
 }
 
 interface RemoteCatalogUpdate {
@@ -24,6 +36,7 @@ type RemoteCatalogResult = RemoteCatalogUpdate | RemoteCatalogNotModified;
 export interface CnbServerCoreCatalogOptions {
   readonly cache: CnbCatalogCache;
   readonly catalogUrl?: string;
+  readonly iconCatalogUrl?: string;
   readonly fetchProvider?: DownloadFetchProvider;
   readonly userAgent?: string;
   readonly requestTimeoutMs?: number;
@@ -32,6 +45,8 @@ export interface CnbServerCoreCatalogOptions {
 
 const safeNamePattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}\.jar$/;
 const sha256PathPattern = /\/lfs\/([a-f0-9]{64})$/i;
+const safeCoreTypePattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const iconCatalogPathPattern = /^\/SeaLantern-studio\/ServerCore-Mirror\/-\/lfs\/([a-f0-9]{64})$/i;
 const maximumCatalogBytes = 8 * 1024 * 1024;
 
 /**
@@ -43,15 +58,19 @@ const maximumCatalogBytes = 8 * 1024 * 1024;
 export class CnbServerCoreCatalog {
   private readonly cache: CnbCatalogCache;
   private readonly catalogUrl: string;
+  private readonly iconCatalogUrl: string;
   private readonly fetchProvider: DownloadFetchProvider;
   private readonly userAgent: string;
   private readonly requestTimeoutMs: number;
   private readonly now: () => Date;
   private data!: CatalogData;
+  private types!: readonly ServerCoreType[];
+  private icons!: readonly CnbServerCoreIcon[];
 
   private constructor(options: CnbServerCoreCatalogOptions) {
     this.cache = options.cache;
     this.catalogUrl = options.catalogUrl ?? defaultCnbCatalogUrl;
+    this.iconCatalogUrl = options.iconCatalogUrl ?? defaultCnbIconCatalogUrl;
     this.fetchProvider = options.fetchProvider ?? (() => globalThis.fetch);
     this.userAgent = options.userAgent ?? "SeaShard/0.0.0 server-core-source";
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
@@ -65,8 +84,12 @@ export class CnbServerCoreCatalog {
     return catalog;
   }
 
-  async listTypes(): Promise<readonly string[]> {
-    return this.data.types;
+  async listTypes(): Promise<readonly ServerCoreType[]> {
+    return this.types;
+  }
+
+  async listIcons(): Promise<readonly CnbServerCoreIcon[]> {
+    return this.icons;
   }
 
   async listVersions(serverType: string): Promise<readonly string[]> {
@@ -93,7 +116,7 @@ export class CnbServerCoreCatalog {
     const cached = await this.cache.load(this.catalogUrl);
     let remote: RemoteCatalogResult | undefined;
     try {
-      remote = await this.fetchRemote(cached);
+      remote = await this.fetchRemote(this.catalogUrl, cached);
     } catch (error) {
       // 离线启动允许使用上次成功缓存；首次启动没有缓存时不能伪装成可用。
       if (!cached) {
@@ -119,10 +142,52 @@ export class CnbServerCoreCatalog {
     const persisted = await this.cache.load(this.catalogUrl);
     if (!persisted) throw new Error("CNB catalog cache is empty after startup refresh");
     this.data = parseCatalogBody(persisted.body);
+    const iconArtifacts = await this.initializeIconCatalog();
+    this.types = Object.freeze(this.data.types.map((id) => Object.freeze({ id })));
+    this.icons = Object.freeze(
+      this.data.types.flatMap((serverType) => {
+        const icon = iconArtifacts.get(serverType);
+        return icon ? [icon] : [];
+      }),
+    );
+  }
+
+  /**
+   * 图标是目录的可选展示元数据。远端或缓存损坏不能阻断核心下载，已有有效缓存仍会
+   * 在离线时复用；完全不可用时由 Client 组件显示文字回退。
+   */
+  private async initializeIconCatalog(): Promise<ReadonlyMap<string, CnbServerCoreIcon>> {
+    const cached = await this.cache.load(this.iconCatalogUrl);
+    try {
+      const remote = await this.fetchRemote(this.iconCatalogUrl, cached);
+      const fetchedAt = this.now().toISOString();
+      if (remote.kind === "updated") {
+        parseIconCatalogBody(remote.body);
+        await this.cache.store(this.iconCatalogUrl, {
+          body: remote.body,
+          fetchedAt,
+          ...(remote.etag ? { etag: remote.etag } : {}),
+          ...(remote.lastModified ? { lastModified: remote.lastModified } : {}),
+        });
+      } else {
+        await this.cache.touch(this.iconCatalogUrl, fetchedAt);
+      }
+    } catch {
+      // 图标不会改变核心制品的选择、下载或完整性，失败时继续使用最后一份有效缓存。
+    }
+
+    const persisted = await this.cache.load(this.iconCatalogUrl);
+    if (!persisted) return new Map();
+    try {
+      return parseIconCatalogBody(persisted.body);
+    } catch {
+      return new Map();
+    }
   }
 
   /** 使用 ETag/Last-Modified 条件请求检查远端目录，304 时不重复传输 JSON。 */
   private async fetchRemote(
+    catalogUrl: string,
     cached: CnbCatalogCacheRecord | undefined,
   ): Promise<RemoteCatalogResult> {
     const controller = new AbortController();
@@ -132,7 +197,7 @@ export class CnbServerCoreCatalog {
     if (cached?.etag) headers.set("If-None-Match", cached.etag);
     if (cached?.lastModified) headers.set("If-Modified-Since", cached.lastModified);
     try {
-      const response = await this.fetchProvider()(this.catalogUrl, {
+      const response = await this.fetchProvider()(catalogUrl, {
         headers,
         redirect: "follow",
         signal: controller.signal,
@@ -177,6 +242,14 @@ function parseCatalogBody(body: string): CatalogData {
   }
 }
 
+function parseIconCatalogBody(body: string): ReadonlyMap<string, CnbServerCoreIcon> {
+  try {
+    return parseCnbIconCatalog(JSON.parse(body));
+  } catch (error) {
+    throw new Error(`CNB icon catalog cache is invalid: ${formatError(error)}`, { cause: error });
+  }
+}
+
 /** 将 CNB 的动态 JSON 结构转换为只读、可按类型和版本查询的目录。 */
 export function parseCnbCatalog(value: unknown): CatalogData {
   const root = expectRecord(value, "CNB catalog");
@@ -213,6 +286,55 @@ export function parseCnbCatalog(value: unknown): CatalogData {
     versionsByType,
     artifactsByTypeAndVersion,
   };
+}
+
+/**
+ * 校验发布的图标索引，并把 CNB OpenAPI 地址收窄成无需凭据的公开 LFS 下载地址。
+ * 当前 Release 中的 api.cnb.cool 链接是对象定位信息，不能直接交给 Renderer。
+ */
+export function parseCnbIconCatalog(value: unknown): ReadonlyMap<string, CnbServerCoreIcon> {
+  const root = expectRecord(value, "CNB icon catalog");
+  const entries = Object.entries(root);
+  if (!entries.length) throw new TypeError("CNB icon catalog contains no icons");
+
+  const icons = new Map<string, CnbServerCoreIcon>();
+  for (const [coreType, rawUrl] of entries) {
+    if (!safeCoreTypePattern.test(coreType)) {
+      throw new TypeError(`CNB icon catalog contains an unsafe core type: ${coreType}`);
+    }
+    if (typeof rawUrl !== "string" || !rawUrl) {
+      throw new TypeError(`CNB icon catalog URL is invalid: ${coreType}`);
+    }
+
+    const url = new URL(rawUrl);
+    if (
+      url.protocol !== "https:" ||
+      (url.hostname !== "api.cnb.cool" && url.hostname !== "cnb.cool") ||
+      url.username ||
+      url.password
+    ) {
+      throw new TypeError(`CNB icon catalog has an unsupported URL: ${rawUrl}`);
+    }
+    const sha256 = iconCatalogPathPattern.exec(url.pathname)?.[1]?.toLowerCase();
+    if (!sha256) {
+      throw new TypeError(`CNB icon catalog URL has no trusted LFS identity: ${rawUrl}`);
+    }
+
+    url.hostname = "cnb.cool";
+    url.port = "";
+    url.hash = "";
+    url.search = "";
+    url.searchParams.set("name", `${coreType}.png`);
+    icons.set(
+      coreType,
+      Object.freeze({
+        serverType: coreType,
+        url: url.href,
+        sha256,
+      }),
+    );
+  }
+  return icons;
 }
 
 function parseArtifact(

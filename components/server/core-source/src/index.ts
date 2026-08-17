@@ -4,10 +4,12 @@ import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-s
 import { CnbServerCoreCatalog, type CnbServerCoreCatalogOptions } from "./cnb-catalog";
 import { serverCoreSourceCatalogDataCapsule, SQLiteCnbCatalogCache } from "./catalog-cache";
 import { ServerCoreSourceCoordinator } from "./coordinator";
+import { ServerCoreIconCache } from "./icon-cache";
 import { serverCoreSourceContract } from "./types";
 
 export type ServerCoreSourceModuleOptions = Omit<CnbServerCoreCatalogOptions, "cache"> & {
   readonly database: DatabaseService;
+  readonly iconCacheDirectory: string;
 };
 
 export const serverCoreSourceManifest: PluginManifest = {
@@ -36,14 +38,22 @@ export function createServerCoreSourceModule(options: ServerCoreSourceModuleOpti
     inject: [downloadContract],
     provides: [serverCoreSourceContract],
     async apply(ctx) {
+      const downloads = ctx.service<DownloadService>(downloadContract);
       const repository = await options.database.registerCapsule(serverCoreSourceCatalogDataCapsule);
       const cache = new SQLiteCnbCatalogCache(repository);
       const catalog = await CnbServerCoreCatalog.create({ ...options, cache });
-      const downloads = ctx.service<DownloadService>(downloadContract);
+      const iconCache = await ServerCoreIconCache.create({
+        cacheDirectory: options.iconCacheDirectory,
+        downloads,
+        types: await catalog.listTypes(),
+        icons: await catalog.listIcons(),
+      });
       const coordinator = new ServerCoreSourceCoordinator(catalog, downloads);
       // 核心源只选择 CNB 类型和版本，通用网络、进度、取消及临时文件由公共下载组件负责。
       ctx.provide(serverCoreSourceContract, {
-        listTypes: async () => asJsonValue(await catalog.listTypes()),
+        listTypes: async () => asJsonValue(iconCache.listTypes()),
+        resolveIconPath: async (sha256) =>
+          iconCache.resolvePath(expectString(sha256, "icon sha256")) ?? null,
         listVersions: async (serverType) =>
           asJsonValue(await catalog.listVersions(expectString(serverType, "serverType"))),
         listArtifacts: async (serverType, gameVersion) =>
@@ -79,4 +89,5 @@ function asJsonValue(value: unknown): JsonValue {
 export * from "./catalog-cache";
 export * from "./cnb-catalog";
 export * from "./coordinator";
+export * from "./icon-cache";
 export * from "./types";

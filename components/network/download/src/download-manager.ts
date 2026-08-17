@@ -139,6 +139,14 @@ export class DownloadManager {
     return task ? snapshotOf(task) : undefined;
   }
 
+  /** 等待指定任务完整退出，不使用轮询，也不会吞掉任务的最终快照。 */
+  async wait(taskId: string): Promise<DownloadTaskSnapshot | undefined> {
+    const task = this.tasks.get(taskId);
+    if (!task) return undefined;
+    await task.run;
+    return snapshotOf(task);
+  }
+
   /** 返回当前保留的全部任务，供统一下载中心展示。 */
   listTasks(): readonly DownloadTaskSnapshot[] {
     return [...this.tasks.values()]

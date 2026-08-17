@@ -2,12 +2,14 @@ import {
   desktopChannels,
   desktopShellContract,
   runtimeDiagnosticsContract,
+  serverCoreIconScheme,
   type ClientEntryPublication,
   type DesktopClientBootstrap,
   type DesktopShellService,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
   type ServerCoreArtifact,
+  type ServerCoreType,
 } from "../packages/contracts/src/index.ts";
 import {
   createDesktopShellModule,
@@ -122,6 +124,10 @@ class FakeBrowserWindow extends EventEmitter {
 class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntime {
   readonly windows: FakeBrowserWindow[] = [];
   readonly handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
+  readonly protocolHandlers = new Map<
+    string,
+    (requestUrl: string) => Promise<string | undefined>
+  >();
   quitCount = 0;
   directorySelection = "C:/SeaShard/resources";
   directorySelectionWindow?: BrowserWindow;
@@ -166,6 +172,24 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
 
   removeHandler(channel: string): void {
     this.handlers.delete(channel);
+  }
+
+  handleFileProtocol(
+    scheme: string,
+    resolvePath: (requestUrl: string) => Promise<string | undefined>,
+  ): void {
+    if (this.protocolHandlers.has(scheme)) throw new Error(`duplicate protocol: ${scheme}`);
+    this.protocolHandlers.set(scheme, resolvePath);
+  }
+
+  removeProtocolHandler(scheme: string): void {
+    this.protocolHandlers.delete(scheme);
+  }
+
+  async resolveProtocol(scheme: string, requestUrl: string): Promise<string | undefined> {
+    const handler = this.protocolHandlers.get(scheme);
+    if (!handler) throw new Error(`missing protocol: ${scheme}`);
+    return handler(requestUrl);
   }
 
   async invoke(channel: string, senderId: number, ...args: unknown[]): Promise<unknown> {
@@ -254,6 +278,16 @@ const paperArtifact = {
   sha256: "a".repeat(64),
 } satisfies ServerCoreArtifact;
 
+const paperIconHash = "f".repeat(64);
+const paperIconPath = `C:/SeaShard/core/cache/server-core-icons/${paperIconHash}.png`;
+const serverCoreTypes = [
+  { id: "vanilla" },
+  {
+    id: "paper",
+    iconUrl: `seashard-cache://server-core-icon/${paperIconHash}`,
+  },
+] satisfies readonly ServerCoreType[];
+
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
@@ -271,10 +305,12 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         readySnapshots.push(value);
       },
       readClientEntryPublication: () => clientEntries,
-      readServerCoreTypes: async () => ["vanilla", "paper"],
+      readServerCoreTypes: async () => serverCoreTypes,
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>
         serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
+      resolveServerCoreIconPath: async (sha256) =>
+        sha256 === paperIconHash ? paperIconPath : undefined,
       readServerSettings: async () => serverSettings,
       writeResourceDownloadDirectory: async (directory) => {
         serverSettings = { resourceDownloadDirectory: directory };
@@ -288,6 +324,19 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       },
     },
     { getSnapshot: async () => snapshot },
+  );
+
+  assert.equal(runtime.protocolHandlers.has(serverCoreIconScheme), true);
+  assert.equal(
+    await runtime.resolveProtocol(serverCoreIconScheme, serverCoreTypes[1]!.iconUrl!),
+    paperIconPath,
+  );
+  assert.equal(
+    await runtime.resolveProtocol(
+      serverCoreIconScheme,
+      `seashard-cache://other-host/${paperIconHash}`,
+    ),
+    undefined,
   );
 
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), true);
@@ -371,7 +420,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
-  assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), ["vanilla", "paper"]);
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), serverCoreTypes);
   await assert.rejects(runtime.invoke(desktopChannels.serverCoreTypes, 999), /request rejected/);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreVersions, 1, "paper"), [
     "1.21.1",
@@ -456,6 +505,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.windowClose), false);
   assert.equal(runtime.handlers.has(desktopChannels.dialogSelectDirectory), false);
   assert.equal(clientEntryListener, undefined);
+  assert.equal(runtime.protocolHandlers.has(serverCoreIconScheme), false);
   assert.deepEqual(failures, []);
 });
 
@@ -472,6 +522,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       readServerCoreTypes: async () => [],
       readServerCoreVersions: async () => [],
       readServerCoreArtifacts: async () => [],
+      resolveServerCoreIconPath: async () => undefined,
       readServerSettings: async () => ({ resourceDownloadDirectory: "/SeaShard/resources" }),
       writeResourceDownloadDirectory: async (directory) => ({
         resourceDownloadDirectory: directory,

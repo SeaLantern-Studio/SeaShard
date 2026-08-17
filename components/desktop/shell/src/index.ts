@@ -2,6 +2,8 @@ import {
   desktopChannels,
   desktopShellContract,
   runtimeDiagnosticsContract,
+  serverCoreIconHost,
+  serverCoreIconScheme,
   type ClientEntryPublication,
   type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
@@ -17,7 +19,10 @@ import type {
   IpcMain,
   Dialog,
   IpcMainInvokeEvent,
+  Net,
+  Protocol,
 } from "electron";
+import { pathToFileURL } from "node:url";
 
 /** Electron 全局对象的最小适配面，便于在不启动 Electron 的情况下验证完整 Shell。 */
 export interface DesktopShellRuntime {
@@ -33,6 +38,11 @@ export interface DesktopShellRuntime {
     listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
   ): void;
   removeHandler(channel: string): void;
+  handleFileProtocol(
+    scheme: string,
+    resolvePath: (requestUrl: string) => Promise<string | undefined>,
+  ): void;
+  removeProtocolHandler(scheme: string): void;
   selectDirectory(window: BrowserWindow): Promise<string | undefined>;
   quit(): void;
 }
@@ -53,6 +63,7 @@ export interface DesktopShellConfig {
     serverType: string,
     gameVersion: string,
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
+  resolveServerCoreIconPath(sha256: string): Promise<string | undefined>;
   readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;
   writeResourceDownloadDirectory(
     directory: string,
@@ -67,6 +78,8 @@ export function createElectronDesktopShellRuntime(
   BrowserWindowClass: typeof BrowserWindow,
   electronIpcMain: IpcMain,
   electronDialog: Dialog,
+  electronProtocol: Protocol,
+  electronNet: Net,
 ): DesktopShellRuntime {
   return {
     platform: process.platform,
@@ -77,6 +90,14 @@ export function createElectronDesktopShellRuntime(
     onWindowAllClosed: (listener) => electronApp.on("window-all-closed", listener),
     offWindowAllClosed: (listener) => electronApp.off("window-all-closed", listener),
     handle: (channel, listener) => electronIpcMain.handle(channel, listener),
+    handleFileProtocol: (scheme, resolvePath) => {
+      electronProtocol.handle(scheme, async (request) => {
+        const path = await resolvePath(request.url);
+        if (!path) return new Response(null, { status: 404 });
+        return electronNet.fetch(pathToFileURL(path).href);
+      });
+    },
+    removeProtocolHandler: (scheme) => electronProtocol.unhandle(scheme),
     selectDirectory: async (window) => {
       const result = await electronDialog.showOpenDialog(window, {
         title: "选择资源默认下载地址",
@@ -245,6 +266,25 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           } satisfies DesktopClientBootstrap);
         });
 
+        config.runtime.handleFileProtocol(serverCoreIconScheme, async (requestUrl) => {
+          let url: URL;
+          try {
+            url = new URL(requestUrl);
+          } catch {
+            return undefined;
+          }
+          if (
+            url.protocol !== `${serverCoreIconScheme}:` ||
+            url.hostname !== serverCoreIconHost ||
+            url.search ||
+            url.hash
+          ) {
+            return undefined;
+          }
+          const sha256 = /^\/([a-f0-9]{64})$/.exec(url.pathname)?.[1];
+          return sha256 ? config.resolveServerCoreIconPath(sha256) : undefined;
+        });
+
         config.runtime.handle(desktopChannels.windowMinimize, (event) => {
           ownedWindow(event.sender.id).minimize();
         });
@@ -327,10 +367,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         config.runtime.onWindowAllClosed(handleWindowAllClosed);
 
         return () => {
-          // 先停止产生窗口和推送的事件，再销毁授权窗口，最后撤销 IPC 入口。
+          // 先停止事件和本地资源入口，再销毁授权窗口，最后撤销 IPC。
           config.runtime.offActivate(handleActivate);
           config.runtime.offWindowAllClosed(handleWindowAllClosed);
           disposeClientEntrySubscription();
+          config.runtime.removeProtocolHandler(serverCoreIconScheme);
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();

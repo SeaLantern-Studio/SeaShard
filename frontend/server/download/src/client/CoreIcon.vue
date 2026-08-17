@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = withDefaults(
   defineProps<{
     coreId: string;
     label: string;
+    iconUrl?: string;
     size?: "card" | "row" | "detail";
   }>(),
   { size: "card" },
+);
+
+const imageFailed = ref(false);
+watch(
+  () => props.iconUrl,
+  () => {
+    imageFailed.value = false;
+  },
 );
 
 const knownMarks: Readonly<Record<string, string>> = {
@@ -47,12 +56,19 @@ const hue = computed(() => {
 <template>
   <span
     class="core-icon"
-    :class="`core-icon-${size}`"
+    :class="[`core-icon-${size}`, { 'core-icon-has-image': iconUrl && !imageFailed }]"
     :style="{ '--core-icon-hue': hue }"
     role="img"
     :aria-label="`${label} 图标`"
   >
-    <span>{{ mark }}</span>
+    <img
+      v-if="iconUrl && !imageFailed"
+      :src="iconUrl"
+      alt=""
+      draggable="false"
+      @error="imageFailed = true"
+    />
+    <span v-else>{{ mark }}</span>
   </span>
 </template>
 
@@ -70,6 +86,18 @@ const hue = computed(() => {
   letter-spacing: -0.04em;
   line-height: 1;
   user-select: none;
+}
+
+.core-icon-has-image {
+  border-color: transparent;
+  background: transparent;
+}
+
+.core-icon > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .core-icon > span {

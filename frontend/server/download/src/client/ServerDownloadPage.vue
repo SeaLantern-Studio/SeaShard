@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { ServerCoreArtifact, ServerCoreSourceClientService } from "@seashard/contracts";
+import type {
+  ServerCoreArtifact,
+  ServerCoreSourceClientService,
+  ServerCoreType,
+} from "@seashard/contracts";
 import { Cmz_Button, Cmz_Input, Cmz_Tooltip } from "cmzya-modern-ui";
 import { ArrowLeft, ChevronDown, Download, Save } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
@@ -11,6 +15,7 @@ type CoreView = "catalog" | "versions" | "configuration";
 interface CoreCard {
   readonly id: string;
   readonly label: string;
+  readonly iconUrl?: string;
 }
 
 const props = defineProps<{
@@ -18,7 +23,7 @@ const props = defineProps<{
   category: ResourceCategory;
 }>();
 
-const catalogTypes = ref<readonly string[]>([]);
+const catalogTypes = ref<readonly ServerCoreType[]>([]);
 const catalogLoading = ref(props.category.id === "server-core");
 const catalogError = ref<string>();
 const activeView = ref<CoreView>("catalog");
@@ -38,12 +43,13 @@ const versionCollator = new Intl.Collator("en", {
   sensitivity: "base",
 });
 
-const coreCards = computed<readonly CoreCard[]>(() => [
-  { id: "vanilla", label: "原版核心" },
-  ...catalogTypes.value
-    .filter((type) => type !== "vanilla")
-    .map((type) => ({ id: type, label: formatCoreType(type) })),
-]);
+const coreCards = computed<readonly CoreCard[]>(() =>
+  catalogTypes.value.map((type) => ({
+    id: type.id,
+    label: type.id === "vanilla" ? "原版核心" : formatCoreType(type.id),
+    ...(type.iconUrl ? { iconUrl: type.iconUrl } : {}),
+  })),
+);
 
 const configurationTitle = computed(() => {
   if (!selectedCore.value || !selectedArtifact.value) return "";
@@ -250,7 +256,7 @@ function formatCoreType(type: string): string {
             :data-core-id="core.id"
             @click="selectCore(core)"
           >
-            <CoreIcon :core-id="core.id" :label="core.label" />
+            <CoreIcon :core-id="core.id" :label="core.label" :icon-url="core.iconUrl" />
             <span class="core-card-label">{{ core.label }}</span>
           </button>
         </div>
@@ -266,7 +272,12 @@ function formatCoreType(type: string): string {
           >
             <ArrowLeft :size="19" :stroke-width="1.9" />
           </button>
-          <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="row" />
+          <CoreIcon
+            :core-id="selectedCore.id"
+            :label="selectedCore.label"
+            :icon-url="selectedCore.iconUrl"
+            size="row"
+          />
           <h1 :id="`resource-title-${category.id}`">{{ selectedCore.label }}</h1>
         </div>
 
@@ -329,7 +340,12 @@ function formatCoreType(type: string): string {
                     class="artifact-row"
                     @click="configureArtifact(artifact)"
                   >
-                    <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="row" />
+                    <CoreIcon
+                      :core-id="selectedCore.id"
+                      :label="selectedCore.label"
+                      :icon-url="selectedCore.iconUrl"
+                      size="row"
+                    />
                     <strong class="artifact-name">{{
                       stripJarExtension(artifact.fileName)
                     }}</strong>
@@ -359,7 +375,12 @@ function formatCoreType(type: string): string {
         </div>
 
         <div class="configuration-body">
-          <CoreIcon :core-id="selectedCore.id" :label="selectedCore.label" size="detail" />
+          <CoreIcon
+            :core-id="selectedCore.id"
+            :label="selectedCore.label"
+            :icon-url="selectedCore.iconUrl"
+            size="detail"
+          />
           <div class="filename-field">
             <label class="sr-only" for="server-core-file-name">文件名</label>
             <Cmz_Input

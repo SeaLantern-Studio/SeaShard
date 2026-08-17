@@ -23,6 +23,9 @@ export const desktopChannels = {
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
+/** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
+export const serverCoreIconScheme = "seashard-cache";
+export const serverCoreIconHost = "server-core-icon";
 /** 服务器设置 Host 组件发布的稳定 Service contract。 */
 export const serverSettingsContract = "seashard.server-settings";
 
@@ -87,6 +90,12 @@ export interface DesktopClientBootstrap extends ClientEntryPublication {
   };
 }
 
+/** Renderer 可安全读取的服务端核心类型；图标地址只指向 Host 本地缓存协议。 */
+export interface ServerCoreType {
+  id: string;
+  iconUrl?: string;
+}
+
 /** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */
 export interface ServerCoreArtifact {
   source: "cnb";
@@ -99,7 +108,7 @@ export interface ServerCoreArtifact {
 
 /** Renderer 只读的服务端核心目录能力，不暴露下载路径或宿主对象。 */
 export interface ServerCoreSourceClientService {
-  listTypes(): Promise<readonly string[]>;
+  listTypes(): Promise<readonly ServerCoreType[]>;
   listVersions(serverType: string): Promise<readonly string[]>;
   listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
 }

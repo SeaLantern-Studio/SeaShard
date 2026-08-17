@@ -43,6 +43,8 @@ export interface DownloadService {
   start(request: StartDownloadRequest): Promise<DownloadTaskSnapshot>;
   /** 查询单个任务；任务不存在时返回 null。 */
   snapshot(taskId: string): Promise<DownloadTaskSnapshot | null>;
+  /** 等待任务进入终态并返回最终快照；任务不存在时返回 null。 */
+  wait(taskId: string): Promise<DownloadTaskSnapshot | null>;
   /** 按创建时间返回当前保留的任务。 */
   listTasks(): Promise<readonly DownloadTaskSnapshot[]>;
   /** 取消任务并等待临时文件清理完成。 */

@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import test from "node:test";
 import {
   DownloadManager,
@@ -14,13 +13,9 @@ async function waitForFinished(
   manager: DownloadManager,
   taskId: string,
 ): Promise<DownloadTaskSnapshot> {
-  for (let attempt = 0; attempt < 20_000; attempt += 1) {
-    const snapshot = manager.snapshot(taskId);
-    if (!snapshot) throw new Error("download task disappeared");
-    if (["completed", "failed", "cancelled"].includes(snapshot.state)) return snapshot;
-    await yieldToEventLoop();
-  }
-  throw new Error(`download task did not finish: ${JSON.stringify(manager.snapshot(taskId))}`);
+  const snapshot = await manager.wait(taskId);
+  if (!snapshot) throw new Error("download task disappeared");
+  return snapshot;
 }
 
 await test("shared downloader resolves the current transport for every new task", async () => {
