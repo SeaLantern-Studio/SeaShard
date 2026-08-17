@@ -9,12 +9,15 @@ import {
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
   type ServerCoreArtifact,
+  type ServerCoreDownloadTaskSnapshot,
   type ServerCoreType,
 } from "../packages/contracts/src/index.ts";
 import {
   createDesktopShellModule,
   type DesktopShellConfig,
   type DesktopShellRuntime,
+  type DirectorySelectionOptions,
+  type StartDesktopServerCoreDownloadRequest,
 } from "../components/desktop/shell/src/index.ts";
 import type {
   Disposable,
@@ -129,8 +132,9 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     (requestUrl: string) => Promise<string | undefined>
   >();
   quitCount = 0;
-  directorySelection = "C:/SeaShard/resources";
+  directorySelection: string | undefined = "C:/SeaShard/resources";
   directorySelectionWindow?: BrowserWindow;
+  directorySelectionOptions?: DirectorySelectionOptions;
 
   constructor(readonly platform: NodeJS.Platform) {
     super();
@@ -198,8 +202,12 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     return handler({ sender: { id: senderId } } as IpcMainInvokeEvent, ...args);
   }
 
-  async selectDirectory(window: BrowserWindow): Promise<string | undefined> {
+  async selectDirectory(
+    window: BrowserWindow,
+    options: DirectorySelectionOptions,
+  ): Promise<string | undefined> {
     this.directorySelectionWindow = window;
+    this.directorySelectionOptions = options;
     return this.directorySelection;
   }
 
@@ -293,7 +301,18 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
-  let serverSettings = { resourceDownloadDirectory: "C:/SeaShard/resources" };
+  let serverSettings = {
+    resourceDownloadDirectory: "C:/SeaShard/resources",
+    defaultDownloadConnections: 16,
+  };
+  const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
+  let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
+  const saveAsRequest = {
+    serverType: "paper",
+    gameVersion: "1.21.1",
+    artifactFileName: paperArtifact.fileName,
+    destinationFileName: "custom-paper.jar",
+  } as const;
   const shell = await activateDesktopShell(
     {
       runtime,
@@ -313,8 +332,44 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         sha256 === paperIconHash ? paperIconPath : undefined,
       readServerSettings: async () => serverSettings,
       writeResourceDownloadDirectory: async (directory) => {
-        serverSettings = { resourceDownloadDirectory: directory };
+        serverSettings = { ...serverSettings, resourceDownloadDirectory: directory };
         return serverSettings;
+      },
+      writeDefaultDownloadConnections: async (connections) => {
+        serverSettings = { ...serverSettings, defaultDownloadConnections: connections };
+        return serverSettings;
+      },
+      startServerCoreDownload: async (request) => {
+        startedDownloads.push(request);
+        const task: ServerCoreDownloadTaskSnapshot = {
+          id: `task-${startedDownloads.length}`,
+          artifact: paperArtifact,
+          destinationPath: `${request.destinationDirectory}/${request.destinationFileName}`,
+          state: "queued",
+          downloadedBytes: 0,
+          totalBytes: 0,
+          connections: 0,
+          progress: 0,
+          createdAt: "2026-08-17T12:00:00.000Z",
+        };
+        downloadTasks = [...downloadTasks, task];
+        return task;
+      },
+      listServerCoreDownloadTasks: async () => downloadTasks,
+      cancelServerCoreDownload: async (taskId) => {
+        const task = downloadTasks.find((candidate) => candidate.id === taskId);
+        if (!task || ["completed", "failed", "cancelled"].includes(task.state)) return false;
+        downloadTasks = downloadTasks.map((candidate) =>
+          candidate.id === taskId
+            ? {
+                ...candidate,
+                state: "cancelled",
+                finishedAt: "2026-08-17T12:00:01.000Z",
+                error: "download cancelled",
+              }
+            : candidate,
+        );
+        return true;
       },
       onClientEntriesChanged: (listener) => {
         clientEntryListener = listener;
@@ -361,6 +416,22 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     ),
     /request rejected/,
   );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, 1, 4),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 1),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreDownloadCancel, 1, "task-1"),
+    /request rejected/,
+  );
 
   await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
@@ -395,6 +466,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.directorySelection,
   );
   assert.equal(runtime.directorySelectionWindow, first as unknown as BrowserWindow);
+  assert.deepEqual(runtime.directorySelectionOptions, {
+    title: "选择资源默认下载地址",
+    buttonLabel: "选择此文件夹",
+    defaultPath: "C:/SeaShard/resources",
+  });
   await assert.rejects(
     runtime.invoke(desktopChannels.dialogSelectDirectory, 999),
     /request rejected/,
@@ -406,16 +482,67 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       1,
       "D:/Servers/resources",
     ),
-    { resourceDownloadDirectory: "D:/Servers/resources" },
+    {
+      resourceDownloadDirectory: "D:/Servers/resources",
+      defaultDownloadConnections: 16,
+    },
   );
-  assert.deepEqual(serverSettings, { resourceDownloadDirectory: "D:/Servers/resources" });
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, 1, 4),
+    {
+      resourceDownloadDirectory: "D:/Servers/resources",
+      defaultDownloadConnections: 4,
+    },
+  );
+  assert.deepEqual(serverSettings, {
+    resourceDownloadDirectory: "D:/Servers/resources",
+    defaultDownloadConnections: 4,
+  });
   await assert.rejects(
     runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 1, 42),
     /must be a string/,
   );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, 1, 4.5),
+    /must be a safe integer/,
+  );
   await assert.rejects(runtime.invoke(desktopChannels.serverSettingsGet, 999), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 999, "E:/Rejected"),
+    /request rejected/,
+  );
+  runtime.directorySelection = "D:/Downloads";
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
+    downloadTasks[0],
+  );
+  assert.deepEqual(runtime.directorySelectionOptions, {
+    title: "选择 custom-paper.jar 的保存文件夹",
+    buttonLabel: "保存到此文件夹",
+    defaultPath: "D:/Servers/resources",
+  });
+  assert.deepEqual(startedDownloads, [
+    {
+      ...saveAsRequest,
+      destinationDirectory: "D:/Downloads",
+      connections: 4,
+    },
+  ]);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 1),
+    downloadTasks,
+  );
+  assert.equal(await runtime.invoke(desktopChannels.serverCoreDownloadCancel, 1, "task-1"), true);
+  assert.equal(downloadTasks[0]?.state, "cancelled");
+  runtime.directorySelection = undefined;
+  assert.equal(
+    await runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
+    undefined,
+  );
+  assert.equal(startedDownloads.length, 1, "cancelling the folder dialog must not start a task");
+  runtime.directorySelection = "C:/SeaShard/resources";
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 999),
     /request rejected/,
   );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
@@ -498,6 +625,13 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.handlers.has(desktopChannels.serverSettingsSetResourceDownloadDirectory),
     false,
   );
+  assert.equal(
+    runtime.handlers.has(desktopChannels.serverSettingsSetDefaultDownloadConnections),
+    false,
+  );
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
   assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
@@ -523,10 +657,23 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       readServerCoreVersions: async () => [],
       readServerCoreArtifacts: async () => [],
       resolveServerCoreIconPath: async () => undefined,
-      readServerSettings: async () => ({ resourceDownloadDirectory: "/SeaShard/resources" }),
+      readServerSettings: async () => ({
+        resourceDownloadDirectory: "/SeaShard/resources",
+        defaultDownloadConnections: 8,
+      }),
       writeResourceDownloadDirectory: async (directory) => ({
         resourceDownloadDirectory: directory,
+        defaultDownloadConnections: 8,
       }),
+      writeDefaultDownloadConnections: async (connections) => ({
+        resourceDownloadDirectory: "/SeaShard/resources",
+        defaultDownloadConnections: connections,
+      }),
+      startServerCoreDownload: async () => {
+        throw new Error("not expected");
+      },
+      listServerCoreDownloadTasks: async () => [],
+      cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},
     },
     { getSnapshot: async () => snapshot },

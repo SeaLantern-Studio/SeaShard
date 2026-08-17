@@ -1,5 +1,7 @@
+import { serverDownloadConnectionLimits } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
-import { basename, dirname, resolve } from "node:path";
+import { access } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { CnbServerCoreCatalog } from "./cnb-catalog";
 import type {
   ServerCoreArtifact,
@@ -8,6 +10,12 @@ import type {
 } from "./types";
 
 const metadataKind = "server-core";
+const usesCaseInsensitivePaths = process.platform === "win32";
+
+interface DestinationReservation {
+  readonly path: string;
+  readonly key: string;
+}
 
 /**
  * 把“服务端类型 + 游戏版本”翻译为公共下载任务。
@@ -16,6 +24,7 @@ const metadataKind = "server-core";
  */
 export class ServerCoreSourceCoordinator {
   private readonly ownedTaskIds = new Set<string>();
+  private readonly reservedDestinationPaths = new Set<string>();
   private disposed = false;
 
   constructor(
@@ -23,39 +32,84 @@ export class ServerCoreSourceCoordinator {
     private readonly downloads: DownloadService,
   ) {}
 
-  /** 解析 CNB 产物，并把最终 JAR 放到调用方明确给出的服务端根目录。 */
+  /** 验证目录中的 CNB 产物，并按调用方给出的安全文件名启动公共多连接下载。 */
   async start(value: unknown): Promise<ServerCoreDownloadTaskSnapshot> {
     if (this.disposed) throw new Error("server core source coordinator is stopped");
     const request = parseStartRequest(value);
     const artifacts = await this.catalog.listArtifacts(request.serverType, request.gameVersion);
     // 目录请求期间组件可能被停止，因此跨越 await 后必须重新检查生命周期。
     if (this.disposed) throw new Error("server core source coordinator is stopped");
-    const artifact = selectArtifact(artifacts, request.fileName);
-    const serverDirectory = resolve(request.serverDirectory);
-    const destinationPath = resolve(serverDirectory, artifact.fileName);
+    const artifact = selectArtifact(artifacts, request.artifactFileName);
+    if (!isAbsolute(request.destinationDirectory)) {
+      throw new TypeError("server core download destination directory must be absolute");
+    }
+    const destinationDirectory = resolve(request.destinationDirectory);
+    const requestedDestinationPath = resolve(destinationDirectory, request.destinationFileName);
     if (
-      dirname(destinationPath) !== serverDirectory ||
-      basename(destinationPath) !== artifact.fileName
+      dirname(requestedDestinationPath) !== destinationDirectory ||
+      basename(requestedDestinationPath) !== request.destinationFileName
     ) {
-      throw new TypeError("server core download destination escaped the server directory");
+      throw new TypeError("server core download destination escaped the selected directory");
     }
 
-    const task = await this.downloads.start({
-      url: artifact.url,
-      destinationPath,
-      sha256: artifact.sha256,
-      metadata: {
-        kind: metadataKind,
-        artifact: { ...artifact },
-      },
-    });
-    // start 与组件停止存在竞态；停止已经开始时，不能把新任务遗留给公共下载器。
-    if (this.disposed) {
-      await this.downloads.cancel(task.id);
-      throw new Error("server core source coordinator is stopped");
+    const reservation = await this.reserveDestinationPath(
+      destinationDirectory,
+      request.destinationFileName,
+    );
+    try {
+      if (this.disposed) throw new Error("server core source coordinator is stopped");
+      const task = await this.downloads.start({
+        url: artifact.url,
+        destinationPath: reservation.path,
+        sha256: artifact.sha256,
+        connections: request.connections,
+        metadata: {
+          kind: metadataKind,
+          artifact: { ...artifact },
+        },
+      });
+      // start 与组件停止存在竞态；停止已经开始时，不能把新任务遗留给公共下载器。
+      if (this.disposed) {
+        await this.downloads.cancel(task.id);
+        throw new Error("server core source coordinator is stopped");
+      }
+      this.ownedTaskIds.add(task.id);
+      return toServerSnapshot(task);
+    } finally {
+      this.reservedDestinationPaths.delete(reservation.key);
     }
-    this.ownedTaskIds.add(task.id);
-    return toServerSnapshot(task);
+  }
+
+  /**
+   * 目标被已有文件或活动任务占用时，在扩展名前依次追加 (1)、(2)。
+   * 候选路径在磁盘检查期间先占位，避免并发请求选中同一个尚未创建的文件。
+   */
+  private async reserveDestinationPath(
+    directory: string,
+    requestedFileName: string,
+  ): Promise<DestinationReservation> {
+    const activeDestinationPaths = new Set<string>();
+    for (const task of await this.downloads.listTasks()) {
+      if (task.state === "queued" || task.state === "downloading") {
+        activeDestinationPaths.add(destinationKey(task.destinationPath));
+      }
+    }
+
+    for (let copyNumber = 0; ; copyNumber += 1) {
+      const fileName = appendCopyNumber(requestedFileName, copyNumber);
+      const candidatePath = resolve(directory, fileName);
+      const key = destinationKey(candidatePath);
+      if (activeDestinationPaths.has(key) || this.reservedDestinationPaths.has(key)) continue;
+
+      this.reservedDestinationPaths.add(key);
+      try {
+        if (!(await pathExists(candidatePath))) return { path: candidatePath, key };
+      } catch (error) {
+        this.reservedDestinationPaths.delete(key);
+        throw error;
+      }
+      this.reservedDestinationPaths.delete(key);
+    }
   }
 
   /** 只允许通过服务端核心组件查询自己创建的公共下载任务。 */
@@ -99,27 +153,44 @@ function parseStartRequest(value: unknown): StartServerCoreDownloadRequest {
     throw new TypeError("server core source request must be an object");
   }
   const record = value as Record<string, unknown>;
-  const serverType = expectString(record.serverType, "serverType");
-  const gameVersion = expectString(record.gameVersion, "gameVersion");
-  const serverDirectory = expectString(record.serverDirectory, "serverDirectory");
-  const fileName =
-    record.fileName === undefined ? undefined : expectString(record.fileName, "fileName");
-  return { serverType, gameVersion, serverDirectory, ...(fileName ? { fileName } : {}) };
+  return {
+    serverType: expectString(record.serverType, "serverType"),
+    gameVersion: expectString(record.gameVersion, "gameVersion"),
+    destinationDirectory: expectString(record.destinationDirectory, "destinationDirectory"),
+    artifactFileName: expectFileName(record.artifactFileName, "artifactFileName"),
+    destinationFileName: expectFileName(record.destinationFileName, "destinationFileName"),
+    connections: expectConnections(record.connections),
+  };
 }
 
 function selectArtifact(
   artifacts: readonly ServerCoreArtifact[],
-  requestedFileName: string | undefined,
+  requestedFileName: string,
 ): ServerCoreArtifact {
-  if (requestedFileName) {
-    const artifact = artifacts.find((candidate) => candidate.fileName === requestedFileName);
-    if (!artifact) throw new Error(`server core artifact is unavailable: ${requestedFileName}`);
-    return artifact;
+  const artifact = artifacts.find((candidate) => candidate.fileName === requestedFileName);
+  if (!artifact) throw new Error(`server core artifact is unavailable: ${requestedFileName}`);
+  return artifact;
+}
+
+function appendCopyNumber(fileName: string, copyNumber: number): string {
+  if (copyNumber === 0) return fileName;
+  const extension = extname(fileName);
+  return `${fileName.slice(0, -extension.length)}(${copyNumber})${extension}`;
+}
+
+function destinationKey(path: string): string {
+  const normalizedPath = resolve(path);
+  return usesCaseInsensitivePaths ? normalizedPath.toLowerCase() : normalizedPath;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
-  if (artifacts.length !== 1) {
-    throw new Error("server core version has multiple artifacts; fileName is required");
-  }
-  return artifacts[0]!;
 }
 
 /** 从公共任务的透明 metadata 恢复服务端核心业务快照。 */
@@ -166,4 +237,31 @@ function expectString(value: unknown, field: string): string {
     throw new TypeError(`server core source ${field} must be a non-empty string`);
   }
   return value;
+}
+
+function expectFileName(value: unknown, field: string): string {
+  const fileName = expectString(value, field);
+  if (
+    fileName === "." ||
+    fileName === ".." ||
+    /[\\/]/u.test(fileName) ||
+    basename(fileName) !== fileName ||
+    !fileName.toLowerCase().endsWith(".jar")
+  ) {
+    throw new TypeError(`server core source ${field} must be a plain JAR file name`);
+  }
+  return fileName;
+}
+
+function expectConnections(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    (value as number) < serverDownloadConnectionLimits.minimum ||
+    (value as number) > serverDownloadConnectionLimits.maximum
+  ) {
+    throw new TypeError(
+      `server core source connections must be between ${serverDownloadConnectionLimits.minimum} and ${serverDownloadConnectionLimits.maximum}`,
+    );
+  }
+  return value as number;
 }

@@ -8,6 +8,9 @@ import {
   type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
+  type ServerCoreDownloadClientService,
+  type ServerCoreDownloadTaskSnapshot,
+  type ServerCoreSaveAsRequest,
   type ServerCoreSourceClientService,
   type ServerSettingsClientService,
 } from "@seashard/contracts";
@@ -23,6 +26,17 @@ import type {
   Protocol,
 } from "electron";
 import { pathToFileURL } from "node:url";
+
+export interface DirectorySelectionOptions {
+  readonly title: string;
+  readonly buttonLabel: string;
+  readonly defaultPath?: string;
+}
+
+export interface StartDesktopServerCoreDownloadRequest extends ServerCoreSaveAsRequest {
+  readonly destinationDirectory: string;
+  readonly connections: number;
+}
 
 /** Electron 全局对象的最小适配面，便于在不启动 Electron 的情况下验证完整 Shell。 */
 export interface DesktopShellRuntime {
@@ -43,7 +57,10 @@ export interface DesktopShellRuntime {
     resolvePath: (requestUrl: string) => Promise<string | undefined>,
   ): void;
   removeProtocolHandler(scheme: string): void;
-  selectDirectory(window: BrowserWindow): Promise<string | undefined>;
+  selectDirectory(
+    window: BrowserWindow,
+    options: DirectorySelectionOptions,
+  ): Promise<string | undefined>;
   quit(): void;
 }
 
@@ -68,6 +85,14 @@ export interface DesktopShellConfig {
   writeResourceDownloadDirectory(
     directory: string,
   ): ReturnType<ServerSettingsClientService["setResourceDownloadDirectory"]>;
+  writeDefaultDownloadConnections(
+    connections: number,
+  ): ReturnType<ServerSettingsClientService["setDefaultDownloadConnections"]>;
+  startServerCoreDownload(
+    request: StartDesktopServerCoreDownloadRequest,
+  ): Promise<ServerCoreDownloadTaskSnapshot>;
+  listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
+  cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
 }
@@ -98,10 +123,11 @@ export function createElectronDesktopShellRuntime(
       });
     },
     removeProtocolHandler: (scheme) => electronProtocol.unhandle(scheme),
-    selectDirectory: async (window) => {
+    selectDirectory: async (window, options) => {
       const result = await electronDialog.showOpenDialog(window, {
-        title: "选择资源默认下载地址",
-        buttonLabel: "选择此文件夹",
+        title: options.title,
+        buttonLabel: options.buttonLabel,
+        ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
         properties: ["openDirectory", "createDirectory"],
       });
       return result.canceled ? undefined : result.filePaths[0];
@@ -142,6 +168,24 @@ function expectNonEmptyString(value: unknown, label: string): string {
 function expectString(value: unknown, label: string): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
   return value;
+}
+
+function expectSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
+  return value as number;
+}
+
+function expectServerCoreSaveAsRequest(value: unknown): ServerCoreSaveAsRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server core save-as request must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    serverType: expectNonEmptyString(record.serverType, "server core type"),
+    gameVersion: expectNonEmptyString(record.gameVersion, "game version"),
+    artifactFileName: expectNonEmptyString(record.artifactFileName, "artifact file name"),
+    destinationFileName: expectNonEmptyString(record.destinationFileName, "destination file name"),
+  };
 }
 
 /**
@@ -300,9 +344,15 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         config.runtime.handle(desktopChannels.windowClose, (event) => {
           ownedWindow(event.sender.id).close();
         });
-        config.runtime.handle(desktopChannels.dialogSelectDirectory, (event) =>
-          config.runtime.selectDirectory(ownedWindow(event.sender.id)),
-        );
+        config.runtime.handle(desktopChannels.dialogSelectDirectory, async (event) => {
+          const window = ownedWindow(event.sender.id);
+          const settings = await config.readServerSettings();
+          return config.runtime.selectDirectory(window, {
+            title: "选择资源默认下载地址",
+            buttonLabel: "选择此文件夹",
+            defaultPath: settings.resourceDownloadDirectory,
+          });
+        });
         config.runtime.handle(desktopChannels.serverSettingsGet, (event) => {
           ownedWindow(event.sender.id);
           return config.readServerSettings();
@@ -316,6 +366,41 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
+        config.runtime.handle(
+          desktopChannels.serverSettingsSetDefaultDownloadConnections,
+          (event, connections) => {
+            ownedWindow(event.sender.id);
+            return config.writeDefaultDownloadConnections(
+              expectSafeInteger(connections, "default download connections"),
+            );
+          },
+        );
+        config.runtime.handle(desktopChannels.serverCoreDownloadSaveAs, async (event, value) => {
+          const window = ownedWindow(event.sender.id);
+          const request = expectServerCoreSaveAsRequest(value);
+          const settings = await config.readServerSettings();
+          const destinationDirectory = await config.runtime.selectDirectory(window, {
+            title: `选择 ${request.destinationFileName} 的保存文件夹`,
+            buttonLabel: "保存到此文件夹",
+            defaultPath: settings.resourceDownloadDirectory,
+          });
+          if (!destinationDirectory) return undefined;
+          return config.startServerCoreDownload({
+            ...request,
+            destinationDirectory,
+            connections: settings.defaultDownloadConnections,
+          });
+        });
+        config.runtime.handle(desktopChannels.serverCoreDownloadListTasks, (event) => {
+          ownedWindow(event.sender.id);
+          return config.listServerCoreDownloadTasks();
+        });
+        config.runtime.handle(desktopChannels.serverCoreDownloadCancel, (event, taskId) => {
+          ownedWindow(event.sender.id);
+          return config.cancelServerCoreDownload(
+            expectNonEmptyString(taskId, "server core download task id"),
+          );
+        });
 
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
@@ -381,6 +466,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
           config.runtime.removeHandler(desktopChannels.serverSettingsGet);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
+          config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);
+          config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
+          config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
+          config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

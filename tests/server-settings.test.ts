@@ -42,13 +42,17 @@ class MemoryPluginStorage implements PluginStorage {
 async function activateSettings(
   storage: PluginStorage,
   defaultResourceDownloadDirectory: string,
+  defaultDownloadConnections = 8,
 ): Promise<ServerSettingsClientService> {
   const providers = new Map<string, ServiceProvider>();
   const context = {
     storage,
     provide: (contract: string, provider: ServiceProvider) => providers.set(contract, provider),
   } as unknown as PluginContext;
-  await createServerSettingsModule({ defaultResourceDownloadDirectory }).apply(context, null);
+  await createServerSettingsModule({
+    defaultResourceDownloadDirectory,
+    defaultDownloadConnections,
+  }).apply(context, null);
   const service = providers.get(serverSettingsContract);
   assert.ok(service, "server settings component must publish its service");
   return service as unknown as ServerSettingsClientService;
@@ -60,14 +64,21 @@ await test("server settings persist the resource directory across component rest
 
   assert.deepEqual(await first.get(), {
     resourceDownloadDirectory: "C:/SeaShard/core/resources",
+    defaultDownloadConnections: 8,
   });
   assert.deepEqual(await first.setResourceDownloadDirectory("D:/Minecraft/resources"), {
     resourceDownloadDirectory: "D:/Minecraft/resources",
+    defaultDownloadConnections: 8,
+  });
+  assert.deepEqual(await first.setDefaultDownloadConnections(16), {
+    resourceDownloadDirectory: "D:/Minecraft/resources",
+    defaultDownloadConnections: 16,
   });
 
-  const restarted = await activateSettings(storage, "C:/Different/default");
+  const restarted = await activateSettings(storage, "C:/Different/default", 4);
   assert.deepEqual(await restarted.get(), {
     resourceDownloadDirectory: "D:/Minecraft/resources",
+    defaultDownloadConnections: 16,
   });
 });
 
@@ -77,12 +88,19 @@ await test("server settings serialize concurrent writes and reject non-string pa
 
   await Promise.all([
     service.setResourceDownloadDirectory("D:/First"),
-    service.setResourceDownloadDirectory("E:/Second"),
+    service.setDefaultDownloadConnections(16),
   ]);
-  assert.deepEqual(await service.get(), { resourceDownloadDirectory: "E:/Second" });
+  assert.deepEqual(await service.get(), {
+    resourceDownloadDirectory: "D:/First",
+    defaultDownloadConnections: 16,
+  });
 
   const provider = service as unknown as ServiceProvider;
   assert.throws(() => provider.setResourceDownloadDirectory?.(42), /must be a string/);
+  assert.throws(
+    () => provider.setDefaultDownloadConnections?.(0),
+    /must be an integer between 1 and 32/,
+  );
 });
 
 assert.equal(serverSettingsManifest.entries[0]?.runtime, "host");

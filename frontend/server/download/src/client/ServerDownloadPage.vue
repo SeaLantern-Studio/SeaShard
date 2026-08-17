@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   ServerCoreArtifact,
+  ServerCoreDownloadClientService,
   ServerCoreSourceClientService,
   ServerCoreType,
 } from "@seashard/contracts";
@@ -20,6 +21,7 @@ interface CoreCard {
 
 const props = defineProps<{
   coreSource: ServerCoreSourceClientService;
+  downloads: ServerCoreDownloadClientService;
   category: ResourceCategory;
 }>();
 
@@ -37,6 +39,8 @@ const artifactLoadingVersions = ref<Record<string, boolean>>({});
 const artifactErrors = ref<Record<string, string | undefined>>({});
 const selectedArtifact = ref<ServerCoreArtifact>();
 const fileStem = ref("");
+const saveAsPending = ref(false);
+const saveAsError = ref<string>();
 let versionsRequestId = 0;
 const versionCollator = new Intl.Collator("en", {
   numeric: true,
@@ -54,6 +58,10 @@ const coreCards = computed<readonly CoreCard[]>(() =>
 const configurationTitle = computed(() => {
   if (!selectedCore.value || !selectedArtifact.value) return "";
   return `${selectedCore.value.label} ${selectedArtifact.value.gameVersion}`;
+});
+const destinationFileName = computed(() => {
+  const stem = fileStem.value.trim();
+  return stem && !/[\\/]/u.test(stem) ? `${stem}.jar` : undefined;
 });
 
 onMounted(() => {
@@ -144,6 +152,7 @@ async function loadArtifacts(
 function configureArtifact(artifact: ServerCoreArtifact): void {
   selectedArtifact.value = artifact;
   fileStem.value = stripJarExtension(artifact.fileName);
+  saveAsError.value = undefined;
   activeView.value = "configuration";
 }
 
@@ -158,10 +167,12 @@ function returnToCatalog(): void {
 function returnToVersions(): void {
   activeView.value = "versions";
   selectedArtifact.value = undefined;
+  saveAsError.value = undefined;
 }
 
 function updateFileStem(value: string): void {
   fileStem.value = stripJarExtension(value);
+  saveAsError.value = undefined;
 }
 
 function stripJarExtension(fileName: string): string {
@@ -172,6 +183,27 @@ function artifactCount(version: string): number | undefined {
   return Object.hasOwn(artifactsByVersion.value, version)
     ? artifactsByVersion.value[version]?.length
     : undefined;
+}
+
+async function saveArtifactAs(): Promise<void> {
+  const artifact = selectedArtifact.value;
+  const destination = destinationFileName.value;
+  if (!artifact || !destination || saveAsPending.value) return;
+
+  saveAsPending.value = true;
+  saveAsError.value = undefined;
+  try {
+    await props.downloads.saveAs({
+      serverType: artifact.serverType,
+      gameVersion: artifact.gameVersion,
+      artifactFileName: artifact.fileName,
+      destinationFileName: destination,
+    });
+  } catch (error) {
+    saveAsError.value = errorMessage(error);
+  } finally {
+    saveAsPending.value = false;
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -405,11 +437,17 @@ function formatCoreType(type: string): string {
               size="lg"
               icon-only
               aria-label="另存为"
+              :loading="saveAsPending"
+              :disabled="!destinationFileName || saveAsPending"
+              @click="saveArtifactAs"
             >
               <Save :size="19" :stroke-width="1.9" />
             </Cmz_Button>
           </Cmz_Tooltip>
         </div>
+        <p v-if="saveAsError" class="download-start-error" role="alert">
+          {{ saveAsError }}
+        </p>
       </div>
     </Transition>
   </section>

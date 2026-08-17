@@ -1,6 +1,7 @@
 import {
   runtimeDiagnosticsContract,
   serverCoreSourceContract,
+  serverCoreDownloadContract,
   serverSettingsContract,
 } from "@seashard/contracts";
 import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
@@ -19,6 +20,7 @@ const runtime = new ClientUiRuntime({
   services: {
     [runtimeDiagnosticsContract]: window.seashard.runtime,
     [serverCoreSourceContract]: window.seashard.serverCore,
+    [serverCoreDownloadContract]: window.seashard.serverCoreDownload,
     [serverSettingsContract]: window.seashard.serverSettings,
     [uiAppearanceContract]: appearanceService,
   },

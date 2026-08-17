@@ -1,0 +1,319 @@
+.download-task-pill {
+  position: relative;
+  z-index: 220;
+  box-sizing: border-box;
+  width: min(270px, 25vw);
+  min-width: 180px;
+  height: 32px;
+  flex: 0 1 auto;
+  border: 1px solid transparent;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-sm);
+  transition:
+    width 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    min-width 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  -webkit-app-region: no-drag;
+}
+
+.download-task-pill.completed,
+.download-task-pill.failed,
+.download-task-pill.cancelled {
+  width: 148px;
+  min-width: 148px;
+  flex-shrink: 0;
+}
+
+.download-task-ring {
+  position: absolute;
+  z-index: 2;
+  top: -1px;
+  left: -1px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.download-task-ring-track,
+.download-task-ring-value {
+  fill: none;
+  stroke-width: 2;
+}
+
+.download-task-ring-track {
+  stroke: var(--sl-border-light);
+}
+
+.download-task-ring-value {
+  stroke: var(--sl-primary);
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1),
+    stroke 160ms ease;
+}
+
+.completed .download-task-ring-value {
+  stroke: var(--sl-success);
+}
+
+.failed .download-task-ring-value {
+  stroke: var(--sl-error);
+}
+
+.cancelled .download-task-ring-value {
+  stroke: var(--sl-warning);
+}
+
+.download-task-summary {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px 0 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.download-task-badge {
+  display: inline-flex;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.completed .download-task-badge {
+  background: var(--sl-success-bg);
+  color: var(--sl-success);
+}
+
+.failed .download-task-badge {
+  background: var(--sl-error-bg);
+  color: var(--sl-error);
+}
+
+.cancelled .download-task-badge {
+  background: var(--sl-warning-bg);
+  color: var(--sl-warning);
+}
+
+.download-task-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-panel-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sl-primary);
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.completed .download-panel-progress > span {
+  background: var(--sl-success);
+}
+
+.failed .download-panel-progress > span {
+  background: var(--sl-error);
+}
+
+.cancelled .download-panel-progress > span {
+  background: var(--sl-warning);
+}
+
+.download-task-panel {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  width: 350px;
+  padding: 16px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-lg);
+}
+
+.download-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.download-panel-heading > div {
+  min-width: 0;
+}
+
+.download-panel-heading strong,
+.download-panel-heading span {
+  display: block;
+}
+
+.download-panel-heading strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-panel-heading span {
+  margin-top: 3px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.75rem;
+}
+
+.download-panel-heading button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: var(--sl-radius-md);
+  color: var(--sl-text-tertiary);
+}
+
+.download-panel-heading button:hover {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.download-panel-progress {
+  height: 5px;
+  margin: 14px 0;
+  overflow: hidden;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-bg-tertiary);
+}
+
+.download-panel-stats {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.download-panel-stats > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  font-size: 0.76rem;
+}
+
+.download-panel-stats dt {
+  color: var(--sl-text-tertiary);
+}
+
+.download-panel-stats dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-panel-stats > .download-path-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.download-path-row dd {
+  overflow: visible;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.download-error-row dd {
+  color: var(--sl-error);
+  white-space: normal;
+}
+
+.download-cancel-button {
+  width: 100%;
+  margin-top: 14px;
+  padding: 7px 12px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.download-cancel-button:hover {
+  border-color: color-mix(in srgb, var(--sl-error) 35%, var(--sl-border-light));
+  background: var(--sl-error-bg);
+  color: var(--sl-error);
+}
+
+.download-pill-enter-active,
+.download-pill-leave-active,
+.download-panel-enter-active,
+.download-panel-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: top right;
+}
+
+.download-pill-enter-from,
+.download-pill-leave-to,
+.download-panel-enter-from,
+.download-panel-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.97);
+}
+
+@media (max-width: 1080px) {
+  .download-task-pill {
+    width: 172px;
+    min-width: 150px;
+  }
+
+  .download-task-pill.completed,
+  .download-task-pill.failed,
+  .download-task-pill.cancelled {
+    width: 148px;
+    min-width: 148px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-task-pill,
+  .download-task-ring-value,
+  .download-panel-progress > span,
+  .download-pill-enter-active,
+  .download-pill-leave-active,
+  .download-panel-enter-active,
+  .download-panel-leave-active {
+    transition-duration: 0s;
+  }
+}

@@ -1,8 +1,14 @@
-import type { ServerCoreArtifact, ServerCoreType } from "@seashard/contracts";
+import type {
+  ServerCoreArtifact,
+  ServerCoreDownloadTaskSnapshot,
+  ServerCoreType,
+} from "@seashard/contracts";
 
 export {
   serverCoreSourceContract,
   type ServerCoreArtifact,
+  type ServerCoreDownloadTaskSnapshot,
+  type ServerCoreDownloadTaskState,
   type ServerCoreType,
 } from "@seashard/contracts";
 
@@ -11,35 +17,14 @@ export const defaultCnbCatalogUrl =
 export const defaultCnbIconCatalogUrl =
   "https://cnb.cool/SeaLantern-studio/ServerCore-Mirror/-/releases/download/26.02.27/icon_lfs_links.json";
 
-/** 下载任务的完整生命周期；终态为 completed、failed 或 cancelled。 */
-export type ServerCoreSourceTaskState =
-  | "queued"
-  | "downloading"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-/** 启动下载所需的稳定业务参数，不允许调用方直接传入任意下载地址。 */
+/** Host 侧下载请求；目录由 Client 平台选择，产物身份仍由核心目录验证。 */
 export interface StartServerCoreDownloadRequest {
   serverType: string;
   gameVersion: string;
-  serverDirectory: string;
-  fileName?: string;
-}
-
-/** 对外暴露的任务快照；组件内部的控制器和 Promise 不会穿过服务边界。 */
-export interface ServerCoreDownloadTaskSnapshot {
-  id: string;
-  artifact: ServerCoreArtifact;
-  destinationPath: string;
-  state: ServerCoreSourceTaskState;
-  downloadedBytes: number;
-  totalBytes: number;
+  destinationDirectory: string;
+  artifactFileName: string;
+  destinationFileName: string;
   connections: number;
-  progress: number;
-  createdAt: string;
-  finishedAt?: string;
-  error?: string;
 }
 
 /** 服务端核心源组件提供给创建、升级、UI 和 Agent 的公共能力。 */

@@ -504,10 +504,24 @@
   color: var(--sl-text-primary);
 }
 
+.save-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .download-primary:active,
 .save-action:active {
   transform: scale(0.965);
   transition-duration: 70ms;
+}
+
+.download-start-error {
+  width: min(560px, calc(100% - 16px));
+  margin: 10px auto 0;
+  color: var(--sl-error);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .sr-only {

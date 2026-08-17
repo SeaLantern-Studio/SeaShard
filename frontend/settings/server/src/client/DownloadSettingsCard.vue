@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import type { ServerSettingsClientService } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Card, Cmz_Input } from "cmzya-modern-ui";
+import {
+  serverDownloadConnectionLimits,
+  type ServerSettingsClientService,
+} from "@seashard/contracts";
+import { Cmz_Button, Cmz_Card, Cmz_Input, Cmz_Select } from "cmzya-modern-ui";
 import { FolderOpen } from "lucide-vue-next";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
@@ -10,6 +13,7 @@ const props = defineProps<{
 }>();
 
 const resourceDirectory = ref("");
+const defaultConnections = ref<number>(serverDownloadConnectionLimits.defaultValue);
 const loading = ref(true);
 const selecting = ref(false);
 const settingsError = ref<string>();
@@ -18,11 +22,21 @@ let pendingDirectory: string | undefined;
 let saveQueue: Promise<void> = Promise.resolve();
 let saveRevision = 0;
 let disposed = false;
+const connectionOptions = [1, 2, 4, 8, 16, 32].map((value) => ({
+  label:
+    value === serverDownloadConnectionLimits.defaultValue
+      ? `${value} 线程（推荐）`
+      : `${value} 线程`,
+  value,
+}));
 
 onMounted(async () => {
   try {
     const snapshot = await props.settings.get();
-    if (!disposed) resourceDirectory.value = snapshot.resourceDownloadDirectory;
+    if (!disposed) {
+      resourceDirectory.value = snapshot.resourceDownloadDirectory;
+      defaultConnections.value = snapshot.defaultDownloadConnections;
+    }
   } catch (error) {
     if (!disposed) settingsError.value = errorMessage(error);
   } finally {
@@ -67,9 +81,24 @@ async function browseDirectory(): Promise<void> {
   }
 }
 
+function updateDefaultConnections(value: string | number): void {
+  if (typeof value !== "number" || !connectionOptions.some((option) => option.value === value)) {
+    return;
+  }
+  defaultConnections.value = value;
+  settingsError.value = undefined;
+  void persistUpdate(() => props.settings.setDefaultDownloadConnections(value));
+}
+
 function persistDirectory(directory: string): Promise<void> {
+  return persistUpdate(() => props.settings.setResourceDownloadDirectory(directory));
+}
+
+function persistUpdate(
+  update: () => ReturnType<ServerSettingsClientService["get"]>,
+): Promise<void> {
   const revision = ++saveRevision;
-  const task = saveQueue.then(() => props.settings.setResourceDownloadDirectory(directory));
+  const task = saveQueue.then(update);
   saveQueue = task.then(
     () => undefined,
     () => undefined,
@@ -90,7 +119,7 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
-  <Cmz_Card title="下载设置" subtitle="配置服务器资源的默认保存位置">
+  <Cmz_Card title="下载设置" subtitle="配置服务器资源的默认保存位置和并发线程数">
     <div class="settings-entry">
       <div class="settings-entry-info">
         <span class="settings-entry-title">资源默认下载地址</span>
@@ -119,6 +148,25 @@ function errorMessage(error: unknown): string {
           <FolderOpen :size="16" :stroke-width="1.8" />
           浏览
         </Cmz_Button>
+      </div>
+    </div>
+
+    <div class="settings-entry">
+      <div class="settings-entry-info">
+        <span class="settings-entry-title">默认下载线程数</span>
+        <span class="settings-entry-desc">
+          服务器核心下载默认使用此并发数；不支持分段的来源会自动回退为单线程
+        </span>
+      </div>
+
+      <div class="connection-control">
+        <Cmz_Select
+          :model-value="defaultConnections"
+          :options="connectionOptions"
+          :disabled="loading"
+          aria-label="默认下载线程数"
+          @update:model-value="updateDefaultConnections"
+        />
       </div>
     </div>
 
@@ -184,6 +232,11 @@ function errorMessage(error: unknown): string {
   white-space: nowrap;
 }
 
+.connection-control {
+  width: 180px;
+  flex: 0 0 180px;
+}
+
 .browse-button:active {
   transform: scale(0.97);
 }
@@ -202,6 +255,11 @@ function errorMessage(error: unknown): string {
   }
 
   .directory-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .connection-control {
     width: 100%;
     flex-basis: auto;
   }

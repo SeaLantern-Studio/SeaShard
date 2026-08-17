@@ -4,8 +4,10 @@ import {
   desktopShellContract,
   serverCoreIconHost,
   serverCoreIconScheme,
+  serverDownloadConnectionLimits,
   serverSettingsContract,
   type ServerCoreArtifact,
+  type ServerCoreDownloadTaskSnapshot,
   type ServerCoreType,
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
@@ -18,7 +20,11 @@ import {
 } from "@seashard/desktop-shell";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
-import type { RuntimeControlSnapshot, RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
+import type {
+  JsonValue,
+  RuntimeControlSnapshot,
+  RuntimeGenerationSnapshot,
+} from "@seashard/plugin-sdk";
 import {
   PluginKernel,
   projectClientEntryPublication,
@@ -145,15 +151,54 @@ function expectServerCoreArtifacts(value: unknown): ServerCoreArtifact[] {
   });
 }
 
+function expectServerCoreDownloadTask(value: unknown): ServerCoreDownloadTaskSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server core source returned an invalid download task");
+  }
+  const task = value as Record<string, unknown>;
+  const artifact = expectServerCoreArtifacts([task.artifact])[0]!;
+  const state = task.state;
+  const stringFields = ["id", "destinationPath", "createdAt"] as const;
+  const numericFields = ["downloadedBytes", "totalBytes", "connections", "progress"] as const;
+  if (
+    stringFields.some((field) => typeof task[field] !== "string" || !task[field]) ||
+    numericFields.some(
+      (field) => typeof task[field] !== "number" || !Number.isFinite(task[field]),
+    ) ||
+    !["queued", "downloading", "completed", "failed", "cancelled"].includes(String(state)) ||
+    (task.finishedAt !== undefined && typeof task.finishedAt !== "string") ||
+    (task.error !== undefined && typeof task.error !== "string")
+  ) {
+    throw new Error("server core source returned an invalid download task");
+  }
+  return { ...task, artifact } as unknown as ServerCoreDownloadTaskSnapshot;
+}
+
+function expectServerCoreDownloadTasks(value: unknown): ServerCoreDownloadTaskSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server core source returned invalid download tasks");
+  }
+  return value.map(expectServerCoreDownloadTask);
+}
+
 function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("server settings returned an invalid snapshot");
   }
   const resourceDownloadDirectory = Reflect.get(value, "resourceDownloadDirectory");
-  if (typeof resourceDownloadDirectory !== "string") {
-    throw new Error("server settings returned an invalid resource download directory");
+  const defaultDownloadConnections = Reflect.get(value, "defaultDownloadConnections");
+  if (
+    typeof resourceDownloadDirectory !== "string" ||
+    !Number.isSafeInteger(defaultDownloadConnections) ||
+    (defaultDownloadConnections as number) < serverDownloadConnectionLimits.minimum ||
+    (defaultDownloadConnections as number) > serverDownloadConnectionLimits.maximum
+  ) {
+    throw new Error("server settings returned an invalid snapshot");
   }
-  return { resourceDownloadDirectory };
+  return {
+    resourceDownloadDirectory,
+    defaultDownloadConnections: defaultDownloadConnections as number,
+  };
 }
 
 function installDevelopmentControl(): void {
@@ -285,6 +330,8 @@ async function bootstrap(): Promise<void> {
           createDownloadModule({
             fetchProvider: downloadFetchProvider,
             defaultHeaders: { "User-Agent": `SeaShard/${seaShardVersion}` },
+            defaultConnections: serverDownloadConnectionLimits.defaultValue,
+            maxConnections: serverDownloadConnectionLimits.maximum,
           }),
       },
     },
@@ -307,6 +354,7 @@ async function bootstrap(): Promise<void> {
         load: async () =>
           createServerSettingsModule({
             defaultResourceDownloadDirectory: join(dataRoot, "resources"),
+            defaultDownloadConnections: serverDownloadConnectionLimits.defaultValue,
           }),
       },
     },
@@ -438,6 +486,33 @@ async function bootstrap(): Promise<void> {
                   [directory],
                 ),
               ),
+            writeDefaultDownloadConnections: async (connections) =>
+              expectServerSettingsSnapshot(
+                await activeKernel.callService(
+                  serverSettingsContract,
+                  "setDefaultDownloadConnections",
+                  [connections],
+                ),
+              ),
+            startServerCoreDownload: async (request) =>
+              expectServerCoreDownloadTask(
+                await activeKernel.callService(serverCoreSourceContract, "start", [
+                  request as unknown as JsonValue,
+                ]),
+              ),
+            listServerCoreDownloadTasks: async () =>
+              expectServerCoreDownloadTasks(
+                await activeKernel.callService(serverCoreSourceContract, "listTasks", []),
+              ),
+            cancelServerCoreDownload: async (taskId) => {
+              const cancelled = await activeKernel.callService(serverCoreSourceContract, "cancel", [
+                taskId,
+              ]);
+              if (typeof cancelled !== "boolean") {
+                throw new Error("server core source returned an invalid cancellation result");
+              }
+              return cancelled;
+            },
             onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;

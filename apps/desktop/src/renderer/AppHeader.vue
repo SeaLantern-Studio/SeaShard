@@ -17,6 +17,7 @@ import {
 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { appearanceService } from "./appearance";
+import DownloadTaskPill from "./DownloadTaskPill.vue";
 import type { WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
@@ -140,6 +141,8 @@ async function closeWindow(): Promise<void> {
           <Moon :size="16" />
         </button>
       </div>
+
+      <DownloadTaskPill />
 
       <button
         v-if="!props.settingsMode"

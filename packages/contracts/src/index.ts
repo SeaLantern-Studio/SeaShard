@@ -17,6 +17,11 @@ export const desktopChannels = {
   serverSettingsGet: "seashard.server-settings.get",
   serverSettingsSetResourceDownloadDirectory:
     "seashard.server-settings.set-resource-download-directory",
+  serverSettingsSetDefaultDownloadConnections:
+    "seashard.server-settings.set-default-download-connections",
+  serverCoreDownloadSaveAs: "seashard.server-core-download.save-as",
+  serverCoreDownloadListTasks: "seashard.server-core-download.list-tasks",
+  serverCoreDownloadCancel: "seashard.server-core-download.cancel",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -28,6 +33,8 @@ export const serverCoreIconScheme = "seashard-cache";
 export const serverCoreIconHost = "server-core-icon";
 /** 服务器设置 Host 组件发布的稳定 Service contract。 */
 export const serverSettingsContract = "seashard.server-settings";
+/** 当前 Client 平台提供的服务器核心下载交互；Desktop 使用系统目录选择窗口。 */
+export const serverCoreDownloadContract = "seashard.server-core-download";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
@@ -112,15 +119,61 @@ export interface ServerCoreSourceClientService {
   listVersions(serverType: string): Promise<readonly string[]>;
   listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
 }
+/** 默认下载并发数的稳定边界；服务端设置和公共下载器必须保持一致。 */
+export const serverDownloadConnectionLimits = {
+  minimum: 1,
+  maximum: 32,
+  defaultValue: 8,
+} as const;
+
+export type ServerCoreDownloadTaskState =
+  | "queued"
+  | "downloading"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/** “另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。 */
+export interface ServerCoreSaveAsRequest {
+  serverType: string;
+  gameVersion: string;
+  artifactFileName: string;
+  destinationFileName: string;
+}
+
+/** 顶栏和下载页共享的服务器核心任务投影。 */
+export interface ServerCoreDownloadTaskSnapshot {
+  id: string;
+  artifact: ServerCoreArtifact;
+  destinationPath: string;
+  state: ServerCoreDownloadTaskState;
+  downloadedBytes: number;
+  totalBytes: number;
+  connections: number;
+  progress: number;
+  createdAt: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+/** 当前 Client 平台实现目录选择、任务创建、进度读取和取消。 */
+export interface ServerCoreDownloadClientService {
+  saveAs(request: ServerCoreSaveAsRequest): Promise<ServerCoreDownloadTaskSnapshot | undefined>;
+  listTasks(): Promise<readonly ServerCoreDownloadTaskSnapshot[]>;
+  cancel(taskId: string): Promise<boolean>;
+}
+
 /** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */
 export interface ServerSettingsSnapshot {
   resourceDownloadDirectory: string;
+  defaultDownloadConnections: number;
 }
 
 /** Renderer 只获得设置读写能力，不接触插件存储或数据库对象。 */
 export interface ServerSettingsClientService {
   get(): Promise<ServerSettingsSnapshot>;
   setResourceDownloadDirectory(directory: string): Promise<ServerSettingsSnapshot>;
+  setDefaultDownloadConnections(connections: number): Promise<ServerSettingsSnapshot>;
 }
 
 export interface SeaShardDesktopApi {
@@ -129,6 +182,7 @@ export interface SeaShardDesktopApi {
   };
   serverCore: ServerCoreSourceClientService;
   serverSettings: ServerSettingsClientService;
+  serverCoreDownload: ServerCoreDownloadClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;
   };

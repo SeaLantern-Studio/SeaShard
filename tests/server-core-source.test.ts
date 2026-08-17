@@ -51,7 +51,7 @@ function iconCatalogFixture(): object {
 }
 
 function fixtureFetch(body = artifactBytes): typeof globalThis.fetch {
-  return async (input) => {
+  return async (input, init) => {
     const url = requestUrl(input);
     if (url === catalogUrl) {
       return Response.json(catalogFixture(), { status: 200 });
@@ -60,6 +60,21 @@ function fixtureFetch(body = artifactBytes): typeof globalThis.fetch {
       return Response.json(iconCatalogFixture(), { status: 200 });
     }
     if (url === artifactUrl) {
+      const range = new Headers(init?.headers).get("range");
+      if (range) {
+        const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+        assert.ok(match);
+        const start = Number(match[1]);
+        const end = Number(match[2]);
+        const chunk = body.subarray(start, end + 1);
+        return new Response(chunk, {
+          status: 206,
+          headers: {
+            "content-length": String(chunk.byteLength),
+            "content-range": `bytes ${start}-${end}/${body.byteLength}`,
+          },
+        });
+      }
       return new Response(body, {
         status: 200,
         headers: { "content-length": String(body.byteLength) },
@@ -340,38 +355,60 @@ await test("server core icons download once through the shared downloader and re
   }
 });
 
-await test("server core delegates streaming and publishes into the server root", async () => {
+await test("server core streams downloads and numbers occupied destination names", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-server-core-source-"));
   const fetchImplementation = fixtureFetch();
   const catalog = await createCatalog(fetchImplementation);
+  let taskNumber = 0;
   const downloads = new DownloadManager({
     fetchProvider: () => fetchImplementation,
-    createId: () => "task-success",
+    createId: () => `task-success-${taskNumber++}`,
+    minimumChunkBytes: 1,
   });
   const coordinator = new ServerCoreSourceCoordinator(catalog, exposeDownloads(downloads));
 
   try {
-    const started = await coordinator.start({
+    const destinationFileName = "renamed-paper.jar";
+    const request = {
       serverType: "paper",
       gameVersion: "1.21.1",
-      serverDirectory: directory,
-    });
+      destinationDirectory: directory,
+      artifactFileName: fileName,
+      destinationFileName,
+      connections: 4,
+    };
+    const started = await coordinator.start(request);
     const completed = await waitForFinished(coordinator, started.id);
 
     assert.equal(completed.state, "completed");
-    assert.equal(completed.destinationPath, join(directory, fileName));
+    assert.equal(completed.destinationPath, join(directory, destinationFileName));
     assert.equal(completed.downloadedBytes, artifactBytes.byteLength);
     assert.equal(completed.totalBytes, artifactBytes.byteLength);
+    assert.equal(completed.connections, 4);
     assert.equal(completed.progress, 100);
-    assert.deepEqual(await readFile(join(directory, fileName)), artifactBytes);
-    assert.deepEqual(await readdir(directory), [fileName]);
+    assert.deepEqual(await readFile(join(directory, destinationFileName)), artifactBytes);
+
+    const firstCopy = await coordinator.start(request);
+    const firstCopyCompleted = await waitForFinished(coordinator, firstCopy.id);
+    assert.equal(firstCopyCompleted.destinationPath, join(directory, "renamed-paper(1).jar"));
+    assert.deepEqual(await readFile(firstCopyCompleted.destinationPath), artifactBytes);
+
+    const secondCopy = await coordinator.start(request);
+    const secondCopyCompleted = await waitForFinished(coordinator, secondCopy.id);
+    assert.equal(secondCopyCompleted.destinationPath, join(directory, "renamed-paper(2).jar"));
+    assert.deepEqual(await readFile(secondCopyCompleted.destinationPath), artifactBytes);
+    assert.deepEqual((await readdir(directory)).sort(), [
+      "renamed-paper(1).jar",
+      "renamed-paper(2).jar",
+      destinationFileName,
+    ]);
+
     await assert.rejects(
       coordinator.start({
-        serverType: "paper",
-        gameVersion: "1.21.1",
-        serverDirectory: directory,
+        ...request,
+        destinationFileName: "../escaped.jar",
       }),
-      /destination already exists/,
+      /plain JAR file name/,
     );
   } finally {
     await coordinator.dispose();
@@ -394,7 +431,10 @@ await test("server core checksum mismatch publishes no final file", async () => 
     const started = await coordinator.start({
       serverType: "paper",
       gameVersion: "1.21.1",
-      serverDirectory: directory,
+      destinationDirectory: directory,
+      artifactFileName: fileName,
+      destinationFileName: fileName,
+      connections: 8,
     });
     const failed = await waitForFinished(coordinator, started.id);
 
@@ -442,7 +482,10 @@ await test("server core cancellation removes the shared downloader partial file"
     const started = await coordinator.start({
       serverType: "paper",
       gameVersion: "1.21.1",
-      serverDirectory: directory,
+      destinationDirectory: directory,
+      artifactFileName: fileName,
+      destinationFileName: fileName,
+      connections: 8,
     });
     await waitForDownloaded(coordinator, started.id);
 
