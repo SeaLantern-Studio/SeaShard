@@ -17,6 +17,8 @@ import {
   type ServerCoreSaveAsRequest,
   type ServerCoreSourceClientService,
   type ServerInstanceClientService,
+  type ServerConsoleLine,
+  type ServerRuntimeClientService,
   type ServerSettingsClientService,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -119,12 +121,24 @@ export interface DesktopShellConfig {
     request: StartDesktopManagedServerCoreDownloadRequest,
   ): Promise<ServerCoreManagedDownloadResult>;
   listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
+  readServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["get"]>;
+  startServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["start"]>;
+  stopServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["stop"]>;
+  sendServerCommand(
+    instanceId: string,
+    command: string,
+  ): ReturnType<ServerRuntimeClientService["sendCommand"]>;
+  readServerConsoleLines(
+    instanceId: string,
+    afterSequence: number,
+  ): ReturnType<ServerRuntimeClientService["getLogs"]>;
   scanJavaInstallations(): ReturnType<JavaRuntimeManagerService["scan"]>;
   inspectJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["inspect"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
+  onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () => void;
 }
 
 /** 把不可序列化的 Electron 进程对象收窄成 Desktop Shell 唯一需要的适配面。 */
@@ -374,6 +388,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             },
           } satisfies DesktopClientBootstrap);
         });
+        const disposeServerConsoleSubscription = config.onServerConsoleLine((line) => {
+          const window = primaryWindow;
+          if (!window || window.isDestroyed()) return;
+          window.webContents.send(desktopChannels.serverRuntimeConsoleLine, line);
+        });
 
         config.runtime.handleFileProtocol(serverCoreIconScheme, async (requestUrl) => {
           let url: URL;
@@ -478,6 +497,38 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.serverRuntimeGet, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.readServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
+        });
+        config.runtime.handle(desktopChannels.serverRuntimeStart, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.startServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
+        });
+        config.runtime.handle(desktopChannels.serverRuntimeStop, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.stopServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
+        });
+        config.runtime.handle(
+          desktopChannels.serverRuntimeSendCommand,
+          (event, instanceId, command) => {
+            ownedWindow(event.sender.id);
+            return config.sendServerCommand(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(command, "server command"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverRuntimeGetLogs,
+          (event, instanceId, afterSequence = 0) => {
+            ownedWindow(event.sender.id);
+            return config.readServerConsoleLines(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectSafeInteger(afterSequence, "server console sequence"),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.javaRuntimeScan, (event) => {
           ownedWindow(event.sender.id);
           return config.scanJavaInstallations();
@@ -561,6 +612,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.offActivate(handleActivate);
           config.runtime.offWindowAllClosed(handleWindowAllClosed);
           disposeClientEntrySubscription();
+          disposeServerConsoleSubscription();
           config.runtime.removeProtocolHandler(serverCoreIconScheme);
           const window = primaryWindow;
           primaryWindow = undefined;
@@ -576,6 +628,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeGet);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeStart);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeStop);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeSendCommand);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeGetLogs);
           config.runtime.removeHandler(desktopChannels.javaRuntimeScan);
           config.runtime.removeHandler(desktopChannels.javaRuntimeAdd);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);

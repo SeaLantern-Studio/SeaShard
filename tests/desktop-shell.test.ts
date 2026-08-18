@@ -12,8 +12,10 @@ import {
   type RuntimeSnapshot,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerConsoleLine,
   type ServerInstanceSnapshot,
   type ServerCoreType,
+  type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
   type ServerStartupDefaultsUpdate,
 } from "../packages/contracts/src/index.ts";
@@ -334,6 +336,19 @@ const serverInstances = [
   },
 ] satisfies readonly ServerInstanceSnapshot[];
 
+const stoppedServerRuntime = {
+  instanceId: "instance-paper",
+  state: "stopped",
+} satisfies ServerRuntimeSnapshot;
+
+const serverConsoleLine = {
+  sequence: 1,
+  instanceId: "instance-paper",
+  stream: "stdout",
+  text: "[Server thread/INFO]: Done",
+  timestamp: "2026-08-17T12:00:02.000Z",
+} satisfies ServerConsoleLine;
+
 const javaInstallations = [
   {
     id: "0123456789abcdef",
@@ -385,6 +400,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
+  let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
+  const serverCommands: string[] = [];
+  let serverConsoleListener: ((line: ServerConsoleLine) => void) | undefined;
   const inspectedJavaPaths: string[] = [];
   const saveAsRequest = {
     serverType: "paper",
@@ -457,6 +475,30 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => serverInstances,
+      readServerRuntime: async () => serverRuntime,
+      startServerRuntime: async (instanceId) => {
+        serverRuntime = {
+          instanceId,
+          state: "running",
+          pid: 4_242,
+          startedAt: "2026-08-17T12:00:02.000Z",
+        };
+        return serverRuntime;
+      },
+      stopServerRuntime: async (instanceId) => {
+        serverRuntime = {
+          instanceId,
+          state: "stopped",
+          stoppedAt: "2026-08-17T12:00:03.000Z",
+          exitCode: 0,
+        };
+        return serverRuntime;
+      },
+      sendServerCommand: async (_instanceId, command) => {
+        serverCommands.push(command);
+      },
+      readServerConsoleLines: async (_instanceId, afterSequence) =>
+        serverConsoleLine.sequence > afterSequence ? [serverConsoleLine] : [],
       scanJavaInstallations: async () => javaInstallations,
       inspectJavaInstallation: async (executablePath) => {
         inspectedJavaPaths.push(executablePath);
@@ -482,6 +524,12 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         clientEntryListener = listener;
         return () => {
           if (clientEntryListener === listener) clientEntryListener = undefined;
+        };
+      },
+      onServerConsoleLine: (listener) => {
+        serverConsoleListener = listener;
+        return () => {
+          if (serverConsoleListener === listener) serverConsoleListener = undefined;
         };
       },
     },
@@ -559,6 +607,26 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadCancel, 1, "task-1"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeGet, 1, "instance-paper"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeStart, 1, "instance-paper"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeStop, 1, "instance-paper"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeSendCommand, 1, "instance-paper", "list"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeGetLogs, 1, "instance-paper", 0),
     /request rejected/,
   );
 
@@ -719,6 +787,44 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   });
   assert.deepEqual(inspectedJavaPaths, ["D:/Java/bin/java.exe"]);
   runtime.fileSelection = undefined;
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverRuntimeGet, 1, "instance-paper"),
+    stoppedServerRuntime,
+  );
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverRuntimeStart, 1, "instance-paper"), {
+    instanceId: "instance-paper",
+    state: "running",
+    pid: 4_242,
+    startedAt: "2026-08-17T12:00:02.000Z",
+  });
+  assert.equal(
+    await runtime.invoke(desktopChannels.serverRuntimeSendCommand, 1, "instance-paper", "list"),
+    undefined,
+  );
+  assert.deepEqual(serverCommands, ["list"]);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverRuntimeGetLogs, 1, "instance-paper", 0),
+    [serverConsoleLine],
+  );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverRuntimeGetLogs,
+      1,
+      "instance-paper",
+      serverConsoleLine.sequence,
+    ),
+    [],
+  );
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverRuntimeStop, 1, "instance-paper"), {
+    instanceId: "instance-paper",
+    state: "stopped",
+    stoppedAt: "2026-08-17T12:00:03.000Z",
+    exitCode: 0,
+  });
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverRuntimeSendCommand, 1, "instance-paper", ""),
+    /non-empty string/,
+  );
   assert.equal(await runtime.invoke(desktopChannels.javaRuntimeAdd, 1), undefined);
   assert.deepEqual(
     inspectedJavaPaths,
@@ -773,6 +879,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.rendererReady, 999), /request rejected/);
   const updatedEntries = { ...clientEntries, revision: 2 };
   clientEntryListener?.(updatedEntries);
+  serverConsoleListener?.(serverConsoleLine);
   assert.deepEqual(first.sent, [
     {
       channel: desktopChannels.clientBootstrapChanged,
@@ -785,6 +892,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
           surface: "primary",
         },
       },
+    },
+    {
+      channel: desktopChannels.serverRuntimeConsoleLine,
+      payload: serverConsoleLine,
     },
   ]);
 
@@ -818,6 +929,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGet), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStart), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStop), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeSendCommand), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGetLogs), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeScan), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeAdd), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
@@ -829,6 +945,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.windowClose), false);
   assert.equal(runtime.handlers.has(desktopChannels.dialogSelectDirectory), false);
   assert.equal(clientEntryListener, undefined);
+  assert.equal(serverConsoleListener, undefined);
   assert.equal(runtime.protocolHandlers.has(serverCoreIconScheme), false);
   assert.deepEqual(failures, []);
 });
@@ -875,6 +992,11 @@ await test("desktop shell keeps macOS alive after the last window closes", async
         throw new Error("not expected");
       },
       listServerInstances: async () => [],
+      readServerRuntime: async (instanceId) => ({ instanceId, state: "stopped" }),
+      startServerRuntime: async (instanceId) => ({ instanceId, state: "running" }),
+      stopServerRuntime: async (instanceId) => ({ instanceId, state: "stopped" }),
+      sendServerCommand: async () => {},
+      readServerConsoleLines: async () => [],
       scanJavaInstallations: async () => [],
       inspectJavaInstallation: async () => {
         throw new Error("not expected");
@@ -882,6 +1004,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       listServerCoreDownloadTasks: async () => [],
       cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},
+      onServerConsoleLine: () => () => {},
     },
     { getSnapshot: async () => snapshot },
   );

@@ -1,6 +1,8 @@
 import {
   serverInstanceManagerContract,
+  serverRuntimeContract,
   type ServerInstanceClientService,
+  type ServerRuntimeClientService,
 } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { Play, Terminal } from "lucide-vue-next";
@@ -11,13 +13,14 @@ import ServerLaunchPage from "./ServerLaunchPage.vue";
 export default defineClientUiModule({
   apply(context) {
     const instances = context.service<ServerInstanceClientService>(serverInstanceManagerContract);
+    const runtime = context.service<ServerRuntimeClientService>(serverRuntimeContract);
     const launchPage = defineComponent({
       name: "ServerLaunch",
-      setup: () => () => h(ServerLaunchPage, { instances }),
+      setup: () => () => h(ServerLaunchPage, { instances, runtime }),
     });
     const consolePage = defineComponent({
       name: "ServerConsole",
-      setup: () => () => h(ServerConsolePage, { instances }),
+      setup: () => () => h(ServerConsolePage, { instances, runtime }),
     });
     context.contribute("navigation.page", {
       id: "server-launch",

@@ -107,6 +107,9 @@ importers:
       '@seashard/server-launch-ui':
         specifier: workspace:*
         version: link:../../frontend/server/launch
+      '@seashard/server-runtime':
+        specifier: workspace:*
+        version: link:../../components/server/runtime
       '@seashard/server-settings':
         specifier: workspace:*
         version: link:../../components/server/settings
@@ -245,6 +248,18 @@ importers:
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../core-source
+
+  components/server/runtime:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../instance-manager
 
   components/server/settings:
     dependencies:

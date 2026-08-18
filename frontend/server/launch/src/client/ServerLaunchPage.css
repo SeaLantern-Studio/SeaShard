@@ -197,6 +197,16 @@
   transform: translateY(-1px);
 }
 
+.primary-launch-button:disabled,
+.primary-launch-button:disabled:hover {
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-tertiary);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.82;
+  transform: none;
+}
+
 .primary-launch-button.is-stop {
   background: var(--sl-error);
   color: #fff;
@@ -206,6 +216,13 @@
   background: color-mix(in srgb, var(--sl-error) 88%, #b91c1c);
 }
 
+.launch-runtime-error {
+  margin: -2px 2px 0;
+  color: var(--sl-error);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
+}
 .secondary-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

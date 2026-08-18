@@ -1,0 +1,94 @@
+import {
+  javaRuntimeManagerContract,
+  serverInstanceManagerContract,
+  serverRuntimeContract,
+  serverSettingsContract,
+  type JavaRuntimeManagerService,
+  type ServerConsoleLine,
+  type ServerRuntimeService,
+  type ServerSettingsClientService,
+} from "@seashard/contracts";
+import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
+import { VanillaServerRuntimeManager, type VanillaServerRuntimeManagerOptions } from "./manager";
+
+export interface ServerRuntimeModuleOptions {
+  onConsoleLine?(line: ServerConsoleLine): void;
+  reportError?(error: unknown): void;
+  managerOptions?: Pick<
+    VanillaServerRuntimeManagerOptions,
+    "spawnProcess" | "fileSystem" | "now" | "stopGracePeriodMs"
+  >;
+}
+
+export const serverRuntimeManifest: PluginManifest = {
+  id: "seashard.server-runtime",
+  version: "0.0.0",
+  publisher: "sealantern-studio",
+  entries: [
+    {
+      id: "server-runtime.host",
+      runtime: "host",
+      module: "./dist/host.js",
+      hostProfiles: ["electron", "node", "docker"],
+      activationScopes: ["global"],
+      permissions: [
+        serverInstanceManagerContract,
+        javaRuntimeManagerContract,
+        serverSettingsContract,
+      ],
+      upgradeMode: "stop-first",
+    },
+  ],
+  compatibility: {
+    seaShard: ">=0.0.0 <1.0.0",
+  },
+};
+
+/** 创建原版服务器运行组件；实例、Java 与启动默认值均来自显式 Contract。 */
+export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = {}): PluginModule {
+  return {
+    inject: [serverInstanceManagerContract, javaRuntimeManagerContract, serverSettingsContract],
+    provides: [serverRuntimeContract],
+    apply(ctx) {
+      const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
+      const javaRuntime = ctx.service<JavaRuntimeManagerService>(javaRuntimeManagerContract);
+      const settings = ctx.service<ServerSettingsClientService>(serverSettingsContract);
+      const manager = new VanillaServerRuntimeManager({
+        listInstances: () => instances.list(),
+        scanJavaInstallations: () => javaRuntime.scan(),
+        readSettings: () => settings.get(),
+        ...(options.onConsoleLine
+          ? { onConsoleLine: (line: ServerConsoleLine) => options.onConsoleLine!(line) }
+          : {}),
+        ...(options.reportError
+          ? { reportError: (error: unknown) => options.reportError!(error) }
+          : {}),
+        ...options.managerOptions,
+      });
+
+      ctx.provide(serverRuntimeContract, {
+        get: async (instanceId) => asJsonValue(manager.get(instanceId)),
+        start: async (instanceId) => asJsonValue(await manager.start(instanceId)),
+        stop: async (instanceId) => asJsonValue(await manager.stop(instanceId)),
+        sendCommand: async (instanceId, command) => {
+          await manager.sendCommand(instanceId, command);
+          return null;
+        },
+        getLogs: async (instanceId, afterSequence = 0) =>
+          asJsonValue(manager.getLogs(instanceId, afterSequence)),
+      } satisfies Record<
+        keyof ServerRuntimeService,
+        (...arguments_: unknown[]) => Promise<JsonValue>
+      >);
+
+      return () => manager.dispose();
+    },
+  };
+}
+
+function asJsonValue(value: unknown): JsonValue {
+  return value as JsonValue;
+}
+
+export * from "./manager";

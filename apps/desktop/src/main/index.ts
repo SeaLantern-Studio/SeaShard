@@ -9,14 +9,17 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   javaRuntimeManagerContract,
+  serverRuntimeContract,
   serverSettingsContract,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
+  type ServerConsoleLine,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
   type ServerInstanceSnapshot,
   type ServerCoreType,
+  type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -60,6 +63,7 @@ import {
   serverInstanceManagerContract,
   serverInstanceManagerManifest,
 } from "@seashard/server-instance-manager";
+import { createServerRuntimeModule, serverRuntimeManifest } from "@seashard/server-runtime";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
@@ -94,6 +98,23 @@ let shutdownTask: Promise<void> | undefined;
 let shutdownComplete = false;
 let smokeQuitScheduled = false;
 let stopping = false;
+const serverConsoleLineListeners = new Set<(line: ServerConsoleLine) => void>();
+
+/** 把运行组件的增量日志发布给当前 Desktop Shell，不让组件直接依赖 Electron。 */
+function publishServerConsoleLine(line: ServerConsoleLine): void {
+  for (const listener of serverConsoleLineListeners) {
+    try {
+      listener({ ...line });
+    } catch (error) {
+      console.error("Server console listener failed", error);
+    }
+  }
+}
+
+function onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () => void {
+  serverConsoleLineListeners.add(listener);
+  return () => serverConsoleLineListeners.delete(listener);
+}
 
 function resolveDevelopmentUrl(): string | undefined {
   const argumentPrefix = "--seashard-dev-server-url=";
@@ -340,6 +361,54 @@ function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
     autoAcceptEula,
     defaultJvmArguments,
   };
+}
+
+function expectServerRuntimeSnapshot(value: unknown): ServerRuntimeSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server runtime returned an invalid snapshot");
+  }
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.instanceId !== "string" ||
+    !snapshot.instanceId ||
+    !["stopped", "starting", "running", "stopping", "failed"].includes(String(snapshot.state)) ||
+    (snapshot.pid !== undefined &&
+      (!Number.isSafeInteger(snapshot.pid) || (snapshot.pid as number) <= 0)) ||
+    (snapshot.startedAt !== undefined && typeof snapshot.startedAt !== "string") ||
+    (snapshot.stoppedAt !== undefined && typeof snapshot.stoppedAt !== "string") ||
+    (snapshot.exitCode !== undefined && !Number.isSafeInteger(snapshot.exitCode)) ||
+    (snapshot.error !== undefined && typeof snapshot.error !== "string")
+  ) {
+    throw new Error("server runtime returned an invalid snapshot");
+  }
+  return snapshot as unknown as ServerRuntimeSnapshot;
+}
+
+function expectServerConsoleLine(value: unknown): ServerConsoleLine {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server runtime returned an invalid console line");
+  }
+  const line = value as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(line.sequence) ||
+    (line.sequence as number) <= 0 ||
+    typeof line.instanceId !== "string" ||
+    !line.instanceId ||
+    !["stdout", "stderr", "input", "system"].includes(String(line.stream)) ||
+    typeof line.text !== "string" ||
+    typeof line.timestamp !== "string" ||
+    !line.timestamp
+  ) {
+    throw new Error("server runtime returned an invalid console line");
+  }
+  return line as unknown as ServerConsoleLine;
+}
+
+function expectServerConsoleLines(value: unknown): ServerConsoleLine[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server runtime returned invalid console lines");
+  }
+  return value.map(expectServerConsoleLine);
 }
 
 function installDevelopmentControl(): void {
@@ -611,6 +680,29 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // 服务器运行组件只接受实例元数据显式声明的 vanilla 类型；启动阶段不探测核心文件。
+  await activeKernel.registerBuiltIn({
+    manifest: serverRuntimeManifest,
+    loaders: {
+      "server-runtime.host": {
+        load: async () =>
+          createServerRuntimeModule({
+            onConsoleLine: publishServerConsoleLine,
+            reportError: (error) => console.error("Server runtime failed", error),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-runtime",
+        entryId: "server-runtime.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 运行诊断属于第二阶段可重载组件。Main 只注入原始控制快照和宿主状态，不复制投影策略。
   await activeKernel.registerBuiltIn({
     manifest: runtimeDiagnosticsManifest,
@@ -746,6 +838,35 @@ async function bootstrap(): Promise<void> {
               expectServerInstances(
                 await activeKernel.callService(serverInstanceManagerContract, "list", []),
               ),
+            readServerRuntime: async (instanceId) =>
+              expectServerRuntimeSnapshot(
+                await activeKernel.callService(serverRuntimeContract, "get", [instanceId]),
+              ),
+            startServerRuntime: async (instanceId) =>
+              expectServerRuntimeSnapshot(
+                await activeKernel.callService(serverRuntimeContract, "start", [instanceId]),
+              ),
+            stopServerRuntime: async (instanceId) =>
+              expectServerRuntimeSnapshot(
+                await activeKernel.callService(serverRuntimeContract, "stop", [instanceId]),
+              ),
+            sendServerCommand: async (instanceId, command) => {
+              const result = await activeKernel.callService(serverRuntimeContract, "sendCommand", [
+                instanceId,
+                command,
+              ]);
+              if (result !== null) {
+                throw new Error("server runtime returned an invalid command result");
+              }
+            },
+            readServerConsoleLines: async (instanceId, afterSequence) =>
+              expectServerConsoleLines(
+                await activeKernel.callService(serverRuntimeContract, "getLogs", [
+                  instanceId,
+                  afterSequence,
+                ]),
+              ),
+            onServerConsoleLine,
             scanJavaInstallations: async () =>
               expectJavaInstallations(
                 await activeKernel.callService(javaRuntimeManagerContract, "scan", []),

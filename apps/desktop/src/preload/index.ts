@@ -3,6 +3,7 @@ import {
   type DesktopClientBootstrap,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
+  type ServerConsoleLine,
   type ServerCoreSaveAsRequest,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -39,6 +40,23 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   serverInstances: Object.freeze({
     list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
+  }),
+  serverRuntime: Object.freeze({
+    get: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeGet, instanceId),
+    start: (instanceId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimeStart, instanceId),
+    stop: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeStop, instanceId),
+    sendCommand: (instanceId: string, command: string) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimeSendCommand, instanceId, command),
+    getLogs: (instanceId: string, afterSequence = 0) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimeGetLogs, instanceId, afterSequence),
+    onConsoleLine: (listener: (line: ServerConsoleLine) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, line: ServerConsoleLine): void => {
+        listener(line);
+      };
+      ipcRenderer.on(desktopChannels.serverRuntimeConsoleLine, handler);
+      return () => ipcRenderer.removeListener(desktopChannels.serverRuntimeConsoleLine, handler);
+    },
   }),
   javaRuntime: Object.freeze({
     scan: () => ipcRenderer.invoke(desktopChannels.javaRuntimeScan),

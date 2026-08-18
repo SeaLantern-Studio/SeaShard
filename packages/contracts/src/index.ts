@@ -26,6 +26,12 @@ export const desktopChannels = {
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
   javaRuntimeScan: "seashard.java-runtime.scan",
+  serverRuntimeGet: "seashard.server-runtime.get",
+  serverRuntimeStart: "seashard.server-runtime.start",
+  serverRuntimeStop: "seashard.server-runtime.stop",
+  serverRuntimeSendCommand: "seashard.server-runtime.send-command",
+  serverRuntimeGetLogs: "seashard.server-runtime.get-logs",
+  serverRuntimeConsoleLine: "seashard.server-runtime.console-line",
   javaRuntimeAdd: "seashard.java-runtime.add",
 } as const;
 
@@ -44,6 +50,8 @@ export const serverSettingsContract = "seashard.server-settings";
 export const serverCoreDownloadContract = "seashard.server-core-download";
 /** 服务器实例管理组件发布的持久化实例 Service contract。 */
 export const serverInstanceManagerContract = "seashard.server-instance-manager";
+/** 服务器进程运行组件发布的 Host/Client 稳定 Contract。 */
+export const serverRuntimeContract = "seashard.server-runtime";
 /** Java 运行环境管理组件发布的只读扫描 Service contract。 */
 export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
 
@@ -227,6 +235,43 @@ export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
 }
 
+export type ServerProcessState = "stopped" | "starting" | "running" | "stopping" | "failed";
+export type ServerConsoleStream = "stdout" | "stderr" | "input" | "system";
+
+/** 单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。 */
+export interface ServerRuntimeSnapshot {
+  instanceId: string;
+  state: ServerProcessState;
+  pid?: number;
+  startedAt?: string;
+  stoppedAt?: string;
+  exitCode?: number;
+  error?: string;
+}
+
+/** 进程输出按实例递增编号，Renderer 可用编号补拉事件订阅前后的缺口。 */
+export interface ServerConsoleLine {
+  sequence: number;
+  instanceId: string;
+  stream: ServerConsoleStream;
+  text: string;
+  timestamp: string;
+}
+
+/** Host 侧服务器进程能力；首期只接受实例元数据中明确标记为 vanilla 的核心。 */
+export interface ServerRuntimeService {
+  get(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  start(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  stop(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  sendCommand(instanceId: string, command: string): Promise<void>;
+  getLogs(instanceId: string, afterSequence?: number): Promise<readonly ServerConsoleLine[]>;
+}
+
+/** Desktop Client 在请求式进程能力之外获得实时控制台事件。 */
+export interface ServerRuntimeClientService extends ServerRuntimeService {
+  onConsoleLine(listener: (line: ServerConsoleLine) => void): () => void;
+}
+
 export type JavaInstallationSource = "java-home" | "path" | "registry" | "filesystem" | "manual";
 
 /** 自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。 */
@@ -285,6 +330,7 @@ export interface SeaShardDesktopApi {
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
   serverInstances: ServerInstanceClientService;
+  serverRuntime: ServerRuntimeClientService;
   javaRuntime: JavaRuntimeClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;

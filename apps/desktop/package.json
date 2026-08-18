@@ -23,6 +23,7 @@
     "@seashard/server-download-ui": "workspace:*",
     "@seashard/server-instance-manager": "workspace:*",
     "@seashard/server-launch-ui": "workspace:*",
+    "@seashard/server-runtime": "workspace:*",
     "@seashard/server-settings": "workspace:*",
     "@seashard/server-settings-ui": "workspace:*",
     "@seashard/ui-runtime": "workspace:*",

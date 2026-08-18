@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import type { ServerInstanceClientService, ServerInstanceSnapshot } from "@seashard/contracts";
+import type {
+  ServerInstanceClientService,
+  ServerInstanceSnapshot,
+  ServerRuntimeClientService,
+  ServerRuntimeSnapshot,
+} from "@seashard/contracts";
 import { Check, ImagePlus, Play, Power, Rows3, Server, Settings2 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;
+  runtime: ServerRuntimeClientService;
 }>();
 
 const route = useRoute();
@@ -17,7 +23,9 @@ const selectedInstanceId = ref<string>();
 const selectorOpen = ref(false);
 const instancesLoading = ref(true);
 const instancesError = ref<string>();
-const runningInstanceIds = reactive(new Set<string>());
+const runtimeError = ref<string>();
+const runtimeSnapshots = reactive(new Map<string, ServerRuntimeSnapshot>());
+const pendingRuntimeOperations = reactive(new Set<string>());
 const customIconSources = reactive(new Map<string, string>());
 const iconMenu = reactive({ open: false, x: 0, y: 0 });
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -30,19 +38,37 @@ let pendingInstanceId =
 const selectedInstance = computed(() =>
   registeredInstances.value.find((instance) => instance.id === selectedInstanceId.value),
 );
+const selectedRuntime = computed(() => {
+  const instanceId = selectedInstance.value?.id;
+  return instanceId ? runtimeSnapshots.get(instanceId) : undefined;
+});
 const selectedIconSource = computed(() => {
   const instance = selectedInstance.value;
   return instance ? (customIconSources.get(instance.id) ?? instance.iconUrl) : undefined;
 });
 const selectedServerActive = computed(
-  () => selectedInstance.value !== undefined && runningInstanceIds.has(selectedInstance.value.id),
+  () => selectedRuntime.value?.state === "running" || selectedRuntime.value?.state === "stopping",
 );
-const primaryLabel = computed(() => (selectedServerActive.value ? "停止服务器" : "启动服务器"));
+const selectedServerSupported = computed(() => selectedInstance.value?.serverType === "vanilla");
+const runtimeOperationPending = computed(() => {
+  const instanceId = selectedInstance.value?.id;
+  const state = selectedRuntime.value?.state;
+  return (
+    (instanceId !== undefined && pendingRuntimeOperations.has(instanceId)) ||
+    state === "starting" ||
+    state === "stopping"
+  );
+});
+const primaryLabel = computed(() => {
+  if (!selectedServerSupported.value) return "暂不支持此核心";
+  if (selectedRuntime.value?.state === "starting") return "正在启动";
+  if (selectedRuntime.value?.state === "stopping") return "正在停止";
+  return selectedRuntime.value?.state === "running" ? "停止服务器" : "启动服务器";
+});
 const primaryIcon = computed(() => (selectedServerActive.value ? Power : Play));
 const sortedInstances = computed(() =>
   [...registeredInstances.value].sort(
-    (left, right) =>
-      Number(runningInstanceIds.has(right.id)) - Number(runningInstanceIds.has(left.id)),
+    (left, right) => Number(isInstanceActive(right.id)) - Number(isInstanceActive(left.id)),
   ),
 );
 
@@ -56,18 +82,39 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", closeIconMenu);
   document.removeEventListener("keydown", handleDocumentKeydown);
-  if (refreshTimer) clearInterval(refreshTimer);
+  clearInterval(refreshTimer);
 });
 
-/** 定时刷新只替换 JSON 实例快照，不打断用户当前选中的仍存在实例。 */
+/** 定时刷新实例与真实进程状态，不用 Renderer 内的临时集合伪造运行状态。 */
 async function loadInstances(silent = false): Promise<void> {
   const requestId = ++listRequestId;
   if (!silent) instancesLoading.value = true;
   try {
     const result = await props.instances.list();
+    const runtimeResults = await Promise.allSettled(
+      result.map(async (instance) => ({
+        instanceId: instance.id,
+        snapshot: await props.runtime.get(instance.id),
+      })),
+    );
     if (requestId !== listRequestId) return;
+
     registeredInstances.value = result;
     instancesError.value = undefined;
+    const currentIds = new Set(result.map((instance) => instance.id));
+    for (const instanceId of runtimeSnapshots.keys()) {
+      if (!currentIds.has(instanceId)) runtimeSnapshots.delete(instanceId);
+    }
+    let readError: string | undefined;
+    for (const runtimeResult of runtimeResults) {
+      if (runtimeResult.status === "fulfilled") {
+        runtimeSnapshots.set(runtimeResult.value.instanceId, runtimeResult.value.snapshot);
+      } else {
+        readError ??= errorMessage(runtimeResult.reason);
+      }
+    }
+    runtimeError.value = readError;
+
     const requestedInstance = pendingInstanceId
       ? result.find(({ id }) => id === pendingInstanceId)
       : undefined;
@@ -88,11 +135,26 @@ async function loadInstances(silent = false): Promise<void> {
   }
 }
 
-function toggleServer(): void {
+/** 只有实例元数据明确标记 vanilla 时才调用运行组件；这里不做任何核心识别。 */
+async function toggleServer(): Promise<void> {
   const instance = selectedInstance.value;
-  if (!instance) return;
-  if (runningInstanceIds.has(instance.id)) runningInstanceIds.delete(instance.id);
-  else runningInstanceIds.add(instance.id);
+  if (!instance || instance.serverType !== "vanilla" || runtimeOperationPending.value) return;
+
+  pendingRuntimeOperations.add(instance.id);
+  runtimeError.value = undefined;
+  try {
+    const snapshot =
+      runtimeSnapshots.get(instance.id)?.state === "running"
+        ? await props.runtime.stop(instance.id)
+        : await props.runtime.start(instance.id);
+    runtimeSnapshots.set(instance.id, snapshot);
+  } catch (error) {
+    runtimeError.value = errorMessage(error);
+    const snapshot = await props.runtime.get(instance.id).catch(() => undefined);
+    if (snapshot) runtimeSnapshots.set(instance.id, snapshot);
+  } finally {
+    pendingRuntimeOperations.delete(instance.id);
+  }
 }
 
 function toggleSelector(): void {
@@ -103,6 +165,7 @@ function toggleSelector(): void {
 
 function selectInstance(instanceId: string): void {
   selectedInstanceId.value = instanceId;
+  runtimeError.value = undefined;
   iconMenu.open = false;
 }
 
@@ -184,8 +247,16 @@ function instanceHue(id: string): number {
   return hash % 360;
 }
 
-function isInstanceRunning(instanceId: string): boolean {
-  return runningInstanceIds.has(instanceId);
+function isInstanceActive(instanceId: string): boolean {
+  const state = runtimeSnapshots.get(instanceId)?.state;
+  return state === "starting" || state === "running" || state === "stopping";
+}
+
+function instanceStateLabel(instanceId: string): string {
+  const state = runtimeSnapshots.get(instanceId)?.state;
+  if (state === "starting") return "启动中";
+  if (state === "stopping") return "停止中";
+  return "运行中";
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -227,11 +298,17 @@ function errorMessage(error: unknown): string {
           type="button"
           class="primary-launch-button"
           :class="{ 'is-stop': selectedServerActive }"
+          :disabled="!selectedServerSupported || runtimeOperationPending"
+          :aria-busy="runtimeOperationPending"
           @click="toggleServer"
         >
           <component :is="primaryIcon" :size="18" :stroke-width="2" />
           <span>{{ primaryLabel }}</span>
         </button>
+
+        <p v-if="runtimeError" class="launch-runtime-error" role="alert">
+          {{ runtimeError }}
+        </p>
 
         <div class="secondary-actions">
           <button type="button" class="secondary-launch-button">
@@ -301,12 +378,12 @@ function errorMessage(error: unknown): string {
           </span>
           <span class="instance-row-name">{{ instance.name }}</span>
           <span
-            v-if="isInstanceRunning(instance.id) || selectedInstanceId === instance.id"
+            v-if="isInstanceActive(instance.id) || selectedInstanceId === instance.id"
             class="instance-row-meta"
           >
-            <span v-if="isInstanceRunning(instance.id)" class="instance-running-state">
+            <span v-if="isInstanceActive(instance.id)" class="instance-running-state">
               <span class="instance-running-dot" aria-hidden="true"></span>
-              运行中
+              {{ instanceStateLabel(instance.id) }}
             </span>
             <Check
               v-if="selectedInstanceId === instance.id"
