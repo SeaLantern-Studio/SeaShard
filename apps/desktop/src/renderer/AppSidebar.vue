@@ -285,7 +285,7 @@ onUnmounted(() => {
               <div v-if="groupIndex > 0" class="settings-section-divider" role="separator"></div>
               <section class="settings-section" :aria-labelledby="`settings-${group.id}-label`">
                 <h3 :id="`settings-${group.id}-label`" class="workspace-section-title">
-                  {{ group.label }}
+                  <span class="workspace-section-title-text">{{ group.label }}</span>
                 </h3>
                 <button
                   v-for="page in group.pages"
@@ -316,7 +316,9 @@ onUnmounted(() => {
             </button>
 
             <section class="download-section" aria-labelledby="download-label">
-              <h3 id="download-label" class="workspace-section-title">下载</h3>
+              <h3 id="download-label" class="workspace-section-title">
+                <span class="workspace-section-title-text">下载</span>
+              </h3>
               <button
                 v-if="serverCoreDownloadPage"
                 type="button"
@@ -339,7 +341,9 @@ onUnmounted(() => {
             </section>
 
             <section class="download-section" aria-labelledby="other-resources-label">
-              <h3 id="other-resources-label" class="workspace-section-title">其他资源</h3>
+              <h3 id="other-resources-label" class="workspace-section-title">
+                <span class="workspace-section-title-text">其他资源</span>
+              </h3>
               <button
                 v-for="page in otherDownloadPages"
                 :key="page.id"
@@ -368,7 +372,9 @@ onUnmounted(() => {
             </button>
 
             <section class="workspace-section" aria-labelledby="projects-label">
-              <h3 id="projects-label" class="workspace-section-title">项目</h3>
+              <h3 id="projects-label" class="workspace-section-title">
+                <span class="workspace-section-title-text">项目</span>
+              </h3>
               <div v-for="project in agentProjects" :key="project.name" class="workspace-project">
                 <button
                   type="button"
@@ -409,7 +415,9 @@ onUnmounted(() => {
             </section>
 
             <section class="workspace-section" aria-labelledby="chats-label">
-              <h3 id="chats-label" class="workspace-section-title">对话</h3>
+              <h3 id="chats-label" class="workspace-section-title">
+                <span class="workspace-section-title-text">对话</span>
+              </h3>
               <button
                 v-for="chat in agentChats"
                 :key="chat"
