@@ -6,7 +6,10 @@ import {
   serverCoreIconScheme,
   serverInstanceIconHost,
   serverDownloadConnectionLimits,
+  javaRuntimeManagerContract,
   serverSettingsContract,
+  type JavaInstallationSnapshot,
+  type JavaInstallationSource,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
@@ -22,6 +25,10 @@ import {
   desktopShellManifest,
 } from "@seashard/desktop-shell";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
+import {
+  createJavaRuntimeManagerModule,
+  javaRuntimeManagerManifest,
+} from "@seashard/java-runtime-manager";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import type {
@@ -253,6 +260,44 @@ function expectServerInstances(value: unknown): ServerInstanceSnapshot[] {
   });
 }
 
+const javaInstallationSources = new Set<JavaInstallationSource>([
+  "java-home",
+  "path",
+  "registry",
+  "filesystem",
+  "manual",
+]);
+
+/** 收窄 Host 组件返回值，禁止未经验证的文件系统路径进入 Renderer。 */
+function expectJavaInstallation(value: unknown, label = "installation"): JavaInstallationSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`java runtime manager returned invalid ${label}`);
+  }
+  const installation = value as Record<string, unknown>;
+  const requiredStrings = ["id", "path", "javaHome", "version", "vendor", "architecture"] as const;
+  if (
+    requiredStrings.some(
+      (field) => typeof installation[field] !== "string" || !installation[field],
+    ) ||
+    !isAbsolute(installation.path as string) ||
+    !isAbsolute(installation.javaHome as string) ||
+    !Number.isSafeInteger(installation.majorVersion) ||
+    (installation.majorVersion as number) <= 0 ||
+    typeof installation.is64Bit !== "boolean" ||
+    !javaInstallationSources.has(installation.source as JavaInstallationSource)
+  ) {
+    throw new Error(`java runtime manager returned invalid ${label}`);
+  }
+  return installation as unknown as JavaInstallationSnapshot;
+}
+
+function expectJavaInstallations(value: unknown): JavaInstallationSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("java runtime manager returned invalid installations");
+  }
+  return value.map((item, index) => expectJavaInstallation(item, `installation ${index}`));
+}
+
 function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("server settings returned an invalid snapshot");
@@ -348,7 +393,7 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
-  // 游戏运行环境设置是纯 Client UI；Java 扫描与持久化由后续 Host 组件提供。
+  // 游戏运行环境设置只消费 Java Host 组件发布的扫描 Contract。
   await activeKernel.registerBuiltIn({
     manifest: gameSettingsUiManifest,
     loaders: {},
@@ -520,6 +565,28 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // Java 自动发现只读取 release 等安装元数据，不执行文件系统中发现的未知程序。
+  await activeKernel.registerBuiltIn({
+    manifest: javaRuntimeManagerManifest,
+    loaders: {
+      "java-runtime-manager.host": {
+        load: async () =>
+          createJavaRuntimeManagerModule({
+            reportError: (error) => console.warn("Java runtime candidate ignored", error),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.java-runtime-manager",
+        entryId: "java-runtime-manager.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 运行诊断属于第二阶段可重载组件。Main 只注入原始控制快照和宿主状态，不复制投影策略。
   await activeKernel.registerBuiltIn({
     manifest: runtimeDiagnosticsManifest,
@@ -648,6 +715,16 @@ async function bootstrap(): Promise<void> {
             listServerInstances: async () =>
               expectServerInstances(
                 await activeKernel.callService(serverInstanceManagerContract, "list", []),
+              ),
+            scanJavaInstallations: async () =>
+              expectJavaInstallations(
+                await activeKernel.callService(javaRuntimeManagerContract, "scan", []),
+              ),
+            inspectJavaInstallation: async (executablePath) =>
+              expectJavaInstallation(
+                await activeKernel.callService(javaRuntimeManagerContract, "inspect", [
+                  executablePath,
+                ]),
               ),
             listServerCoreDownloadTasks: async () =>
               expectServerCoreDownloadTasks(

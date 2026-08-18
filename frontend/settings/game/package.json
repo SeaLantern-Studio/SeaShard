@@ -8,6 +8,7 @@
     "./client": "./src/client/index.ts"
   },
   "dependencies": {
+    "@seashard/contracts": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",
     "cmzya-modern-ui": "0.6.2",

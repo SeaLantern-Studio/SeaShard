@@ -8,6 +8,7 @@ import {
   type ClientEntryPublication,
   type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
+  type JavaRuntimeManagerService,
   type RuntimeSnapshot,
   type ServerCoreDownloadClientService,
   type ServerCoreDownloadTaskSnapshot,
@@ -35,6 +36,15 @@ export interface DirectorySelectionOptions {
   readonly title: string;
   readonly buttonLabel: string;
   readonly defaultPath?: string;
+}
+
+export interface FileSelectionOptions {
+  readonly title: string;
+  readonly buttonLabel: string;
+  readonly filters: readonly {
+    readonly name: string;
+    readonly extensions: readonly string[];
+  }[];
 }
 
 export interface StartDesktopServerCoreDownloadRequest extends ServerCoreSaveAsRequest {
@@ -69,6 +79,7 @@ export interface DesktopShellRuntime {
     window: BrowserWindow,
     options: DirectorySelectionOptions,
   ): Promise<string | undefined>;
+  selectFile(window: BrowserWindow, options: FileSelectionOptions): Promise<string | undefined>;
   quit(): void;
 }
 
@@ -104,6 +115,8 @@ export interface DesktopShellConfig {
     request: StartDesktopManagedServerCoreDownloadRequest,
   ): Promise<ServerCoreManagedDownloadResult>;
   listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
+  scanJavaInstallations(): ReturnType<JavaRuntimeManagerService["scan"]>;
+  inspectJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["inspect"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
@@ -142,6 +155,18 @@ export function createElectronDesktopShellRuntime(
         buttonLabel: options.buttonLabel,
         ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
         properties: ["openDirectory", "createDirectory"],
+      });
+      return result.canceled ? undefined : result.filePaths[0];
+    },
+    selectFile: async (window, options) => {
+      const result = await electronDialog.showOpenDialog(window, {
+        title: options.title,
+        buttonLabel: options.buttonLabel,
+        filters: options.filters.map((filter) => ({
+          name: filter.name,
+          extensions: [...filter.extensions],
+        })),
+        properties: ["openFile"],
       });
       return result.canceled ? undefined : result.filePaths[0];
     },
@@ -422,6 +447,24 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.javaRuntimeScan, (event) => {
+          ownedWindow(event.sender.id);
+          return config.scanJavaInstallations();
+        });
+        config.runtime.handle(desktopChannels.javaRuntimeAdd, async (event) => {
+          const window = ownedWindow(event.sender.id);
+          const executablePath = await config.runtime.selectFile(window, {
+            title: "选择 Java 可执行文件",
+            buttonLabel: "添加此 Java",
+            filters: [
+              {
+                name: "Java 可执行文件",
+                extensions: config.runtime.platform === "win32" ? ["exe"] : ["*"],
+              },
+            ],
+          });
+          return executablePath ? config.inspectJavaInstallation(executablePath) : undefined;
+        });
         config.runtime.handle(desktopChannels.serverCoreDownloadListTasks, (event) => {
           ownedWindow(event.sender.id);
           return config.listServerCoreDownloadTasks();
@@ -501,6 +544,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.javaRuntimeScan);
+          config.runtime.removeHandler(desktopChannels.javaRuntimeAdd);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);

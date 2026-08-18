@@ -74,6 +74,9 @@ importers:
       '@seashard/game-settings-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/game
+      '@seashard/java-runtime-manager':
+        specifier: workspace:*
+        version: link:../../components/game/java-runtime-manager
       '@seashard/personalization-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/personalization
@@ -169,6 +172,15 @@ importers:
         version: 43.4.0
 
   components/diagnostics/runtime:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+
+  components/game/java-runtime-manager:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
@@ -326,6 +338,9 @@ importers:
 
   frontend/settings/game:
     dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk

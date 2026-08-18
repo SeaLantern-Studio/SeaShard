@@ -24,6 +24,8 @@ export const desktopChannels = {
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  javaRuntimeScan: "seashard.java-runtime.scan",
+  javaRuntimeAdd: "seashard.java-runtime.add",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -41,6 +43,8 @@ export const serverSettingsContract = "seashard.server-settings";
 export const serverCoreDownloadContract = "seashard.server-core-download";
 /** 服务器实例管理组件发布的持久化实例 Service contract。 */
 export const serverInstanceManagerContract = "seashard.server-instance-manager";
+/** Java 运行环境管理组件发布的只读扫描 Service contract。 */
+export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
@@ -205,6 +209,33 @@ export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
 }
 
+export type JavaInstallationSource = "java-home" | "path" | "registry" | "filesystem" | "manual";
+
+/** 自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。 */
+export interface JavaInstallationSnapshot {
+  id: string;
+  path: string;
+  javaHome: string;
+  version: string;
+  majorVersion: number;
+  vendor: string;
+  architecture: string;
+  is64Bit: boolean;
+  source: JavaInstallationSource;
+}
+
+/** Host 组件的完整能力；显式检查只接受用户选择的可执行文件路径。 */
+export interface JavaRuntimeManagerService {
+  scan(): Promise<readonly JavaInstallationSnapshot[]>;
+  inspect(executablePath: string): Promise<JavaInstallationSnapshot>;
+}
+
+/** Renderer 只触发受控扫描或系统文件选择，不直接提交任意文件系统路径。 */
+export interface JavaRuntimeClientService {
+  scan(): Promise<readonly JavaInstallationSnapshot[]>;
+  add(): Promise<JavaInstallationSnapshot | undefined>;
+}
+
 /** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */
 export interface ServerSettingsSnapshot {
   resourceDownloadDirectory: string;
@@ -226,6 +257,7 @@ export interface SeaShardDesktopApi {
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
   serverInstances: ServerInstanceClientService;
+  javaRuntime: JavaRuntimeClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;
   };

@@ -1,3 +1,4 @@
+import { javaRuntimeManagerContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const gameSettingsUiManifest: PluginManifest = {
@@ -11,7 +12,7 @@ export const gameSettingsUiManifest: PluginManifest = {
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [],
+      permissions: [javaRuntimeManagerContract],
       upgradeMode: "stop-first",
     },
   ],

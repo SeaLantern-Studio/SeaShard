@@ -7,6 +7,7 @@ import {
   type ClientEntryPublication,
   type DesktopClientBootstrap,
   type DesktopShellService,
+  type JavaInstallationSnapshot,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
   type ServerCoreArtifact,
@@ -18,6 +19,7 @@ import {
   createDesktopShellModule,
   type DesktopShellConfig,
   type DesktopShellRuntime,
+  type FileSelectionOptions,
   type DirectorySelectionOptions,
   type StartDesktopServerCoreDownloadRequest,
   type StartDesktopManagedServerCoreDownloadRequest,
@@ -138,6 +140,9 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
   directorySelection: string | undefined = "C:/SeaShard/resources";
   directorySelectionWindow?: BrowserWindow;
   directorySelectionOptions?: DirectorySelectionOptions;
+  fileSelection: string | undefined = "D:/Java/bin/java.exe";
+  fileSelectionWindow?: BrowserWindow;
+  fileSelectionOptions?: FileSelectionOptions;
 
   constructor(readonly platform: NodeJS.Platform) {
     super();
@@ -212,6 +217,15 @@ class FakeDesktopShellRuntime extends EventEmitter implements DesktopShellRuntim
     this.directorySelectionWindow = window;
     this.directorySelectionOptions = options;
     return this.directorySelection;
+  }
+
+  async selectFile(
+    window: BrowserWindow,
+    options: FileSelectionOptions,
+  ): Promise<string | undefined> {
+    this.fileSelectionWindow = window;
+    this.fileSelectionOptions = options;
+    return this.fileSelection;
   }
 
   quit(): void {
@@ -318,6 +332,28 @@ const serverInstances = [
   },
 ] satisfies readonly ServerInstanceSnapshot[];
 
+const javaInstallations = [
+  {
+    id: "0123456789abcdef",
+    path: "C:/Program Files/Eclipse Adoptium/jdk-21/bin/java.exe",
+    javaHome: "C:/Program Files/Eclipse Adoptium/jdk-21",
+    version: "21.0.7",
+    majorVersion: 21,
+    vendor: "Eclipse Adoptium",
+    architecture: "x64",
+    is64Bit: true,
+    source: "registry",
+  },
+] satisfies readonly JavaInstallationSnapshot[];
+
+const manuallyAddedJavaInstallation = {
+  ...javaInstallations[0]!,
+  id: "fedcba9876543210",
+  path: "D:/Java/bin/java.exe",
+  javaHome: "D:/Java",
+  source: "manual",
+} satisfies JavaInstallationSnapshot;
+
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
@@ -330,6 +366,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
+  const inspectedJavaPaths: string[] = [];
   const saveAsRequest = {
     serverType: "paper",
     gameVersion: "1.21.1",
@@ -397,6 +434,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => serverInstances,
+      scanJavaInstallations: async () => javaInstallations,
+      inspectJavaInstallation: async (executablePath) => {
+        inspectedJavaPaths.push(executablePath);
+        return manuallyAddedJavaInstallation;
+      },
       listServerCoreDownloadTasks: async () => downloadTasks,
       cancelServerCoreDownload: async (taskId) => {
         const task = downloadTasks.find((candidate) => candidate.id === taskId);
@@ -478,6 +520,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     /request rejected/,
   );
   await assert.rejects(runtime.invoke(desktopChannels.serverInstancesList, 1), /request rejected/);
+  await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeScan, 1), /request rejected/);
+  await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeAdd, 1), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 1),
     /request rejected/,
@@ -600,6 +644,26 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   assert.deepEqual(startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
+  assert.deepEqual(await runtime.invoke(desktopChannels.javaRuntimeScan, 1), javaInstallations);
+  await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeScan, 999), /request rejected/);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.javaRuntimeAdd, 1),
+    manuallyAddedJavaInstallation,
+  );
+  assert.equal(runtime.fileSelectionWindow, first as unknown as BrowserWindow);
+  assert.deepEqual(runtime.fileSelectionOptions, {
+    title: "选择 Java 可执行文件",
+    buttonLabel: "添加此 Java",
+    filters: [{ name: "Java 可执行文件", extensions: ["exe"] }],
+  });
+  assert.deepEqual(inspectedJavaPaths, ["D:/Java/bin/java.exe"]);
+  runtime.fileSelection = undefined;
+  assert.equal(await runtime.invoke(desktopChannels.javaRuntimeAdd, 1), undefined);
+  assert.deepEqual(
+    inspectedJavaPaths,
+    ["D:/Java/bin/java.exe"],
+    "取消文件选择不能调用 Java 检查服务",
+  );
   runtime.directorySelection = "C:/SeaShard/resources";
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 999),
@@ -692,6 +756,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
+  assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeScan), false);
+  assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeAdd), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
@@ -739,6 +805,10 @@ await test("desktop shell keeps macOS alive after the last window closes", async
         throw new Error("not expected");
       },
       listServerInstances: async () => [],
+      scanJavaInstallations: async () => [],
+      inspectJavaInstallation: async () => {
+        throw new Error("not expected");
+      },
       listServerCoreDownloadTasks: async () => [],
       cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},

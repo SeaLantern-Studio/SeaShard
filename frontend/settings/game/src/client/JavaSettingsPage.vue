@@ -1,19 +1,92 @@
 <script setup lang="ts">
+import type { JavaInstallationSnapshot, JavaRuntimeClientService } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Card } from "cmzya-modern-ui";
-import { Check, Coffee, Plus, Search } from "lucide-vue-next";
-import { ref } from "vue";
+import { Check, Coffee, Plus, Search, WandSparkles } from "lucide-vue-next";
+import { computed, onMounted, ref } from "vue";
 
-interface DetectedJavaInstallation {
-  readonly id: string;
-  readonly version: string;
-  readonly vendor: string;
-  readonly architecture: string;
-  readonly path: string;
+const props = defineProps<{
+  javaRuntime: JavaRuntimeClientService;
+}>();
+
+type OperationTone = "neutral" | "success" | "error";
+
+// 自动扫描与手动添加分开保存，重新扫描时不会丢失当前会话中手动选择的 Java。
+const scannedJavaInstallations = ref<readonly JavaInstallationSnapshot[]>([]);
+const manuallyAddedJavaInstallations = ref<readonly JavaInstallationSnapshot[]>([]);
+const selectedJavaId = ref("auto");
+const scanning = ref(false);
+const adding = ref(false);
+const operationMessage = ref("自动选择，或使用电脑上检测到的 Java");
+const operationTone = ref<OperationTone>("neutral");
+const busy = computed(() => scanning.value || adding.value);
+const detectedJavaInstallations = computed(() => {
+  const installations = new Map<string, JavaInstallationSnapshot>();
+  for (const installation of scannedJavaInstallations.value) {
+    installations.set(installation.id, installation);
+  }
+  for (const installation of manuallyAddedJavaInstallations.value) {
+    installations.set(installation.id, installation);
+  }
+  return [...installations.values()].sort(
+    (left, right) =>
+      right.majorVersion - left.majorVersion ||
+      left.vendor.localeCompare(right.vendor) ||
+      left.path.localeCompare(right.path),
+  );
+});
+
+function reportOperation(message: string, tone: OperationTone): void {
+  operationMessage.value = message;
+  operationTone.value = tone;
 }
 
-// 后端扫描接入后只需填充此列表；“自动选择”始终固定为首项。
-const detectedJavaInstallations = ref<readonly DetectedJavaInstallation[]>([]);
-const selectedJavaId = ref("auto");
+async function scanJavaInstallations(): Promise<void> {
+  if (busy.value) return;
+  scanning.value = true;
+  reportOperation("正在扫描 Java 运行环境…", "neutral");
+  try {
+    const installations = await props.javaRuntime.scan();
+    scannedJavaInstallations.value = installations;
+    reportOperation(`扫描完成，发现 ${installations.length} 个 Java 运行环境`, "success");
+  } catch (error) {
+    reportOperation(
+      `Java 扫描失败：${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  } finally {
+    scanning.value = false;
+  }
+}
+
+async function addJavaInstallation(): Promise<void> {
+  if (busy.value) return;
+  adding.value = true;
+  reportOperation("请选择 Java 安装目录中的 bin/java.exe", "neutral");
+  try {
+    const installation = await props.javaRuntime.add();
+    if (!installation) {
+      reportOperation("已取消添加 Java", "neutral");
+      return;
+    }
+    manuallyAddedJavaInstallations.value = [
+      ...manuallyAddedJavaInstallations.value.filter(
+        (candidate) => candidate.id !== installation.id,
+      ),
+      installation,
+    ];
+    selectedJavaId.value = installation.id;
+    reportOperation(`已添加 Java ${installation.version} · ${installation.vendor}`, "success");
+  } catch (error) {
+    reportOperation(
+      `Java 添加失败：${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  } finally {
+    adding.value = false;
+  }
+}
+
+onMounted(() => void scanJavaInstallations());
 </script>
 
 <template>
@@ -22,18 +95,32 @@ const selectedJavaId = ref("auto");
       <div class="java-list-toolbar">
         <div>
           <h3 class="java-list-title">Java 版本</h3>
-          <p class="java-list-subtitle">自动选择，或使用电脑上检测到的 Java</p>
+          <p
+            class="java-list-subtitle"
+            :class="`java-list-subtitle--${operationTone}`"
+            role="status"
+            aria-live="polite"
+          >
+            {{ operationMessage }}
+          </p>
         </div>
         <div class="java-toolbar-actions">
-          <Cmz_Button variant="outline" size="sm" disabled title="Java 扫描后端接入后启用">
+          <Cmz_Button
+            variant="outline"
+            size="sm"
+            :loading="scanning"
+            :disabled="busy"
+            @click="scanJavaInstallations"
+          >
             <Search :size="16" :stroke-width="1.8" />
             扫描
           </Cmz_Button>
           <Cmz_Button
             variant="outline"
             size="sm"
-            disabled
-            title="手动添加将在 Java 扫描后端接入后启用"
+            :loading="adding"
+            :disabled="busy"
+            @click="addJavaInstallation"
           >
             <Plus :size="16" :stroke-width="1.8" />
             添加
@@ -51,7 +138,7 @@ const selectedJavaId = ref("auto");
           @click="selectedJavaId = 'auto'"
         >
           <span class="java-option-icon" aria-hidden="true">
-            <Coffee :size="20" :stroke-width="1.8" />
+            <WandSparkles :size="20" :stroke-width="1.8" />
           </span>
           <span class="java-option-copy">
             <span class="java-option-name">自动选择</span>
@@ -127,6 +214,14 @@ const selectedJavaId = ref("auto");
   display: flex;
   align-items: center;
   gap: var(--sl-space-sm);
+}
+
+.java-list-subtitle--success {
+  color: var(--sl-success);
+}
+
+.java-list-subtitle--error {
+  color: var(--sl-error);
 }
 
 .java-list {
@@ -207,13 +302,18 @@ const selectedJavaId = ref("auto");
 
 .java-option-detail {
   overflow: hidden;
+  width: 107.527%;
   margin-top: 2px;
   color: var(--sl-text-tertiary);
-  font-family: var(--sl-font-mono);
-  font-size: 0.75rem;
-  line-height: 1.4;
+  font-family: var(--sl-font-sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.005em;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transform: scale(0.93);
+  transform-origin: left top;
 }
 
 .java-option-check {

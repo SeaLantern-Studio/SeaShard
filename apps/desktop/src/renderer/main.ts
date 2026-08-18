@@ -1,4 +1,5 @@
 import {
+  javaRuntimeManagerContract,
   runtimeDiagnosticsContract,
   serverCoreSourceContract,
   serverCoreDownloadContract,
@@ -24,6 +25,7 @@ const runtime = new ClientUiRuntime({
     [serverCoreDownloadContract]: window.seashard.serverCoreDownload,
     [serverSettingsContract]: window.seashard.serverSettings,
     [serverInstanceManagerContract]: window.seashard.serverInstances,
+    [javaRuntimeManagerContract]: window.seashard.javaRuntime,
     [uiAppearanceContract]: appearanceService,
   },
 });
