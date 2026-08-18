@@ -145,6 +145,12 @@ function leaveDownload(): void {
   navigate("/server/launch");
 }
 
+function serverItemForPath(path: string): InstanceItemId {
+  if (path.startsWith("/server/download")) return "download";
+  if (path.startsWith("/server/console")) return "console";
+  return "launch";
+}
+
 function selectInstanceItem(id: InstanceItemId): void {
   if (props.workspace === "server") {
     activeServerItem.value = id;
@@ -152,6 +158,8 @@ function selectInstanceItem(id: InstanceItemId): void {
       navigate("/server/download");
     } else if (id === "launch") {
       navigate("/server/launch");
+    } else if (id === "console") {
+      navigate("/server/console");
     } else if (route.path.startsWith("/server/")) {
       navigate("/");
     }
@@ -231,7 +239,7 @@ watch(
   () => route.fullPath,
   (path) => {
     if (!path.startsWith("/settings/")) lastWorkspacePath.value = path;
-    activeServerItem.value = path.startsWith("/server/download") ? "download" : "launch";
+    activeServerItem.value = serverItemForPath(path);
   },
   { immediate: true },
 );

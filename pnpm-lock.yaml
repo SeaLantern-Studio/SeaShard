@@ -311,6 +311,9 @@ importers:
       '@seashard/ui-sdk':
         specifier: workspace:*
         version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))

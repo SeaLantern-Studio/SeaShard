@@ -3,16 +3,21 @@ import {
   type ServerInstanceClientService,
 } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
-import { Play } from "lucide-vue-next";
+import { Play, Terminal } from "lucide-vue-next";
 import { defineComponent, h } from "vue";
+import ServerConsolePage from "./ServerConsolePage.vue";
 import ServerLaunchPage from "./ServerLaunchPage.vue";
 
 export default defineClientUiModule({
   apply(context) {
     const instances = context.service<ServerInstanceClientService>(serverInstanceManagerContract);
-    const page = defineComponent({
+    const launchPage = defineComponent({
       name: "ServerLaunch",
       setup: () => () => h(ServerLaunchPage, { instances }),
+    });
+    const consolePage = defineComponent({
+      name: "ServerConsole",
+      setup: () => () => h(ServerConsolePage, { instances }),
     });
     context.contribute("navigation.page", {
       id: "server-launch",
@@ -23,7 +28,18 @@ export default defineClientUiModule({
       icon: Play,
       navigation: false,
       placement: "main",
-      component: page,
+      component: launchPage,
+    });
+    context.contribute("navigation.page", {
+      id: "server-console",
+      path: "/server/console",
+      label: "控制台",
+      description: "查看服务器日志并发送命令",
+      order: 10,
+      icon: Terminal,
+      navigation: false,
+      placement: "main",
+      component: consolePage,
     });
   },
 });
