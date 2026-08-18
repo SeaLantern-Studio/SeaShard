@@ -668,6 +668,12 @@ async function bootstrap(): Promise<void> {
   });
   await registerSmokePlugin(kernel);
   await kernel.start();
+  if (smokeMode) {
+    const instances = expectServerInstances(
+      await kernel.callService(serverInstanceManagerContract, "list", []),
+    );
+    console.log(`SEASHARD_SMOKE_SERVER_INSTANCES count=${instances.length}`);
+  }
   if (process.env.SEASHARD_SMOKE_EXPECT_PLUGIN === "1") {
     const echo = await kernel.callService("seashard.smoke.echo", "echo", ["probe"]);
     if (echo !== "core-smoke:probe") {

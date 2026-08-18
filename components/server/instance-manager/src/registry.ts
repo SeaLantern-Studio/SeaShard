@@ -10,65 +10,23 @@ interface ServerInstanceManifestPathRow extends DatabaseRow {
 
 /** 服务器实例组件拥有的 SQLite 路径索引 Data Capsule。 */
 export const serverInstanceDataCapsule = defineDataCapsule({
-  namespace: "server_instance_manager",
-  schemaVersion: 2,
-  compatibilityFloor: 2,
-  tables: ["server_instances", "server_instance_manifest_index"],
+  namespace: "server_instance_registry",
+  schemaVersion: 1,
+  compatibilityFloor: 1,
+  tables: ["server_instance_manifests"],
   migrations: [
     {
       version: 1,
       statements: [
-        `CREATE TABLE server_instances (
-          id TEXT PRIMARY KEY NOT NULL,
-          name TEXT NOT NULL,
-          name_key TEXT NOT NULL UNIQUE,
-          root_path TEXT NOT NULL,
-          root_path_key TEXT NOT NULL UNIQUE,
-          core_jar_path TEXT NOT NULL,
-          icon_path TEXT,
-          storage_mode TEXT NOT NULL CHECK (storage_mode IN ('managed', 'external')),
-          source TEXT NOT NULL CHECK (source IN ('downloaded', 'imported')),
-          server_type TEXT,
-          game_version TEXT,
-          artifact_sha256 TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          last_started_at TEXT
-        ) STRICT`,
-      ],
-      verify: [
-        {
-          sql: `SELECT COUNT(*) = 1 AS valid
-                  FROM sqlite_schema
-                 WHERE type = 'table' AND name = 'server_instances'`,
-          column: "valid",
-          equals: 1,
-        },
-      ],
-    },
-    {
-      version: 2,
-      statements: [
-        `CREATE TABLE server_instance_manifest_index (
+        `CREATE TABLE server_instance_manifests (
           manifest_path TEXT PRIMARY KEY NOT NULL
         ) STRICT`,
-        `INSERT INTO server_instance_manifest_index (manifest_path)
-         SELECT root_path || '/.server-info/seashard.json'
-           FROM server_instances`,
-        "DROP TABLE server_instances",
       ],
       verify: [
         {
           sql: `SELECT COUNT(*) = 1 AS valid
                   FROM sqlite_schema
-                 WHERE type = 'table' AND name = 'server_instance_manifest_index'`,
-          column: "valid",
-          equals: 1,
-        },
-        {
-          sql: `SELECT COUNT(*) = 0 AS valid
-                  FROM sqlite_schema
-                 WHERE type = 'table' AND name = 'server_instances'`,
+                 WHERE type = 'table' AND name = 'server_instance_manifests'`,
           column: "valid",
           equals: 1,
         },
@@ -81,14 +39,14 @@ export const serverInstanceDataCapsule = defineDataCapsule({
       access: "read",
       result: "all",
       sql: `SELECT manifest_path
-              FROM server_instance_manifest_index
+              FROM server_instance_manifests
              ORDER BY manifest_path ASC`,
     },
     {
       id: "manifest.insert",
       access: "write",
       result: "run",
-      sql: `INSERT INTO server_instance_manifest_index (manifest_path)
+      sql: `INSERT INTO server_instance_manifests (manifest_path)
             VALUES (?)`,
     },
   ],

@@ -71,6 +71,7 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
     "SEASHARD_PLUGIN_SMOKE_STORAGE",
     "SEASHARD_SMOKE_READY components=7",
+    "SEASHARD_SMOKE_SERVER_INSTANCES count=0",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
     "SEASHARD_PLUGIN_HOST_DISPOSED runtime=smoke.external-plugin",
     "SEASHARD_SMOKE_DISPOSED activeUnits=0 services=0 contributions=0",

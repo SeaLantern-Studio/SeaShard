@@ -25,7 +25,7 @@ import {
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
@@ -33,22 +33,41 @@ const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
 const iconBytes = Buffer.from("server-core-icon");
 
-const legacyServerInstanceDataCapsule = defineDataCapsule({
+/**
+ * 预发布阶段曾把完整实例实体写进旧命名空间；其迁移摘要可能已落盘。
+ * 当前路径索引必须与这份退役 Capsule 隔离，否则 Runtime 会在启动时因摘要变化而失败。
+ */
+const retiredServerInstanceDataCapsule = defineDataCapsule({
   namespace: "server_instance_manager",
   schemaVersion: 1,
   compatibilityFloor: 1,
   tables: ["server_instances"],
-  migrations: [serverInstanceDataCapsule.migrations[0]!],
+  migrations: [
+    {
+      version: 1,
+      statements: [
+        `CREATE TABLE server_instances (
+          id TEXT PRIMARY KEY NOT NULL,
+          root_path TEXT NOT NULL
+        ) STRICT`,
+      ],
+      verify: [
+        {
+          sql: `SELECT COUNT(*) = 1 AS valid
+                  FROM sqlite_schema
+                 WHERE type = 'table' AND name = 'server_instances'`,
+          column: "valid",
+          equals: 1,
+        },
+      ],
+    },
+  ],
   commands: [
     {
-      id: "legacy.insert",
-      access: "write",
-      result: "run",
-      sql: `INSERT INTO server_instances (
-              id, name, name_key, root_path, root_path_key, core_jar_path, icon_path,
-              storage_mode, source, server_type, game_version, artifact_sha256,
-              created_at, updated_at, last_started_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id: "legacy.list",
+      access: "read",
+      result: "all",
+      sql: "SELECT id, root_path FROM server_instances ORDER BY id",
     },
   ],
 });
@@ -339,62 +358,19 @@ await test("split portable JSON remains authoritative after path registration", 
   }
 });
 
-await test("schema v2 migrates entity rows to JSON path indexes", async () => {
-  const dataRoot = await mkdtemp(join(tmpdir(), "seashard-instance-index-migration-"));
+await test("path registry activates beside a retired pre-release entity schema", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "seashard-instance-index-cutover-"));
   const broker = await SQLiteDatabaseBroker.create({
     databasePath: join(dataRoot, "seashard.sqlite3"),
     workerEntry: databaseWorkerEntry,
     readWorkers: 1,
   });
   try {
-    const rootPath = join(dataRoot, "servers", "migrated-instance");
-    const coreJarPath = join(rootPath, "server.jar");
-    await mkdir(rootPath, { recursive: true });
-    await writeFile(coreJarPath, "migrated-core\n", "utf8");
-    const instance = {
-      id: "migrated-instance",
-      name: "1.21.1-paper",
-      rootPath,
-      coreJarPath,
-      storageMode: "managed",
-      source: "downloaded",
-      serverType: "paper",
-      gameVersion: "1.21.1",
-      artifactSha256: artifactHash,
-      createdAt: "2026-08-16T00:00:00.000Z",
-      updatedAt: "2026-08-16T00:00:00.000Z",
-    } as const;
-    const manifestPath = await writePortableInstanceManifests(instance);
-    const legacyRepository = await broker.registerCapsule(legacyServerInstanceDataCapsule);
-    await legacyRepository.execute("legacy.insert", [
-      instance.id,
-      instance.name,
-      instance.name.toLowerCase(),
-      instance.rootPath,
-      instance.rootPath.toLowerCase(),
-      instance.coreJarPath,
-      null,
-      instance.storageMode,
-      instance.source,
-      instance.serverType,
-      instance.gameVersion,
-      instance.artifactSha256,
-      instance.createdAt,
-      instance.updatedAt,
-      null,
-    ]);
+    await broker.registerCapsule(retiredServerInstanceDataCapsule);
 
     const repository = await broker.registerCapsule(serverInstanceDataCapsule);
     const registry = new SQLiteServerInstanceRegistry(repository);
-    const [indexedPath] = await registry.listManifestPaths();
-    assert.equal(resolve(indexedPath!), resolve(manifestPath));
-    const manager = new ServerInstanceManager({
-      managedRoot: join(dataRoot, "servers"),
-      registry,
-      coreSource: new FakeServerCoreSource(),
-    });
-    assert.deepEqual(await manager.list(), [instance]);
-    await manager.dispose();
+    assert.deepEqual(await registry.listManifestPaths(), []);
   } finally {
     await broker.close();
     await rm(dataRoot, { recursive: true, force: true });
