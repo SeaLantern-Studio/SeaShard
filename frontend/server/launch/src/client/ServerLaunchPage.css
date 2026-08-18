@@ -1,0 +1,413 @@
+/* Server launch preview page styles. */
+.server-launch-page {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
+  overflow: hidden;
+  border-radius: calc(var(--sl-radius-lg) - 2px);
+  background:
+    radial-gradient(circle at 50% 47%, var(--sl-primary-bg) 0, transparent 34%), var(--sl-surface);
+}
+
+.launch-focus-area {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transform: translate3d(0, 0, 0);
+  transition: transform 360ms cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+.selector-open .launch-focus-area {
+  transform: translate3d(-25%, 0, 0);
+}
+
+.instance-icon-button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 140px;
+  height: 140px;
+  place-items: center;
+  border: 0;
+  border-radius: 32px;
+  background: transparent;
+  color: inherit;
+  cursor: context-menu;
+  transform: translate(-50%, -50%) scale(1);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.instance-icon-button::after {
+  position: absolute;
+  inset: 3px;
+  border: 1px solid color-mix(in srgb, var(--sl-primary) 13%, transparent);
+  border-radius: 30px;
+  content: "";
+  opacity: 0;
+  transform: scale(0.92);
+  transition:
+    opacity var(--sl-transition-fast),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.instance-icon-button:hover::after,
+.instance-icon-button:focus-visible::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.instance-icon-button:active {
+  transform: translate(-50%, -50%) scale(0.97);
+  transition-duration: 80ms;
+}
+
+.instance-icon-visual {
+  --instance-hue: 204;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid hsl(var(--instance-hue) 36% 82%);
+  background: hsl(var(--instance-hue) 58% 95%);
+  color: hsl(var(--instance-hue) 60% 32%);
+  font-weight: 780;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+    0 16px 40px color-mix(in srgb, hsl(var(--instance-hue) 48% 48%) 14%, transparent);
+  user-select: none;
+}
+
+.instance-icon-visual > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.instance-icon-large {
+  width: 116px;
+  height: 116px;
+  border-radius: 27px;
+  font-size: 2.2rem;
+}
+
+.launch-actions {
+  position: absolute;
+  top: calc(50% + 88px);
+  left: 50%;
+  display: grid;
+  width: 244px;
+  gap: 10px;
+  transform: translateX(-50%);
+}
+
+.primary-launch-button,
+.secondary-launch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--sl-transition-fast),
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast),
+    box-shadow var(--sl-transition-fast),
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.primary-launch-button {
+  width: 100%;
+  height: 44px;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--sl-primary);
+  color: var(--sl-text-inverse);
+  box-shadow: var(--sl-shadow-button);
+  font-size: 0.9rem;
+}
+
+.primary-launch-button:hover {
+  background: color-mix(in srgb, var(--sl-primary) 88%, var(--sl-primary-dark));
+  box-shadow: var(--sl-shadow-button-hover);
+  transform: translateY(-1px);
+}
+
+.primary-launch-button.is-stop {
+  background: var(--sl-error);
+  color: #fff;
+}
+
+.primary-launch-button.is-stop:hover {
+  background: color-mix(in srgb, var(--sl-error) 88%, #b91c1c);
+}
+
+.secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.secondary-launch-button {
+  height: 38px;
+  gap: 6px;
+  border-color: var(--sl-border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--sl-surface) 92%, var(--sl-bg-secondary));
+  color: var(--sl-text-secondary);
+  font-size: 0.79rem;
+}
+
+.secondary-launch-button:hover,
+.secondary-launch-button.active {
+  border-color: color-mix(in srgb, var(--sl-primary) 28%, var(--sl-border));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary-dark);
+}
+
+.primary-launch-button:active,
+.secondary-launch-button:active {
+  transform: scale(0.975);
+  transition-duration: 70ms;
+}
+
+.primary-launch-button:focus-visible,
+.secondary-launch-button:focus-visible,
+.instance-icon-button:focus-visible,
+.instance-list-row:focus-visible,
+.icon-context-menu button:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
+
+.instance-selector-panel {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: calc(50% - 30px);
+  min-width: 0;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-lg);
+  background: color-mix(in srgb, var(--sl-bg-secondary) 66%, var(--sl-surface));
+  box-shadow: var(--sl-shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(28px, 0, 0);
+  transition:
+    opacity 180ms ease,
+    transform 360ms cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform, opacity;
+}
+
+.selector-open .instance-selector-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0);
+}
+
+.instance-list {
+  display: grid;
+  gap: 7px;
+}
+
+.instance-list-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 62px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 11px 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast),
+    box-shadow var(--sl-transition-fast),
+    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.instance-list-row:hover {
+  border-color: var(--sl-border-light);
+  background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-sm);
+  transform: translateX(2px);
+}
+
+.instance-list-row.selected {
+  border-color: color-mix(in srgb, var(--sl-primary) 20%, var(--sl-border-light));
+  background: var(--sl-surface);
+}
+
+.instance-list-row:active {
+  transform: scale(0.985);
+  transition-duration: 70ms;
+}
+
+.instance-order-move {
+  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.instance-icon-small {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  box-shadow: none;
+}
+
+.instance-row-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: 0.84rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instance-row-meta {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.instance-running-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sl-success);
+  font-size: 0.72rem;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.instance-running-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-success);
+  box-shadow: 0 0 0 3px var(--sl-success-bg);
+}
+
+.instance-selected-check {
+  color: var(--sl-primary);
+}
+
+.icon-context-menu {
+  position: absolute;
+  z-index: 10;
+  width: 148px;
+  padding: 5px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 11px;
+  background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-lg);
+  transform-origin: top left;
+  animation: icon-menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.icon-context-menu button {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+  font-size: 0.79rem;
+  cursor: pointer;
+}
+
+.icon-context-menu button:hover {
+  background: var(--sl-bg-secondary);
+}
+
+.visually-hidden-icon-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes icon-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+:global([data-theme="dark"]) .instance-icon-visual {
+  border-color: hsl(var(--instance-hue) 28% 35%);
+  background: hsl(var(--instance-hue) 28% 20%);
+  color: hsl(var(--instance-hue) 55% 78%);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 24%);
+}
+
+:global([data-theme="dark"]) .secondary-launch-button:hover,
+:global([data-theme="dark"]) .secondary-launch-button.active {
+  color: var(--sl-primary);
+}
+
+@media (max-height: 690px) {
+  .instance-icon-button {
+    top: 45%;
+  }
+
+  .launch-actions {
+    top: calc(45% + 82px);
+  }
+
+  .instance-icon-large {
+    width: 106px;
+    height: 106px;
+    border-radius: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launch-focus-area,
+  .instance-selector-panel,
+  .instance-icon-button,
+  .primary-launch-button,
+  .secondary-launch-button,
+  .instance-list-row,
+  .icon-context-menu {
+    animation-duration: 0s;
+    transition-duration: 0s;
+  }
+}

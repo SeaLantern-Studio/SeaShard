@@ -13,6 +13,9 @@ export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleL
   "seashard.server-download-ui/server-download.client": {
     load: () => import("@seashard/server-download-ui/client"),
   },
+  "seashard.server-launch-ui/server-launch.client": {
+    load: () => import("@seashard/server-launch-ui/client"),
+  },
   "seashard.server-settings-ui/server-settings.client": {
     load: () => import("@seashard/server-settings-ui/client"),
   },

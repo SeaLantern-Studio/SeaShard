@@ -42,6 +42,7 @@ import {
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
+import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 import { createServerSettingsModule, serverSettingsManifest } from "@seashard/server-settings";
 import { Context } from "cordis";
@@ -284,6 +285,21 @@ async function bootstrap(): Promise<void> {
       {
         id: "core.server-download.ui",
         entryId: "server-download.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 服务器启动页是纯 Client Entry；当前只提供实例选择和启动状态的交互预览。
+  await activeKernel.registerBuiltIn({
+    manifest: serverLaunchUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-launch.ui",
+        entryId: "server-launch.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

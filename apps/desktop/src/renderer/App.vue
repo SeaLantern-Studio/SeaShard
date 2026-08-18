@@ -27,7 +27,8 @@ watch(
 function updateWorkspace(value: WorkspaceMode): void {
   workspace.value = value;
   const routeWorkspace = workspaceForPath(route.path);
-  if (routeWorkspace && routeWorkspace !== value) void router.push("/");
+  if (routeWorkspace === value) return;
+  void router.push(value === "server" ? "/server/launch" : "/");
 }
 
 function workspaceForPath(path: string): WorkspaceMode | undefined {

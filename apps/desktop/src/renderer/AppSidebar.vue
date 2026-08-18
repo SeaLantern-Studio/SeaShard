@@ -141,7 +141,7 @@ function leaveSettings(): void {
 }
 function leaveDownload(): void {
   activeServerItem.value = "launch";
-  navigate("/");
+  navigate("/server/launch");
 }
 
 function selectInstanceItem(id: InstanceItemId): void {
@@ -149,6 +149,8 @@ function selectInstanceItem(id: InstanceItemId): void {
     activeServerItem.value = id;
     if (id === "download") {
       navigate("/server/download");
+    } else if (id === "launch") {
+      navigate("/server/launch");
     } else if (route.path.startsWith("/server/")) {
       navigate("/");
     }
