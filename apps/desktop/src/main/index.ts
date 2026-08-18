@@ -21,6 +21,7 @@ import {
   createElectronDesktopShellRuntime,
   desktopShellManifest,
 } from "@seashard/desktop-shell";
+import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import type {
@@ -340,6 +341,21 @@ async function bootstrap(): Promise<void> {
       {
         id: "core.personalization.ui",
         entryId: "personalization.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 游戏运行环境设置是纯 Client UI；Java 扫描与持久化由后续 Host 组件提供。
+  await activeKernel.registerBuiltIn({
+    manifest: gameSettingsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.game-settings.ui",
+        entryId: "game-settings.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

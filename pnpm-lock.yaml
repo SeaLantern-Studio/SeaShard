@@ -71,6 +71,9 @@ importers:
       '@seashard/download':
         specifier: workspace:*
         version: link:../../components/network/download
+      '@seashard/game-settings-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/game
       '@seashard/personalization-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/personalization
@@ -314,6 +317,24 @@ importers:
       '@seashard/ui-sdk':
         specifier: workspace:*
         version: link:../../../packages/ui-sdk
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/settings/game:
+    dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))

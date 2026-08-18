@@ -30,7 +30,7 @@ export interface UiAppearanceService {
   reset(): void;
 }
 
-export type SettingsNavigationGroup = "agent" | "server" | "launcher" | "software";
+export type SettingsNavigationGroup = "agent" | "game" | "server" | "launcher" | "software";
 /** 一个功能入口贡献给桌面 Shell 的页面及其导航记录。 */
 export interface NavigationPageContribution {
   id: string;

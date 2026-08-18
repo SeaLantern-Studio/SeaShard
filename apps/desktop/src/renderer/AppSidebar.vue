@@ -40,6 +40,7 @@ const settingsPages = computed(() =>
 );
 const settingsNavigationGroups = [
   { id: "agent", label: "Agent 设置" },
+  { id: "game", label: "游戏设置" },
   { id: "server", label: "服务器设置" },
   { id: "launcher", label: "启动器设置" },
   { id: "software", label: "软件设置" },

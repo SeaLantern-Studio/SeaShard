@@ -11,6 +11,7 @@
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/desktop-shell": "workspace:*",
     "@seashard/download": "workspace:*",
+    "@seashard/game-settings-ui": "workspace:*",
     "@seashard/personalization-ui": "workspace:*",
     "@seashard/plugin-foundation": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",

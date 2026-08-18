@@ -4,6 +4,9 @@ export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleL
   "seashard.about-ui/about.client": {
     load: () => import("@seashard/about-ui/client"),
   },
+  "seashard.game-settings-ui/game-settings.client": {
+    load: () => import("@seashard/game-settings-ui/client"),
+  },
   "seashard.runtime-diagnostics-ui/runtime-diagnostics.client": {
     load: () => import("@seashard/runtime-diagnostics-ui/client"),
   },
