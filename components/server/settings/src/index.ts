@@ -1,7 +1,11 @@
 import {
   serverDownloadConnectionLimits,
+  serverJvmArgumentsMaximumLength,
+  serverPortLimits,
   serverSettingsContract,
+  serverStartupDefaults,
   type ServerSettingsSnapshot,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule, PluginStorage } from "@seashard/plugin-sdk";
 
@@ -43,6 +47,11 @@ export function createServerSettingsModule(options: ServerSettingsModuleOptions)
       options.defaultDownloadConnections,
       "defaultDownloadConnections",
     ),
+    defaultMinimumMemoryMiB: serverStartupDefaults.minimumMemoryMiB,
+    defaultMaximumMemoryMiB: serverStartupDefaults.maximumMemoryMiB,
+    defaultServerPort: serverStartupDefaults.port,
+    autoAcceptEula: serverStartupDefaults.autoAcceptEula,
+    defaultJvmArguments: serverStartupDefaults.jvmArguments,
   };
 
   return {
@@ -88,6 +97,13 @@ export function createServerSettingsModule(options: ServerSettingsModuleOptions)
             defaultDownloadConnections: connections,
           }));
         },
+        setStartupDefaults: (value) => {
+          const startupDefaults = expectStartupDefaults(value);
+          return updateSnapshot((current) => ({
+            ...current,
+            ...startupDefaults,
+          }));
+        },
       });
     },
   };
@@ -102,18 +118,114 @@ async function loadSnapshot(
   if (!value || typeof value !== "object" || Array.isArray(value)) return { ...defaults };
   const directory = Reflect.get(value, "resourceDownloadDirectory");
   const connections = Reflect.get(value, "defaultDownloadConnections");
+  const minimumMemory = Reflect.get(value, "defaultMinimumMemoryMiB");
+  const maximumMemory = Reflect.get(value, "defaultMaximumMemoryMiB");
+  const defaultMinimumMemoryMiB = isPositiveSafeInteger(minimumMemory)
+    ? minimumMemory
+    : defaults.defaultMinimumMemoryMiB;
+  const defaultMaximumMemoryMiB = isPositiveSafeInteger(maximumMemory)
+    ? maximumMemory
+    : defaults.defaultMaximumMemoryMiB;
+  const hasValidMemoryRange = defaultMinimumMemoryMiB <= defaultMaximumMemoryMiB;
+  const port = Reflect.get(value, "defaultServerPort");
+  const autoAcceptEula = Reflect.get(value, "autoAcceptEula");
+  const jvmArguments = Reflect.get(value, "defaultJvmArguments");
   return {
     resourceDownloadDirectory:
       typeof directory === "string" ? directory : defaults.resourceDownloadDirectory,
     defaultDownloadConnections: isConnections(connections)
       ? connections
       : defaults.defaultDownloadConnections,
+    defaultMinimumMemoryMiB: hasValidMemoryRange
+      ? defaultMinimumMemoryMiB
+      : defaults.defaultMinimumMemoryMiB,
+    defaultMaximumMemoryMiB: hasValidMemoryRange
+      ? defaultMaximumMemoryMiB
+      : defaults.defaultMaximumMemoryMiB,
+    defaultServerPort: isPort(port) ? port : defaults.defaultServerPort,
+    autoAcceptEula: typeof autoAcceptEula === "boolean" ? autoAcceptEula : defaults.autoAcceptEula,
+    defaultJvmArguments: isJvmArguments(jvmArguments) ? jvmArguments : defaults.defaultJvmArguments,
   };
 }
 
 function expectString(value: unknown, field: string): string {
   if (typeof value !== "string") throw new TypeError(`server settings ${field} must be a string`);
   return value;
+}
+
+function expectStartupDefaults(value: unknown): ServerStartupDefaultsUpdate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server startup defaults must be an object");
+  }
+  const defaultMinimumMemoryMiB = expectPositiveSafeInteger(
+    Reflect.get(value, "defaultMinimumMemoryMiB"),
+    "defaultMinimumMemoryMiB",
+  );
+  const defaultMaximumMemoryMiB = expectPositiveSafeInteger(
+    Reflect.get(value, "defaultMaximumMemoryMiB"),
+    "defaultMaximumMemoryMiB",
+  );
+  if (defaultMinimumMemoryMiB > defaultMaximumMemoryMiB) {
+    throw new TypeError(
+      "server settings defaultMinimumMemoryMiB must not exceed defaultMaximumMemoryMiB",
+    );
+  }
+  const autoAcceptEula = Reflect.get(value, "autoAcceptEula");
+  if (typeof autoAcceptEula !== "boolean") {
+    throw new TypeError("server settings autoAcceptEula must be a boolean");
+  }
+  return {
+    defaultMinimumMemoryMiB,
+    defaultMaximumMemoryMiB,
+    defaultServerPort: expectPort(Reflect.get(value, "defaultServerPort")),
+    autoAcceptEula,
+    defaultJvmArguments: expectJvmArguments(Reflect.get(value, "defaultJvmArguments")),
+  };
+}
+
+function expectPositiveSafeInteger(value: unknown, field: string): number {
+  if (!isPositiveSafeInteger(value)) {
+    throw new TypeError(`server settings ${field} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function expectPort(value: unknown): number {
+  if (!isPort(value)) {
+    throw new TypeError(
+      `server settings defaultServerPort must be an integer between ${serverPortLimits.minimum} and ${serverPortLimits.maximum}`,
+    );
+  }
+  return value;
+}
+
+function isPort(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) >= serverPortLimits.minimum &&
+    (value as number) <= serverPortLimits.maximum
+  );
+}
+
+function expectJvmArguments(value: unknown): string {
+  if (!isJvmArguments(value)) {
+    throw new TypeError(
+      `server settings defaultJvmArguments must be a string without NUL characters and at most ${serverJvmArgumentsMaximumLength} characters`,
+    );
+  }
+  return value;
+}
+
+function isJvmArguments(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= serverJvmArgumentsMaximumLength &&
+    !value.includes("\0")
+  );
 }
 
 function expectConnections(value: unknown, field: string): number {

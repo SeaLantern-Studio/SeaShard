@@ -18,6 +18,7 @@ import {
   type ServerCoreSourceClientService,
   type ServerInstanceClientService,
   type ServerSettingsClientService,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type {
@@ -108,6 +109,9 @@ export interface DesktopShellConfig {
   writeDefaultDownloadConnections(
     connections: number,
   ): ReturnType<ServerSettingsClientService["setDefaultDownloadConnections"]>;
+  writeServerStartupDefaults(
+    update: ServerStartupDefaultsUpdate,
+  ): ReturnType<ServerSettingsClientService["setStartupDefaults"]>;
   startServerCoreDownload(
     request: StartDesktopServerCoreDownloadRequest,
   ): Promise<ServerCoreDownloadTaskSnapshot>;
@@ -211,6 +215,29 @@ function expectString(value: unknown, label: string): string {
 function expectSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
   return value as number;
+}
+
+function expectServerStartupDefaultsUpdate(value: unknown): ServerStartupDefaultsUpdate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server startup defaults must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.autoAcceptEula !== "boolean") {
+    throw new TypeError("auto accept EULA must be a boolean");
+  }
+  return {
+    defaultMinimumMemoryMiB: expectSafeInteger(
+      record.defaultMinimumMemoryMiB,
+      "default minimum memory",
+    ),
+    defaultMaximumMemoryMiB: expectSafeInteger(
+      record.defaultMaximumMemoryMiB,
+      "default maximum memory",
+    ),
+    defaultServerPort: expectSafeInteger(record.defaultServerPort, "default server port"),
+    autoAcceptEula: record.autoAcceptEula,
+    defaultJvmArguments: expectString(record.defaultJvmArguments, "default JVM arguments"),
+  };
 }
 
 function expectServerCoreSaveAsRequest(value: unknown): ServerCoreSaveAsRequest {
@@ -415,6 +442,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
+        config.runtime.handle(desktopChannels.serverSettingsSetStartupDefaults, (event, value) => {
+          ownedWindow(event.sender.id);
+          return config.writeServerStartupDefaults(expectServerStartupDefaultsUpdate(value));
+        });
         config.runtime.handle(desktopChannels.serverCoreDownloadSaveAs, async (event, value) => {
           const window = ownedWindow(event.sender.id);
           const request = expectServerCoreSaveAsRequest(value);
@@ -541,6 +572,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverSettingsGet);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);
+          config.runtime.removeHandler(desktopChannels.serverSettingsSetStartupDefaults);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);

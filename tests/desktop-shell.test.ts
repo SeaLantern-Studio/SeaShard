@@ -14,6 +14,8 @@ import {
   type ServerCoreDownloadTaskSnapshot,
   type ServerInstanceSnapshot,
   type ServerCoreType,
+  type ServerSettingsSnapshot,
+  type ServerStartupDefaultsUpdate,
 } from "../packages/contracts/src/index.ts";
 import {
   createDesktopShellModule,
@@ -354,14 +356,31 @@ const manuallyAddedJavaInstallation = {
   source: "manual",
 } satisfies JavaInstallationSnapshot;
 
+const defaultServerStartupSettings = {
+  defaultMinimumMemoryMiB: 512,
+  defaultMaximumMemoryMiB: 2_048,
+  defaultServerPort: 25_565,
+  autoAcceptEula: true,
+  defaultJvmArguments: "",
+} satisfies ServerStartupDefaultsUpdate;
+
+const updatedServerStartupSettings = {
+  defaultMinimumMemoryMiB: 1_024,
+  defaultMaximumMemoryMiB: 6_144,
+  defaultServerPort: 25_566,
+  autoAcceptEula: false,
+  defaultJvmArguments: "-XX:+UseG1GC",
+} satisfies ServerStartupDefaultsUpdate;
+
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
-  let serverSettings = {
+  let serverSettings: ServerSettingsSnapshot = {
     resourceDownloadDirectory: "C:/SeaShard/resources",
     defaultDownloadConnections: 16,
+    ...defaultServerStartupSettings,
   };
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
@@ -399,6 +418,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       },
       writeDefaultDownloadConnections: async (connections) => {
         serverSettings = { ...serverSettings, defaultDownloadConnections: connections };
+        return serverSettings;
+      },
+      writeServerStartupDefaults: async (update) => {
+        serverSettings = { ...serverSettings, ...update };
         return serverSettings;
       },
       startServerCoreDownload: async (request) => {
@@ -512,6 +535,14 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     /request rejected/,
   );
   await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverSettingsSetStartupDefaults,
+      1,
+      updatedServerStartupSettings,
+    ),
+    /request rejected/,
+  );
+  await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
     /request rejected/,
   );
@@ -583,6 +614,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     {
       resourceDownloadDirectory: "D:/Servers/resources",
       defaultDownloadConnections: 16,
+      ...defaultServerStartupSettings,
     },
   );
   assert.deepEqual(
@@ -590,11 +622,25 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     {
       resourceDownloadDirectory: "D:/Servers/resources",
       defaultDownloadConnections: 4,
+      ...defaultServerStartupSettings,
+    },
+  );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverSettingsSetStartupDefaults,
+      1,
+      updatedServerStartupSettings,
+    ),
+    {
+      resourceDownloadDirectory: "D:/Servers/resources",
+      defaultDownloadConnections: 4,
+      ...updatedServerStartupSettings,
     },
   );
   assert.deepEqual(serverSettings, {
     resourceDownloadDirectory: "D:/Servers/resources",
     defaultDownloadConnections: 4,
+    ...updatedServerStartupSettings,
   });
   await assert.rejects(
     runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 1, 42),
@@ -604,9 +650,24 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, 1, 4.5),
     /must be a safe integer/,
   );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverSettingsSetStartupDefaults, 1, {
+      ...updatedServerStartupSettings,
+      autoAcceptEula: "yes",
+    }),
+    /must be a boolean/,
+  );
   await assert.rejects(runtime.invoke(desktopChannels.serverSettingsGet, 999), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, 999, "E:/Rejected"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverSettingsSetStartupDefaults,
+      999,
+      updatedServerStartupSettings,
+    ),
     /request rejected/,
   );
   runtime.directorySelection = "D:/Downloads";
@@ -753,6 +814,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.handlers.has(desktopChannels.serverSettingsSetDefaultDownloadConnections),
     false,
   );
+  assert.equal(runtime.handlers.has(desktopChannels.serverSettingsSetStartupDefaults), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
@@ -789,14 +851,22 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       readServerSettings: async () => ({
         resourceDownloadDirectory: "/SeaShard/resources",
         defaultDownloadConnections: 8,
+        ...defaultServerStartupSettings,
       }),
       writeResourceDownloadDirectory: async (directory) => ({
         resourceDownloadDirectory: directory,
         defaultDownloadConnections: 8,
+        ...defaultServerStartupSettings,
       }),
       writeDefaultDownloadConnections: async (connections) => ({
         resourceDownloadDirectory: "/SeaShard/resources",
         defaultDownloadConnections: connections,
+        ...defaultServerStartupSettings,
+      }),
+      writeServerStartupDefaults: async (update) => ({
+        resourceDownloadDirectory: "/SeaShard/resources",
+        defaultDownloadConnections: 8,
+        ...update,
       }),
       startServerCoreDownload: async () => {
         throw new Error("not expected");

@@ -19,6 +19,7 @@ export const desktopChannels = {
     "seashard.server-settings.set-resource-download-directory",
   serverSettingsSetDefaultDownloadConnections:
     "seashard.server-settings.set-default-download-connections",
+  serverSettingsSetStartupDefaults: "seashard.server-settings.set-startup-defaults",
   serverCoreDownloadSaveAs: "seashard.server-core-download.save-as",
   serverCoreDownloadListTasks: "seashard.server-core-download.list-tasks",
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
@@ -136,6 +137,23 @@ export const serverDownloadConnectionLimits = {
   defaultValue: 8,
 } as const;
 
+/** 新服务器继承的全局启动默认值；具体实例后续可以单独覆盖。 */
+export const serverStartupDefaults = {
+  minimumMemoryMiB: 512,
+  maximumMemoryMiB: 2_048,
+  port: 25_565,
+  autoAcceptEula: true,
+  jvmArguments: "",
+} as const;
+
+export const serverPortLimits = {
+  minimum: 1,
+  maximum: 65_535,
+} as const;
+
+/** 防止无界 IPC 与持久化输入；该值只限制参数文本，不改变 JVM 参数语义。 */
+export const serverJvmArgumentsMaximumLength = 8_192;
+
 export type ServerCoreDownloadTaskState =
   | "queued"
   | "downloading"
@@ -236,8 +254,17 @@ export interface JavaRuntimeClientService {
   add(): Promise<JavaInstallationSnapshot | undefined>;
 }
 
+/** 一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。 */
+export interface ServerStartupDefaultsUpdate {
+  defaultMinimumMemoryMiB: number;
+  defaultMaximumMemoryMiB: number;
+  defaultServerPort: number;
+  autoAcceptEula: boolean;
+  defaultJvmArguments: string;
+}
+
 /** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */
-export interface ServerSettingsSnapshot {
+export interface ServerSettingsSnapshot extends ServerStartupDefaultsUpdate {
   resourceDownloadDirectory: string;
   defaultDownloadConnections: number;
 }
@@ -247,6 +274,7 @@ export interface ServerSettingsClientService {
   get(): Promise<ServerSettingsSnapshot>;
   setResourceDownloadDirectory(directory: string): Promise<ServerSettingsSnapshot>;
   setDefaultDownloadConnections(connections: number): Promise<ServerSettingsSnapshot>;
+  setStartupDefaults(update: ServerStartupDefaultsUpdate): Promise<ServerSettingsSnapshot>;
 }
 
 export interface SeaShardDesktopApi {

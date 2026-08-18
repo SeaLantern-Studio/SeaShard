@@ -4,6 +4,7 @@ import {
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
   type ServerCoreSaveAsRequest,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 
@@ -24,6 +25,8 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverSettingsSetResourceDownloadDirectory, directory),
     setDefaultDownloadConnections: (connections: number) =>
       ipcRenderer.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, connections),
+    setStartupDefaults: (update: ServerStartupDefaultsUpdate) =>
+      ipcRenderer.invoke(desktopChannels.serverSettingsSetStartupDefaults, update),
   }),
   serverCoreDownload: Object.freeze({
     startManaged: (request: ServerCoreManagedDownloadRequest) =>

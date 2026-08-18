@@ -6,6 +6,8 @@ import {
   serverCoreIconScheme,
   serverInstanceIconHost,
   serverDownloadConnectionLimits,
+  serverJvmArgumentsMaximumLength,
+  serverPortLimits,
   javaRuntimeManagerContract,
   serverSettingsContract,
   type JavaInstallationSnapshot,
@@ -16,6 +18,7 @@ import {
   type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerSettingsSnapshot,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
@@ -304,17 +307,38 @@ function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
   }
   const resourceDownloadDirectory = Reflect.get(value, "resourceDownloadDirectory");
   const defaultDownloadConnections = Reflect.get(value, "defaultDownloadConnections");
+  const defaultMinimumMemoryMiB = Reflect.get(value, "defaultMinimumMemoryMiB");
+  const defaultMaximumMemoryMiB = Reflect.get(value, "defaultMaximumMemoryMiB");
+  const defaultServerPort = Reflect.get(value, "defaultServerPort");
+  const autoAcceptEula = Reflect.get(value, "autoAcceptEula");
+  const defaultJvmArguments = Reflect.get(value, "defaultJvmArguments");
   if (
     typeof resourceDownloadDirectory !== "string" ||
     !Number.isSafeInteger(defaultDownloadConnections) ||
     (defaultDownloadConnections as number) < serverDownloadConnectionLimits.minimum ||
-    (defaultDownloadConnections as number) > serverDownloadConnectionLimits.maximum
+    (defaultDownloadConnections as number) > serverDownloadConnectionLimits.maximum ||
+    !Number.isSafeInteger(defaultMinimumMemoryMiB) ||
+    (defaultMinimumMemoryMiB as number) <= 0 ||
+    !Number.isSafeInteger(defaultMaximumMemoryMiB) ||
+    (defaultMaximumMemoryMiB as number) < (defaultMinimumMemoryMiB as number) ||
+    !Number.isSafeInteger(defaultServerPort) ||
+    (defaultServerPort as number) < serverPortLimits.minimum ||
+    (defaultServerPort as number) > serverPortLimits.maximum ||
+    typeof autoAcceptEula !== "boolean" ||
+    typeof defaultJvmArguments !== "string" ||
+    defaultJvmArguments.length > serverJvmArgumentsMaximumLength ||
+    defaultJvmArguments.includes("\0")
   ) {
     throw new Error("server settings returned an invalid snapshot");
   }
   return {
     resourceDownloadDirectory,
     defaultDownloadConnections: defaultDownloadConnections as number,
+    defaultMinimumMemoryMiB: defaultMinimumMemoryMiB as number,
+    defaultMaximumMemoryMiB: defaultMaximumMemoryMiB as number,
+    defaultServerPort: defaultServerPort as number,
+    autoAcceptEula,
+    defaultJvmArguments,
   };
 }
 
@@ -699,6 +723,12 @@ async function bootstrap(): Promise<void> {
                   "setDefaultDownloadConnections",
                   [connections],
                 ),
+              ),
+            writeServerStartupDefaults: async (update: ServerStartupDefaultsUpdate) =>
+              expectServerSettingsSnapshot(
+                await activeKernel.callService(serverSettingsContract, "setStartupDefaults", [
+                  update as unknown as JsonValue,
+                ]),
               ),
             startServerCoreDownload: async (request) =>
               expectServerCoreDownloadTask(
