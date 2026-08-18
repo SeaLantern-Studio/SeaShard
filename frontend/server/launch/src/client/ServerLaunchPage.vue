@@ -1,40 +1,46 @@
 <script setup lang="ts">
-import { Check, ImagePlus, Play, Power, Rows3, Settings2 } from "lucide-vue-next";
+import type { ServerInstanceClientService, ServerInstanceSnapshot } from "@seashard/contracts";
+import { Check, ImagePlus, Play, Power, Rows3, Server, Settings2 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 
-interface PreviewServerInstance {
-  readonly id: string;
-  readonly name: string;
-  readonly mark: string;
-  readonly hue: number;
-}
+const props = defineProps<{
+  instances: ServerInstanceClientService;
+}>();
 
-const previewInstances: readonly PreviewServerInstance[] = [
-  { id: "paper-main", name: "Paper 生存服务器", mark: "P", hue: 204 },
-  { id: "fabric-create", name: "Fabric 创造服务器", mark: "F", hue: 267 },
-  { id: "purpur-lobby", name: "Purpur 大厅服务器", mark: "P", hue: 325 },
-  { id: "velocity-group", name: "Velocity 群组代理", mark: "V", hue: 24 },
-];
+const route = useRoute();
 
 const pageRoot = ref<HTMLElement>();
 const iconInput = ref<HTMLInputElement>();
-const selectedInstanceId = ref(previewInstances[0].id);
+const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
+const selectedInstanceId = ref<string>();
 const selectorOpen = ref(false);
-const runningInstanceIds = reactive(new Set<string>(["fabric-create", "velocity-group"]));
+const instancesLoading = ref(true);
+const instancesError = ref<string>();
+const runningInstanceIds = reactive(new Set<string>());
 const customIconSources = reactive(new Map<string, string>());
 const iconMenu = reactive({ open: false, x: 0, y: 0 });
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let listRequestId = 0;
+let pendingInstanceId =
+  typeof route.query.instance === "string" && route.query.instance
+    ? route.query.instance
+    : undefined;
 
-const selectedInstance = computed(
-  () =>
-    previewInstances.find((instance) => instance.id === selectedInstanceId.value) ??
-    previewInstances[0],
+const selectedInstance = computed(() =>
+  registeredInstances.value.find((instance) => instance.id === selectedInstanceId.value),
 );
-const selectedIconSource = computed(() => customIconSources.get(selectedInstance.value.id));
-const selectedServerActive = computed(() => runningInstanceIds.has(selectedInstance.value.id));
+const selectedIconSource = computed(() => {
+  const instance = selectedInstance.value;
+  return instance ? (customIconSources.get(instance.id) ?? instance.iconUrl) : undefined;
+});
+const selectedServerActive = computed(
+  () => selectedInstance.value !== undefined && runningInstanceIds.has(selectedInstance.value.id),
+);
 const primaryLabel = computed(() => (selectedServerActive.value ? "停止服务器" : "启动服务器"));
 const primaryIcon = computed(() => (selectedServerActive.value ? Power : Play));
 const sortedInstances = computed(() =>
-  [...previewInstances].sort(
+  [...registeredInstances.value].sort(
     (left, right) =>
       Number(runningInstanceIds.has(right.id)) - Number(runningInstanceIds.has(left.id)),
   ),
@@ -43,20 +49,54 @@ const sortedInstances = computed(() =>
 onMounted(() => {
   document.addEventListener("pointerdown", closeIconMenu);
   document.addEventListener("keydown", handleDocumentKeydown);
+  void loadInstances();
+  refreshTimer = setInterval(() => void loadInstances(true), 2_000);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", closeIconMenu);
   document.removeEventListener("keydown", handleDocumentKeydown);
+  if (refreshTimer) clearInterval(refreshTimer);
 });
 
+/** 定时刷新只替换 JSON 实例快照，不打断用户当前选中的仍存在实例。 */
+async function loadInstances(silent = false): Promise<void> {
+  const requestId = ++listRequestId;
+  if (!silent) instancesLoading.value = true;
+  try {
+    const result = await props.instances.list();
+    if (requestId !== listRequestId) return;
+    registeredInstances.value = result;
+    instancesError.value = undefined;
+    const requestedInstance = pendingInstanceId
+      ? result.find(({ id }) => id === pendingInstanceId)
+      : undefined;
+    if (requestedInstance) {
+      selectedInstanceId.value = requestedInstance.id;
+      pendingInstanceId = undefined;
+    } else if (
+      !selectedInstanceId.value ||
+      !result.some((instance) => instance.id === selectedInstanceId.value)
+    ) {
+      selectedInstanceId.value = result[0]?.id;
+    }
+    if (result.length === 0) selectorOpen.value = false;
+  } catch (error) {
+    if (requestId === listRequestId) instancesError.value = errorMessage(error);
+  } finally {
+    if (requestId === listRequestId) instancesLoading.value = false;
+  }
+}
+
 function toggleServer(): void {
-  const instanceId = selectedInstance.value.id;
-  if (runningInstanceIds.has(instanceId)) runningInstanceIds.delete(instanceId);
-  else runningInstanceIds.add(instanceId);
+  const instance = selectedInstance.value;
+  if (!instance) return;
+  if (runningInstanceIds.has(instance.id)) runningInstanceIds.delete(instance.id);
+  else runningInstanceIds.add(instance.id);
 }
 
 function toggleSelector(): void {
+  if (registeredInstances.value.length === 0) return;
   selectorOpen.value = !selectorOpen.value;
   iconMenu.open = false;
 }
@@ -68,6 +108,7 @@ function selectInstance(instanceId: string): void {
 
 /** 菜单坐标限制在页面内部，图标移动到左半区后右键菜单仍从指针位置出现。 */
 function openIconMenu(event: MouseEvent): void {
+  if (!selectedInstance.value) return;
   const root = pageRoot.value;
   if (!root) return;
   const bounds = root.getBoundingClientRect();
@@ -105,16 +146,16 @@ function chooseCustomIcon(): void {
   iconInput.value?.click();
 }
 
-/** 预览阶段使用 CSP 允许的 data URL；后续接入实例组件时再交由 Host 持久化。 */
+/** 当前仅保留会话内预览；实例图标持久化将在实例设置能力接入时交给 Host。 */
 async function applyCustomIcon(event: Event): Promise<void> {
   const input = event.currentTarget as HTMLInputElement;
   const file = input.files?.[0];
-  if (!file || !file.type.startsWith("image/")) return;
+  const instance = selectedInstance.value;
+  if (!file || !file.type.startsWith("image/") || !instance) return;
 
-  const instanceId = selectedInstance.value.id;
   input.value = "";
   const source = await readImageFile(file).catch(() => undefined);
-  if (source) customIconSources.set(instanceId, source);
+  if (source) customIconSources.set(instance.id, source);
 }
 
 function readImageFile(file: File): Promise<string> {
@@ -129,8 +170,18 @@ function readImageFile(file: File): Promise<string> {
   });
 }
 
-function instanceStyle(instance: PreviewServerInstance): Record<string, string> {
-  return { "--instance-hue": String(instance.hue) };
+function instanceStyle(instance: ServerInstanceSnapshot): Record<string, string> {
+  return { "--instance-hue": String(instanceHue(instance.id)) };
+}
+
+function instanceMark(instance: ServerInstanceSnapshot): string {
+  return (instance.serverType ?? instance.name).trim().charAt(0).toUpperCase() || "S";
+}
+
+function instanceHue(id: string): number {
+  let hash = 0;
+  for (const character of id) hash = (hash * 31 + character.codePointAt(0)!) >>> 0;
+  return hash % 360;
 }
 
 function isInstanceRunning(instanceId: string): boolean {
@@ -139,6 +190,10 @@ function isInstanceRunning(instanceId: string): boolean {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 </script>
 
@@ -149,7 +204,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
     :class="{ 'selector-open': selectorOpen }"
     aria-label="服务器启动"
   >
-    <div class="launch-focus-area">
+    <div v-if="selectedInstance" class="launch-focus-area">
       <button
         type="button"
         class="instance-icon-button"
@@ -163,7 +218,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
           :style="instanceStyle(selectedInstance)"
         >
           <img v-if="selectedIconSource" :src="selectedIconSource" alt="" draggable="false" />
-          <span v-else>{{ selectedInstance.mark }}</span>
+          <span v-else>{{ instanceMark(selectedInstance) }}</span>
         </span>
       </button>
 
@@ -197,6 +252,21 @@ function clamp(value: number, minimum: number, maximum: number): number {
       </div>
     </div>
 
+    <div v-else class="launch-empty-state" role="status">
+      <span class="launch-empty-icon" aria-hidden="true">
+        <Server :size="32" :stroke-width="1.55" />
+      </span>
+      <strong>{{
+        instancesLoading
+          ? "正在读取服务器实例"
+          : instancesError
+            ? "无法读取服务器实例"
+            : "还没有服务器实例"
+      }}</strong>
+      <span>{{ instancesError ?? "从下载页面获取服务器核心后，实例会自动显示在这里。" }}</span>
+      <button v-if="instancesError" type="button" @click="loadInstances()">重新加载</button>
+    </div>
+
     <aside
       class="instance-selector-panel"
       aria-label="选择实例"
@@ -222,12 +292,12 @@ function clamp(value: number, minimum: number, maximum: number): number {
         >
           <span class="instance-icon-visual instance-icon-small" :style="instanceStyle(instance)">
             <img
-              v-if="customIconSources.get(instance.id)"
-              :src="customIconSources.get(instance.id)"
+              v-if="customIconSources.get(instance.id) ?? instance.iconUrl"
+              :src="customIconSources.get(instance.id) ?? instance.iconUrl"
               alt=""
               draggable="false"
             />
-            <span v-else>{{ instance.mark }}</span>
+            <span v-else>{{ instanceMark(instance) }}</span>
           </span>
           <span class="instance-row-name">{{ instance.name }}</span>
           <span

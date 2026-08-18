@@ -4,10 +4,13 @@ import {
   desktopShellContract,
   serverCoreIconHost,
   serverCoreIconScheme,
+  serverInstanceIconHost,
   serverDownloadConnectionLimits,
   serverSettingsContract,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerCoreManagedDownloadResult,
+  type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
@@ -41,6 +44,11 @@ import {
   serverCoreSourceContract,
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
+import {
+  createServerInstanceManagerModule,
+  serverInstanceManagerContract,
+  serverInstanceManagerManifest,
+} from "@seashard/server-instance-manager";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
@@ -182,6 +190,68 @@ function expectServerCoreDownloadTasks(value: unknown): ServerCoreDownloadTaskSn
   return value.map(expectServerCoreDownloadTask);
 }
 
+function expectManagedDownloadResult(value: unknown): ServerCoreManagedDownloadResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server instance manager returned an invalid managed download");
+  }
+  const instanceId = Reflect.get(value, "instanceId");
+  const task = Reflect.get(value, "task");
+  if (typeof instanceId !== "string" || !instanceId) {
+    throw new Error("server instance manager returned an invalid managed download");
+  }
+  return {
+    instanceId,
+    task: expectServerCoreDownloadTask(task),
+  };
+}
+
+function expectServerInstances(value: unknown): ServerInstanceSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid instances");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`server instance manager returned invalid instance ${index}`);
+    }
+    const instance = item as Record<string, unknown>;
+    const requiredStrings = [
+      "id",
+      "name",
+      "rootPath",
+      "coreJarPath",
+      "createdAt",
+      "updatedAt",
+    ] as const;
+    const optionalStrings = [
+      "iconPath",
+      "serverType",
+      "gameVersion",
+      "coreArtifactFileName",
+      "artifactSha256",
+      "lastStartedAt",
+    ] as const;
+    if (
+      requiredStrings.some((field) => typeof instance[field] !== "string" || !instance[field]) ||
+      optionalStrings.some(
+        (field) => instance[field] !== undefined && typeof instance[field] !== "string",
+      ) ||
+      !["managed", "external"].includes(String(instance.storageMode)) ||
+      !["downloaded", "imported"].includes(String(instance.source))
+    ) {
+      throw new Error(`server instance manager returned invalid instance ${index}`);
+    }
+    const snapshot = instance as unknown as ServerInstanceSnapshot;
+    return {
+      ...snapshot,
+      ...(snapshot.iconPath
+        ? {
+            iconUrl: `${serverCoreIconScheme}://${serverInstanceIconHost}/${encodeURIComponent(snapshot.id)}`,
+          }
+        : {}),
+    };
+  });
+}
+
 function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("server settings returned an invalid snapshot");
@@ -292,7 +362,7 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
-  // 服务器启动页是纯 Client Entry；当前只提供实例选择和启动状态的交互预览。
+  // 服务器启动页读取实例管理器的持久化投影；进程启停状态仍由后续运行组件接管。
   await activeKernel.registerBuiltIn({
     manifest: serverLaunchUiManifest,
     loaders: {},
@@ -409,6 +479,31 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // 实例管理器只登记校验成功的托管下载，并在独立目录写入可移植描述文件。
+  await activeKernel.registerBuiltIn({
+    manifest: serverInstanceManagerManifest,
+    loaders: {
+      "server-instance-manager.host": {
+        load: async () =>
+          createServerInstanceManagerModule({
+            database: root.database,
+            managedRoot: join(dataRoot, "servers"),
+            reportError: (error) =>
+              console.error("Managed server instance finalization failed", error),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-instance-manager",
+        entryId: "server-instance-manager.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 运行诊断属于第二阶段可重载组件。Main 只注入原始控制快照和宿主状态，不复制投影策略。
   await activeKernel.registerBuiltIn({
     manifest: runtimeDiagnosticsManifest,
@@ -490,6 +585,18 @@ async function bootstrap(): Promise<void> {
               }
               return path;
             },
+            resolveServerInstanceIconPath: async (instanceId) => {
+              const path = await activeKernel.callService(
+                serverInstanceManagerContract,
+                "resolveIconPath",
+                [instanceId],
+              );
+              if (path === null) return undefined;
+              if (typeof path !== "string" || !isAbsolute(path)) {
+                throw new Error("server instance manager returned an invalid icon path");
+              }
+              return path;
+            },
             readServerSettings: async () =>
               expectServerSettingsSnapshot(
                 await activeKernel.callService(serverSettingsContract, "get", []),
@@ -515,6 +622,16 @@ async function bootstrap(): Promise<void> {
                 await activeKernel.callService(serverCoreSourceContract, "start", [
                   request as unknown as JsonValue,
                 ]),
+              ),
+            startManagedServerCoreDownload: async (request) =>
+              expectManagedDownloadResult(
+                await activeKernel.callService(serverInstanceManagerContract, "createManaged", [
+                  request as unknown as JsonValue,
+                ]),
+              ),
+            listServerInstances: async () =>
+              expectServerInstances(
+                await activeKernel.callService(serverInstanceManagerContract, "list", []),
               ),
             listServerCoreDownloadTasks: async () =>
               expectServerCoreDownloadTasks(

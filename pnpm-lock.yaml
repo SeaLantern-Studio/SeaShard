@@ -95,6 +95,9 @@ importers:
       '@seashard/server-download-ui':
         specifier: workspace:*
         version: link:../../frontend/server/download
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../../components/server/instance-manager
       '@seashard/server-launch-ui':
         specifier: workspace:*
         version: link:../../frontend/server/launch
@@ -213,6 +216,21 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
 
+  components/server/instance-manager:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../../packages/database
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/server-core-source':
+        specifier: workspace:*
+        version: link:../core-source
+
   components/server/settings:
     dependencies:
       '@seashard/contracts':
@@ -263,9 +281,15 @@ importers:
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
+      vue-router:
+        specifier: 5.0.3
+        version: 5.0.3(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
 
   frontend/server/launch:
     dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
@@ -278,6 +302,9 @@ importers:
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
+      vue-router:
+        specifier: 5.0.3
+        version: 5.0.3(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
 
   frontend/settings/about:
     dependencies:

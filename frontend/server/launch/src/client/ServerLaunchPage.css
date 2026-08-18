@@ -1,4 +1,4 @@
-/* Server launch preview page styles. */
+/* Server launch page styles. */
 .server-launch-page {
   position: relative;
   isolation: isolate;
@@ -22,6 +22,61 @@
 
 .selector-open .launch-focus-area {
   transform: translate3d(-25%, 0, 0);
+}
+
+.launch-empty-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px;
+  color: var(--sl-text-secondary);
+  text-align: center;
+}
+
+.launch-empty-icon {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 8px;
+  place-items: center;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 20px;
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-tertiary);
+}
+
+.launch-empty-state strong {
+  color: var(--sl-text-primary);
+  font-size: 0.96rem;
+}
+
+.launch-empty-state > span:last-of-type {
+  max-width: 360px;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.launch-empty-state button {
+  height: 34px;
+  margin-top: 4px;
+  padding: 0 14px;
+  border: 1px solid var(--sl-border);
+  border-radius: 10px;
+  background: var(--sl-surface);
+  color: var(--sl-text-primary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.launch-empty-state button:hover {
+  border-color: color-mix(in srgb, var(--sl-primary) 28%, var(--sl-border));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary-dark);
 }
 
 .instance-icon-button {

@@ -3,6 +3,7 @@ import {
   desktopShellContract,
   runtimeDiagnosticsContract,
   serverCoreIconScheme,
+  serverInstanceIconHost,
   type ClientEntryPublication,
   type DesktopClientBootstrap,
   type DesktopShellService,
@@ -10,6 +11,7 @@ import {
   type RuntimeSnapshot,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerInstanceSnapshot,
   type ServerCoreType,
 } from "../packages/contracts/src/index.ts";
 import {
@@ -18,6 +20,7 @@ import {
   type DesktopShellRuntime,
   type DirectorySelectionOptions,
   type StartDesktopServerCoreDownloadRequest,
+  type StartDesktopManagedServerCoreDownloadRequest,
 } from "../components/desktop/shell/src/index.ts";
 import type {
   Disposable,
@@ -288,6 +291,7 @@ const paperArtifact = {
 
 const paperIconHash = "f".repeat(64);
 const paperIconPath = `C:/SeaShard/core/cache/server-core-icons/${paperIconHash}.png`;
+const paperInstanceIconPath = "C:/SeaShard/core/servers/instance-paper/.server-info/icon.png";
 const serverCoreTypes = [
   { id: "vanilla" },
   {
@@ -295,6 +299,24 @@ const serverCoreTypes = [
     iconUrl: `seashard-cache://server-core-icon/${paperIconHash}`,
   },
 ] satisfies readonly ServerCoreType[];
+
+const serverInstances = [
+  {
+    id: "instance-paper",
+    name: "1.21.1-paper",
+    rootPath: "C:/SeaShard/core/servers/instance-paper",
+    coreJarPath: "C:/SeaShard/core/servers/instance-paper/server.jar",
+    iconPath: paperInstanceIconPath,
+    storageMode: "managed",
+    source: "downloaded",
+    serverType: "paper",
+    gameVersion: "1.21.1",
+    coreArtifactFileName: paperArtifact.fileName,
+    artifactSha256: "a".repeat(64),
+    createdAt: "2026-08-17T12:00:00.000Z",
+    updatedAt: "2026-08-17T12:00:01.000Z",
+  },
+] satisfies readonly ServerInstanceSnapshot[];
 
 await test("desktop shell owns window, sender authorization, and IPC as one lifecycle", async () => {
   const runtime = new FakeDesktopShellRuntime("win32");
@@ -306,6 +328,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     defaultDownloadConnections: 16,
   };
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
+  const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
   const saveAsRequest = {
     serverType: "paper",
@@ -330,6 +353,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
       resolveServerCoreIconPath: async (sha256) =>
         sha256 === paperIconHash ? paperIconPath : undefined,
+      resolveServerInstanceIconPath: async (instanceId) =>
+        instanceId === "instance-paper" ? paperInstanceIconPath : undefined,
       readServerSettings: async () => serverSettings,
       writeResourceDownloadDirectory: async (directory) => {
         serverSettings = { ...serverSettings, resourceDownloadDirectory: directory };
@@ -355,6 +380,23 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         downloadTasks = [...downloadTasks, task];
         return task;
       },
+      startManagedServerCoreDownload: async (request) => {
+        startedManagedDownloads.push(request);
+        const task: ServerCoreDownloadTaskSnapshot = {
+          id: `managed-task-${startedManagedDownloads.length}`,
+          artifact: paperArtifact,
+          destinationPath: `C:/SeaShard/core/servers/managed-${startedManagedDownloads.length}/${request.destinationFileName}`,
+          state: "queued",
+          downloadedBytes: 0,
+          totalBytes: 0,
+          connections: request.connections,
+          progress: 0,
+          createdAt: "2026-08-17T12:00:00.000Z",
+        };
+        downloadTasks = [...downloadTasks, task];
+        return { instanceId: "instance-managed", task };
+      },
+      listServerInstances: async () => serverInstances,
       listServerCoreDownloadTasks: async () => downloadTasks,
       cancelServerCoreDownload: async (taskId) => {
         const task = downloadTasks.find((candidate) => candidate.id === taskId);
@@ -385,6 +427,13 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(
     await runtime.resolveProtocol(serverCoreIconScheme, serverCoreTypes[1]!.iconUrl!),
     paperIconPath,
+  );
+  assert.equal(
+    await runtime.resolveProtocol(
+      serverCoreIconScheme,
+      `${serverCoreIconScheme}://${serverInstanceIconHost}/instance-paper`,
+    ),
+    paperInstanceIconPath,
   );
   assert.equal(
     await runtime.resolveProtocol(
@@ -424,6 +473,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
     /request rejected/,
   );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverCoreDownloadStartManaged, 1, saveAsRequest),
+    /request rejected/,
+  );
+  await assert.rejects(runtime.invoke(desktopChannels.serverInstancesList, 1), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 1),
     /request rejected/,
@@ -540,6 +594,12 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     undefined,
   );
   assert.equal(startedDownloads.length, 1, "cancelling the folder dialog must not start a task");
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverCoreDownloadStartManaged, 1, saveAsRequest),
+    { instanceId: "instance-managed", task: downloadTasks[1] },
+  );
+  assert.deepEqual(startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
   runtime.directorySelection = "C:/SeaShard/resources";
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 999),
@@ -630,6 +690,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     false,
   );
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
@@ -657,6 +719,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       readServerCoreVersions: async () => [],
       readServerCoreArtifacts: async () => [],
       resolveServerCoreIconPath: async () => undefined,
+      resolveServerInstanceIconPath: async () => undefined,
       readServerSettings: async () => ({
         resourceDownloadDirectory: "/SeaShard/resources",
         defaultDownloadConnections: 8,
@@ -672,6 +735,10 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       startServerCoreDownload: async () => {
         throw new Error("not expected");
       },
+      startManagedServerCoreDownload: async () => {
+        throw new Error("not expected");
+      },
+      listServerInstances: async () => [],
       listServerCoreDownloadTasks: async () => [],
       cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},

@@ -2,12 +2,14 @@
 import type {
   ServerCoreArtifact,
   ServerCoreDownloadClientService,
+  ServerCoreDownloadTaskSnapshot,
   ServerCoreSourceClientService,
   ServerCoreType,
 } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Input, Cmz_Tooltip } from "cmzya-modern-ui";
 import { ArrowLeft, ChevronDown, Download, Save } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import CoreIcon from "./CoreIcon.vue";
 import type { ResourceCategory } from "./resource-categories";
 
@@ -25,6 +27,8 @@ const props = defineProps<{
   category: ResourceCategory;
 }>();
 
+const router = useRouter();
+
 const catalogTypes = ref<readonly ServerCoreType[]>([]);
 const catalogLoading = ref(props.category.id === "server-core");
 const catalogError = ref<string>();
@@ -40,6 +44,8 @@ const artifactErrors = ref<Record<string, string | undefined>>({});
 const selectedArtifact = ref<ServerCoreArtifact>();
 const fileStem = ref("");
 const saveAsPending = ref(false);
+const managedDownloadPending = ref(false);
+const managedDownloadError = ref<string>();
 const saveAsError = ref<string>();
 let versionsRequestId = 0;
 const versionCollator = new Intl.Collator("en", {
@@ -153,6 +159,7 @@ function configureArtifact(artifact: ServerCoreArtifact): void {
   selectedArtifact.value = artifact;
   fileStem.value = stripJarExtension(artifact.fileName);
   saveAsError.value = undefined;
+  managedDownloadError.value = undefined;
   activeView.value = "configuration";
 }
 
@@ -168,11 +175,13 @@ function returnToVersions(): void {
   activeView.value = "versions";
   selectedArtifact.value = undefined;
   saveAsError.value = undefined;
+  managedDownloadError.value = undefined;
 }
 
 function updateFileStem(value: string): void {
   fileStem.value = stripJarExtension(value);
   saveAsError.value = undefined;
+  managedDownloadError.value = undefined;
 }
 
 function stripJarExtension(fileName: string): string {
@@ -185,13 +194,57 @@ function artifactCount(version: string): number | undefined {
     : undefined;
 }
 
+async function downloadManagedInstance(): Promise<void> {
+  const artifact = selectedArtifact.value;
+  const destination = destinationFileName.value;
+  if (!artifact || !destination || managedDownloadPending.value || saveAsPending.value) return;
+
+  managedDownloadPending.value = true;
+  saveAsError.value = undefined;
+  managedDownloadError.value = undefined;
+  try {
+    const result = await props.downloads.startManaged({
+      serverType: artifact.serverType,
+      gameVersion: artifact.gameVersion,
+      artifactFileName: artifact.fileName,
+      destinationFileName: destination,
+    });
+    const completed = await waitForDownload(result.task.id);
+    if (completed.state !== "completed") {
+      throw new Error(
+        completed.error ??
+          (completed.state === "cancelled" ? "服务器核心下载已取消" : "服务器核心下载失败"),
+      );
+    }
+    await router.push({
+      path: "/server/launch",
+      query: { instance: result.instanceId },
+    });
+  } catch (error) {
+    managedDownloadError.value = errorMessage(error);
+  } finally {
+    managedDownloadPending.value = false;
+  }
+}
+
+/** 等待顶栏共享任务进入终态，成功后才能跳转到已经写入注册表的实例。 */
+async function waitForDownload(taskId: string): Promise<ServerCoreDownloadTaskSnapshot> {
+  for (;;) {
+    const task = (await props.downloads.listTasks()).find(({ id }) => id === taskId);
+    if (!task) throw new Error("服务器核心下载任务已丢失");
+    if (["completed", "failed", "cancelled"].includes(task.state)) return task;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 async function saveArtifactAs(): Promise<void> {
   const artifact = selectedArtifact.value;
   const destination = destinationFileName.value;
-  if (!artifact || !destination || saveAsPending.value) return;
+  if (!artifact || !destination || saveAsPending.value || managedDownloadPending.value) return;
 
   saveAsPending.value = true;
   saveAsError.value = undefined;
+  managedDownloadError.value = undefined;
   try {
     await props.downloads.saveAs({
       serverType: artifact.serverType,
@@ -426,7 +479,13 @@ function formatCoreType(type: string): string {
         </div>
 
         <div class="download-action-bar" aria-label="下载操作">
-          <Cmz_Button class="download-primary" size="lg">
+          <Cmz_Button
+            class="download-primary"
+            size="lg"
+            :loading="managedDownloadPending"
+            :disabled="!destinationFileName || managedDownloadPending || saveAsPending"
+            @click="downloadManagedInstance"
+          >
             <Download :size="19" :stroke-width="2" />
             开始下载
           </Cmz_Button>
@@ -438,15 +497,15 @@ function formatCoreType(type: string): string {
               icon-only
               aria-label="另存为"
               :loading="saveAsPending"
-              :disabled="!destinationFileName || saveAsPending"
+              :disabled="!destinationFileName || saveAsPending || managedDownloadPending"
               @click="saveArtifactAs"
             >
               <Save :size="19" :stroke-width="1.9" />
             </Cmz_Button>
           </Cmz_Tooltip>
         </div>
-        <p v-if="saveAsError" class="download-start-error" role="alert">
-          {{ saveAsError }}
+        <p v-if="managedDownloadError || saveAsError" class="download-start-error" role="alert">
+          {{ managedDownloadError ?? saveAsError }}
         </p>
       </div>
     </Transition>

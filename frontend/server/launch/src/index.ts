@@ -1,3 +1,4 @@
+import { serverInstanceManagerContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const serverLaunchUiManifest: PluginManifest = {
@@ -11,7 +12,7 @@ export const serverLaunchUiManifest: PluginManifest = {
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [],
+      permissions: [serverInstanceManagerContract],
       upgradeMode: "stop-first",
     },
   ],

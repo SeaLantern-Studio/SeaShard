@@ -123,6 +123,17 @@ export class ServerCoreSourceCoordinator {
     return toServerSnapshot(task);
   }
 
+  /** 等待本组件创建的任务进入终态，避免业务组件轮询公共下载器。 */
+  async wait(taskId: string): Promise<ServerCoreDownloadTaskSnapshot | undefined> {
+    if (!this.ownedTaskIds.has(taskId)) return undefined;
+    const task = await this.downloads.wait(taskId);
+    if (!task) {
+      this.ownedTaskIds.delete(taskId);
+      return undefined;
+    }
+    return toServerSnapshot(task);
+  }
+
   /** 从统一下载中心中过滤出本组件拥有的任务。 */
   async listTasks(): Promise<readonly ServerCoreDownloadTaskSnapshot[]> {
     const tasks = await this.downloads.listTasks();

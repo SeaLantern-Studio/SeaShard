@@ -1,0 +1,15 @@
+{
+  "name": "@seashard/server-instance-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "@seashard/database": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/server-core-source": "workspace:*"
+  }
+}

@@ -2,6 +2,7 @@ import {
   desktopChannels,
   type DesktopClientBootstrap,
   type SeaShardDesktopApi,
+  type ServerCoreManagedDownloadRequest,
   type ServerCoreSaveAsRequest,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -25,11 +26,16 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverSettingsSetDefaultDownloadConnections, connections),
   }),
   serverCoreDownload: Object.freeze({
+    startManaged: (request: ServerCoreManagedDownloadRequest) =>
+      ipcRenderer.invoke(desktopChannels.serverCoreDownloadStartManaged, request),
     saveAs: (request: ServerCoreSaveAsRequest) =>
       ipcRenderer.invoke(desktopChannels.serverCoreDownloadSaveAs, request),
     listTasks: () => ipcRenderer.invoke(desktopChannels.serverCoreDownloadListTasks),
     cancel: (taskId: string) =>
       ipcRenderer.invoke(desktopChannels.serverCoreDownloadCancel, taskId),
+  }),
+  serverInstances: Object.freeze({
+    list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
   }),
   dialog: Object.freeze({
     selectDirectory: () => ipcRenderer.invoke(desktopChannels.dialogSelectDirectory),

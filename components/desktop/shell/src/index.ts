@@ -3,6 +3,7 @@ import {
   desktopShellContract,
   runtimeDiagnosticsContract,
   serverCoreIconHost,
+  serverInstanceIconHost,
   serverCoreIconScheme,
   type ClientEntryPublication,
   type DesktopClientBootstrap,
@@ -10,8 +11,11 @@ import {
   type RuntimeSnapshot,
   type ServerCoreDownloadClientService,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerCoreManagedDownloadResult,
+  type ServerCoreManagedDownloadRequest,
   type ServerCoreSaveAsRequest,
   type ServerCoreSourceClientService,
+  type ServerInstanceClientService,
   type ServerSettingsClientService,
 } from "@seashard/contracts";
 import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
@@ -35,6 +39,10 @@ export interface DirectorySelectionOptions {
 
 export interface StartDesktopServerCoreDownloadRequest extends ServerCoreSaveAsRequest {
   readonly destinationDirectory: string;
+  readonly connections: number;
+}
+
+export interface StartDesktopManagedServerCoreDownloadRequest extends ServerCoreManagedDownloadRequest {
   readonly connections: number;
 }
 
@@ -81,6 +89,7 @@ export interface DesktopShellConfig {
     gameVersion: string,
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
   resolveServerCoreIconPath(sha256: string): Promise<string | undefined>;
+  resolveServerInstanceIconPath(instanceId: string): Promise<string | undefined>;
   readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;
   writeResourceDownloadDirectory(
     directory: string,
@@ -91,6 +100,10 @@ export interface DesktopShellConfig {
   startServerCoreDownload(
     request: StartDesktopServerCoreDownloadRequest,
   ): Promise<ServerCoreDownloadTaskSnapshot>;
+  startManagedServerCoreDownload(
+    request: StartDesktopManagedServerCoreDownloadRequest,
+  ): Promise<ServerCoreManagedDownloadResult>;
+  listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
@@ -317,16 +330,18 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           } catch {
             return undefined;
           }
-          if (
-            url.protocol !== `${serverCoreIconScheme}:` ||
-            url.hostname !== serverCoreIconHost ||
-            url.search ||
-            url.hash
-          ) {
+          if (url.protocol !== `${serverCoreIconScheme}:` || url.search || url.hash) {
             return undefined;
           }
-          const sha256 = /^\/([a-f0-9]{64})$/.exec(url.pathname)?.[1];
-          return sha256 ? config.resolveServerCoreIconPath(sha256) : undefined;
+          if (url.hostname === serverCoreIconHost) {
+            const sha256 = /^\/([a-f0-9]{64})$/u.exec(url.pathname)?.[1];
+            return sha256 ? config.resolveServerCoreIconPath(sha256) : undefined;
+          }
+          if (url.hostname === serverInstanceIconHost) {
+            const instanceId = /^\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/u.exec(url.pathname)?.[1];
+            return instanceId ? config.resolveServerInstanceIconPath(instanceId) : undefined;
+          }
+          return undefined;
         });
 
         config.runtime.handle(desktopChannels.windowMinimize, (event) => {
@@ -390,6 +405,22 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             destinationDirectory,
             connections: settings.defaultDownloadConnections,
           });
+        });
+        config.runtime.handle(
+          desktopChannels.serverCoreDownloadStartManaged,
+          async (event, value) => {
+            ownedWindow(event.sender.id);
+            const request = expectServerCoreSaveAsRequest(value);
+            const settings = await config.readServerSettings();
+            return config.startManagedServerCoreDownload({
+              ...request,
+              connections: settings.defaultDownloadConnections,
+            });
+          },
+        );
+        config.runtime.handle(desktopChannels.serverInstancesList, (event) => {
+          ownedWindow(event.sender.id);
+          return config.listServerInstances();
         });
         config.runtime.handle(desktopChannels.serverCoreDownloadListTasks, (event) => {
           ownedWindow(event.sender.id);
@@ -468,6 +499,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
+          config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
+          config.runtime.removeHandler(desktopChannels.serverInstancesList);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);

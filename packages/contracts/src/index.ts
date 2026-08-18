@@ -22,6 +22,8 @@ export const desktopChannels = {
   serverCoreDownloadSaveAs: "seashard.server-core-download.save-as",
   serverCoreDownloadListTasks: "seashard.server-core-download.list-tasks",
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
+  serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
+  serverInstancesList: "seashard.server-instances.list",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -31,10 +33,14 @@ export const serverCoreSourceContract = "seashard.server-core-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
 export const serverCoreIconHost = "server-core-icon";
+/** Renderer 通过受限本地协议读取已复制到实例目录的服务器图标。 */
+export const serverInstanceIconHost = "server-instance-icon";
 /** 服务器设置 Host 组件发布的稳定 Service contract。 */
 export const serverSettingsContract = "seashard.server-settings";
 /** 当前 Client 平台提供的服务器核心下载交互；Desktop 使用系统目录选择窗口。 */
 export const serverCoreDownloadContract = "seashard.server-core-download";
+/** 服务器实例管理组件发布的持久化实例 Service contract。 */
+export const serverInstanceManagerContract = "seashard.server-instance-manager";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
@@ -140,6 +146,14 @@ export interface ServerCoreSaveAsRequest {
   artifactFileName: string;
   destinationFileName: string;
 }
+/** “开始下载”创建由 SeaShard 托管的实例；目标目录只能由 Host 决定。 */
+export interface ServerCoreManagedDownloadRequest extends ServerCoreSaveAsRequest {}
+
+/** 托管下载立即返回任务与预留实例 ID，下载完成后可精确跳转到新实例。 */
+export interface ServerCoreManagedDownloadResult {
+  instanceId: string;
+  task: ServerCoreDownloadTaskSnapshot;
+}
 
 /** 顶栏和下载页共享的服务器核心任务投影。 */
 export interface ServerCoreDownloadTaskSnapshot {
@@ -156,11 +170,39 @@ export interface ServerCoreDownloadTaskSnapshot {
   error?: string;
 }
 
-/** 当前 Client 平台实现目录选择、任务创建、进度读取和取消。 */
+/** 当前 Client 平台实现托管下载、另存为、进度读取和取消。 */
 export interface ServerCoreDownloadClientService {
+  startManaged(request: ServerCoreManagedDownloadRequest): Promise<ServerCoreManagedDownloadResult>;
   saveAs(request: ServerCoreSaveAsRequest): Promise<ServerCoreDownloadTaskSnapshot | undefined>;
   listTasks(): Promise<readonly ServerCoreDownloadTaskSnapshot[]>;
   cancel(taskId: string): Promise<boolean>;
+}
+
+export type ServerInstanceStorageMode = "managed" | "external";
+export type ServerInstanceSource = "downloaded" | "imported";
+
+/** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */
+export interface ServerInstanceSnapshot {
+  id: string;
+  name: string;
+  rootPath: string;
+  coreJarPath: string;
+  iconPath?: string;
+  storageMode: ServerInstanceStorageMode;
+  source: ServerInstanceSource;
+  serverType?: string;
+  gameVersion?: string;
+  coreArtifactFileName?: string;
+  artifactSha256?: string;
+  createdAt: string;
+  updatedAt: string;
+  iconUrl?: string;
+  lastStartedAt?: string;
+}
+
+/** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
+export interface ServerInstanceClientService {
+  list(): Promise<readonly ServerInstanceSnapshot[]>;
 }
 
 /** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */
@@ -183,6 +225,7 @@ export interface SeaShardDesktopApi {
   serverCore: ServerCoreSourceClientService;
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
+  serverInstances: ServerInstanceClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;
   };

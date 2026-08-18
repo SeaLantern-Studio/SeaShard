@@ -66,6 +66,8 @@ export function createServerCoreSourceModule(options: ServerCoreSourceModuleOpti
         start: async (request) => asJsonValue(await coordinator.start(request)),
         snapshot: async (taskId) =>
           asJsonValue((await coordinator.snapshot(expectString(taskId, "taskId"))) ?? null),
+        wait: async (taskId) =>
+          asJsonValue((await coordinator.wait(expectString(taskId, "taskId"))) ?? null),
         listTasks: async () => asJsonValue(await coordinator.listTasks()),
         cancel: (taskId) => coordinator.cancel(expectString(taskId, "taskId")),
       });

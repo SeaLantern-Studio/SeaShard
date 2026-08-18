@@ -41,6 +41,8 @@ export interface ServerCoreSourceService {
   start(request: StartServerCoreDownloadRequest): Promise<ServerCoreDownloadTaskSnapshot>;
   /** 查询单个任务；任务不存在时返回 null。 */
   snapshot(taskId: string): Promise<ServerCoreDownloadTaskSnapshot | null>;
+  /** 等待任务进入终态；实例管理器据此决定注册或清理托管目录。 */
+  wait(taskId: string): Promise<ServerCoreDownloadTaskSnapshot | null>;
   /** 按创建时间返回当前保留的任务快照。 */
   listTasks(): Promise<readonly ServerCoreDownloadTaskSnapshot[]>;
   /** 取消未进入终态的任务，并等待临时文件清理完成。 */

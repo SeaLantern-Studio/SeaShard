@@ -1,0 +1,58 @@
+import type {
+  ServerCoreManagedDownloadResult,
+  ServerCoreManagedDownloadRequest,
+  ServerInstanceSnapshot,
+} from "@seashard/contracts";
+
+export {
+  serverInstanceManagerContract,
+  type ServerInstanceSnapshot,
+  type ServerInstanceSource,
+  type ServerInstanceStorageMode,
+} from "@seashard/contracts";
+
+/** Host 侧创建托管实例时补入设置组件保存的下载并发数。 */
+export interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {
+  connections: number;
+}
+
+/** 实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。 */
+export interface ServerInstanceManagerService {
+  /** 下载服务端核心；校验成功后写入双 JSON，并在 SQLite 登记 seashard.json 路径。 */
+  createManaged(
+    request: CreateManagedServerInstanceRequest,
+  ): Promise<ServerCoreManagedDownloadResult>;
+  /** 从路径索引读取并合并 server.json 与 seashard.json。 */
+  list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 只按已注册实例 ID 解析实例内图标，不接受调用方传入任意路径。 */
+  resolveIconPath(instanceId: string): Promise<string | null>;
+}
+
+/** 服务器自身事实；所有路径均相对实例根目录。 */
+export interface PortableServerInformationManifest {
+  schemaVersion: 1;
+  minecraft: {
+    version?: string;
+  };
+  core: {
+    path: string;
+    type?: string;
+    artifact?: {
+      fileName?: string;
+      sha256?: string;
+    };
+  };
+}
+
+/** 仅供 SeaShard 使用的实例管理数据；icon 相对元数据目录。 */
+export interface PortableSeaShardInstanceManifest {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  storageMode: "managed" | "external";
+  source: "downloaded" | "imported";
+  icon?: string;
+  lastStartedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}

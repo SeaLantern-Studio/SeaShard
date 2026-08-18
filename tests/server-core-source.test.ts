@@ -156,13 +156,9 @@ async function waitForFinished(
   coordinator: ServerCoreSourceCoordinator,
   taskId: string,
 ): Promise<ServerCoreDownloadTaskSnapshot> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const snapshot = await coordinator.snapshot(taskId);
-    if (!snapshot) throw new Error("download task disappeared");
-    if (["completed", "failed", "cancelled"].includes(snapshot.state)) return snapshot;
-    await yieldToEventLoop();
-  }
-  throw new Error("download task did not finish");
+  const snapshot = await coordinator.wait(taskId);
+  if (!snapshot) throw new Error("download task disappeared");
+  return snapshot;
 }
 
 async function waitForDownloaded(
