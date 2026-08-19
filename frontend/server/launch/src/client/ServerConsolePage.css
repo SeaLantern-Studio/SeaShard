@@ -189,6 +189,29 @@
   color: var(--sl-text-tertiary);
 }
 
+/* Java 运行时确认框只遮罩工作区，和启动页、配置页的模态框保持一致。 */
+:global(body:has(.server-console-page) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.server-console-page):has(.right-sidebar.open) .cmz-modal-overlay) {
+  right: calc(var(--sl-sidebar-width) + 20px);
+}
+
+:global(body:has(.server-console-page) .cmz-modal) {
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 @media (max-width: 920px) {
   .console-toolbar {
     align-items: stretch;

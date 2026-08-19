@@ -21,7 +21,8 @@ import {
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { ServerInstanceSelection } from "./server-selection";
-import { runtimeErrorMessage } from "./runtime-error";
+import MissingJava25Modal from "./MissingJava25Modal.vue";
+import { isMissingJava25RuntimeError, runtimeErrorMessage } from "./runtime-error";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;
@@ -39,6 +40,8 @@ const selectorOpen = ref(false);
 const instancesLoading = ref(true);
 const instancesError = ref<string>();
 const runtimeError = ref<string>();
+const missingJava25ModalOpen = ref(false);
+const missingJava25Message = ref("");
 const runtimeSnapshots = reactive(new Map<string, ServerRuntimeSnapshot>());
 const pendingRuntimeOperations = reactive(new Set<string>());
 const customIconSources = reactive(new Map<string, string>());
@@ -189,7 +192,13 @@ async function toggleServer(): Promise<void> {
         : await props.runtime.start(instance.id);
     runtimeSnapshots.set(instance.id, snapshot);
   } catch (error) {
-    runtimeError.value = runtimeErrorMessage(error);
+    const message = runtimeErrorMessage(error);
+    if (isMissingJava25RuntimeError(message)) {
+      missingJava25Message.value = message;
+      missingJava25ModalOpen.value = true;
+    } else {
+      runtimeError.value = message;
+    }
     const snapshot = await props.runtime.get(instance.id).catch(() => undefined);
     if (snapshot) runtimeSnapshots.set(instance.id, snapshot);
   } finally {
@@ -565,6 +574,8 @@ function errorMessage(error: unknown): string {
       tabindex="-1"
       @change="applyCustomIcon"
     />
+
+    <MissingJava25Modal v-model:visible="missingJava25ModalOpen" :message="missingJava25Message" />
 
     <Cmz_Modal
       :visible="deleteConfirmOpen && !!deleteTarget"
