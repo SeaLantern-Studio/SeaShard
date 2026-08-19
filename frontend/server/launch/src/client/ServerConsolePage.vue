@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isServerRuntimeSupportedType } from "@seashard/contracts";
 import type {
   ServerConsoleLine,
   ServerInstanceClientService,
@@ -8,8 +9,8 @@ import type {
 } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Console, type ConsoleLine } from "cmzya-modern-ui";
 import { Server } from "lucide-vue-next";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { ServerInstanceSelection } from "./server-selection";
 import { BoundedSequenceStore } from "./console-buffer";
 
 const maximumConsoleLines = 5_000;
@@ -17,11 +18,11 @@ const maximumConsoleLines = 5_000;
 const props = defineProps<{
   instances: ServerInstanceClientService;
   runtime: ServerRuntimeClientService;
+  selection: ServerInstanceSelection;
 }>();
 
-const route = useRoute();
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
-const selectedInstanceId = ref<string>();
+const selectedInstanceId = computed(() => props.selection.instanceId);
 const loading = ref(true);
 const instancesError = ref<string>();
 const consoleLines = ref<ConsoleLine[]>([]);
@@ -39,7 +40,7 @@ const selectedInstance = computed(() =>
 );
 const hasConsoleOutput = computed(() => consoleLines.value.length > 0);
 const startButtonLabel = computed(() => {
-  if (selectedInstance.value?.serverType !== "vanilla") return "暂不支持此核心";
+  if (!isServerRuntimeSupportedType(selectedInstance.value?.serverType)) return "暂不支持此核心";
   if (startingServer.value || runtimeSnapshot.value?.state === "starting") return "正在启动";
   if (runtimeSnapshot.value?.state === "running") return "服务器已启动";
   if (runtimeSnapshot.value?.state === "stopping") return "正在停止";
@@ -48,7 +49,7 @@ const startButtonLabel = computed(() => {
 const startButtonDisabled = computed(
   () =>
     !selectedInstance.value ||
-    selectedInstance.value.serverType !== "vanilla" ||
+    !isServerRuntimeSupportedType(selectedInstance.value.serverType) ||
     startingServer.value ||
     runtimeSnapshot.value?.state === "starting" ||
     runtimeSnapshot.value?.state === "running" ||
@@ -76,15 +77,30 @@ onBeforeUnmount(() => {
   clearInterval(runtimeRefreshTimer);
 });
 
+watch(
+  () => props.selection.instanceId,
+  (instanceId, previousInstanceId) => {
+    if (instanceId === previousInstanceId || loading.value) return;
+    resetConsole();
+    runtimeSnapshot.value = undefined;
+    if (!registeredInstances.value.some((instance) => instance.id === instanceId)) {
+      void loadInstances();
+      return;
+    }
+    void Promise.all([loadConsoleLines(), refreshRuntime()]);
+  },
+);
+
 /** 控制台只读取实例元数据中已经声明的核心类型，不在启动阶段识别核心。 */
 async function loadInstances(): Promise<void> {
   loading.value = true;
   try {
     const instances = await props.instances.list();
     registeredInstances.value = instances;
-    const requestedId = typeof route.query.instance === "string" ? route.query.instance : undefined;
-    selectedInstanceId.value =
-      instances.find((instance) => instance.id === requestedId)?.id ?? instances[0]?.id;
+    const selectedId = instances.some((instance) => instance.id === props.selection.instanceId)
+      ? props.selection.instanceId
+      : instances[0]?.id;
+    props.selection.instanceId = selectedId;
     instancesError.value = undefined;
     resetConsole();
     await Promise.all([loadConsoleLines(), refreshRuntime()]);
@@ -126,8 +142,13 @@ async function loadConsoleLines(): Promise<void> {
 
 async function startSelectedServer(): Promise<void> {
   const instance = selectedInstance.value;
-  if (!instance || instance.serverType !== "vanilla" || startButtonDisabled.value) return;
-
+  if (
+    !instance ||
+    !isServerRuntimeSupportedType(instance.serverType) ||
+    startButtonDisabled.value
+  ) {
+    return;
+  }
   startingServer.value = true;
   try {
     runtimeSnapshot.value = await props.runtime.start(instance.id);

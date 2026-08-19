@@ -256,7 +256,8 @@
 .secondary-launch-button:focus-visible,
 .instance-icon-button:focus-visible,
 .instance-list-row:focus-visible,
-.icon-context-menu button:focus-visible {
+.icon-context-menu button:focus-visible,
+.instance-context-menu button:focus-visible {
   outline: 2px solid var(--sl-primary);
   outline-offset: 2px;
 }
@@ -388,7 +389,8 @@
   color: var(--sl-primary);
 }
 
-.icon-context-menu {
+.icon-context-menu,
+.instance-context-menu {
   position: absolute;
   z-index: 10;
   width: 148px;
@@ -401,7 +403,8 @@
   animation: icon-menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.icon-context-menu button {
+.icon-context-menu button,
+.instance-context-menu button {
   display: flex;
   width: 100%;
   height: 32px;
@@ -417,8 +420,76 @@
   cursor: pointer;
 }
 
-.icon-context-menu button:hover {
+.icon-context-menu button:hover,
+.instance-context-menu button:hover {
   background: var(--sl-bg-secondary);
+}
+
+.instance-context-menu button.danger {
+  color: var(--sl-error);
+}
+
+.instance-context-menu button.danger:hover {
+  background: var(--sl-error-bg);
+}
+
+.delete-confirm-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.delete-confirm-content p {
+  margin: 0;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
+  line-height: var(--sl-line-height-normal);
+  overflow-wrap: anywhere;
+}
+
+.delete-confirm-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-error-bg);
+  color: var(--sl-error);
+}
+
+.delete-confirm-content .delete-confirm-error {
+  margin-top: 8px;
+  color: var(--sl-error);
+}
+
+.delete-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+}
+
+/* 删除确认框只遮罩当前工作区，不覆盖应用导航与标题栏。 */
+:global(body:has(.server-launch-page) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.server-launch-page):has(.right-sidebar.open) .cmz-modal-overlay) {
+  right: calc(var(--sl-sidebar-width) + 20px);
+}
+
+:global(body:has(.server-launch-page) .cmz-modal) {
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .visually-hidden-icon-input {
@@ -478,7 +549,8 @@
   .primary-launch-button,
   .secondary-launch-button,
   .instance-list-row,
-  .icon-context-menu {
+  .icon-context-menu,
+  .instance-context-menu {
     animation-duration: 0s;
     transition-duration: 0s;
   }

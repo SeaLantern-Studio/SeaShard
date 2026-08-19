@@ -49,6 +49,13 @@ export const serverInstanceDataCapsule = defineDataCapsule({
       sql: `INSERT INTO server_instance_manifests (manifest_path)
             VALUES (?)`,
     },
+    {
+      id: "manifest.delete",
+      access: "write",
+      result: "run",
+      sql: `DELETE FROM server_instance_manifests
+             WHERE manifest_path = ?`,
+    },
   ],
 });
 
@@ -67,6 +74,14 @@ export class SQLiteServerInstanceRegistry {
   async insertManifestPath(manifestPath: string): Promise<void> {
     const result = await this.repository.execute("manifest.insert", [manifestPath]);
     if (result.kind !== "run") throw unexpectedResult("manifest.insert", result.kind);
+  }
+
+  async deleteManifestPath(manifestPath: string): Promise<void> {
+    const result = await this.repository.execute("manifest.delete", [manifestPath]);
+    if (result.kind !== "run") throw unexpectedResult("manifest.delete", result.kind);
+    if (Number(result.changes) !== 1) {
+      throw new Error("server instance registry manifest path was not registered");
+    }
   }
 }
 

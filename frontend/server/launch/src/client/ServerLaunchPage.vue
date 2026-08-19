@@ -1,11 +1,23 @@
 <script setup lang="ts">
+import { isServerRuntimeSupportedType } from "@seashard/contracts";
 import type {
   ServerInstanceClientService,
   ServerInstanceSnapshot,
   ServerRuntimeClientService,
   ServerRuntimeSnapshot,
 } from "@seashard/contracts";
-import { Check, FileCog, ImagePlus, Play, Power, Rows3, Server } from "lucide-vue-next";
+import { Cmz_Button, Cmz_Modal } from "cmzya-modern-ui";
+import {
+  AlertTriangle,
+  Check,
+  FileCog,
+  ImagePlus,
+  Play,
+  Power,
+  Rows3,
+  Server,
+  Trash2,
+} from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { ServerInstanceSelection } from "./server-selection";
@@ -30,6 +42,16 @@ const runtimeSnapshots = reactive(new Map<string, ServerRuntimeSnapshot>());
 const pendingRuntimeOperations = reactive(new Set<string>());
 const customIconSources = reactive(new Map<string, string>());
 const iconMenu = reactive({ open: false, x: 0, y: 0 });
+const instanceMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  instanceId: undefined as string | undefined,
+});
+const deleteTarget = ref<ServerInstanceSnapshot>();
+const deleteConfirmOpen = ref(false);
+const deletingInstanceId = ref<string>();
+const deleteError = ref<string>();
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let listRequestId = 0;
 let pendingInstanceId =
@@ -54,10 +76,13 @@ const selectedIconSource = computed(() => {
   const instance = selectedInstance.value;
   return instance ? (customIconSources.get(instance.id) ?? instance.iconUrl) : undefined;
 });
+const deleteTargetFolderPath = computed(() => deleteTarget.value?.rootPath ?? "");
 const selectedServerActive = computed(
   () => selectedRuntime.value?.state === "running" || selectedRuntime.value?.state === "stopping",
 );
-const selectedServerSupported = computed(() => selectedInstance.value?.serverType === "vanilla");
+const selectedServerSupported = computed(() =>
+  isServerRuntimeSupportedType(selectedInstance.value?.serverType),
+);
 const runtimeOperationPending = computed(() => {
   const instanceId = selectedInstance.value?.id;
   const state = selectedRuntime.value?.state;
@@ -81,14 +106,14 @@ const sortedInstances = computed(() =>
 );
 
 onMounted(() => {
-  document.addEventListener("pointerdown", closeIconMenu);
+  document.addEventListener("pointerdown", closeContextMenus);
   document.addEventListener("keydown", handleDocumentKeydown);
   void loadInstances();
   refreshTimer = setInterval(() => void loadInstances(true), 2_000);
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", closeIconMenu);
+  document.removeEventListener("pointerdown", closeContextMenus);
   document.removeEventListener("keydown", handleDocumentKeydown);
   clearInterval(refreshTimer);
 });
@@ -143,10 +168,16 @@ async function loadInstances(silent = false): Promise<void> {
   }
 }
 
-/** 只有实例元数据明确标记 vanilla 时才调用运行组件；这里不做任何核心识别。 */
+/** 只调用 Contract 共享列表中明确实现的核心；这里不扫描产物或猜测类型。 */
 async function toggleServer(): Promise<void> {
   const instance = selectedInstance.value;
-  if (!instance || instance.serverType !== "vanilla" || runtimeOperationPending.value) return;
+  if (
+    !instance ||
+    !isServerRuntimeSupportedType(instance.serverType) ||
+    runtimeOperationPending.value
+  ) {
+    return;
+  }
 
   pendingRuntimeOperations.add(instance.id);
   runtimeError.value = undefined;
@@ -169,12 +200,14 @@ function toggleSelector(): void {
   if (registeredInstances.value.length === 0) return;
   selectorOpen.value = !selectorOpen.value;
   iconMenu.open = false;
+  instanceMenu.open = false;
 }
 
 function selectInstance(instanceId: string): void {
   selectedInstanceId.value = instanceId;
   runtimeError.value = undefined;
   iconMenu.open = false;
+  instanceMenu.open = false;
 }
 
 function openConfiguration(): void {
@@ -183,6 +216,7 @@ function openConfiguration(): void {
 /** 菜单坐标限制在页面内部，图标移动到左半区后右键菜单仍从指针位置出现。 */
 function openIconMenu(event: MouseEvent): void {
   if (!selectedInstance.value) return;
+  instanceMenu.open = false;
   const root = pageRoot.value;
   if (!root) return;
   const bounds = root.getBoundingClientRect();
@@ -194,6 +228,7 @@ function openIconMenu(event: MouseEvent): void {
 }
 
 function openIconMenuFromKeyboard(): void {
+  instanceMenu.open = false;
   const root = pageRoot.value;
   const icon = root?.querySelector<HTMLElement>(".instance-icon-button");
   if (!root || !icon) return;
@@ -204,13 +239,14 @@ function openIconMenuFromKeyboard(): void {
   iconMenu.open = true;
 }
 
-function closeIconMenu(): void {
+function closeContextMenus(): void {
   iconMenu.open = false;
+  instanceMenu.open = false;
 }
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
-    iconMenu.open = false;
+    closeContextMenus();
     selectorOpen.value = false;
   }
 }
@@ -218,6 +254,89 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
 function chooseCustomIcon(): void {
   iconMenu.open = false;
   iconInput.value?.click();
+}
+
+/** 实例右键菜单绑定被点击的行，不隐式切换当前选中实例。 */
+function openInstanceMenu(event: MouseEvent, instance: ServerInstanceSnapshot): void {
+  const root = pageRoot.value;
+  if (!root) return;
+  const bounds = root.getBoundingClientRect();
+  const menuWidth = 148;
+  const menuHeight = 42;
+  iconMenu.open = false;
+  instanceMenu.instanceId = instance.id;
+  instanceMenu.x = clamp(event.clientX - bounds.left, 8, bounds.width - menuWidth - 8);
+  instanceMenu.y = clamp(event.clientY - bounds.top, 8, bounds.height - menuHeight - 8);
+  instanceMenu.open = true;
+}
+
+function openInstanceMenuFromKeyboard(
+  event: KeyboardEvent,
+  instance: ServerInstanceSnapshot,
+): void {
+  const root = pageRoot.value;
+  const row = event.currentTarget as HTMLElement | null;
+  if (!root || !row) return;
+  const rootBounds = root.getBoundingClientRect();
+  const rowBounds = row.getBoundingClientRect();
+  openInstanceMenu(
+    new MouseEvent("contextmenu", {
+      clientX: rowBounds.right - 16,
+      clientY: rowBounds.top + rowBounds.height / 2,
+    }),
+    instance,
+  );
+  instanceMenu.x = clamp(instanceMenu.x, 8, rootBounds.width - 156);
+}
+
+function requestDeleteInstance(): void {
+  const instance = registeredInstances.value.find(({ id }) => id === instanceMenu.instanceId);
+  instanceMenu.open = false;
+  if (!instance) return;
+  if (isInstanceActive(instance.id)) {
+    runtimeError.value = "请先停止服务器，再删除实例";
+    return;
+  }
+  deleteTarget.value = instance;
+  deleteError.value = undefined;
+  deleteConfirmOpen.value = true;
+}
+
+function setDeleteConfirmVisible(visible: boolean): void {
+  if (visible) {
+    deleteConfirmOpen.value = true;
+  } else if (!deletingInstanceId.value) {
+    deleteConfirmOpen.value = false;
+    deleteTarget.value = undefined;
+    deleteError.value = undefined;
+  }
+}
+
+/** Host 成功删除目录和 SQLite 记录后，立即切换到相邻实例并重新读取真实列表。 */
+async function confirmDeleteInstance(): Promise<void> {
+  const instance = deleteTarget.value;
+  if (!instance || deletingInstanceId.value) return;
+  deletingInstanceId.value = instance.id;
+  deleteError.value = undefined;
+  const currentIndex = registeredInstances.value.findIndex(({ id }) => id === instance.id);
+  try {
+    await props.instances.delete(instance.id);
+    const remaining = registeredInstances.value.filter(({ id }) => id !== instance.id);
+    registeredInstances.value = remaining;
+    runtimeSnapshots.delete(instance.id);
+    customIconSources.delete(instance.id);
+    if (selectedInstanceId.value === instance.id) {
+      selectedInstanceId.value = remaining[Math.min(currentIndex, remaining.length - 1)]?.id;
+    }
+    deleteConfirmOpen.value = false;
+    deleteTarget.value = undefined;
+    if (remaining.length === 0) selectorOpen.value = false;
+    await loadInstances(true);
+  } catch (error) {
+    deleteError.value = errorMessage(error);
+  } finally {
+    deletingInstanceId.value = undefined;
+  }
 }
 
 /** 当前仅保留会话内预览；实例图标持久化将在实例设置能力接入时交给 Host。 */
@@ -376,7 +495,10 @@ function errorMessage(error: unknown): string {
           :class="{ selected: selectedInstanceId === instance.id }"
           role="option"
           :aria-selected="selectedInstanceId === instance.id"
+          aria-haspopup="menu"
           @click="selectInstance(instance.id)"
+          @contextmenu.prevent.stop="openInstanceMenu($event, instance)"
+          @keydown.shift.f10.prevent.stop="openInstanceMenuFromKeyboard($event, instance)"
         >
           <span class="instance-icon-visual instance-icon-small" :style="instanceStyle(instance)">
             <img
@@ -420,6 +542,19 @@ function errorMessage(error: unknown): string {
       </button>
     </div>
 
+    <div
+      v-if="instanceMenu.open"
+      class="instance-context-menu"
+      role="menu"
+      :style="{ left: `${instanceMenu.x}px`, top: `${instanceMenu.y}px` }"
+      @pointerdown.stop
+    >
+      <button type="button" class="danger" role="menuitem" @click="requestDeleteInstance">
+        <Trash2 :size="16" :stroke-width="1.8" />
+        <span>删除</span>
+      </button>
+    </div>
+
     <input
       ref="iconInput"
       class="visually-hidden-icon-input"
@@ -429,6 +564,43 @@ function errorMessage(error: unknown): string {
       tabindex="-1"
       @change="applyCustomIcon"
     />
+
+    <Cmz_Modal
+      :visible="deleteConfirmOpen && !!deleteTarget"
+      title="删除服务器实例"
+      width="440px"
+      :close-on-overlay="!deletingInstanceId"
+      @close="setDeleteConfirmVisible(false)"
+      @update:visible="setDeleteConfirmVisible"
+    >
+      <div class="delete-confirm-content">
+        <span class="delete-confirm-icon" aria-hidden="true">
+          <AlertTriangle :size="21" />
+        </span>
+        <div>
+          <p>是否确认删除文件夹 [{{ deleteTargetFolderPath }}]？</p>
+          <p v-if="deleteError" class="delete-confirm-error" role="alert">{{ deleteError }}</p>
+        </div>
+      </div>
+      <template #footer>
+        <div class="delete-modal-actions">
+          <Cmz_Button
+            variant="outline"
+            :disabled="!!deletingInstanceId"
+            @click="setDeleteConfirmVisible(false)"
+          >
+            取消
+          </Cmz_Button>
+          <Cmz_Button
+            color="#ef4444"
+            :loading="!!deletingInstanceId"
+            @click="confirmDeleteInstance"
+          >
+            确认删除
+          </Cmz_Button>
+        </div>
+      </template>
+    </Cmz_Modal>
   </section>
 </template>
 

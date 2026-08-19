@@ -28,7 +28,7 @@ export default defineClientUiModule({
     });
     const consolePage = defineComponent({
       name: "ServerConsole",
-      setup: () => () => h(ServerConsolePage, { instances, runtime }),
+      setup: () => () => h(ServerConsolePage, { instances, runtime, selection }),
     });
     const configurationPage = defineComponent({
       name: "ServerConfiguration",

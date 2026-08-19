@@ -124,6 +124,7 @@ export interface DesktopShellConfig {
     request: StartDesktopManagedServerCoreDownloadRequest,
   ): Promise<ServerCoreManagedDownloadResult>;
   listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
+  deleteServerInstance(instanceId: string): ReturnType<ServerInstanceClientService["delete"]>;
   listServerConfigurations(instanceId: string): Promise<ServerConfigurationCatalog>;
   readServerConfiguration(instanceId: string, path: string): Promise<ServerConfigurationDocument>;
   writeServerConfiguration(
@@ -305,6 +306,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
       const diagnostics = ctx.service<RuntimeDiagnosticsService>(runtimeDiagnosticsContract);
       let primaryWindow: BrowserWindow | undefined;
       let opening: Promise<void> | undefined;
+      const deletingServerInstances = new Set<string>();
 
       const ownsWebContents = (webContentsId: number): boolean =>
         Number.isSafeInteger(webContentsId) &&
@@ -521,6 +523,27 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.serverInstancesDelete, async (event, value) => {
+          ownedWindow(event.sender.id);
+          const instanceId = expectNonEmptyString(value, "server instance id");
+          if (deletingServerInstances.has(instanceId)) {
+            throw new Error(`server instance ${instanceId} is already being deleted`);
+          }
+          deletingServerInstances.add(instanceId);
+          try {
+            const runtime = await config.readServerRuntime(instanceId);
+            if (
+              runtime.state === "starting" ||
+              runtime.state === "running" ||
+              runtime.state === "stopping"
+            ) {
+              throw new Error("请先停止服务器，再删除实例");
+            }
+            await config.deleteServerInstance(instanceId);
+          } finally {
+            deletingServerInstances.delete(instanceId);
+          }
+        });
         config.runtime.handle(desktopChannels.serverConfigurationList, (event, instanceId) => {
           ownedWindow(event.sender.id);
           return config.listServerConfigurations(
@@ -545,9 +568,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.readServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
         });
-        config.runtime.handle(desktopChannels.serverRuntimeStart, (event, instanceId) => {
+        config.runtime.handle(desktopChannels.serverRuntimeStart, (event, value) => {
           ownedWindow(event.sender.id);
-          return config.startServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
+          const instanceId = expectNonEmptyString(value, "server instance id");
+          if (deletingServerInstances.has(instanceId)) {
+            throw new Error(`server instance ${instanceId} is being deleted`);
+          }
+          return config.startServerRuntime(instanceId);
         });
         config.runtime.handle(desktopChannels.serverRuntimeStop, (event, instanceId) => {
           ownedWindow(event.sender.id);
@@ -672,6 +699,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverConfigurationList);
           config.runtime.removeHandler(desktopChannels.serverConfigurationRead);
           config.runtime.removeHandler(desktopChannels.serverConfigurationWrite);

@@ -25,6 +25,7 @@ export const desktopChannels = {
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  serverInstancesDelete: "seashard.server-instances.delete",
   javaRuntimeScan: "seashard.java-runtime.scan",
   serverRuntimeGet: "seashard.server-runtime.get",
   serverRuntimeStart: "seashard.server-runtime.start",
@@ -238,6 +239,8 @@ export interface ServerInstanceSnapshot {
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
 export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 删除 Host 已登记的托管实例目录及其数据库路径记录。 */
+  delete(instanceId: string): Promise<void>;
 }
 
 /** 运行组件已实现并可由启动页直接调度的核心类型。 */

@@ -41,6 +41,7 @@ export class ServerInstanceManager {
   private readonly reservedNameKeys = new Set<string>();
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
+  private readonly deletions = new Map<string, Promise<void>>();
   private disposed = false;
   private iconBackfillTask: Promise<void> | undefined;
 
@@ -73,6 +74,26 @@ export class ServerInstanceManager {
       if (this.iconBackfillTask === task) this.iconBackfillTask = undefined;
     }
     return this.readIndexedInstances();
+  }
+
+  /** 删除仅限由 SeaShard 管理且仍位于 managedRoot 直属目录中的实例。 */
+  async delete(value: unknown): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(value, "instance id");
+    if ([...this.pending.values()].some((pending) => pending.id === instanceId)) {
+      throw new Error(`server instance ${instanceId} is still downloading`);
+    }
+    if (this.deletions.has(instanceId)) {
+      throw new Error(`server instance ${instanceId} is already being deleted`);
+    }
+
+    const task = this.deleteManagedInstance(instanceId);
+    this.deletions.set(instanceId, task);
+    try {
+      await task;
+    } finally {
+      if (this.deletions.get(instanceId) === task) this.deletions.delete(instanceId);
+    }
   }
 
   /**
@@ -145,6 +166,64 @@ export class ServerInstanceManager {
       [...this.pending.keys()].map((taskId) => this.options.coreSource.cancel(taskId)),
     );
     await Promise.allSettled(this.finalizers.values());
+    await Promise.allSettled(this.deletions.values());
+  }
+
+  /**
+   * 先移除 SQLite 索引，再直接递归删除实例目录。
+   * Windows 上的短暂文件占用由 rm 重试处理；目录删除失败时恢复索引，避免实例悄然丢失。
+   */
+  private async deleteManagedInstance(instanceId: string): Promise<void> {
+    const { instance, manifestPath } = await this.findIndexedInstance(instanceId);
+    if (instance.storageMode !== "managed") {
+      throw new Error(`server instance ${instanceId} is not managed by SeaShard`);
+    }
+    const rootPath = resolve(instance.rootPath);
+    if (rootPath !== resolve(this.managedRoot, instance.id)) {
+      throw new Error(`server instance ${instanceId} directory is outside the managed root`);
+    }
+
+    const nameKey = instanceNameKey(instance.name);
+    this.reservedNameKeys.add(nameKey);
+    let registryDeleted = false;
+    try {
+      await this.options.registry.deleteManifestPath(manifestPath);
+      registryDeleted = true;
+      await rm(rootPath, {
+        recursive: true,
+        force: false,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    } catch (error) {
+      if (registryDeleted) {
+        try {
+          await this.options.registry.insertManifestPath(manifestPath);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            `server instance ${instanceId} deletion and registry rollback both failed`,
+          );
+        }
+      }
+      throw error;
+    } finally {
+      this.reservedNameKeys.delete(nameKey);
+    }
+  }
+
+  private async findIndexedInstance(
+    instanceId: string,
+  ): Promise<{ instance: ServerInstanceSnapshot; manifestPath: string }> {
+    for (const manifestPath of await this.options.registry.listManifestPaths()) {
+      try {
+        const instance = await readPortableInstanceManifests(manifestPath);
+        if (instance.id === instanceId) return { instance, manifestPath };
+      } catch (error) {
+        this.options.reportError?.(error);
+      }
+    }
+    throw new Error(`server instance ${instanceId} was not found`);
   }
 
   private async reserveName(

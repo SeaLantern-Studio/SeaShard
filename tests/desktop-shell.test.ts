@@ -426,6 +426,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   };
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
+  const deletedServerInstances: string[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
   let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
   const serverCommands: string[] = [];
@@ -504,6 +505,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => serverInstances,
+      deleteServerInstance: async (instanceId) => {
+        deletedServerInstances.push(instanceId);
+      },
       listServerConfigurations: async () => serverConfigurationCatalog,
       readServerConfiguration: async () => serverConfigurationDocument,
       writeServerConfiguration: async (request) => {
@@ -640,6 +644,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     /request rejected/,
   );
   await assert.rejects(runtime.invoke(desktopChannels.serverInstancesList, 1), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesDelete, 1, "instance-paper"),
+    /request rejected/,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverConfigurationList, 1, "instance-paper"),
     /request rejected/,
@@ -836,6 +844,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   assert.deepEqual(startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
+  assert.equal(
+    await runtime.invoke(desktopChannels.serverInstancesDelete, 1, "instance-paper"),
+    undefined,
+  );
+  assert.deepEqual(deletedServerInstances, ["instance-paper"]);
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverConfigurationList, 1, "instance-paper"),
     serverConfigurationCatalog,
@@ -891,6 +904,11 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     pid: 4_242,
     startedAt: "2026-08-17T12:00:02.000Z",
   });
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesDelete, 1, "instance-paper"),
+    /请先停止服务器/,
+  );
+  assert.deepEqual(deletedServerInstances, ["instance-paper"]);
   assert.equal(
     await runtime.invoke(desktopChannels.serverRuntimeSendCommand, 1, "instance-paper", "list"),
     undefined,
@@ -1023,6 +1041,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverInstancesDelete), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationList), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationRead), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationWrite), false);
@@ -1089,6 +1108,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
         throw new Error("not expected");
       },
       listServerInstances: async () => [],
+      deleteServerInstance: async () => {},
       listServerConfigurations: async (instanceId) => ({
         instanceId,
         pluginSupported: false,

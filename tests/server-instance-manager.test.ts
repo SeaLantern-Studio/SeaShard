@@ -283,6 +283,22 @@ await test("managed downloads persist unique instances and split portable manife
       instances,
       "split portable JSON must remain the restart source of truth",
     );
+
+    const deletedInstance = instances[0]!;
+    await reloadedManager.delete(deletedInstance.id);
+    await assert.rejects(access(deletedInstance.rootPath), { code: "ENOENT" });
+    assert.deepEqual(
+      (await reloadedManager.list()).map(({ id }) => id),
+      instances.slice(1).map(({ id }) => id),
+    );
+    assert.deepEqual(
+      await registry.listManifestPaths(),
+      instances
+        .slice(1)
+        .map(({ rootPath }) =>
+          join(rootPath, portableInstanceMetadataDirectoryName, portableSeaShardInstanceFileName),
+        ),
+    );
     await reloadedManager.dispose();
   } finally {
     await broker.close();

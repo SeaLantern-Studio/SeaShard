@@ -950,6 +950,16 @@ async function bootstrap(): Promise<void> {
               expectServerInstances(
                 await activeKernel.callService(serverInstanceManagerContract, "list", []),
               ),
+            deleteServerInstance: async (instanceId) => {
+              const result = await activeKernel.callService(
+                serverInstanceManagerContract,
+                "delete",
+                [instanceId],
+              );
+              if (result !== null) {
+                throw new Error("server instance manager returned an invalid delete result");
+              }
+            },
             listServerConfigurations: async (instanceId) =>
               expectServerConfigurationCatalog(
                 await activeKernel.callService(serverConfigurationContract, "list", [instanceId]),
