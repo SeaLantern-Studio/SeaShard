@@ -341,6 +341,7 @@ const serverInstances = [
 
 const serverConfigurationCatalog = {
   instanceId: "instance-paper",
+  configurationRootPath: "C:/SeaShard/servers/instance-paper",
   serverType: "paper",
   pluginSupported: true,
   serverFiles: [
@@ -1111,6 +1112,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       deleteServerInstance: async () => {},
       listServerConfigurations: async (instanceId) => ({
         instanceId,
+        configurationRootPath: `/SeaShard/servers/${instanceId}`,
         pluginSupported: false,
         serverFiles: [],
         plugins: [],

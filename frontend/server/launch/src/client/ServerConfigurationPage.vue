@@ -92,7 +92,7 @@ const selectedConfigurationLocation = computed(() => {
       ? (selectedDraft.value?.document.path ?? selectedFile.value.path)
       : undefined;
   const filePath = activeServerPath ?? catalog.value?.serverFiles[0]?.path;
-  const rootPath = selectedInstance.value?.rootPath.replace(/[\\/]+$/u, "");
+  const rootPath = catalog.value?.configurationRootPath.replace(/[\\/]+$/u, "");
   if (!filePath) return "尚未选择配置文件";
   if (!rootPath) return filePath;
   const separator = rootPath.includes("\\") ? "\\" : "/";

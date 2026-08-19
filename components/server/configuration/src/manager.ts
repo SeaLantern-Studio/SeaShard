@@ -15,6 +15,10 @@ const maximumConfigurationBytes = 1_000_000;
 const maximumPluginConfigurationFiles = 500;
 const maximumPluginDirectoryDepth = 8;
 
+const configurationRootSubdirectories: Readonly<Record<string, string>> = {
+  quilt: "server",
+};
+
 const serverConfigurationPaths = [
   "server.properties",
   "bukkit.yml",
@@ -125,7 +129,7 @@ export class ServerConfigurationManager {
   async list(value: unknown): Promise<ServerConfigurationCatalog> {
     const instanceId = expectNonEmptyString(value, "服务器实例 ID");
     const instance = await this.resolveInstance(instanceId);
-    const rootPath = await this.fileSystem.realpath(instance.rootPath);
+    const rootPath = await this.resolveConfigurationRoot(instance);
     const serverFiles: ServerConfigurationFile[] = [];
 
     for (const path of serverConfigurationPaths) {
@@ -141,6 +145,7 @@ export class ServerConfigurationManager {
 
     return {
       instanceId,
+      configurationRootPath: rootPath,
       ...(instance.serverType ? { serverType: instance.serverType } : {}),
       pluginSupported:
         hasPluginsDirectory ||
@@ -155,7 +160,7 @@ export class ServerConfigurationManager {
     const path = expectRelativeConfigurationPath(pathValue);
     const descriptor = await this.resolveListedDescriptor(instanceId, path);
     const instance = await this.resolveInstance(instanceId);
-    const rootPath = await this.fileSystem.realpath(instance.rootPath);
+    const rootPath = await this.resolveConfigurationRoot(instance);
     const filePath = await this.resolveSafeExistingFile(rootPath, path);
     return this.readDocument(instanceId, descriptor, filePath);
   }
@@ -175,7 +180,7 @@ export class ServerConfigurationManager {
   ): Promise<ServerConfigurationDocument> {
     const descriptor = await this.resolveListedDescriptor(request.instanceId, request.path);
     const instance = await this.resolveInstance(request.instanceId);
-    const rootPath = await this.fileSystem.realpath(instance.rootPath);
+    const rootPath = await this.resolveConfigurationRoot(instance);
     const filePath = await this.resolveSafeExistingFile(rootPath, request.path);
     const current = await this.readDocument(request.instanceId, descriptor, filePath);
     if (current.revision !== request.expectedRevision) {
@@ -222,6 +227,23 @@ export class ServerConfigurationManager {
     if (!instance) throw new Error(`找不到服务器实例：${instanceId}`);
     if (!isAbsolute(instance.rootPath)) throw new Error("服务器实例根目录不是绝对路径。");
     return instance;
+  }
+
+  /**
+   * 配置目录默认等于实例根目录；安装到子目录的核心在这里集中声明。
+   * realpath 与实例边界校验阻止子目录被符号链接重定向到实例之外。
+   */
+  private async resolveConfigurationRoot(instance: ServerInstanceSnapshot): Promise<string> {
+    const instanceRoot = await this.fileSystem.realpath(instance.rootPath);
+    const subdirectory = instance.serverType
+      ? configurationRootSubdirectories[instance.serverType]
+      : undefined;
+    if (!subdirectory) return instanceRoot;
+    const configurationRoot = await this.fileSystem.realpath(resolve(instanceRoot, subdirectory));
+    if (!isWithinRoot(instanceRoot, configurationRoot)) {
+      throw new Error("服务器配置根目录超出实例目录。");
+    }
+    return configurationRoot;
   }
 
   private async scanPluginConfigurations(

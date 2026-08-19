@@ -325,6 +325,8 @@ function expectServerConfigurationCatalog(value: unknown): ServerConfigurationCa
   if (
     typeof catalog.instanceId !== "string" ||
     !catalog.instanceId ||
+    typeof catalog.configurationRootPath !== "string" ||
+    !isAbsolute(catalog.configurationRootPath) ||
     (catalog.serverType !== undefined && typeof catalog.serverType !== "string") ||
     typeof catalog.pluginSupported !== "boolean" ||
     !Array.isArray(catalog.serverFiles) ||
@@ -352,6 +354,7 @@ function expectServerConfigurationCatalog(value: unknown): ServerConfigurationCa
   });
   return {
     instanceId: catalog.instanceId,
+    configurationRootPath: catalog.configurationRootPath,
     ...(catalog.serverType ? { serverType: catalog.serverType as string } : {}),
     pluginSupported: catalog.pluginSupported,
     serverFiles,

@@ -171,6 +171,7 @@ await test("configuration manager lists allowlisted server files and recursive p
   const { manager } = createFixture();
   const catalog = await manager.list(instance.id);
 
+  assert.equal(catalog.configurationRootPath, rootPath);
   assert.equal(catalog.pluginSupported, true);
   assert.deepEqual(
     catalog.serverFiles.map((file) => file.path),
@@ -235,6 +236,47 @@ await test("configuration manager rejects forged paths, unlisted files, invalid 
   await assert.rejects(manager.read(instance.id, "plugins/plugin.jar"), /不在当前实例的可编辑目录/);
   await assert.rejects(manager.read(instance.id, "plugins/Broken/config.yml"), /不是有效的 UTF-8/);
   await assert.rejects(manager.list("missing-instance"), /找不到服务器实例/);
+});
+
+await test("Quilt configuration resolves files and backups from its generated server directory", async () => {
+  const quiltRootPath = resolve("test-fixtures/server-configuration/instance-quilt");
+  const configurationRootPath = resolve(quiltRootPath, "server");
+  const quiltInstance = {
+    ...instance,
+    id: "instance-quilt",
+    name: "1.21.11-quilt",
+    rootPath: quiltRootPath,
+    coreJarPath: resolve(quiltRootPath, "quilt-installer.jar"),
+    serverType: "quilt",
+  } satisfies ServerInstanceSnapshot;
+  const fileSystem = new MemoryConfigurationFileSystem(quiltRootPath);
+  fileSystem.addTextFile(resolve(configurationRootPath, "server.properties"), "motd=Quilt\n");
+  const manager = new ServerConfigurationManager({
+    listInstances: async () => [quiltInstance],
+    fileSystem,
+    now: () => new Date("2026-08-17T13:00:00.000Z"),
+  });
+
+  const catalog = await manager.list(quiltInstance.id);
+  assert.equal(catalog.configurationRootPath, configurationRootPath);
+  assert.deepEqual(
+    catalog.serverFiles.map((file) => file.path),
+    ["server.properties"],
+  );
+  const original = await manager.read(quiltInstance.id, "server.properties");
+  const saved = await manager.write({
+    instanceId: quiltInstance.id,
+    path: "server.properties",
+    content: "motd=Updated Quilt\n",
+    expectedRevision: original.revision,
+  });
+  assert.equal(saved.content, "motd=Updated Quilt\n");
+  assert.equal(
+    [...fileSystem.files.keys()].some((path) =>
+      path.startsWith(resolve(configurationRootPath, ".seashard", "backups", "configuration")),
+    ),
+    true,
+  );
 });
 
 function missingPath(path: string): Error {

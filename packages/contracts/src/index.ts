@@ -325,6 +325,8 @@ export interface ServerPluginConfigurationGroup {
 export interface ServerConfigurationCatalog {
   instanceId: string;
   serverType?: string;
+  /** 实际配置根目录；Quilt 等核心可能位于实例根目录的子目录。 */
+  configurationRootPath: string;
   pluginSupported: boolean;
   serverFiles: readonly ServerConfigurationFile[];
   plugins: readonly ServerPluginConfigurationGroup[];
