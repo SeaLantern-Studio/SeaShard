@@ -5,6 +5,7 @@ import {
   type ServerCoreManagedDownloadRequest,
   type ServerConsoleLine,
   type ServerCoreSaveAsRequest,
+  type ServerConfigurationWriteRequest,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -40,6 +41,14 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   serverInstances: Object.freeze({
     list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
+  }),
+  serverConfiguration: Object.freeze({
+    list: (instanceId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverConfigurationList, instanceId),
+    read: (instanceId: string, path: string) =>
+      ipcRenderer.invoke(desktopChannels.serverConfigurationRead, instanceId, path),
+    write: (request: ServerConfigurationWriteRequest) =>
+      ipcRenderer.invoke(desktopChannels.serverConfigurationWrite, request),
   }),
   serverRuntime: Object.freeze({
     get: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeGet, instanceId),

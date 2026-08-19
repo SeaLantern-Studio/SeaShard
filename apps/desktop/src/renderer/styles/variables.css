@@ -48,7 +48,7 @@
   --sl-space-xl: 32px;
   --sl-space-2xl: 48px;
   --sl-font-sans: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --sl-font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --sl-font-mono: Consolas, "Cascadia Mono", "Lucida Console", monospace;
   --sl-font-display: "Inter", "PingFang SC", sans-serif;
   --sl-font-size-xs: 0.75rem;
   --sl-font-size-sm: 0.8125rem;

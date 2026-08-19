@@ -9,11 +9,16 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   javaRuntimeManagerContract,
+  serverConfigurationContract,
   serverRuntimeContract,
   serverSettingsContract,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
   type ServerConsoleLine,
+  type ServerConfigurationCatalog,
+  type ServerConfigurationDocument,
+  type ServerConfigurationFile,
+  type ServerConfigurationWriteRequest,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
@@ -58,6 +63,10 @@ import {
   serverCoreSourceContract,
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
+import {
+  createServerConfigurationModule,
+  serverConfigurationManifest,
+} from "@seashard/server-configuration";
 import {
   createServerInstanceManagerModule,
   serverInstanceManagerContract,
@@ -282,6 +291,90 @@ function expectServerInstances(value: unknown): ServerInstanceSnapshot[] {
         : {}),
     };
   });
+}
+
+const serverConfigurationKinds = new Set(["properties", "yaml", "json", "toml", "text"]);
+
+function expectServerConfigurationFile(value: unknown, label: string): ServerConfigurationFile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server configuration returned invalid ${label}`);
+  }
+  const file = value as Record<string, unknown>;
+  if (
+    typeof file.path !== "string" ||
+    !file.path ||
+    file.path.startsWith("/") ||
+    file.path.includes("\\") ||
+    file.path.split("/").some((part) => !part || part === "." || part === "..") ||
+    typeof file.name !== "string" ||
+    !file.name ||
+    !serverConfigurationKinds.has(String(file.kind)) ||
+    !["server", "plugin"].includes(String(file.scope)) ||
+    (file.pluginName !== undefined && (typeof file.pluginName !== "string" || !file.pluginName))
+  ) {
+    throw new Error(`server configuration returned invalid ${label}`);
+  }
+  return file as unknown as ServerConfigurationFile;
+}
+
+function expectServerConfigurationCatalog(value: unknown): ServerConfigurationCatalog {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server configuration returned an invalid catalog");
+  }
+  const catalog = value as Record<string, unknown>;
+  if (
+    typeof catalog.instanceId !== "string" ||
+    !catalog.instanceId ||
+    (catalog.serverType !== undefined && typeof catalog.serverType !== "string") ||
+    typeof catalog.pluginSupported !== "boolean" ||
+    !Array.isArray(catalog.serverFiles) ||
+    !Array.isArray(catalog.plugins)
+  ) {
+    throw new Error("server configuration returned an invalid catalog");
+  }
+  const serverFiles = catalog.serverFiles.map((file, index) =>
+    expectServerConfigurationFile(file, `server file ${index}`),
+  );
+  const plugins = catalog.plugins.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`server configuration returned invalid plugin ${index}`);
+    }
+    const plugin = value as Record<string, unknown>;
+    if (typeof plugin.name !== "string" || !plugin.name || !Array.isArray(plugin.files)) {
+      throw new Error(`server configuration returned invalid plugin ${index}`);
+    }
+    return {
+      name: plugin.name,
+      files: plugin.files.map((file, fileIndex) =>
+        expectServerConfigurationFile(file, `plugin ${index} file ${fileIndex}`),
+      ),
+    };
+  });
+  return {
+    instanceId: catalog.instanceId,
+    ...(catalog.serverType ? { serverType: catalog.serverType as string } : {}),
+    pluginSupported: catalog.pluginSupported,
+    serverFiles,
+    plugins,
+  };
+}
+
+function expectServerConfigurationDocument(value: unknown): ServerConfigurationDocument {
+  const file = expectServerConfigurationFile(value, "document");
+  const document = value as unknown as Record<string, unknown>;
+  if (
+    typeof document.instanceId !== "string" ||
+    !document.instanceId ||
+    typeof document.content !== "string" ||
+    typeof document.revision !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(document.revision) ||
+    !["utf-8", "utf-8-bom"].includes(String(document.encoding)) ||
+    typeof document.modifiedAt !== "string" ||
+    !document.modifiedAt
+  ) {
+    throw new Error("server configuration returned an invalid document");
+  }
+  return { ...file, ...document } as ServerConfigurationDocument;
 }
 
 const javaInstallationSources = new Set<JavaInstallationSource>([
@@ -658,6 +751,25 @@ async function bootstrap(): Promise<void> {
       },
     ],
   });
+  // 配置管理器在实例边界内列出并修改 UTF-8 配置文件，写入时校验 revision 并先备份。
+  await activeKernel.registerBuiltIn({
+    manifest: serverConfigurationManifest,
+    loaders: {
+      "server-configuration.host": {
+        load: async () => createServerConfigurationModule(),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-configuration",
+        entryId: "server-configuration.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // Java 自动发现只读取 release 等安装元数据，不执行文件系统中发现的未知程序。
   await activeKernel.registerBuiltIn({
     manifest: javaRuntimeManagerManifest,
@@ -837,6 +949,23 @@ async function bootstrap(): Promise<void> {
             listServerInstances: async () =>
               expectServerInstances(
                 await activeKernel.callService(serverInstanceManagerContract, "list", []),
+              ),
+            listServerConfigurations: async (instanceId) =>
+              expectServerConfigurationCatalog(
+                await activeKernel.callService(serverConfigurationContract, "list", [instanceId]),
+              ),
+            readServerConfiguration: async (instanceId, path) =>
+              expectServerConfigurationDocument(
+                await activeKernel.callService(serverConfigurationContract, "read", [
+                  instanceId,
+                  path,
+                ]),
+              ),
+            writeServerConfiguration: async (request: ServerConfigurationWriteRequest) =>
+              expectServerConfigurationDocument(
+                await activeKernel.callService(serverConfigurationContract, "write", [
+                  request as unknown as JsonValue,
+                ]),
               ),
             readServerRuntime: async (instanceId) =>
               expectServerRuntimeSnapshot(

@@ -5,21 +5,23 @@ import type {
   ServerRuntimeClientService,
   ServerRuntimeSnapshot,
 } from "@seashard/contracts";
-import { Check, ImagePlus, Play, Power, Rows3, Server, Settings2 } from "lucide-vue-next";
+import { Check, FileCog, ImagePlus, Play, Power, Rows3, Server } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
+import type { ServerInstanceSelection } from "./server-selection";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;
   runtime: ServerRuntimeClientService;
+  selection: ServerInstanceSelection;
 }>();
 
 const route = useRoute();
+const router = useRouter();
 
 const pageRoot = ref<HTMLElement>();
 const iconInput = ref<HTMLInputElement>();
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
-const selectedInstanceId = ref<string>();
 const selectorOpen = ref(false);
 const instancesLoading = ref(true);
 const instancesError = ref<string>();
@@ -35,6 +37,12 @@ let pendingInstanceId =
     ? route.query.instance
     : undefined;
 
+const selectedInstanceId = computed<string | undefined>({
+  get: () => props.selection.instanceId,
+  set: (instanceId) => {
+    props.selection.instanceId = instanceId;
+  },
+});
 const selectedInstance = computed(() =>
   registeredInstances.value.find((instance) => instance.id === selectedInstanceId.value),
 );
@@ -169,6 +177,9 @@ function selectInstance(instanceId: string): void {
   iconMenu.open = false;
 }
 
+function openConfiguration(): void {
+  void router.push("/server/configuration");
+}
 /** 菜单坐标限制在页面内部，图标移动到左半区后右键菜单仍从指针位置出现。 */
 function openIconMenu(event: MouseEvent): void {
   if (!selectedInstance.value) return;
@@ -311,9 +322,9 @@ function errorMessage(error: unknown): string {
         </p>
 
         <div class="secondary-actions">
-          <button type="button" class="secondary-launch-button">
-            <Settings2 :size="16" :stroke-width="1.8" />
-            <span>实例设置</span>
+          <button type="button" class="secondary-launch-button" @click="openConfiguration">
+            <FileCog :size="16" :stroke-width="1.8" />
+            <span>配置管理</span>
           </button>
           <button
             type="button"

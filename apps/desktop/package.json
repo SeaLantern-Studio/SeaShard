@@ -19,6 +19,7 @@
     "@seashard/plugin-system": "workspace:*",
     "@seashard/runtime-diagnostics": "workspace:*",
     "@seashard/runtime-diagnostics-ui": "workspace:*",
+    "@seashard/server-configuration": "workspace:*",
     "@seashard/server-core-source": "workspace:*",
     "@seashard/server-download-ui": "workspace:*",
     "@seashard/server-instance-manager": "workspace:*",

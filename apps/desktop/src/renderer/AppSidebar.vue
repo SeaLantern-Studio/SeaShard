@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Download,
   Folder,
+  FileCog,
   Image,
   LayoutDashboard,
   MessageSquare,
@@ -91,6 +92,7 @@ const launcherManagementItems = [
 const serverManagementItems = [
   { id: "overview", label: "概览", icon: LayoutDashboard },
   { id: "console", label: "控制台", icon: Terminal },
+  { id: "configuration", label: "配置管理", icon: FileCog },
   { id: "settings", label: "设置", icon: Settings },
   { id: "export", label: "导出", icon: Upload },
   { id: "saves", label: "存档", icon: Archive },
@@ -148,6 +150,7 @@ function leaveDownload(): void {
 function serverItemForPath(path: string): InstanceItemId {
   if (path.startsWith("/server/download")) return "download";
   if (path.startsWith("/server/console")) return "console";
+  if (path.startsWith("/server/configuration")) return "configuration";
   return "launch";
 }
 
@@ -160,6 +163,8 @@ function selectInstanceItem(id: InstanceItemId): void {
       navigate("/server/launch");
     } else if (id === "console") {
       navigate("/server/console");
+    } else if (id === "configuration") {
+      navigate("/server/configuration");
     } else if (route.path.startsWith("/server/")) {
       navigate("/");
     }

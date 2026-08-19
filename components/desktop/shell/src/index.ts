@@ -19,6 +19,9 @@ import {
   type ServerInstanceClientService,
   type ServerConsoleLine,
   type ServerRuntimeClientService,
+  type ServerConfigurationCatalog,
+  type ServerConfigurationDocument,
+  type ServerConfigurationWriteRequest,
   type ServerSettingsClientService,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -121,6 +124,11 @@ export interface DesktopShellConfig {
     request: StartDesktopManagedServerCoreDownloadRequest,
   ): Promise<ServerCoreManagedDownloadResult>;
   listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
+  listServerConfigurations(instanceId: string): Promise<ServerConfigurationCatalog>;
+  readServerConfiguration(instanceId: string, path: string): Promise<ServerConfigurationDocument>;
+  writeServerConfiguration(
+    request: ServerConfigurationWriteRequest,
+  ): Promise<ServerConfigurationDocument>;
   readServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["get"]>;
   startServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["start"]>;
   stopServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["stop"]>;
@@ -264,6 +272,22 @@ function expectServerCoreSaveAsRequest(value: unknown): ServerCoreSaveAsRequest 
     gameVersion: expectNonEmptyString(record.gameVersion, "game version"),
     artifactFileName: expectNonEmptyString(record.artifactFileName, "artifact file name"),
     destinationFileName: expectNonEmptyString(record.destinationFileName, "destination file name"),
+  };
+}
+
+function expectServerConfigurationWriteRequest(value: unknown): ServerConfigurationWriteRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server configuration write request must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    instanceId: expectNonEmptyString(record.instanceId, "server instance id"),
+    path: expectNonEmptyString(record.path, "server configuration path"),
+    content: expectString(record.content, "server configuration content"),
+    expectedRevision: expectNonEmptyString(
+      record.expectedRevision,
+      "server configuration revision",
+    ),
   };
 }
 
@@ -497,6 +521,26 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.serverConfigurationList, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.listServerConfigurations(
+            expectNonEmptyString(instanceId, "server instance id"),
+          );
+        });
+        config.runtime.handle(
+          desktopChannels.serverConfigurationRead,
+          (event, instanceId, path) => {
+            ownedWindow(event.sender.id);
+            return config.readServerConfiguration(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(path, "server configuration path"),
+            );
+          },
+        );
+        config.runtime.handle(desktopChannels.serverConfigurationWrite, (event, request) => {
+          ownedWindow(event.sender.id);
+          return config.writeServerConfiguration(expectServerConfigurationWriteRequest(request));
+        });
         config.runtime.handle(desktopChannels.serverRuntimeGet, (event, instanceId) => {
           ownedWindow(event.sender.id);
           return config.readServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
@@ -628,6 +672,9 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.serverConfigurationList);
+          config.runtime.removeHandler(desktopChannels.serverConfigurationRead);
+          config.runtime.removeHandler(desktopChannels.serverConfigurationWrite);
           config.runtime.removeHandler(desktopChannels.serverRuntimeGet);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStart);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStop);

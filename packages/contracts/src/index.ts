@@ -32,6 +32,9 @@ export const desktopChannels = {
   serverRuntimeSendCommand: "seashard.server-runtime.send-command",
   serverRuntimeGetLogs: "seashard.server-runtime.get-logs",
   serverRuntimeConsoleLine: "seashard.server-runtime.console-line",
+  serverConfigurationList: "seashard.server-configuration.list",
+  serverConfigurationRead: "seashard.server-configuration.read",
+  serverConfigurationWrite: "seashard.server-configuration.write",
   javaRuntimeAdd: "seashard.java-runtime.add",
 } as const;
 
@@ -52,6 +55,8 @@ export const serverCoreDownloadContract = "seashard.server-core-download";
 export const serverInstanceManagerContract = "seashard.server-instance-manager";
 /** 服务器进程运行组件发布的 Host/Client 稳定 Contract。 */
 export const serverRuntimeContract = "seashard.server-runtime";
+/** 服务器与插件配置文件管理组件发布的 Host/Client 稳定 Contract。 */
+export const serverConfigurationContract = "seashard.server-configuration";
 /** Java 运行环境管理组件发布的只读扫描 Service contract。 */
 export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
 
@@ -272,6 +277,58 @@ export interface ServerRuntimeClientService extends ServerRuntimeService {
   onConsoleLine(listener: (line: ServerConsoleLine) => void): () => void;
 }
 
+export type ServerConfigurationFileKind = "properties" | "yaml" | "json" | "toml" | "text";
+export type ServerConfigurationFileScope = "server" | "plugin";
+export type ServerConfigurationTextEncoding = "utf-8" | "utf-8-bom";
+
+/** Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。 */
+export interface ServerConfigurationFile {
+  path: string;
+  name: string;
+  kind: ServerConfigurationFileKind;
+  scope: ServerConfigurationFileScope;
+  pluginName?: string;
+}
+
+export interface ServerPluginConfigurationGroup {
+  name: string;
+  files: readonly ServerConfigurationFile[];
+}
+
+/** 单个实例当前可编辑配置的目录；插件页只在明确支持或已有 plugins 目录时显示。 */
+export interface ServerConfigurationCatalog {
+  instanceId: string;
+  serverType?: string;
+  pluginSupported: boolean;
+  serverFiles: readonly ServerConfigurationFile[];
+  plugins: readonly ServerPluginConfigurationGroup[];
+}
+
+/** revision 是原始文件字节的 SHA-256，用于拒绝覆盖服务器或外部编辑器的新修改。 */
+export interface ServerConfigurationDocument extends ServerConfigurationFile {
+  instanceId: string;
+  content: string;
+  revision: string;
+  encoding: ServerConfigurationTextEncoding;
+  modifiedAt: string;
+}
+
+export interface ServerConfigurationWriteRequest {
+  instanceId: string;
+  path: string;
+  content: string;
+  expectedRevision: string;
+}
+
+/** 配置文件路径必须先由 list 发布；Host 仍会独立校验实例边界、后缀与符号链接。 */
+export interface ServerConfigurationService {
+  list(instanceId: string): Promise<ServerConfigurationCatalog>;
+  read(instanceId: string, path: string): Promise<ServerConfigurationDocument>;
+  write(request: ServerConfigurationWriteRequest): Promise<ServerConfigurationDocument>;
+}
+
+export interface ServerConfigurationClientService extends ServerConfigurationService {}
+
 export type JavaInstallationSource = "java-home" | "path" | "registry" | "filesystem" | "manual";
 
 /** 自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。 */
@@ -331,6 +388,7 @@ export interface SeaShardDesktopApi {
   serverCoreDownload: ServerCoreDownloadClientService;
   serverInstances: ServerInstanceClientService;
   serverRuntime: ServerRuntimeClientService;
+  serverConfiguration: ServerConfigurationClientService;
   javaRuntime: JavaRuntimeClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;

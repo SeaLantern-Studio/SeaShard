@@ -13,6 +13,9 @@ import {
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerConsoleLine,
+  type ServerConfigurationCatalog,
+  type ServerConfigurationDocument,
+  type ServerConfigurationWriteRequest,
   type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -336,6 +339,30 @@ const serverInstances = [
   },
 ] satisfies readonly ServerInstanceSnapshot[];
 
+const serverConfigurationCatalog = {
+  instanceId: "instance-paper",
+  serverType: "paper",
+  pluginSupported: true,
+  serverFiles: [
+    {
+      path: "server.properties",
+      name: "server.properties",
+      kind: "properties",
+      scope: "server",
+    },
+  ],
+  plugins: [],
+} satisfies ServerConfigurationCatalog;
+
+const initialServerConfigurationDocument = {
+  ...serverConfigurationCatalog.serverFiles[0]!,
+  instanceId: "instance-paper",
+  content: "motd=SeaShard\n",
+  revision: "b".repeat(64),
+  encoding: "utf-8",
+  modifiedAt: "2026-08-17T12:00:01.000Z",
+} satisfies ServerConfigurationDocument;
+
 const stoppedServerRuntime = {
   instanceId: "instance-paper",
   state: "stopped",
@@ -403,6 +430,8 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
   const serverCommands: string[] = [];
   let serverConsoleListener: ((line: ServerConsoleLine) => void) | undefined;
+  let serverConfigurationDocument = initialServerConfigurationDocument;
+  const configurationWrites: ServerConfigurationWriteRequest[] = [];
   const inspectedJavaPaths: string[] = [];
   const saveAsRequest = {
     serverType: "paper",
@@ -475,6 +504,18 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => serverInstances,
+      listServerConfigurations: async () => serverConfigurationCatalog,
+      readServerConfiguration: async () => serverConfigurationDocument,
+      writeServerConfiguration: async (request) => {
+        configurationWrites.push(request);
+        serverConfigurationDocument = {
+          ...serverConfigurationDocument,
+          content: request.content,
+          revision: "c".repeat(64),
+          modifiedAt: "2026-08-17T12:00:02.000Z",
+        };
+        return serverConfigurationDocument;
+      },
       readServerRuntime: async () => serverRuntime,
       startServerRuntime: async (instanceId) => {
         serverRuntime = {
@@ -599,6 +640,28 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     /request rejected/,
   );
   await assert.rejects(runtime.invoke(desktopChannels.serverInstancesList, 1), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverConfigurationList, 1, "instance-paper"),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverConfigurationRead,
+      1,
+      "instance-paper",
+      "server.properties",
+    ),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverConfigurationWrite, 1, {
+      instanceId: "instance-paper",
+      path: "server.properties",
+      content: "motd=Rejected\n",
+      expectedRevision: "b".repeat(64),
+    }),
+    /request rejected/,
+  );
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeScan, 1), /request rejected/);
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeAdd, 1), /request rejected/);
   await assert.rejects(
@@ -773,6 +836,37 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   assert.deepEqual(startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverConfigurationList, 1, "instance-paper"),
+    serverConfigurationCatalog,
+  );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverConfigurationRead,
+      1,
+      "instance-paper",
+      "server.properties",
+    ),
+    initialServerConfigurationDocument,
+  );
+  const configurationWrite = {
+    instanceId: "instance-paper",
+    path: "server.properties",
+    content: "motd=Updated\n",
+    expectedRevision: "b".repeat(64),
+  } satisfies ServerConfigurationWriteRequest;
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverConfigurationWrite, 1, configurationWrite),
+    serverConfigurationDocument,
+  );
+  assert.deepEqual(configurationWrites, [configurationWrite]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverConfigurationWrite, 1, {
+      ...configurationWrite,
+      content: 42,
+    }),
+    /must be a string/,
+  );
   assert.deepEqual(await runtime.invoke(desktopChannels.javaRuntimeScan, 1), javaInstallations);
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeScan, 999), /request rejected/);
   assert.deepEqual(
@@ -929,6 +1023,9 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationList), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationRead), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationWrite), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGet), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStart), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStop), false);
@@ -992,6 +1089,18 @@ await test("desktop shell keeps macOS alive after the last window closes", async
         throw new Error("not expected");
       },
       listServerInstances: async () => [],
+      listServerConfigurations: async (instanceId) => ({
+        instanceId,
+        pluginSupported: false,
+        serverFiles: [],
+        plugins: [],
+      }),
+      readServerConfiguration: async () => {
+        throw new Error("not expected");
+      },
+      writeServerConfiguration: async () => {
+        throw new Error("not expected");
+      },
       readServerRuntime: async (instanceId) => ({ instanceId, state: "stopped" }),
       startServerRuntime: async (instanceId) => ({ instanceId, state: "running" }),
       stopServerRuntime: async (instanceId) => ({ instanceId, state: "stopped" }),
