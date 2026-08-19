@@ -147,6 +147,7 @@ await test("Java scanner reads release metadata, deduplicates paths, and sorts n
       architecture: "x64",
       is64Bit: true,
       source: "java-home",
+      disabled: false,
     });
     assert.match(installations[0]!.id, /^[a-f0-9]{16}$/u);
     assert.equal(installations[1]!.architecture, "x86");
@@ -163,6 +164,7 @@ await test("Java scanner reads release metadata, deduplicates paths, and sorts n
       architecture: "arm64",
       is64Bit: true,
       source: "manual",
+      disabled: false,
     });
     assert.equal(inspectedJavaPath, javaWithoutRelease.executable);
   } finally {
@@ -170,7 +172,7 @@ await test("Java scanner reads release metadata, deduplicates paths, and sorts n
   }
 });
 
-await test("Java manager keeps manually added installations available to later scans", async () => {
+await test("Java manager persists manual records and disabled automatic installations", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-java-manager-"));
   try {
     const selectedJava = await writeFakeJava(root, {
@@ -188,7 +190,7 @@ await test("Java manager keeps manually added installations available to later s
       } as unknown as PluginContext;
       await createJavaRuntimeManagerModule({
         platform: "win32",
-        candidateProviders: [async () => []],
+        candidateProviders: [async () => [{ path: selectedJava.executable, source: "filesystem" }]],
       }).apply(context, null);
       const service = providers.get(javaRuntimeManagerContract);
       assert.ok(service, "Java runtime manager must publish its scan service");
@@ -196,19 +198,29 @@ await test("Java manager keeps manually added installations available to later s
     };
 
     const javaRuntimeManager = await activateManager();
-    assert.deepEqual(await javaRuntimeManager.scan(), []);
-    const inspected = await javaRuntimeManager.inspect(selectedJava.executable);
-    assert.equal(inspected.source, "manual");
-    assert.deepEqual(await javaRuntimeManager.scan(), [inspected]);
-    assert.equal(await javaRuntimeManager.remove(selectedJava.executable), true);
-    assert.deepEqual(await javaRuntimeManager.scan(), []);
-    await access(selectedJava.executable);
+    const automatic = (await javaRuntimeManager.scan())[0]!;
+    assert.equal(automatic.source, "filesystem");
+    assert.equal(automatic.disabled, false);
+    assert.equal(await javaRuntimeManager.setDisabled(automatic.id, true), true);
+    assert.deepEqual(await javaRuntimeManager.scan(), [{ ...automatic, disabled: true }]);
 
     const restartedJavaRuntimeManager = await activateManager();
-    assert.deepEqual(await restartedJavaRuntimeManager.scan(), []);
+    assert.deepEqual(await restartedJavaRuntimeManager.scan(), [{ ...automatic, disabled: true }]);
+    assert.equal(await restartedJavaRuntimeManager.setDisabled(automatic.id, false), false);
+    assert.deepEqual(await restartedJavaRuntimeManager.scan(), [automatic]);
+
+    const inspected = await restartedJavaRuntimeManager.inspect(selectedJava.executable);
+    assert.equal(inspected.source, "manual");
+    assert.equal(inspected.disabled, false);
+    assert.deepEqual(await restartedJavaRuntimeManager.scan(), [inspected]);
+    assert.equal(await restartedJavaRuntimeManager.remove(selectedJava.executable), true);
+    assert.deepEqual(await restartedJavaRuntimeManager.scan(), [automatic]);
+    await access(selectedJava.executable);
+
     assert.equal(await restartedJavaRuntimeManager.remove(selectedJava.executable), false);
     await assert.rejects(restartedJavaRuntimeManager.inspect(""), /non-empty string/);
     await assert.rejects(restartedJavaRuntimeManager.remove(""), /non-empty string/);
+    await assert.rejects(restartedJavaRuntimeManager.setDisabled("invalid", true), /16-character/);
     assert.equal(javaRuntimeManagerManifest.entries[0]?.runtime, "host");
     assert.equal(parseJavaMajorVersion("1.8.0_452"), 8);
     assert.equal(parseJavaMajorVersion("21.0.7+6-LTS"), 21);

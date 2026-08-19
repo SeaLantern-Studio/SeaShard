@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import type { JavaInstallationSnapshot, JavaRuntimeClientService } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Card } from "cmzya-modern-ui";
-import { Check, CircleMinus, Coffee, Plus, Search, WandSparkles } from "lucide-vue-next";
+import {
+  Ban,
+  Check,
+  CircleMinus,
+  Coffee,
+  Plus,
+  Power,
+  Search,
+  WandSparkles,
+} from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
 const props = defineProps<{
@@ -18,6 +27,7 @@ const selectedJavaId = ref("auto");
 const scanning = ref(false);
 const adding = ref(false);
 const removingJavaId = ref<string>();
+const updatingJavaId = ref<string>();
 const javaMenu = reactive({
   open: false,
   x: 0,
@@ -26,7 +36,13 @@ const javaMenu = reactive({
 });
 const operationMessage = ref("自动选择，或使用电脑上检测到的 Java");
 const operationTone = ref<OperationTone>("neutral");
-const busy = computed(() => scanning.value || adding.value || removingJavaId.value !== undefined);
+const busy = computed(
+  () =>
+    scanning.value ||
+    adding.value ||
+    removingJavaId.value !== undefined ||
+    updatingJavaId.value !== undefined,
+);
 const detectedJavaInstallations = computed(() => {
   const installations = new Map<string, JavaInstallationSnapshot>();
   for (const installation of scannedJavaInstallations.value) {
@@ -42,6 +58,9 @@ const detectedJavaInstallations = computed(() => {
       left.path.localeCompare(right.path),
   );
 });
+const javaMenuInstallation = computed(() =>
+  detectedJavaInstallations.value.find(({ id }) => id === javaMenu.installationId),
+);
 
 function reportOperation(message: string, tone: OperationTone): void {
   operationMessage.value = message;
@@ -89,7 +108,7 @@ async function addJavaInstallation(): Promise<void> {
       ),
       installation,
     ];
-    selectedJavaId.value = installation.id;
+    selectedJavaId.value = installation.disabled ? "auto" : installation.id;
     reportOperation(`已添加 Java ${installation.version} · ${installation.vendor}`, "success");
   } catch (error) {
     reportOperation(
@@ -101,15 +120,14 @@ async function addJavaInstallation(): Promise<void> {
   }
 }
 
-/** 只有通过“添加”保存的记录能够移除；自动扫描项没有可删除的 SeaShard 记录。 */
+/** 自动扫描和手动添加项都可禁用；只有手动添加项额外提供“从列表中移除”。 */
 function openJavaMenu(event: MouseEvent, installation: JavaInstallationSnapshot): void {
   closeJavaMenu();
-  if (installation.source !== "manual") return;
   const root = pageRoot.value;
   if (!root) return;
   const bounds = root.getBoundingClientRect();
   const menuWidth = 184;
-  const menuHeight = 42;
+  const menuHeight = installation.source === "manual" ? 79 : 42;
   javaMenu.x = Math.max(8, Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 8));
   javaMenu.y = Math.max(8, Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 8));
   javaMenu.installationId = installation.id;
@@ -134,6 +152,62 @@ function openJavaMenuFromKeyboard(
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") closeJavaMenu();
+}
+
+function selectJavaInstallation(installation: JavaInstallationSnapshot): void {
+  if (installation.disabled) {
+    reportOperation("该 Java 已禁用；右键可以重新启用", "neutral");
+    return;
+  }
+  selectedJavaId.value = installation.id;
+}
+
+function updateDisabledState(
+  installations: readonly JavaInstallationSnapshot[],
+  installationId: string,
+  disabled: boolean,
+): readonly JavaInstallationSnapshot[] {
+  return installations.map((installation) =>
+    installation.id === installationId ? { ...installation, disabled } : installation,
+  );
+}
+
+async function toggleJavaDisabled(): Promise<void> {
+  const installation = javaMenuInstallation.value;
+  closeJavaMenu();
+  if (!installation || busy.value) return;
+  const disabled = !installation.disabled;
+  updatingJavaId.value = installation.id;
+  reportOperation(`正在${disabled ? "禁用" : "启用"} Java ${installation.version}…`, "neutral");
+  try {
+    await props.javaRuntime.setDisabled(installation.id, disabled);
+    scannedJavaInstallations.value = updateDisabledState(
+      scannedJavaInstallations.value,
+      installation.id,
+      disabled,
+    );
+    manuallyAddedJavaInstallations.value = updateDisabledState(
+      manuallyAddedJavaInstallations.value,
+      installation.id,
+      disabled,
+    );
+    if (disabled && selectedJavaId.value === installation.id) selectedJavaId.value = "auto";
+    reportOperation(
+      disabled
+        ? `已禁用 Java ${installation.version}，服务器启动时不会再选择它`
+        : `已启用 Java ${installation.version}，服务器启动时可以再次选择它`,
+      "success",
+    );
+  } catch (error) {
+    reportOperation(
+      `Java ${disabled ? "禁用" : "启用"}失败：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      "error",
+    );
+  } finally {
+    updatingJavaId.value = undefined;
+  }
 }
 
 async function removeJavaInstallation(): Promise<void> {
@@ -246,12 +320,16 @@ onBeforeUnmount(() => {
           :key="installation.id"
           type="button"
           class="java-option"
-          :class="{ selected: selectedJavaId === installation.id }"
+          :class="{
+            selected: selectedJavaId === installation.id,
+            disabled: installation.disabled,
+          }"
           role="radio"
           :aria-checked="selectedJavaId === installation.id"
+          :aria-disabled="installation.disabled"
           :title="installation.path"
-          :aria-haspopup="installation.source === 'manual' ? 'menu' : undefined"
-          @click="selectedJavaId = installation.id"
+          aria-haspopup="menu"
+          @click="selectJavaInstallation(installation)"
           @contextmenu.prevent.stop="openJavaMenu($event, installation)"
           @keydown.shift.f10.prevent.stop="openJavaMenuFromKeyboard($event, installation)"
         >
@@ -259,13 +337,17 @@ onBeforeUnmount(() => {
             <Coffee :size="20" :stroke-width="1.8" />
           </span>
           <span class="java-option-copy">
-            <span class="java-option-name">Java {{ installation.version }}</span>
+            <span class="java-option-name">
+              Java {{ installation.version }}
+              <span v-if="installation.disabled" class="java-option-disabled-badge">已禁用</span>
+            </span>
             <span class="java-option-detail">
               {{ installation.vendor }} · {{ installation.architecture }} · {{ installation.path }}
             </span>
           </span>
           <span class="java-option-check" aria-hidden="true">
-            <Check v-if="selectedJavaId === installation.id" :size="17" :stroke-width="2" />
+            <Ban v-if="installation.disabled" :size="17" :stroke-width="1.9" />
+            <Check v-else-if="selectedJavaId === installation.id" :size="17" :stroke-width="2" />
           </span>
         </button>
       </div>
@@ -278,7 +360,18 @@ onBeforeUnmount(() => {
       :style="{ left: `${javaMenu.x}px`, top: `${javaMenu.y}px` }"
       @pointerdown.stop
     >
-      <button type="button" role="menuitem" :disabled="busy" @click="removeJavaInstallation">
+      <button type="button" role="menuitem" :disabled="busy" @click="toggleJavaDisabled">
+        <Power :size="16" :stroke-width="1.8" />
+        <span>{{ javaMenuInstallation?.disabled ? "启用" : "禁用" }}</span>
+      </button>
+      <button
+        v-if="javaMenuInstallation?.source === 'manual'"
+        type="button"
+        class="java-context-menu-remove"
+        role="menuitem"
+        :disabled="busy"
+        @click="removeJavaInstallation"
+      >
         <CircleMinus :size="16" :stroke-width="1.8" />
         <span>从列表中移除</span>
       </button>
@@ -360,6 +453,11 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.java-context-menu-remove {
+  margin-top: 5px;
+  border-top: 1px solid var(--sl-border-light) !important;
+}
+
 .java-context-menu button:hover:not(:disabled) {
   background: var(--sl-bg-secondary);
 }
@@ -419,6 +517,27 @@ onBeforeUnmount(() => {
   background: var(--sl-primary-bg);
 }
 
+.java-option.disabled {
+  border-color: var(--sl-border-light);
+  background: var(--sl-bg-secondary);
+  cursor: context-menu;
+  opacity: 0.58;
+}
+
+.java-option.disabled:hover {
+  border-color: var(--sl-border);
+  background: var(--sl-bg-secondary);
+}
+
+.java-option.disabled:active {
+  transform: none;
+}
+
+.java-option.disabled .java-option-icon,
+.java-option.disabled .java-option-check {
+  color: var(--sl-text-tertiary);
+}
+
 .java-option-icon {
   display: grid;
   width: 36px;
@@ -439,15 +558,27 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.java-option-name,
 .java-option-detail {
   display: block;
 }
 
 .java-option-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--sl-text-primary);
   font-size: 0.9375rem;
   font-weight: 500;
+}
+
+.java-option-disabled-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-full);
+  color: var(--sl-text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .java-option-detail {

@@ -88,6 +88,7 @@ const java17 = {
   architecture: "x64",
   is64Bit: true,
   source: "registry",
+  disabled: false,
 } satisfies JavaInstallationSnapshot;
 
 const java21 = {
@@ -445,14 +446,22 @@ await test("launch helpers select compatible Java and reject reserved JVM argume
     }).id,
     java21.id,
   );
+  assert.equal(
+    selectJavaInstallation([{ ...java17, disabled: true }, java21], {
+      major: 17,
+      exact: false,
+      description: "fixture",
+    }).id,
+    java21.id,
+  );
   assert.throws(
     () =>
-      selectJavaInstallation([java21], {
+      selectJavaInstallation([{ ...java25, disabled: true }], {
         major: 25,
         exact: true,
         description: "NeoForge 26.1",
       }),
-    /未检测到 Java 25。NeoForge 26\.1 必须使用 Java 25/,
+    /未检测到已启用的 Java 25。NeoForge 26\.1 必须使用 Java 25/,
   );
   assert.deepEqual(parseJvmArguments("-Dname=\"Sea Shard\" '-Dliteral=a b'"), [
     "-Dname=Sea Shard",

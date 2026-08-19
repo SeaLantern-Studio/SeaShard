@@ -298,6 +298,7 @@ function createJavaInstallationSnapshot(
     architecture,
     is64Bit: architecture === "x64" || architecture === "arm64",
     source,
+    disabled: false,
   };
 }
 

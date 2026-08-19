@@ -144,6 +144,10 @@ export interface DesktopShellConfig {
   scanJavaInstallations(): ReturnType<JavaRuntimeManagerService["scan"]>;
   inspectJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["inspect"]>;
   removeJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["remove"]>;
+  setJavaInstallationDisabled(
+    installationId: string,
+    disabled: boolean,
+  ): ReturnType<JavaRuntimeManagerService["setDisabled"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
@@ -625,6 +629,19 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(executablePath, "Java executable path"),
           );
         });
+        config.runtime.handle(
+          desktopChannels.javaRuntimeSetDisabled,
+          (event, installationId, disabled) => {
+            ownedWindow(event.sender.id);
+            if (typeof disabled !== "boolean") {
+              throw new TypeError("Java disabled state must be a boolean");
+            }
+            return config.setJavaInstallationDisabled(
+              expectNonEmptyString(installationId, "Java installation id"),
+              disabled,
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverCoreDownloadListTasks, (event) => {
           ownedWindow(event.sender.id);
           return config.listServerCoreDownloadTasks();
@@ -718,6 +735,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.javaRuntimeScan);
           config.runtime.removeHandler(desktopChannels.javaRuntimeAdd);
           config.runtime.removeHandler(desktopChannels.javaRuntimeRemove);
+          config.runtime.removeHandler(desktopChannels.javaRuntimeSetDisabled);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);

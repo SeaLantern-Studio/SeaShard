@@ -388,6 +388,7 @@ const javaInstallations = [
     architecture: "x64",
     is64Bit: true,
     source: "registry",
+    disabled: false,
   },
 ] satisfies readonly JavaInstallationSnapshot[];
 
@@ -436,6 +437,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   const configurationWrites: ServerConfigurationWriteRequest[] = [];
   const inspectedJavaPaths: string[] = [];
   const removedJavaPaths: string[] = [];
+  const javaDisabledUpdates: Array<{ installationId: string; disabled: boolean }> = [];
   const saveAsRequest = {
     serverType: "paper",
     gameVersion: "1.21.1",
@@ -554,6 +556,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       removeJavaInstallation: async (executablePath) => {
         removedJavaPaths.push(executablePath);
         return true;
+      },
+      setJavaInstallationDisabled: async (installationId, disabled) => {
+        javaDisabledUpdates.push({ installationId, disabled });
+        return disabled;
       },
       listServerCoreDownloadTasks: async () => downloadTasks,
       cancelServerCoreDownload: async (taskId) => {
@@ -680,6 +686,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeAdd, 1), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.javaRuntimeRemove, 1, manuallyAddedJavaInstallation.path),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.javaRuntimeSetDisabled, 1, javaInstallations[0]!.id, true),
     /request rejected/,
   );
   await assert.rejects(
@@ -912,6 +922,17 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     runtime.invoke(desktopChannels.javaRuntimeRemove, 1, ""),
     /non-empty string/,
   );
+  assert.equal(
+    await runtime.invoke(desktopChannels.javaRuntimeSetDisabled, 1, javaInstallations[0]!.id, true),
+    true,
+  );
+  assert.deepEqual(javaDisabledUpdates, [
+    { installationId: javaInstallations[0]!.id, disabled: true },
+  ]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.javaRuntimeSetDisabled, 1, javaInstallations[0]!.id, "true"),
+    /must be a boolean/,
+  );
   runtime.fileSelection = undefined;
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverRuntimeGet, 1, "instance-paper"),
@@ -1072,6 +1093,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeScan), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeAdd), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeRemove), false);
+  assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeSetDisabled), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
@@ -1152,6 +1174,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
         throw new Error("not expected");
       },
       removeJavaInstallation: async () => false,
+      setJavaInstallationDisabled: async (_installationId, disabled) => disabled,
       listServerCoreDownloadTasks: async () => [],
       cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},

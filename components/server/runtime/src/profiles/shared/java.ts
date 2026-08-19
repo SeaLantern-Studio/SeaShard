@@ -11,10 +11,12 @@ export function selectJavaInstallation(
   requirement: JavaVersionRequirement,
 ): JavaInstallationSnapshot {
   const compatible = installations
-    .filter((installation) =>
-      requirement.exact
-        ? installation.majorVersion === requirement.major
-        : installation.majorVersion >= requirement.major,
+    .filter(
+      (installation) =>
+        !installation.disabled &&
+        (requirement.exact
+          ? installation.majorVersion === requirement.major
+          : installation.majorVersion >= requirement.major),
     )
     .sort(
       (left, right) =>
@@ -28,9 +30,9 @@ export function selectJavaInstallation(
       ? `Java ${requirement.major}`
       : `Java ${requirement.major} 或更高版本`;
     throw new Error(
-      `未检测到 ${requiredVersion}。${requirement.description} ${
+      `未检测到已启用的 ${requiredVersion}。${requirement.description} ${
         requirement.exact ? "必须使用" : "需要"
-      } ${requiredVersion}，请先安装或添加对应的 Java 后重试。`,
+      } ${requiredVersion}，请先启用、安装或添加对应的 Java 后重试。`,
     );
   }
   return selected;

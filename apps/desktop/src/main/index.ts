@@ -404,6 +404,7 @@ function expectJavaInstallation(value: unknown, label = "installation"): JavaIns
     !Number.isSafeInteger(installation.majorVersion) ||
     (installation.majorVersion as number) <= 0 ||
     typeof installation.is64Bit !== "boolean" ||
+    typeof installation.disabled !== "boolean" ||
     !javaInstallationSources.has(installation.source as JavaInstallationSource)
   ) {
     throw new Error(`java runtime manager returned invalid ${label}`);
@@ -1027,6 +1028,17 @@ async function bootstrap(): Promise<void> {
                 throw new Error("java runtime manager returned an invalid removal result");
               }
               return removed;
+            },
+            setJavaInstallationDisabled: async (installationId, disabled) => {
+              const result = await activeKernel.callService(
+                javaRuntimeManagerContract,
+                "setDisabled",
+                [installationId, disabled],
+              );
+              if (typeof result !== "boolean" || result !== disabled) {
+                throw new Error("java runtime manager returned an invalid disabled state");
+              }
+              return result;
             },
             listServerCoreDownloadTasks: async () =>
               expectServerCoreDownloadTasks(

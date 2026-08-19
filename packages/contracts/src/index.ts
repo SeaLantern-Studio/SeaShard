@@ -38,6 +38,7 @@ export const desktopChannels = {
   serverConfigurationWrite: "seashard.server-configuration.write",
   javaRuntimeAdd: "seashard.java-runtime.add",
   javaRuntimeRemove: "seashard.java-runtime.remove",
+  javaRuntimeSetDisabled: "seashard.java-runtime.set-disabled",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -371,6 +372,8 @@ export interface JavaInstallationSnapshot {
   architecture: string;
   is64Bit: boolean;
   source: JavaInstallationSource;
+  /** 禁用项继续展示，但不会参与服务器启动时的 Java 选择。 */
+  disabled: boolean;
 }
 
 /** Host 组件的完整能力；显式检查只接受用户选择的可执行文件路径。 */
@@ -379,6 +382,8 @@ export interface JavaRuntimeManagerService {
   inspect(executablePath: string): Promise<JavaInstallationSnapshot>;
   /** 仅移除 SeaShard 保存的手动路径记录，不删除或卸载本地 Java。 */
   remove(executablePath: string): Promise<boolean>;
+  /** 持久化启用状态；禁用只影响 SeaShard 选择，不修改本地 Java。 */
+  setDisabled(installationId: string, disabled: boolean): Promise<boolean>;
 }
 
 /** Renderer 只触发受控扫描或系统文件选择，不直接提交任意文件系统路径。 */
@@ -387,6 +392,8 @@ export interface JavaRuntimeClientService {
   add(): Promise<JavaInstallationSnapshot | undefined>;
   /** 仅移除通过“添加”保存的记录；自动扫描到的安装不受影响。 */
   remove(executablePath: string): Promise<boolean>;
+  /** 禁用项保留在列表中，可随时重新启用。 */
+  setDisabled(installationId: string, disabled: boolean): Promise<boolean>;
 }
 
 /** 一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。 */

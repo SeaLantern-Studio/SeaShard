@@ -74,6 +74,8 @@ const api: SeaShardDesktopApi = Object.freeze({
     add: () => ipcRenderer.invoke(desktopChannels.javaRuntimeAdd),
     remove: (executablePath: string) =>
       ipcRenderer.invoke(desktopChannels.javaRuntimeRemove, executablePath),
+    setDisabled: (installationId: string, disabled: boolean) =>
+      ipcRenderer.invoke(desktopChannels.javaRuntimeSetDisabled, installationId, disabled),
   }),
   dialog: Object.freeze({
     selectDirectory: () => ipcRenderer.invoke(desktopChannels.dialogSelectDirectory),
