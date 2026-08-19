@@ -229,6 +229,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   child.stdout.write("\u001b]0;Nukkit MOT\u0007");
   child.stdout.write("22:38:12 [main] [INFO] Ready\u001b[0m\n");
   child.stdout.write("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8\n");
+  child.stderr.write("0% [        ]\r50% [====    ]\r100% [========]\n");
   child.stderr.write("warning from java\n");
   await manager.sendCommand(vanillaInstance.id, "list");
   assert.equal((child.stdin as PassThrough).read()?.toString(), "list\n");
@@ -242,6 +243,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
       "stdout:second line",
       "stdout:命令不存在",
       "stdout:22:38:12 [main] [INFO] Ready",
+      "stderr:100% [========]",
       "stderr:warning from java",
       "input:> list",
     ],

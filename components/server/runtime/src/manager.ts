@@ -697,8 +697,17 @@ function decodeConsoleBytes(bytes: Buffer): string {
 }
 
 function normalizeProcessLine(text: string): string | undefined {
-  const normalized = stripTerminalControlSequences(text);
+  const normalized = stripTerminalControlSequences(lastTerminalCarriageReturnFrame(text));
   return javaToolOptionsNoticePattern.test(normalized) ? undefined : normalized;
+}
+
+/**
+ * 回车符会把终端光标移回当前行开头。进度条用它反复覆盖同一行，因此日志只保留最终帧，
+ * 避免把 1% 到 100% 的所有刷新内容拼成一条超长文本。
+ */
+function lastTerminalCarriageReturnFrame(text: string): string {
+  const lastCarriageReturn = text.lastIndexOf("\r");
+  return lastCarriageReturn < 0 ? text : text.slice(lastCarriageReturn + 1);
 }
 
 /**

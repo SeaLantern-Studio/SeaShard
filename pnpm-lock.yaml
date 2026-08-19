@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   cmzya-modern-ui@0.6.2:
-    hash: c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e
+    hash: b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1
     path: patches/cmzya-modern-ui@0.6.2.patch
 
 importers:
@@ -19,6 +19,9 @@ importers:
       '@vitejs/plugin-vue':
         specifier: 6.0.8
         version: 6.0.8(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
@@ -132,7 +135,7 @@ importers:
         version: link:../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
@@ -303,7 +306,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -324,7 +327,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -363,7 +366,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -402,7 +405,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -420,7 +423,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -441,7 +444,7 @@ importers:
         version: link:../../../packages/ui-sdk
       cmzya-modern-ui:
         specifier: 0.6.2
-        version: 0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -2887,7 +2890,7 @@ snapshots:
     dependencies:
       readdirp: 5.1.1
 
-  cmzya-modern-ui@0.6.2(patch_hash=c3d40fd9163d8753e32cdbc143a221e4faba3eb3738a9599107c8970de1d7c5e)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3)):
+  cmzya-modern-ui@0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3)):
     dependencies:
       highlight.js: 11.12.0
       lucide-vue-next: 0.400.0(vue@3.5.41(typescript@5.9.3))
