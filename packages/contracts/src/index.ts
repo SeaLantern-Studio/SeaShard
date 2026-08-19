@@ -240,6 +240,29 @@ export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
 }
 
+/** 运行组件已实现并可由启动页直接调度的核心类型。 */
+export const serverRuntimeSupportedTypes = [
+  "vanilla",
+  "paper",
+  "purpur",
+  "folia",
+  "fabric",
+  "quilt",
+  "neoforge",
+  "arclight-neoforge",
+  "mohist",
+  "velocity",
+  "nukkitx",
+] as const;
+export type ServerRuntimeSupportedType = (typeof serverRuntimeSupportedTypes)[number];
+
+/** Renderer 与 Host 共享同一支持列表，避免页面和进程管理器各维护一份条件链。 */
+export function isServerRuntimeSupportedType(value: unknown): value is ServerRuntimeSupportedType {
+  return (
+    typeof value === "string" && (serverRuntimeSupportedTypes as readonly string[]).includes(value)
+  );
+}
+
 export type ServerProcessState = "stopped" | "starting" | "running" | "stopping" | "failed";
 export type ServerConsoleStream = "stdout" | "stderr" | "input" | "system";
 
@@ -263,7 +286,7 @@ export interface ServerConsoleLine {
   timestamp: string;
 }
 
-/** Host 侧服务器进程能力；首期只接受实例元数据中明确标记为 vanilla 的核心。 */
+/** Host 侧服务器进程能力；仅启动实例元数据中明确声明且已实现运行策略的核心。 */
 export interface ServerRuntimeService {
   get(instanceId: string): Promise<ServerRuntimeSnapshot>;
   start(instanceId: string): Promise<ServerRuntimeSnapshot>;

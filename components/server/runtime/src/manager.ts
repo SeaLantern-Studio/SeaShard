@@ -7,9 +7,18 @@ import {
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
-import { basename, delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import {
+  buildServerLaunchPlan,
+  selectJavaInstallation,
+  type ServerLaunchPlan,
+  type ServerPreparationPlan,
+  type FileHashManifestPlan,
+} from "./profiles";
 
 const maximumConsoleLines = 5_000;
 const maximumCommandLength = 32_768;
@@ -29,9 +38,10 @@ export interface ServerRuntimeFileSystem {
   access(path: string): Promise<void>;
   readTextFile(path: string): Promise<string>;
   writeTextFile(path: string, content: string): Promise<void>;
+  hashFile(path: string, algorithm: "md5"): Promise<string>;
 }
 
-export interface VanillaServerRuntimeManagerOptions {
+export interface ServerRuntimeManagerOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
   scanJavaInstallations(): Promise<readonly JavaInstallationSnapshot[]>;
   readSettings(): Promise<ServerSettingsSnapshot>;
@@ -54,24 +64,32 @@ interface ActiveSession {
   readonly stderr: ProcessLineDecoder;
   readonly closed: Promise<void>;
   readonly resolveClosed: () => void;
+  readonly stopCommand: string;
   snapshot: ServerRuntimeSnapshot;
   forceStopTimer?: ReturnType<typeof setTimeout>;
   stdinFailure?: Error;
 }
 
+interface ActivePreparation {
+  readonly child: ChildProcessWithoutNullStreams;
+  readonly closed: Promise<void>;
+}
+
 const defaultFileSystem: ServerRuntimeFileSystem = {
   access,
   readTextFile: (path) => readFile(path, "utf8"),
+  hashFile: hashFileStreaming,
   writeTextFile: (path, content) => writeFile(path, content, "utf8"),
 };
 
 /**
- * 管理原版服务端的直接 JAR 进程。
+ * 管理已声明启动策略的服务器进程。
  *
- * 核心类型只读取导入或下载阶段已经写入的实例元数据；启动阶段不会扫描 JAR、文件名或目录。
+ * 核心类型、版本和原始产物身份均来自下载阶段写入的实例元数据；启动阶段不扫描 JAR。
  */
-export class VanillaServerRuntimeManager {
+export class ServerRuntimeManager {
   private readonly sessions = new Map<string, ActiveSession>();
+  private readonly preparations = new Map<string, ActivePreparation>();
   private readonly snapshots = new Map<string, ServerRuntimeSnapshot>();
   private readonly logs = new Map<string, ConsoleLogState>();
   private readonly fileSystem: ServerRuntimeFileSystem;
@@ -80,7 +98,7 @@ export class VanillaServerRuntimeManager {
   private disposed = false;
   private disposeTask?: Promise<void>;
 
-  constructor(private readonly options: VanillaServerRuntimeManagerOptions) {
+  constructor(private readonly options: ServerRuntimeManagerOptions) {
     this.fileSystem = options.fileSystem ?? defaultFileSystem;
     this.spawnProcess =
       options.spawnProcess ??
@@ -115,7 +133,7 @@ export class VanillaServerRuntimeManager {
 
     const startingSnapshot: ServerRuntimeSnapshot = { instanceId, state: "starting" };
     this.snapshots.set(instanceId, startingSnapshot);
-    this.appendLine(instanceId, "system", "[SeaShard] 正在准备原版服务器启动环境…");
+    this.appendLine(instanceId, "system", "[SeaShard] 正在解析服务器核心启动策略…");
 
     let child: ChildProcessWithoutNullStreams | undefined;
     try {
@@ -126,18 +144,19 @@ export class VanillaServerRuntimeManager {
       ]);
       // 异步扫描期间组件可能开始卸载；此后不得再写实例文件或创建新进程。
       this.ensureActive();
-      validateVanillaInstance(instance);
-      const java = selectJavaInstallation(installations, instance.gameVersion);
-      await this.prepareInstanceFiles(instance, settings);
-      const arguments_ = buildVanillaLaunchArguments(instance, settings);
+      const plan = buildServerLaunchPlan(instance, settings);
+      const java = selectJavaInstallation(installations, plan.java);
+      await this.prepareInstallation(instanceId, java, plan);
+      this.ensureActive();
+      await this.prepareRuntimeFiles(plan, settings);
       const environment = createJavaEnvironment(java);
 
-      child = this.spawnProcess(java.path, arguments_, {
-        cwd: instance.rootPath,
+      child = this.spawnProcess(java.path, plan.arguments, {
+        cwd: plan.workingDirectory,
         env: environment,
         windowsHide: true,
       });
-      const session = this.createSession(instanceId, child, startingSnapshot);
+      const session = this.createSession(instanceId, child, startingSnapshot, plan.stopCommand);
       this.sessions.set(instanceId, session);
       await waitForSpawn(child);
       if (this.sessions.get(instanceId) !== session) {
@@ -155,7 +174,7 @@ export class VanillaServerRuntimeManager {
       this.appendLine(
         instanceId,
         "system",
-        `[SeaShard] 原版服务器进程已启动（Java ${java.version}）。`,
+        `[SeaShard] ${plan.displayName} 服务器进程已启动（Java ${java.version}）。`,
       );
       return { ...runningSnapshot };
     } catch (error) {
@@ -204,11 +223,13 @@ export class VanillaServerRuntimeManager {
     }
   }
 
-  /** 组件卸载必须等待每个 Java 进程安全停止，超时强杀后仍等待 close。 */
+  /** 组件卸载必须等待运行进程安全停止，并终止仍在执行的安装器。 */
   dispose(): Promise<void> {
     if (this.disposeTask) return this.disposeTask;
     this.disposed = true;
-    this.disposeTask = this.disposeSessions();
+    this.disposeTask = Promise.all([this.disposeSessions(), this.disposePreparations()]).then(
+      () => undefined,
+    );
     return this.disposeTask;
   }
 
@@ -226,6 +247,15 @@ export class VanillaServerRuntimeManager {
     await Promise.all(pendingSessions);
   }
 
+  private async disposePreparations(): Promise<void> {
+    await Promise.all(
+      [...this.preparations.values()].map(async ({ child, closed }) => {
+        child.kill();
+        await closed;
+      }),
+    );
+  }
+
   private async requestSafeStop(instanceId: string, session: ActiveSession): Promise<void> {
     const stoppingSnapshot: ServerRuntimeSnapshot = {
       ...session.snapshot,
@@ -234,13 +264,13 @@ export class VanillaServerRuntimeManager {
     session.snapshot = stoppingSnapshot;
     this.snapshots.set(instanceId, stoppingSnapshot);
     try {
-      await this.writeCommand(instanceId, session, "stop");
+      await this.writeCommand(instanceId, session, session.stopCommand);
     } catch (error) {
       this.forceTerminate(instanceId, session, "[SeaShard] 无法发送安全停止命令，正在终止进程。");
       throw error;
     }
     if (this.sessions.get(instanceId)?.child !== session.child) return;
-    this.appendLine(instanceId, "input", "> stop");
+    this.appendLine(instanceId, "input", `> ${session.stopCommand}`);
     this.appendLine(instanceId, "system", "[SeaShard] 已请求服务器安全停止。");
     this.armForceStop(instanceId, session);
   }
@@ -272,6 +302,7 @@ export class VanillaServerRuntimeManager {
     instanceId: string,
     child: ChildProcessWithoutNullStreams,
     snapshot: ServerRuntimeSnapshot,
+    stopCommand: string,
   ): ActiveSession {
     const stdout = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stdout", line));
     const stderr = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stderr", line));
@@ -285,6 +316,7 @@ export class VanillaServerRuntimeManager {
       stderr,
       closed,
       resolveClosed,
+      stopCommand,
       snapshot,
     };
     child.stdout.on("data", (chunk: Buffer | string) => stdout.write(chunk));
@@ -382,23 +414,178 @@ export class VanillaServerRuntimeManager {
     return instance;
   }
 
-  private async prepareInstanceFiles(
-    instance: ServerInstanceSnapshot,
+  /** 仅在安装哨兵不完整时执行上游安装器；正常启动不重复下载和修补。 */
+  private async prepareInstallation(
+    instanceId: string,
+    java: JavaInstallationSnapshot,
+    plan: ServerLaunchPlan,
+  ): Promise<void> {
+    const preparation = plan.preparation;
+    if (!preparation) return;
+    if (await this.isPreparationComplete(preparation)) {
+      this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 已准备完成。`);
+      return;
+    }
+
+    this.appendLine(instanceId, "system", `[SeaShard] 正在准备 ${preparation.description}…`);
+    const outcome = await this.runPreparationProcess(instanceId, java, preparation);
+    this.ensureActive();
+    const complete = await this.isPreparationComplete(preparation);
+    if (!complete) {
+      throw new Error(`${preparation.description} installer exited without complete runtime files`);
+    }
+    if (outcome.code !== 0 && !preparation.acceptNonZeroWithSentinels) {
+      throw new Error(
+        `${preparation.description} installer exited with code ${outcome.code ?? "unknown"}`,
+      );
+    }
+    if (outcome.signal) {
+      throw new Error(`${preparation.description} installer exited by signal ${outcome.signal}`);
+    }
+    this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 准备完成。`);
+  }
+
+  private async runPreparationProcess(
+    instanceId: string,
+    java: JavaInstallationSnapshot,
+    preparation: ServerPreparationPlan,
+  ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    const child = this.spawnProcess(java.path, preparation.arguments, {
+      cwd: preparation.workingDirectory,
+      env: createJavaEnvironment(java),
+      windowsHide: true,
+    });
+    const stdout = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stdout", line));
+    const stderr = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stderr", line));
+    child.stdout.on("data", (chunk: Buffer | string) => stdout.write(chunk));
+    child.stderr.on("data", (chunk: Buffer | string) => stderr.write(chunk));
+    child.stdin.on("error", (error: Error) => {
+      this.appendLine(instanceId, "stderr", `[SeaShard] 准备进程标准输入错误：${error.message}`);
+      this.options.reportError?.(error);
+    });
+    child.on("error", (error) => {
+      this.appendLine(instanceId, "stderr", `[SeaShard] 准备进程错误：${error.message}`);
+      this.options.reportError?.(error);
+    });
+
+    let resolveClosed = (): void => {};
+    const closed = new Promise<void>((resolvePreparation) => {
+      resolveClosed = resolvePreparation;
+    });
+    const outcome = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolveOutcome) => {
+        child.once("close", (code, signal) => {
+          stdout.end();
+          stderr.end();
+          resolveOutcome({ code, signal });
+          resolveClosed();
+        });
+      },
+    );
+    const active: ActivePreparation = { child, closed };
+    this.preparations.set(instanceId, active);
+
+    try {
+      await waitForSpawn(child);
+      if (preparation.closeStdin) child.stdin.end();
+      return await outcome;
+    } catch (error) {
+      child.kill();
+      await closed;
+      throw error;
+    } finally {
+      if (this.preparations.get(instanceId) === active) {
+        this.preparations.delete(instanceId);
+      }
+    }
+  }
+
+  private async isPreparationComplete(preparation: ServerPreparationPlan): Promise<boolean> {
+    for (const path of preparation.sentinels) {
+      if (!(await canAccess(this.fileSystem, path))) return false;
+    }
+    if (
+      preparation.classPathArgumentFile &&
+      !(await this.hasCompleteArgumentFileClassPath(
+        preparation.workingDirectory,
+        preparation.classPathArgumentFile,
+      ))
+    ) {
+      return false;
+    }
+    return preparation.hashManifest ? this.hasMatchingHashManifest(preparation.hashManifest) : true;
+  }
+
+  /** Mohist 的 installInfo 只含两行无标签 MD5，按集合比较可兼容其固定但未命名的顺序。 */
+  private async hasMatchingHashManifest(manifest: FileHashManifestPlan): Promise<boolean> {
+    const content = await readOptionalText(this.fileSystem, manifest.path);
+    if (content === undefined) return false;
+    const recorded = content
+      .split(/\r?\n/u)
+      .map((line) => line.trim().toLowerCase())
+      .filter((line) => line.length > 0);
+    if (
+      recorded.length !== manifest.targets.length ||
+      recorded.some((hash) => !/^[a-f\d]{32}$/u.test(hash))
+    ) {
+      return false;
+    }
+    const actual = await Promise.all(
+      manifest.targets.map((path) => this.fileSystem.hashFile(path, manifest.algorithm)),
+    );
+    const sortedActual = actual.toSorted();
+    return recorded.toSorted().every((hash, index) => hash === sortedActual[index]);
+  }
+
+  private async hasCompleteArgumentFileClassPath(
+    workingDirectory: string,
+    argumentFilePath: string,
+  ): Promise<boolean> {
+    const content = await readOptionalText(this.fileSystem, argumentFilePath);
+    if (content === undefined) return false;
+    const lines = content
+      .replaceAll("\r\n", "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    const classPathOption = lines.findIndex(
+      (line) => line === "-classpath" || line === "--class-path",
+    );
+    const classPath = classPathOption < 0 ? undefined : lines[classPathOption + 1];
+    if (!classPath) return false;
+    const separator = argumentFilePath.endsWith("win_args.txt") ? ";" : ":";
+    for (const entry of classPath.split(separator).filter(Boolean)) {
+      if (!(await canAccess(this.fileSystem, resolve(workingDirectory, entry)))) return false;
+    }
+    return true;
+  }
+
+  private async prepareRuntimeFiles(
+    plan: ServerLaunchPlan,
     settings: ServerSettingsSnapshot,
   ): Promise<void> {
-    await this.fileSystem.access(instance.coreJarPath);
-    if (settings.autoAcceptEula) {
-      const eulaPath = resolve(instance.rootPath, "eula.txt");
+    for (const path of plan.requiredRuntimeFiles) await this.fileSystem.access(path);
+
+    if (plan.jvmArgumentFile) {
+      const current = await readOptionalText(this.fileSystem, plan.jvmArgumentFile.path);
+      await this.fileSystem.writeTextFile(
+        plan.jvmArgumentFile.path,
+        updateManagedJvmArgumentFile(current ?? "", plan.jvmArgumentFile.managedArguments),
+      );
+    }
+    if (plan.eula === "minecraft" && settings.autoAcceptEula) {
+      const eulaPath = resolve(plan.workingDirectory, "eula.txt");
       const current = await readOptionalText(this.fileSystem, eulaPath);
       await this.fileSystem.writeTextFile(eulaPath, upsertProperty(current ?? "", "eula", "true"));
     }
-
-    const propertiesPath = resolve(instance.rootPath, "server.properties");
-    if ((await readOptionalText(this.fileSystem, propertiesPath)) === undefined) {
-      await this.fileSystem.writeTextFile(
-        propertiesPath,
-        `server-port=${settings.defaultServerPort}\n`,
-      );
+    if (plan.writesServerProperties) {
+      const propertiesPath = resolve(plan.workingDirectory, "server.properties");
+      if ((await readOptionalText(this.fileSystem, propertiesPath)) === undefined) {
+        await this.fileSystem.writeTextFile(
+          propertiesPath,
+          `server-port=${settings.defaultServerPort}\n`,
+        );
+      }
     }
   }
 
@@ -484,119 +671,6 @@ class ProcessLineDecoder {
   }
 }
 
-export function buildVanillaLaunchArguments(
-  instance: ServerInstanceSnapshot,
-  settings: ServerSettingsSnapshot,
-): readonly string[] {
-  const jvmArguments = parseJvmArguments(settings.defaultJvmArguments);
-  for (const argument of jvmArguments) {
-    if (argument === "-jar" || /^-Xm[sx]/iu.test(argument)) {
-      throw new TypeError("default JVM arguments must not override -jar, -Xms, or -Xmx");
-    }
-  }
-  const rootPath = resolve(instance.rootPath);
-  const jarPath = resolve(instance.coreJarPath);
-  const jarArgument = dirname(jarPath) === rootPath ? basename(jarPath) : jarPath;
-  return [
-    ...jvmArguments,
-    `-Xms${settings.defaultMinimumMemoryMiB}M`,
-    `-Xmx${settings.defaultMaximumMemoryMiB}M`,
-    "-jar",
-    jarArgument,
-    "nogui",
-  ];
-}
-
-/** 根据 Minecraft 版本元数据选择最低的兼容 Java，不读取核心文件进行推断。 */
-export function selectJavaInstallation(
-  installations: readonly JavaInstallationSnapshot[],
-  gameVersion: string | undefined,
-): JavaInstallationSnapshot {
-  const requiredMajor = requiredJavaMajor(gameVersion);
-  const compatible = installations
-    .filter((installation) => installation.majorVersion >= requiredMajor)
-    .sort(
-      (left, right) =>
-        left.majorVersion - right.majorVersion ||
-        Number(right.is64Bit) - Number(left.is64Bit) ||
-        left.path.localeCompare(right.path),
-    );
-  const selected = compatible[0];
-  if (!selected) {
-    throw new Error(`Minecraft ${gameVersion} requires Java ${requiredMajor} or newer`);
-  }
-  return selected;
-}
-
-export function requiredJavaMajor(gameVersion: string | undefined): number {
-  const match = gameVersion?.match(/^1\.(\d+)(?:\.(\d+))?/u);
-  if (!match) throw new Error("vanilla server instance is missing a valid Minecraft version");
-  const minor = Number(match[1]);
-  const patch = Number(match[2] ?? 0);
-  if (minor > 20 || (minor === 20 && patch >= 5)) return 21;
-  if (minor >= 18) return 17;
-  if (minor === 17) return 16;
-  return 8;
-}
-
-export function parseJvmArguments(input: string): readonly string[] {
-  const arguments_: string[] = [];
-  let token = "";
-  let tokenStarted = false;
-  let quote: "'" | '"' | undefined;
-
-  for (let index = 0; index < input.length; index += 1) {
-    const character = input[index]!;
-    if (character === "'" || character === '"') {
-      if (quote === character) quote = undefined;
-      else if (!quote) quote = character;
-      else token += character;
-      tokenStarted = true;
-      continue;
-    }
-    if (character === "\\" && quote !== "'") {
-      const next = input[index + 1];
-      if (next && (next === "\\" || next === '"' || next === "'" || /\s/u.test(next))) {
-        token += next;
-        tokenStarted = true;
-        index += 1;
-        continue;
-      }
-    }
-    if (!quote && /\s/u.test(character)) {
-      if (tokenStarted) arguments_.push(token);
-      token = "";
-      tokenStarted = false;
-      continue;
-    }
-    token += character;
-    tokenStarted = true;
-  }
-
-  if (quote) throw new TypeError("default JVM arguments contain an unterminated quote");
-  if (tokenStarted) arguments_.push(token);
-  return arguments_;
-}
-
-function validateVanillaInstance(instance: ServerInstanceSnapshot): void {
-  if (instance.serverType !== "vanilla") {
-    throw new Error("only instances explicitly marked as vanilla are supported");
-  }
-  if (!isAbsolute(instance.rootPath) || !isAbsolute(instance.coreJarPath)) {
-    throw new Error("server instance paths must be absolute");
-  }
-  const relativeJar = relative(resolve(instance.rootPath), resolve(instance.coreJarPath));
-  if (
-    !relativeJar ||
-    relativeJar === ".." ||
-    relativeJar.startsWith("../") ||
-    relativeJar.startsWith("..\\") ||
-    isAbsolute(relativeJar)
-  ) {
-    throw new Error("server core JAR must stay inside the instance root");
-  }
-}
-
 function createJavaEnvironment(java: JavaInstallationSnapshot): NodeJS.ProcessEnv {
   const javaBin = dirname(java.path);
   const path = process.env.PATH;
@@ -675,6 +749,65 @@ function upsertProperty(content: string, key: string, value: string): string {
   }
   if (!propertyWritten) updatedLines.push(`${key}=${value}`);
   return `${updatedLines.join("\n")}\n`;
+}
+
+const managedJvmArgumentsBegin = "# >>> SeaShard managed JVM arguments";
+const managedJvmArgumentsEnd = "# <<< SeaShard managed JVM arguments";
+
+/** 保留安装器和用户注释，只接管活动的堆参数及 SeaShard 自己的参数块。 */
+function updateManagedJvmArgumentFile(
+  content: string,
+  managedArguments: readonly string[],
+): string {
+  const sourceLines = content.replaceAll("\r\n", "\n").split("\n");
+  const retained: string[] = [];
+  let insideManagedBlock = false;
+  for (const line of sourceLines) {
+    if (line.trim() === managedJvmArgumentsBegin) {
+      insideManagedBlock = true;
+      continue;
+    }
+    if (line.trim() === managedJvmArgumentsEnd) {
+      insideManagedBlock = false;
+      continue;
+    }
+    if (insideManagedBlock || /^\s*-Xm[sx]\S*\s*$/iu.test(line)) continue;
+    retained.push(line);
+  }
+  while (retained.at(-1) === "") retained.pop();
+  if (retained.length > 0) retained.push("");
+  retained.push(
+    managedJvmArgumentsBegin,
+    ...managedArguments.map(encodeJvmArgumentFileEntry),
+    managedJvmArgumentsEnd,
+  );
+  return `${retained.join("\n")}\n`;
+}
+
+function encodeJvmArgumentFileEntry(argument: string): string {
+  return /\s|"/u.test(argument)
+    ? `"${argument.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+    : argument;
+}
+
+async function canAccess(fileSystem: ServerRuntimeFileSystem, path: string): Promise<boolean> {
+  try {
+    await fileSystem.access(path);
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+function hashFileStreaming(path: string, algorithm: "md5"): Promise<string> {
+  return new Promise((resolveHash, rejectHash) => {
+    const hash = createHash(algorithm);
+    const input = createReadStream(path);
+    input.once("error", rejectHash);
+    input.on("data", (chunk: Buffer) => hash.update(chunk));
+    input.once("end", () => resolveHash(hash.digest("hex")));
+  });
 }
 
 function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {

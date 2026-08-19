@@ -10,13 +10,13 @@ import {
 } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
-import { VanillaServerRuntimeManager, type VanillaServerRuntimeManagerOptions } from "./manager";
+import { ServerRuntimeManager, type ServerRuntimeManagerOptions } from "./manager";
 
 export interface ServerRuntimeModuleOptions {
   onConsoleLine?(line: ServerConsoleLine): void;
   reportError?(error: unknown): void;
   managerOptions?: Pick<
-    VanillaServerRuntimeManagerOptions,
+    ServerRuntimeManagerOptions,
     "spawnProcess" | "fileSystem" | "now" | "stopGracePeriodMs"
   >;
 }
@@ -45,7 +45,7 @@ export const serverRuntimeManifest: PluginManifest = {
   },
 };
 
-/** 创建原版服务器运行组件；实例、Java 与启动默认值均来自显式 Contract。 */
+/** 创建多核心服务器运行组件；实例、Java 与启动默认值均来自显式 Contract。 */
 export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = {}): PluginModule {
   return {
     inject: [serverInstanceManagerContract, javaRuntimeManagerContract, serverSettingsContract],
@@ -54,7 +54,7 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
       const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
       const javaRuntime = ctx.service<JavaRuntimeManagerService>(javaRuntimeManagerContract);
       const settings = ctx.service<ServerSettingsClientService>(serverSettingsContract);
-      const manager = new VanillaServerRuntimeManager({
+      const manager = new ServerRuntimeManager({
         listInstances: () => instances.list(),
         scanJavaInstallations: () => javaRuntime.scan(),
         readSettings: () => settings.get(),
@@ -92,3 +92,4 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./manager";
+export * from "./profiles";
