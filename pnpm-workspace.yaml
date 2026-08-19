@@ -3,3 +3,6 @@ packages:
   - packages/*
   - components/*/*
   - frontend/*/*
+
+patchedDependencies:
+  cmzya-modern-ui@0.6.2: patches/cmzya-modern-ui@0.6.2.patch

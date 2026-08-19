@@ -24,8 +24,13 @@ export function selectJavaInstallation(
     );
   const selected = compatible[0];
   if (!selected) {
+    const requiredVersion = requirement.exact
+      ? `Java ${requirement.major}`
+      : `Java ${requirement.major} 或更高版本`;
     throw new Error(
-      `${requirement.description} requires ${requirement.exact ? "exactly " : ""}Java ${requirement.major}${requirement.exact ? "" : " or newer"}`,
+      `未检测到 ${requiredVersion}。${requirement.description} ${
+        requirement.exact ? "必须使用" : "需要"
+      } ${requiredVersion}，请先安装或添加对应的 Java 后重试。`,
     );
   }
   return selected;

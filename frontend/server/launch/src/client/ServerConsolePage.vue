@@ -11,6 +11,7 @@ import { Cmz_Button, Cmz_Console, type ConsoleLine } from "cmzya-modern-ui";
 import { Server } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ServerInstanceSelection } from "./server-selection";
+import { runtimeErrorMessage } from "./runtime-error";
 import { BoundedSequenceStore } from "./console-buffer";
 
 const maximumConsoleLines = 5_000;
@@ -153,7 +154,7 @@ async function startSelectedServer(): Promise<void> {
   try {
     runtimeSnapshot.value = await props.runtime.start(instance.id);
   } catch (error) {
-    appendLocalLine("error", `[SeaShard] 启动请求失败：${errorMessage(error)}`);
+    appendLocalLine("error", `[SeaShard] 启动请求失败：${runtimeErrorMessage(error)}`);
     await refreshRuntime();
   } finally {
     startingServer.value = false;
@@ -293,8 +294,8 @@ function errorMessage(error: unknown): string {
             size="sm"
             :disabled="startButtonDisabled"
             :title="
-              selectedInstance && selectedInstance.serverType !== 'vanilla'
-                ? '首期只支持实例元数据明确标记为 vanilla 的原版核心'
+              selectedInstance && !isServerRuntimeSupportedType(selectedInstance.serverType)
+                ? '当前核心尚未接入启动策略'
                 : undefined
             "
             @click="startSelectedServer"

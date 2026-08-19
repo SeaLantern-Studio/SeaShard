@@ -21,6 +21,7 @@ import {
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { ServerInstanceSelection } from "./server-selection";
+import { runtimeErrorMessage } from "./runtime-error";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;
@@ -188,7 +189,7 @@ async function toggleServer(): Promise<void> {
         : await props.runtime.start(instance.id);
     runtimeSnapshots.set(instance.id, snapshot);
   } catch (error) {
-    runtimeError.value = errorMessage(error);
+    runtimeError.value = runtimeErrorMessage(error);
     const snapshot = await props.runtime.get(instance.id).catch(() => undefined);
     if (snapshot) runtimeSnapshots.set(instance.id, snapshot);
   } finally {

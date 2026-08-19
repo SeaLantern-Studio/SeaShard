@@ -213,11 +213,22 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     spawnCalls[0]!.options.env.PATH?.startsWith(`${dirname(java21.path)}${delimiter}`),
     true,
   );
+  const javaToolOptions = spawnCalls[0]!.options.env.JAVA_TOOL_OPTIONS ?? "";
+  assert.equal(
+    javaToolOptions.endsWith(
+      "-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8",
+    ),
+    true,
+  );
   assert.equal(files.get(eulaPath), "# Minecraft EULA\neula=true\n");
   assert.equal(files.get(propertiesPath), "server-port=25566\n");
 
   child.stdout.write("[Server thread/INFO]: Done\r\nsecond");
   child.stdout.write(" line\n");
+  child.stdout.write(Buffer.from("c3fcc1eeb2bbb4e6d4da0a", "hex"));
+  child.stdout.write("\u001b]0;Nukkit MOT\u0007");
+  child.stdout.write("22:38:12 [main] [INFO] Ready\u001b[0m\n");
+  child.stdout.write("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8\n");
   child.stderr.write("warning from java\n");
   await manager.sendCommand(vanillaInstance.id, "list");
   assert.equal((child.stdin as PassThrough).read()?.toString(), "list\n");
@@ -229,6 +240,8 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     [
       "stdout:[Server thread/INFO]: Done",
       "stdout:second line",
+      "stdout:命令不存在",
+      "stdout:22:38:12 [main] [INFO] Ready",
       "stderr:warning from java",
       "input:> list",
     ],
@@ -437,7 +450,7 @@ await test("launch helpers select compatible Java and reject reserved JVM argume
         exact: true,
         description: "NeoForge 26.1",
       }),
-    /exactly Java 25/,
+    /未检测到 Java 25。NeoForge 26\.1 必须使用 Java 25/,
   );
   assert.deepEqual(parseJvmArguments("-Dname=\"Sea Shard\" '-Dliteral=a b'"), [
     "-Dname=Sea Shard",
