@@ -577,7 +577,365 @@ await test("all supported direct and self-bootstrap cores retain the verified ru
     "mohist",
     "velocity",
     "nukkitx",
+    "arclight-fabric",
+    "arclight-forge",
+    "banner",
+    "bukkit",
+    "bungeecord",
+    "catserver",
+    "leaf",
+    "leaves",
+    "lightfall",
+    "pufferfish",
   ]);
+});
+
+await test("second-batch profiles preserve per-type launch and stop contracts", () => {
+  const cases = [
+    {
+      serverType: "arclight-fabric",
+      gameVersion: "1.21.1",
+      artifact: "arclight-fabric-1.21.1.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "arclight-forge",
+      gameVersion: "1.21.1",
+      artifact: "arclight-forge-1.21.1.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "banner",
+      gameVersion: "1.21.1",
+      artifact: "banner-1.21.1.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+      eula: "interactive-minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "bukkit",
+      gameVersion: "1.21.11",
+      artifact: "craftbukkit-1.21.11.jar",
+      javaMajor: 21,
+      maximumJavaMajor: 25,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "bungeecord",
+      gameVersion: "latest",
+      artifact: "BungeeCord.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: [],
+      eula: "none",
+      writesServerProperties: false,
+      stopCommand: "end",
+    },
+    {
+      serverType: "catserver",
+      gameVersion: "1.18.2",
+      artifact: "CatServer-1.18.2.jar",
+      javaMajor: 17,
+      jvmArguments: [
+        "--add-exports=java.base/sun.security.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.jar=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      ],
+      programArguments: [],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "leaf",
+      gameVersion: "1.21.11",
+      artifact: "leaf-1.21.11.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "leaves",
+      gameVersion: "1.21.10",
+      artifact: "leaves-1.21.10.jar",
+      javaMajor: 21,
+      jvmArguments: ["-Dleavesclip.disable.auto-update=true"],
+      programArguments: ["--nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+    {
+      serverType: "lightfall",
+      gameVersion: "1.20",
+      artifact: "lightfall.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: [],
+      eula: "none",
+      writesServerProperties: false,
+      stopCommand: "end",
+    },
+    {
+      serverType: "pufferfish",
+      gameVersion: "1.21.10",
+      artifact: "pufferfish-1.21.10.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+      eula: "minecraft",
+      writesServerProperties: true,
+      stopCommand: "stop",
+    },
+  ] as const;
+
+  const buildInstance = (
+    fixture: {
+      readonly serverType: string;
+      readonly gameVersion: string;
+      readonly artifact: string;
+    },
+    rootPath = `C:/SeaShard/servers/instance-${fixture.serverType}`,
+  ): ServerInstanceSnapshot => ({
+    ...vanillaInstance,
+    id: `instance-${fixture.serverType}`,
+    name: fixture.serverType,
+    rootPath,
+    coreJarPath: `${rootPath}/${fixture.artifact}`,
+    serverType: fixture.serverType,
+    gameVersion: fixture.gameVersion,
+    coreArtifactFileName: fixture.artifact,
+    artifactSha256: "f".repeat(64),
+  });
+
+  for (const fixture of cases) {
+    const instance = buildInstance(fixture);
+    const plan = buildServerLaunchPlan(instance, settings, "win32");
+    assert.equal(plan.serverType, fixture.serverType);
+    assert.equal(plan.java.major, fixture.javaMajor);
+    assert.equal(
+      plan.java.maximumMajor,
+      "maximumJavaMajor" in fixture ? fixture.maximumJavaMajor : undefined,
+    );
+    assert.equal(plan.workingDirectory, resolve(instance.rootPath));
+    assert.equal(plan.eula, fixture.eula);
+    assert.equal(plan.writesServerProperties, fixture.writesServerProperties);
+    assert.equal(plan.stopCommand, fixture.stopCommand);
+    assert.deepEqual(plan.requiredRuntimeFiles, [resolve(instance.coreJarPath)]);
+    assert.equal(plan.preparation, undefined);
+    assert.deepEqual(plan.arguments, [
+      "-XX:+UseG1GC",
+      "-Dmotd=Hello World",
+      "-Xms1024M",
+      "-Xmx2048M",
+      ...fixture.jvmArguments,
+      "-jar",
+      fixture.artifact,
+      ...fixture.programArguments,
+    ]);
+  }
+
+  const historicalCases = [
+    {
+      serverType: "arclight-fabric",
+      gameVersion: "1.20.4",
+      artifact: "arclight-fabric-1.20.4.jar",
+      javaMajor: 17,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+    },
+    {
+      serverType: "arclight-forge",
+      gameVersion: "1.16.5",
+      artifact: "arclight-forge-1.16.5.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+    },
+    {
+      serverType: "banner",
+      gameVersion: "1.19.4",
+      artifact: "banner-1.19.4.jar",
+      javaMajor: 17,
+      jvmArguments: [],
+      programArguments: ["nogui"],
+    },
+    {
+      serverType: "bukkit",
+      gameVersion: "1.8.8",
+      artifact: "craftbukkit-1.8.8.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+    },
+    {
+      serverType: "catserver",
+      gameVersion: "1.12.2",
+      artifact: "CatServer-1.12.2.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: [],
+    },
+    {
+      serverType: "leaf",
+      gameVersion: "1.21.4",
+      artifact: "leaf-1.21.4.jar",
+      javaMajor: 21,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+    },
+    {
+      serverType: "leaves",
+      gameVersion: "1.19.4",
+      artifact: "leaves-1.19.4.jar",
+      javaMajor: 17,
+      jvmArguments: ["-Dleavesclip.disable.auto-update=true"],
+      programArguments: ["--nogui"],
+    },
+    {
+      serverType: "lightfall",
+      gameVersion: "1.18",
+      artifact: "lightfall.jar",
+      javaMajor: 8,
+      jvmArguments: [],
+      programArguments: [],
+    },
+    {
+      serverType: "pufferfish",
+      gameVersion: "1.17.1",
+      artifact: "pufferfish-1.17.1.jar",
+      javaMajor: 16,
+      jvmArguments: [],
+      programArguments: ["--nogui"],
+    },
+  ] as const;
+
+  for (const fixture of historicalCases) {
+    const plan = buildServerLaunchPlan(buildInstance(fixture), settings, "win32");
+    assert.equal(plan.java.major, fixture.javaMajor);
+    assert.equal(plan.java.maximumMajor, undefined);
+    assert.deepEqual(plan.arguments, [
+      "-XX:+UseG1GC",
+      "-Dmotd=Hello World",
+      "-Xms1024M",
+      "-Xmx2048M",
+      ...fixture.jvmArguments,
+      "-jar",
+      fixture.artifact,
+      ...fixture.programArguments,
+    ]);
+  }
+
+  for (const [serverType, character] of [
+    ["leaf", "!"],
+    ["leaves", "+"],
+    ["bukkit", "!"],
+    ["pufferfish", "+"],
+    ["lightfall", "!"],
+  ] as const) {
+    const fixture = cases.find((candidate) => candidate.serverType === serverType);
+    assert.ok(fixture);
+    assert.throws(
+      () =>
+        buildServerLaunchPlan(
+          buildInstance(fixture, `C:/SeaShard/servers/${serverType}${character}invalid`),
+          settings,
+          "win32",
+        ),
+      /cannot run from a working directory containing/,
+    );
+  }
+
+  const bukkit = cases.find((fixture) => fixture.serverType === "bukkit");
+  assert.ok(bukkit);
+  const bukkitPlan = buildServerLaunchPlan(buildInstance(bukkit), settings, "win32");
+  const java26 = {
+    ...java25,
+    id: "java-26",
+    path: "C:/Program Files/Eclipse Adoptium/jdk-26/bin/java.exe",
+    javaHome: "C:/Program Files/Eclipse Adoptium/jdk-26",
+    version: "26.0.0",
+    majorVersion: 26,
+  } satisfies JavaInstallationSnapshot;
+  assert.equal(selectJavaInstallation([java26, java25], bukkitPlan.java).id, java25.id);
+  assert.throws(() => selectJavaInstallation([java26], bukkitPlan.java), /Java 21 至 25/);
+});
+
+await test("Banner submits interactive EULA only when automatic acceptance is enabled", async () => {
+  async function exerciseBanner(autoAcceptEula: boolean): Promise<{
+    initialInput: string | undefined;
+    stopInput: string | undefined;
+    files: Map<string, string>;
+  }> {
+    const rootPath = `C:/SeaShard/servers/banner-${autoAcceptEula ? "auto" : "manual"}`;
+    const instance: ServerInstanceSnapshot = {
+      ...vanillaInstance,
+      id: `instance-banner-${autoAcceptEula ? "auto" : "manual"}`,
+      name: "Banner",
+      rootPath,
+      coreJarPath: `${rootPath}/banner.jar`,
+      serverType: "banner",
+      gameVersion: "1.21.1",
+      coreArtifactFileName: "banner-1.21.1-170.jar",
+      artifactSha256: "6d5ca32ecb1b79713dda0ad5bc5eb69ad3418a6f5d60c81f63e060c4e1345ec5",
+    };
+    const { fileSystem, files } = createMemoryFileSystem(
+      new Map([[instance.coreJarPath, "banner"]]),
+    );
+    const child = new FakeServerProcess();
+    const manager = new ServerRuntimeManager({
+      listInstances: async () => [instance],
+      scanJavaInstallations: async () => [java17, java21],
+      readSettings: async () => ({ ...settings, autoAcceptEula }),
+      fileSystem,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return child as unknown as ChildProcessWithoutNullStreams;
+      },
+    });
+
+    await manager.start(instance.id);
+    const initialInput = (child.stdin as PassThrough).read()?.toString();
+    await manager.stop(instance.id);
+    const stopInput = (child.stdin as PassThrough).read()?.toString();
+    child.finish(0, null);
+    await manager.dispose();
+    return { initialInput, stopInput, files };
+  }
+
+  const automatic = await exerciseBanner(true);
+  assert.equal(automatic.initialInput, "true\n");
+  assert.equal(automatic.stopInput, "stop\n");
+  assert.equal(automatic.files.has(resolve("C:/SeaShard/servers/banner-auto", "eula.txt")), false);
+  assert.equal(
+    automatic.files.get(resolve("C:/SeaShard/servers/banner-auto", "server.properties")),
+    "server-port=25566\n",
+  );
+
+  const manual = await exerciseBanner(false);
+  assert.equal(manual.initialInput, undefined);
+  assert.equal(manual.stopInput, "stop\n");
+  assert.equal(manual.files.has(resolve("C:/SeaShard/servers/banner-manual", "eula.txt")), false);
 });
 
 await test("Quilt, NeoForge, and Mohist plans preserve their installer handoff contracts", () => {

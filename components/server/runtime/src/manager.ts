@@ -169,6 +169,12 @@ export class ServerRuntimeManager {
       if (this.sessions.get(instanceId) !== session) {
         throw new Error(`server instance ${instanceId} exited before startup completed`);
       }
+      if (plan.eula === "interactive-minecraft" && settings.autoAcceptEula) {
+        // Banner 只从 stdin 接受严格小写 true；提前写入管道，由其到达 EULA 门后读取。
+        await this.writeCommand(instanceId, session, "true");
+        this.appendLine(instanceId, "input", "> true");
+        this.appendLine(instanceId, "system", "[SeaShard] 已提交交互式 Minecraft EULA 同意。");
+      }
 
       const runningSnapshot: ServerRuntimeSnapshot = {
         instanceId,

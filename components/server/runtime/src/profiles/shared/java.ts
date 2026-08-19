@@ -4,6 +4,14 @@ import type { JavaVersionRequirement } from "../types";
 export function minimumJava(major: number, description: string): JavaVersionRequirement {
   return { major, exact: false, description };
 }
+/** 用于 Bukkit 等同时具有最低与最高 Java 主版本边界的精确制品。 */
+export function boundedJava(
+  minimumMajor: number,
+  maximumMajor: number,
+  description: string,
+): JavaVersionRequirement {
+  return { major: minimumMajor, maximumMajor, exact: false, description };
+}
 
 /** 根据显式运行策略选择 Java；NeoForge 26.1 等核心可要求精确主版本。 */
 export function selectJavaInstallation(
@@ -11,13 +19,15 @@ export function selectJavaInstallation(
   requirement: JavaVersionRequirement,
 ): JavaInstallationSnapshot {
   const compatible = installations
-    .filter(
-      (installation) =>
-        !installation.disabled &&
-        (requirement.exact
-          ? installation.majorVersion === requirement.major
-          : installation.majorVersion >= requirement.major),
-    )
+    .filter((installation) => {
+      if (installation.disabled) return false;
+      if (requirement.exact) return installation.majorVersion === requirement.major;
+      return (
+        installation.majorVersion >= requirement.major &&
+        (requirement.maximumMajor === undefined ||
+          installation.majorVersion <= requirement.maximumMajor)
+      );
+    })
     .sort(
       (left, right) =>
         left.majorVersion - right.majorVersion ||
@@ -28,7 +38,9 @@ export function selectJavaInstallation(
   if (!selected) {
     const requiredVersion = requirement.exact
       ? `Java ${requirement.major}`
-      : `Java ${requirement.major} 或更高版本`;
+      : requirement.maximumMajor === undefined
+        ? `Java ${requirement.major} 或更高版本`
+        : `Java ${requirement.major} 至 ${requirement.maximumMajor}`;
     throw new Error(
       `未检测到已启用的 ${requiredVersion}。${requirement.description} ${
         requirement.exact ? "必须使用" : "需要"

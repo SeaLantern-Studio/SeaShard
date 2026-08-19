@@ -4,13 +4,23 @@ import {
   type ServerRuntimeSupportedType,
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
+import { buildArclightFabricPlan } from "./cores/arclight-fabric";
+import { buildArclightForgePlan } from "./cores/arclight-forge";
 import { buildArclightNeoForgePlan } from "./cores/arclight-neoforge";
+import { buildBannerPlan } from "./cores/banner";
+import { buildBukkitPlan } from "./cores/bukkit";
+import { buildBungeeCordPlan } from "./cores/bungeecord";
+import { buildCatServerPlan } from "./cores/catserver";
 import { buildFabricPlan } from "./cores/fabric";
 import { buildFoliaPlan } from "./cores/folia";
+import { buildLeafPlan } from "./cores/leaf";
+import { buildLeavesPlan } from "./cores/leaves";
+import { buildLightfallPlan } from "./cores/lightfall";
 import { buildMohistPlan } from "./cores/mohist";
 import { buildNeoForgePlan } from "./cores/neoforge";
 import { buildNukkitxPlan } from "./cores/nukkitx";
 import { buildPaperPlan } from "./cores/paper";
+import { buildPufferfishPlan } from "./cores/pufferfish";
 import { buildPurpurPlan } from "./cores/purpur";
 import { buildQuiltPlan } from "./cores/quilt";
 import { buildVanillaPlan } from "./cores/vanilla";
@@ -31,6 +41,16 @@ const profileBuilders = {
   mohist: buildMohistPlan,
   velocity: buildVelocityPlan,
   nukkitx: buildNukkitxPlan,
+  "arclight-fabric": buildArclightFabricPlan,
+  "arclight-forge": buildArclightForgePlan,
+  banner: buildBannerPlan,
+  bukkit: buildBukkitPlan,
+  bungeecord: buildBungeeCordPlan,
+  catserver: buildCatServerPlan,
+  leaf: buildLeafPlan,
+  leaves: buildLeavesPlan,
+  lightfall: buildLightfallPlan,
+  pufferfish: buildPufferfishPlan,
 } satisfies Record<ServerRuntimeSupportedType, ServerProfileBuilder>;
 
 /**

@@ -3,6 +3,8 @@ import type { ServerInstanceSnapshot, ServerRuntimeSupportedType } from "@seasha
 export interface JavaVersionRequirement {
   readonly major: number;
   readonly exact: boolean;
+  /** 部分精确核心会主动拒绝更高版本 Java；未设置表示无已知硬上限。 */
+  readonly maximumMajor?: number;
   readonly description: string;
 }
 
@@ -40,7 +42,7 @@ export interface ServerLaunchPlan {
   readonly requiredRuntimeFiles: readonly string[];
   readonly arguments: readonly string[];
   readonly jvmArgumentFile?: JvmArgumentFilePlan;
-  readonly eula: "minecraft" | "none";
+  readonly eula: "minecraft" | "interactive-minecraft" | "none";
   readonly writesServerProperties: boolean;
   readonly stopCommand: string;
 }

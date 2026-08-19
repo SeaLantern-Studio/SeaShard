@@ -258,6 +258,16 @@ export const serverRuntimeSupportedTypes = [
   "mohist",
   "velocity",
   "nukkitx",
+  "arclight-fabric",
+  "arclight-forge",
+  "banner",
+  "bukkit",
+  "bungeecord",
+  "catserver",
+  "leaf",
+  "leaves",
+  "lightfall",
+  "pufferfish",
 ] as const;
 export type ServerRuntimeSupportedType = (typeof serverRuntimeSupportedTypes)[number];
 
