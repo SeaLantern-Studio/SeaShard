@@ -435,6 +435,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   let serverConfigurationDocument = initialServerConfigurationDocument;
   const configurationWrites: ServerConfigurationWriteRequest[] = [];
   const inspectedJavaPaths: string[] = [];
+  const removedJavaPaths: string[] = [];
   const saveAsRequest = {
     serverType: "paper",
     gameVersion: "1.21.1",
@@ -549,6 +550,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
       inspectJavaInstallation: async (executablePath) => {
         inspectedJavaPaths.push(executablePath);
         return manuallyAddedJavaInstallation;
+      },
+      removeJavaInstallation: async (executablePath) => {
+        removedJavaPaths.push(executablePath);
+        return true;
       },
       listServerCoreDownloadTasks: async () => downloadTasks,
       cancelServerCoreDownload: async (taskId) => {
@@ -673,6 +678,10 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   );
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeScan, 1), /request rejected/);
   await assert.rejects(runtime.invoke(desktopChannels.javaRuntimeAdd, 1), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.javaRuntimeRemove, 1, manuallyAddedJavaInstallation.path),
+    /request rejected/,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverCoreDownloadListTasks, 1),
     /request rejected/,
@@ -894,6 +903,15 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
     filters: [{ name: "Java 可执行文件", extensions: ["exe"] }],
   });
   assert.deepEqual(inspectedJavaPaths, ["D:/Java/bin/java.exe"]);
+  assert.equal(
+    await runtime.invoke(desktopChannels.javaRuntimeRemove, 1, manuallyAddedJavaInstallation.path),
+    true,
+  );
+  assert.deepEqual(removedJavaPaths, [manuallyAddedJavaInstallation.path]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.javaRuntimeRemove, 1, ""),
+    /non-empty string/,
+  );
   runtime.fileSelection = undefined;
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverRuntimeGet, 1, "instance-paper"),
@@ -1053,6 +1071,7 @@ await test("desktop shell owns window, sender authorization, and IPC as one life
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGetLogs), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeScan), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeAdd), false);
+  assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeRemove), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadListTasks), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
@@ -1132,6 +1151,7 @@ await test("desktop shell keeps macOS alive after the last window closes", async
       inspectJavaInstallation: async () => {
         throw new Error("not expected");
       },
+      removeJavaInstallation: async () => false,
       listServerCoreDownloadTasks: async () => [],
       cancelServerCoreDownload: async () => false,
       onClientEntriesChanged: () => () => {},

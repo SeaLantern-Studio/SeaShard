@@ -143,6 +143,7 @@ export interface DesktopShellConfig {
   ): ReturnType<ServerRuntimeClientService["getLogs"]>;
   scanJavaInstallations(): ReturnType<JavaRuntimeManagerService["scan"]>;
   inspectJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["inspect"]>;
+  removeJavaInstallation(executablePath: string): ReturnType<JavaRuntimeManagerService["remove"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;
@@ -618,6 +619,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           });
           return executablePath ? config.inspectJavaInstallation(executablePath) : undefined;
         });
+        config.runtime.handle(desktopChannels.javaRuntimeRemove, (event, executablePath) => {
+          ownedWindow(event.sender.id);
+          return config.removeJavaInstallation(
+            expectNonEmptyString(executablePath, "Java executable path"),
+          );
+        });
         config.runtime.handle(desktopChannels.serverCoreDownloadListTasks, (event) => {
           ownedWindow(event.sender.id);
           return config.listServerCoreDownloadTasks();
@@ -710,6 +717,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverRuntimeGetLogs);
           config.runtime.removeHandler(desktopChannels.javaRuntimeScan);
           config.runtime.removeHandler(desktopChannels.javaRuntimeAdd);
+          config.runtime.removeHandler(desktopChannels.javaRuntimeRemove);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);

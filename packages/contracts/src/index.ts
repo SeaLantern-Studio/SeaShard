@@ -37,6 +37,7 @@ export const desktopChannels = {
   serverConfigurationRead: "seashard.server-configuration.read",
   serverConfigurationWrite: "seashard.server-configuration.write",
   javaRuntimeAdd: "seashard.java-runtime.add",
+  javaRuntimeRemove: "seashard.java-runtime.remove",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -376,12 +377,16 @@ export interface JavaInstallationSnapshot {
 export interface JavaRuntimeManagerService {
   scan(): Promise<readonly JavaInstallationSnapshot[]>;
   inspect(executablePath: string): Promise<JavaInstallationSnapshot>;
+  /** 仅移除 SeaShard 保存的手动路径记录，不删除或卸载本地 Java。 */
+  remove(executablePath: string): Promise<boolean>;
 }
 
 /** Renderer 只触发受控扫描或系统文件选择，不直接提交任意文件系统路径。 */
 export interface JavaRuntimeClientService {
   scan(): Promise<readonly JavaInstallationSnapshot[]>;
   add(): Promise<JavaInstallationSnapshot | undefined>;
+  /** 仅移除通过“添加”保存的记录；自动扫描到的安装不受影响。 */
+  remove(executablePath: string): Promise<boolean>;
 }
 
 /** 一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。 */

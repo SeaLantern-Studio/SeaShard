@@ -17,7 +17,7 @@ import type {
   ServiceProvider,
 } from "../packages/plugin-sdk/src/index.ts";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -200,10 +200,15 @@ await test("Java manager keeps manually added installations available to later s
     const inspected = await javaRuntimeManager.inspect(selectedJava.executable);
     assert.equal(inspected.source, "manual");
     assert.deepEqual(await javaRuntimeManager.scan(), [inspected]);
+    assert.equal(await javaRuntimeManager.remove(selectedJava.executable), true);
+    assert.deepEqual(await javaRuntimeManager.scan(), []);
+    await access(selectedJava.executable);
 
     const restartedJavaRuntimeManager = await activateManager();
-    assert.deepEqual(await restartedJavaRuntimeManager.scan(), [inspected]);
+    assert.deepEqual(await restartedJavaRuntimeManager.scan(), []);
+    assert.equal(await restartedJavaRuntimeManager.remove(selectedJava.executable), false);
     await assert.rejects(restartedJavaRuntimeManager.inspect(""), /non-empty string/);
+    await assert.rejects(restartedJavaRuntimeManager.remove(""), /non-empty string/);
     assert.equal(javaRuntimeManagerManifest.entries[0]?.runtime, "host");
     assert.equal(parseJavaMajorVersion("1.8.0_452"), 8);
     assert.equal(parseJavaMajorVersion("21.0.7+6-LTS"), 21);

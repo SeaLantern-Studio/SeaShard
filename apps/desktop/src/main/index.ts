@@ -1019,6 +1019,15 @@ async function bootstrap(): Promise<void> {
                   executablePath,
                 ]),
               ),
+            removeJavaInstallation: async (executablePath) => {
+              const removed = await activeKernel.callService(javaRuntimeManagerContract, "remove", [
+                executablePath,
+              ]);
+              if (typeof removed !== "boolean") {
+                throw new Error("java runtime manager returned an invalid removal result");
+              }
+              return removed;
+            },
             listServerCoreDownloadTasks: async () =>
               expectServerCoreDownloadTasks(
                 await activeKernel.callService(serverCoreSourceContract, "listTasks", []),

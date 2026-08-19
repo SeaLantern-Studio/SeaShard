@@ -62,6 +62,27 @@ export function createJavaRuntimeManagerModule(
         return task;
       };
 
+      /** 仅忘记已保存的路径；此操作绝不访问、修改或删除 Java 安装目录。 */
+      const forgetManualPath = (executablePath: string): Promise<boolean> => {
+        const task = writeQueue.then(async () => {
+          const current = await manualPathsTask;
+          const key = storedPathKey(executablePath, platform);
+          const next = current.filter((path) => storedPathKey(path, platform) !== key);
+          if (next.length === current.length) return false;
+          await ctx.storage.put(manualJavaPathsStorageKey, {
+            version: 1,
+            paths: next,
+          });
+          manualPathsTask = Promise.resolve(next);
+          return true;
+        });
+        writeQueue = task.then(
+          () => undefined,
+          () => undefined,
+        );
+        return task;
+      };
+
       const readManualInstallations = async (): Promise<readonly JavaInstallationSnapshot[]> => {
         await writeQueue;
         const installations: JavaInstallationSnapshot[] = [];
@@ -91,6 +112,12 @@ export function createJavaRuntimeManagerModule(
           const installation = await scanner.inspect(executablePath);
           await rememberManualPath(installation.path);
           return asJsonValue(installation);
+        },
+        remove: async (executablePath: unknown) => {
+          if (typeof executablePath !== "string" || executablePath.length === 0) {
+            throw new TypeError("Java executable path must be a non-empty string");
+          }
+          return forgetManualPath(executablePath);
         },
       });
     },

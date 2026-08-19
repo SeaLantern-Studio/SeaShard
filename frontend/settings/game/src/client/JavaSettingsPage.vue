@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { JavaInstallationSnapshot, JavaRuntimeClientService } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Card } from "cmzya-modern-ui";
-import { Check, Coffee, Plus, Search, WandSparkles } from "lucide-vue-next";
-import { computed, onMounted, ref } from "vue";
+import { Check, CircleMinus, Coffee, Plus, Search, WandSparkles } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
 const props = defineProps<{
   javaRuntime: JavaRuntimeClientService;
@@ -13,12 +13,20 @@ type OperationTone = "neutral" | "success" | "error";
 // 自动扫描与手动添加分开保存，重新扫描时不会丢失当前会话中手动选择的 Java。
 const scannedJavaInstallations = ref<readonly JavaInstallationSnapshot[]>([]);
 const manuallyAddedJavaInstallations = ref<readonly JavaInstallationSnapshot[]>([]);
+const pageRoot = ref<HTMLElement>();
 const selectedJavaId = ref("auto");
 const scanning = ref(false);
 const adding = ref(false);
+const removingJavaId = ref<string>();
+const javaMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  installationId: undefined as string | undefined,
+});
 const operationMessage = ref("自动选择，或使用电脑上检测到的 Java");
 const operationTone = ref<OperationTone>("neutral");
-const busy = computed(() => scanning.value || adding.value);
+const busy = computed(() => scanning.value || adding.value || removingJavaId.value !== undefined);
 const detectedJavaInstallations = computed(() => {
   const installations = new Map<string, JavaInstallationSnapshot>();
   for (const installation of scannedJavaInstallations.value) {
@@ -40,7 +48,13 @@ function reportOperation(message: string, tone: OperationTone): void {
   operationTone.value = tone;
 }
 
+function closeJavaMenu(): void {
+  javaMenu.open = false;
+  javaMenu.installationId = undefined;
+}
+
 async function scanJavaInstallations(): Promise<void> {
+  closeJavaMenu();
   if (busy.value) return;
   scanning.value = true;
   reportOperation("正在扫描 Java 运行环境…", "neutral");
@@ -59,6 +73,7 @@ async function scanJavaInstallations(): Promise<void> {
 }
 
 async function addJavaInstallation(): Promise<void> {
+  closeJavaMenu();
   if (busy.value) return;
   adding.value = true;
   reportOperation("请选择 Java 安装目录中的 bin/java.exe", "neutral");
@@ -86,11 +101,88 @@ async function addJavaInstallation(): Promise<void> {
   }
 }
 
-onMounted(() => void scanJavaInstallations());
+/** 只有通过“添加”保存的记录能够移除；自动扫描项没有可删除的 SeaShard 记录。 */
+function openJavaMenu(event: MouseEvent, installation: JavaInstallationSnapshot): void {
+  closeJavaMenu();
+  if (installation.source !== "manual") return;
+  const root = pageRoot.value;
+  if (!root) return;
+  const bounds = root.getBoundingClientRect();
+  const menuWidth = 184;
+  const menuHeight = 42;
+  javaMenu.x = Math.max(8, Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 8));
+  javaMenu.y = Math.max(8, Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 8));
+  javaMenu.installationId = installation.id;
+  javaMenu.open = true;
+}
+
+function openJavaMenuFromKeyboard(
+  event: KeyboardEvent,
+  installation: JavaInstallationSnapshot,
+): void {
+  const option = event.currentTarget as HTMLElement | null;
+  if (!option) return;
+  const bounds = option.getBoundingClientRect();
+  openJavaMenu(
+    new MouseEvent("contextmenu", {
+      clientX: bounds.right - 16,
+      clientY: bounds.top + bounds.height / 2,
+    }),
+    installation,
+  );
+}
+
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") closeJavaMenu();
+}
+
+async function removeJavaInstallation(): Promise<void> {
+  const installation = detectedJavaInstallations.value.find(
+    ({ id }) => id === javaMenu.installationId,
+  );
+  closeJavaMenu();
+  if (!installation || installation.source !== "manual" || busy.value) return;
+  removingJavaId.value = installation.id;
+  reportOperation(`正在移除 Java ${installation.version} 的 SeaShard 记录…`, "neutral");
+  try {
+    const removed = await props.javaRuntime.remove(installation.path);
+    scannedJavaInstallations.value = scannedJavaInstallations.value.filter(
+      ({ id }) => id !== installation.id,
+    );
+    manuallyAddedJavaInstallations.value = manuallyAddedJavaInstallations.value.filter(
+      ({ id }) => id !== installation.id,
+    );
+    if (selectedJavaId.value === installation.id) selectedJavaId.value = "auto";
+    reportOperation(
+      removed
+        ? `已从 SeaShard 记录中移除 Java ${installation.version}，未删除任何本地文件`
+        : "该 Java 记录已不存在，未修改任何本地文件",
+      removed ? "success" : "neutral",
+    );
+  } catch (error) {
+    reportOperation(
+      `Java 记录移除失败：${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  } finally {
+    removingJavaId.value = undefined;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", closeJavaMenu);
+  document.addEventListener("keydown", handleDocumentKeydown);
+  void scanJavaInstallations();
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", closeJavaMenu);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+});
 </script>
 
 <template>
-  <div class="java-settings-view animate-stagger-in">
+  <div ref="pageRoot" class="java-settings-view animate-stagger-in">
     <Cmz_Card title="Java" subtitle="选择 Minecraft 实例默认使用的 Java 运行环境">
       <div class="java-list-toolbar">
         <div>
@@ -158,7 +250,10 @@ onMounted(() => void scanJavaInstallations());
           role="radio"
           :aria-checked="selectedJavaId === installation.id"
           :title="installation.path"
+          :aria-haspopup="installation.source === 'manual' ? 'menu' : undefined"
           @click="selectedJavaId = installation.id"
+          @contextmenu.prevent.stop="openJavaMenu($event, installation)"
+          @keydown.shift.f10.prevent.stop="openJavaMenuFromKeyboard($event, installation)"
         >
           <span class="java-option-icon" aria-hidden="true">
             <Coffee :size="20" :stroke-width="1.8" />
@@ -175,11 +270,25 @@ onMounted(() => void scanJavaInstallations());
         </button>
       </div>
     </Cmz_Card>
+
+    <div
+      v-if="javaMenu.open"
+      class="java-context-menu"
+      role="menu"
+      :style="{ left: `${javaMenu.x}px`, top: `${javaMenu.y}px` }"
+      @pointerdown.stop
+    >
+      <button type="button" role="menuitem" :disabled="busy" @click="removeJavaInstallation">
+        <CircleMinus :size="16" :stroke-width="1.8" />
+        <span>从列表中移除</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .java-settings-view {
+  position: relative;
   max-width: 860px;
   margin: 0 auto;
   padding-bottom: var(--sl-space-2xl);
@@ -222,6 +331,47 @@ onMounted(() => void scanJavaInstallations());
 
 .java-list-subtitle--error {
   color: var(--sl-error);
+}
+
+.java-context-menu {
+  position: absolute;
+  z-index: 10;
+  width: 184px;
+  padding: 5px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 11px;
+  background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-lg);
+}
+
+.java-context-menu button {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+  font-size: 0.79rem;
+  cursor: pointer;
+}
+
+.java-context-menu button:hover:not(:disabled) {
+  background: var(--sl-bg-secondary);
+}
+
+.java-context-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.java-context-menu button:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
 }
 
 .java-list {
