@@ -6,53 +6,26 @@ import {
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
 } from "@seashard/contracts";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { delimiter, dirname, resolve } from "node:path";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { ProcessLineDecoder } from "./console-decoder";
+import { defaultServerRuntimeFileSystem, type ServerRuntimeFileSystem } from "./filesystem";
 import {
-  buildServerLaunchPlan,
-  parseJvmArguments,
-  selectJavaInstallation,
-  type ServerLaunchPlan,
-  type ServerPreparationPlan,
-  type ServerPreparationDownloadPlan,
-} from "./profiles";
+  createJavaEnvironment,
+  defaultSpawnServerProcess,
+  type SpawnServerProcess,
+  waitForSpawn,
+} from "./process";
+import {
+  defaultFetchPreparationArtifact,
+  type FetchPreparationArtifact,
+  ServerPreparationRunner,
+} from "./preparation-runner";
+import { buildServerLaunchPlan, selectJavaInstallation } from "./profiles";
+import { prepareRuntimeFiles } from "./runtime-files";
 
 const maximumConsoleLines = 5_000;
 const maximumCommandLength = 32_768;
 const defaultStopGracePeriodMs = 15_000;
-const managedJavaToolOptions = [
-  "-Dfile.encoding=UTF-8",
-  "-Dsun.stdout.encoding=UTF-8",
-  "-Dsun.stderr.encoding=UTF-8",
-].join(" ");
-const javaToolOptionsNoticePattern = /^Picked up JAVA_TOOL_OPTIONS:/u;
-const utf8ConsoleDecoder = new TextDecoder("utf-8", { fatal: true });
-const gb18030ConsoleDecoder = new TextDecoder("gb18030");
-
-export type SpawnServerProcess = (
-  command: string,
-  arguments_: readonly string[],
-  options: {
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    windowsHide: boolean;
-  },
-) => ChildProcessWithoutNullStreams;
-
-export type FetchPreparationArtifact = (url: string) => Promise<Uint8Array>;
-
-export interface ServerRuntimeFileSystem {
-  access(path: string): Promise<void>;
-  copyFile(source: string, target: string): Promise<void>;
-  createDirectory(path: string): Promise<void>;
-  readTextFile(path: string): Promise<string>;
-  writeBinaryFile(path: string, content: Uint8Array): Promise<void>;
-  writeTextFile(path: string, content: string): Promise<void>;
-  hashFile(path: string, algorithm: "md5" | "sha256"): Promise<string>;
-}
 
 export interface ServerRuntimeManagerOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
@@ -84,23 +57,6 @@ interface ActiveSession {
   stdinFailure?: Error;
 }
 
-interface ActivePreparation {
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly closed: Promise<void>;
-}
-
-const defaultFileSystem: ServerRuntimeFileSystem = {
-  access,
-  copyFile,
-  createDirectory: async (path) => {
-    await mkdir(path, { recursive: true });
-  },
-  readTextFile: (path) => readFile(path, "utf8"),
-  hashFile: hashFileStreaming,
-  writeBinaryFile: (path, content) => writeFile(path, content),
-  writeTextFile: (path, content) => writeFile(path, content, "utf8"),
-};
-
 /**
  * 管理已声明启动策略的服务器进程。
  *
@@ -108,27 +64,28 @@ const defaultFileSystem: ServerRuntimeFileSystem = {
  */
 export class ServerRuntimeManager {
   private readonly sessions = new Map<string, ActiveSession>();
-  private readonly preparations = new Map<string, ActivePreparation>();
   private readonly snapshots = new Map<string, ServerRuntimeSnapshot>();
   private readonly logs = new Map<string, ConsoleLogState>();
   private readonly fileSystem: ServerRuntimeFileSystem;
   private readonly spawnProcess: SpawnServerProcess;
+  private readonly preparationRunner: ServerPreparationRunner;
   private readonly stopGracePeriodMs: number;
-  private readonly fetchPreparationArtifact: FetchPreparationArtifact;
   private disposed = false;
   private disposeTask?: Promise<void>;
 
   constructor(private readonly options: ServerRuntimeManagerOptions) {
-    this.fileSystem = options.fileSystem ?? defaultFileSystem;
-    this.fetchPreparationArtifact =
-      options.fetchPreparationArtifact ?? defaultFetchPreparationArtifact;
-    this.spawnProcess =
-      options.spawnProcess ??
-      ((command, arguments_, spawnOptions) =>
-        spawn(command, [...arguments_], {
-          ...spawnOptions,
-          stdio: "pipe",
-        }));
+    this.fileSystem = options.fileSystem ?? defaultServerRuntimeFileSystem;
+    this.spawnProcess = options.spawnProcess ?? defaultSpawnServerProcess;
+    this.preparationRunner = new ServerPreparationRunner({
+      fileSystem: this.fileSystem,
+      spawnProcess: this.spawnProcess,
+      fetchArtifact: options.fetchPreparationArtifact ?? defaultFetchPreparationArtifact,
+      ensureActive: () => this.ensureActive(),
+      onLine: (instanceId, stream, text) => this.appendLine(instanceId, stream, text),
+      ...(options.reportError
+        ? { reportError: (error: unknown) => options.reportError!(error) }
+        : {}),
+    });
     this.stopGracePeriodMs = options.stopGracePeriodMs ?? defaultStopGracePeriodMs;
   }
 
@@ -168,9 +125,9 @@ export class ServerRuntimeManager {
       this.ensureActive();
       const plan = buildServerLaunchPlan(instance, settings);
       const java = selectJavaInstallation(installations, plan.java);
-      await this.prepareInstallation(instanceId, java, plan);
+      await this.preparationRunner.prepare(instanceId, java, plan);
       this.ensureActive();
-      await this.prepareRuntimeFiles(plan, settings);
+      await prepareRuntimeFiles(this.fileSystem, plan, settings);
       const environment = createJavaEnvironment(java);
 
       child = this.spawnProcess(java.path, plan.arguments, {
@@ -255,7 +212,7 @@ export class ServerRuntimeManager {
   dispose(): Promise<void> {
     if (this.disposeTask) return this.disposeTask;
     this.disposed = true;
-    this.disposeTask = Promise.all([this.disposeSessions(), this.disposePreparations()]).then(
+    this.disposeTask = Promise.all([this.disposeSessions(), this.preparationRunner.dispose()]).then(
       () => undefined,
     );
     return this.disposeTask;
@@ -273,15 +230,6 @@ export class ServerRuntimeManager {
       await session.closed;
     });
     await Promise.all(pendingSessions);
-  }
-
-  private async disposePreparations(): Promise<void> {
-    await Promise.all(
-      [...this.preparations.values()].map(async ({ child, closed }) => {
-        child.kill();
-        await closed;
-      }),
-    );
   }
 
   private async requestSafeStop(instanceId: string, session: ActiveSession): Promise<void> {
@@ -442,276 +390,6 @@ export class ServerRuntimeManager {
     return instance;
   }
 
-  /** 仅在安装哨兵不完整时执行上游安装器；正常启动不重复下载和修补。 */
-  private async prepareInstallation(
-    instanceId: string,
-    java: JavaInstallationSnapshot,
-    plan: ServerLaunchPlan,
-  ): Promise<void> {
-    const preparation = plan.preparation;
-    if (!preparation) return;
-    await this.preparePreparationInputs(instanceId, preparation);
-    if (await this.isPreparationComplete(preparation)) {
-      this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 已准备完成。`);
-      return;
-    }
-
-    this.appendLine(instanceId, "system", `[SeaShard] 正在准备 ${preparation.description}…`);
-    const outcome = await this.runPreparationProcess(instanceId, java, preparation);
-    this.ensureActive();
-    const complete = await this.isPreparationComplete(preparation);
-    if (!complete) {
-      throw new Error(`${preparation.description} installer exited without complete runtime files`);
-    }
-    if (outcome.code !== 0 && !preparation.acceptNonZeroWithSentinels) {
-      throw new Error(
-        `${preparation.description} installer exited with code ${outcome.code ?? "unknown"}`,
-      );
-    }
-    if (outcome.signal) {
-      throw new Error(`${preparation.description} installer exited by signal ${outcome.signal}`);
-    }
-    this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 准备完成。`);
-  }
-
-  /**
-   * Forge 等复合核心的安装器不在核心目录清单中；先校验并补齐固定输入，
-   * 再判断生成物是否完整，避免“已安装”实例漏装模组或重复运行安装器。
-   */
-  private async preparePreparationInputs(
-    instanceId: string,
-    preparation: ServerPreparationPlan,
-  ): Promise<void> {
-    for (const download of preparation.downloads ?? []) {
-      this.ensureActive();
-      const expectedSha256 = await this.resolveDownloadSha256(download);
-      this.ensureActive();
-      if (await this.hasExpectedSha256(download.path, expectedSha256)) continue;
-      this.ensureActive();
-      this.appendLine(
-        instanceId,
-        "system",
-        `[SeaShard] 正在下载 ${preparation.description} 的安装依赖…`,
-      );
-      const content = await this.fetchPreparationArtifact(download.url);
-      this.ensureActive();
-      const actualSha256 = createHash("sha256").update(content).digest("hex");
-      if (actualSha256 !== expectedSha256) {
-        throw new Error(
-          `${preparation.description} downloaded artifact failed SHA-256 verification`,
-        );
-      }
-      await this.fileSystem.createDirectory(dirname(download.path));
-      this.ensureActive();
-      await this.fileSystem.writeBinaryFile(download.path, content);
-      if (!(await this.hasExpectedSha256(download.path, expectedSha256))) {
-        throw new Error(`${preparation.description} installer was not written intact`);
-      }
-    }
-
-    for (const copy of preparation.copies ?? []) {
-      this.ensureActive();
-      const expectedSha256 =
-        copy.sha256 === undefined
-          ? await this.hashExistingFile(copy.source)
-          : this.normalizeSha256(copy.sha256, copy.source);
-      if (!(await this.hasExpectedSha256(copy.source, expectedSha256))) {
-        throw new Error(`${preparation.description} source artifact failed SHA-256 verification`);
-      }
-      this.ensureActive();
-      if (await this.hasExpectedSha256(copy.target, expectedSha256)) continue;
-      this.ensureActive();
-      await this.fileSystem.createDirectory(dirname(copy.target));
-      this.ensureActive();
-      await this.fileSystem.copyFile(copy.source, copy.target);
-      if (!(await this.hasExpectedSha256(copy.target, expectedSha256))) {
-        throw new Error(`${preparation.description} copied artifact failed SHA-256 verification`);
-      }
-    }
-  }
-
-  private async resolveDownloadSha256(download: ServerPreparationDownloadPlan): Promise<string> {
-    if (download.sha256 !== undefined) {
-      return this.normalizeSha256(download.sha256, download.path);
-    }
-    if (!download.sha256Url) {
-      throw new Error(`preparation download ${download.url} is missing SHA-256 metadata`);
-    }
-
-    const cached = download.sha256Path
-      ? await readOptionalText(this.fileSystem, download.sha256Path)
-      : undefined;
-    if (cached !== undefined) return this.normalizeSha256(cached, download.sha256Path!);
-
-    const checksumBytes = await this.fetchPreparationArtifact(download.sha256Url);
-    this.ensureActive();
-    const checksum = this.normalizeSha256(
-      new TextDecoder("utf-8", { fatal: true }).decode(checksumBytes),
-      download.sha256Url,
-    );
-    if (download.sha256Path) {
-      await this.fileSystem.createDirectory(dirname(download.sha256Path));
-      this.ensureActive();
-      await this.fileSystem.writeTextFile(download.sha256Path, `${checksum}\n`);
-    }
-    return checksum;
-  }
-
-  private normalizeSha256(value: string, source: string): string {
-    const normalized = value.trim().split(/\s+/u)[0]?.toLowerCase();
-    if (!normalized || !/^[a-f\d]{64}$/u.test(normalized)) {
-      throw new Error(`invalid SHA-256 declared for preparation input ${source}`);
-    }
-    return normalized;
-  }
-
-  private async hashExistingFile(path: string): Promise<string> {
-    await this.fileSystem.access(path);
-    return (await this.fileSystem.hashFile(path, "sha256")).toLowerCase();
-  }
-
-  private async hasExpectedSha256(path: string, expectedSha256: string): Promise<boolean> {
-    const normalized = this.normalizeSha256(expectedSha256, path);
-    if (!(await canAccess(this.fileSystem, path))) return false;
-    return (await this.fileSystem.hashFile(path, "sha256")).toLowerCase() === normalized;
-  }
-
-  private async runPreparationProcess(
-    instanceId: string,
-    java: JavaInstallationSnapshot,
-    preparation: ServerPreparationPlan,
-  ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
-    const child = this.spawnProcess(java.path, preparation.arguments, {
-      cwd: preparation.workingDirectory,
-      env: createJavaEnvironment(java),
-      windowsHide: true,
-    });
-    const stdout = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stdout", line));
-    const stderr = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stderr", line));
-    child.stdout.on("data", (chunk: Buffer | string) => stdout.write(chunk));
-    child.stderr.on("data", (chunk: Buffer | string) => stderr.write(chunk));
-    child.stdin.on("error", (error: Error) => {
-      this.appendLine(instanceId, "stderr", `[SeaShard] 准备进程标准输入错误：${error.message}`);
-      this.options.reportError?.(error);
-    });
-    child.on("error", (error) => {
-      this.appendLine(instanceId, "stderr", `[SeaShard] 准备进程错误：${error.message}`);
-      this.options.reportError?.(error);
-    });
-
-    let resolveClosed = (): void => {};
-    const closed = new Promise<void>((resolvePreparation) => {
-      resolveClosed = resolvePreparation;
-    });
-    const outcome = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolveOutcome) => {
-        child.once("close", (code, signal) => {
-          stdout.end();
-          stderr.end();
-          resolveOutcome({ code, signal });
-          resolveClosed();
-        });
-      },
-    );
-    const active: ActivePreparation = { child, closed };
-    this.preparations.set(instanceId, active);
-
-    try {
-      await waitForSpawn(child);
-      if (preparation.closeStdin) child.stdin.end();
-      return await outcome;
-    } catch (error) {
-      child.kill();
-      await closed;
-      throw error;
-    } finally {
-      if (this.preparations.get(instanceId) === active) {
-        this.preparations.delete(instanceId);
-      }
-    }
-  }
-
-  private async isPreparationComplete(preparation: ServerPreparationPlan): Promise<boolean> {
-    for (const path of preparation.sentinels) {
-      if (!(await canAccess(this.fileSystem, path))) return false;
-    }
-    if (
-      preparation.runtimeArgumentFile &&
-      !(await this.hasCompleteRuntimeArgumentFile(
-        preparation.workingDirectory,
-        preparation.runtimeArgumentFile,
-      ))
-    ) {
-      return false;
-    }
-    return true;
-  }
-
-  /** Forge 新版使用 -jar shim，NeoForge 等版本使用 classpath；两种生成格式都按实际目标校验。 */
-  private async hasCompleteRuntimeArgumentFile(
-    workingDirectory: string,
-    argumentFilePath: string,
-  ): Promise<boolean> {
-    const content = await readOptionalText(this.fileSystem, argumentFilePath);
-    if (content === undefined) return false;
-    const uncommented = content
-      .replaceAll("\r\n", "\n")
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("#"))
-      .join("\n");
-    let arguments_: readonly string[];
-    try {
-      arguments_ = parseJvmArguments(uncommented);
-    } catch {
-      return false;
-    }
-
-    const classPathOption = arguments_.findIndex(
-      (argument) => argument === "-cp" || argument === "-classpath" || argument === "--class-path",
-    );
-    const classPath = classPathOption < 0 ? undefined : arguments_[classPathOption + 1];
-    if (classPath) {
-      const separator = argumentFilePath.endsWith("win_args.txt") ? ";" : ":";
-      for (const entry of classPath.split(separator).filter(Boolean)) {
-        if (!(await canAccess(this.fileSystem, resolve(workingDirectory, entry)))) return false;
-      }
-      return true;
-    }
-
-    const jarOption = arguments_.findIndex((argument) => argument === "-jar");
-    const jarPath = jarOption < 0 ? undefined : arguments_[jarOption + 1];
-    return jarPath ? canAccess(this.fileSystem, resolve(workingDirectory, jarPath)) : false;
-  }
-
-  private async prepareRuntimeFiles(
-    plan: ServerLaunchPlan,
-    settings: ServerSettingsSnapshot,
-  ): Promise<void> {
-    for (const path of plan.requiredRuntimeFiles) await this.fileSystem.access(path);
-
-    if (plan.jvmArgumentFile) {
-      const current = await readOptionalText(this.fileSystem, plan.jvmArgumentFile.path);
-      await this.fileSystem.writeTextFile(
-        plan.jvmArgumentFile.path,
-        updateManagedJvmArgumentFile(current ?? "", plan.jvmArgumentFile.managedArguments),
-      );
-    }
-    if (plan.eula === "minecraft" && settings.autoAcceptEula) {
-      const eulaPath = resolve(plan.workingDirectory, "eula.txt");
-      const current = await readOptionalText(this.fileSystem, eulaPath);
-      await this.fileSystem.writeTextFile(eulaPath, upsertProperty(current ?? "", "eula", "true"));
-    }
-    if (plan.writesServerProperties) {
-      const propertiesPath = resolve(plan.workingDirectory, "server.properties");
-      if ((await readOptionalText(this.fileSystem, propertiesPath)) === undefined) {
-        await this.fileSystem.writeTextFile(
-          propertiesPath,
-          `server-port=${settings.defaultServerPort}\n`,
-        );
-      }
-    }
-  }
-
   private async writeCommand(
     instanceId: string,
     session: ActiveSession,
@@ -769,125 +447,6 @@ export class ServerRuntimeManager {
   }
 }
 
-class ProcessLineDecoder {
-  private pending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-
-  constructor(private readonly emit: (line: string) => void) {}
-
-  write(chunk: Buffer | string): void {
-    const incoming = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-    this.pending = this.pending.length === 0 ? incoming : Buffer.concat([this.pending, incoming]);
-    this.flushCompleteLines();
-  }
-
-  end(): void {
-    if (this.pending.length > 0) this.emitBytes(this.pending);
-    this.pending = Buffer.alloc(0);
-  }
-
-  private flushCompleteLines(): void {
-    let lineStart = 0;
-    for (let index = 0; index < this.pending.length; index += 1) {
-      if (this.pending[index] !== 0x0a) continue;
-      this.emitBytes(this.pending.subarray(lineStart, index));
-      lineStart = index + 1;
-    }
-    if (lineStart > 0) this.pending = Buffer.from(this.pending.subarray(lineStart));
-  }
-
-  private emitBytes(bytes: Buffer): void {
-    const content = bytes.at(-1) === 0x0d ? bytes.subarray(0, -1) : bytes;
-    const line = normalizeProcessLine(decodeConsoleBytes(content));
-    if (line !== undefined) this.emit(line);
-  }
-}
-
-function decodeConsoleBytes(bytes: Buffer): string {
-  if (bytes.length === 0) return "";
-  try {
-    return utf8ConsoleDecoder.decode(bytes);
-  } catch {
-    // 部分 Windows 核心及其子安装器仍直接向管道写入 GBK/GB18030。
-    return gb18030ConsoleDecoder.decode(bytes);
-  }
-}
-
-function normalizeProcessLine(text: string): string | undefined {
-  const normalized = stripTerminalControlSequences(lastTerminalCarriageReturnFrame(text));
-  return javaToolOptionsNoticePattern.test(normalized) ? undefined : normalized;
-}
-
-/**
- * 回车符会把终端光标移回当前行开头。进度条用它反复覆盖同一行，因此日志只保留最终帧，
- * 避免把 1% 到 100% 的所有刷新内容拼成一条超长文本。
- */
-function lastTerminalCarriageReturnFrame(text: string): string {
-  const lastCarriageReturn = text.lastIndexOf("\r");
-  return lastCarriageReturn < 0 ? text : text.slice(lastCarriageReturn + 1);
-}
-
-/**
- * 移除终端标题（OSC）、颜色（CSI）和不可见控制字符，避免其进入 Renderer 标签解析。
- * 普通文本按 UTF-16 代码单元原样拼回，中文和代理对不会被改写。
- */
-function stripTerminalControlSequences(text: string): string {
-  let normalized = "";
-  for (let index = 0; index < text.length;) {
-    const code = text.charCodeAt(index);
-    if (code === 0x1b) {
-      const next = text.charCodeAt(index + 1);
-      if (next === 0x5b) {
-        index += 2;
-        while (index < text.length) {
-          const sequenceCode = text.charCodeAt(index);
-          index += 1;
-          if (sequenceCode >= 0x40 && sequenceCode <= 0x7e) break;
-        }
-        continue;
-      }
-      if (next === 0x5d) {
-        index += 2;
-        while (index < text.length) {
-          const sequenceCode = text.charCodeAt(index);
-          if (sequenceCode === 0x07) {
-            index += 1;
-            break;
-          }
-          if (sequenceCode === 0x1b && text.charCodeAt(index + 1) === 0x5c) {
-            index += 2;
-            break;
-          }
-          index += 1;
-        }
-        continue;
-      }
-      index += 1;
-      continue;
-    }
-    if ((code < 0x20 && code !== 0x09) || code === 0x7f) {
-      index += 1;
-      continue;
-    }
-    normalized += text[index];
-    index += 1;
-  }
-  return normalized;
-}
-
-function createJavaEnvironment(java: JavaInstallationSnapshot): NodeJS.ProcessEnv {
-  const javaBin = dirname(java.path);
-  const path = process.env.PATH;
-  const existingJavaToolOptions = process.env.JAVA_TOOL_OPTIONS?.trim();
-  return {
-    ...process.env,
-    JAVA_HOME: java.javaHome,
-    JAVA_TOOL_OPTIONS: existingJavaToolOptions
-      ? `${existingJavaToolOptions} ${managedJavaToolOptions}`
-      : managedJavaToolOptions,
-    PATH: path ? `${javaBin}${delimiter}${path}` : javaBin,
-  };
-}
-
 function stoppedSnapshot(instanceId: string): ServerRuntimeSnapshot {
   return { instanceId, state: "stopped" };
 }
@@ -923,130 +482,6 @@ function expectCommand(value: unknown): string {
     throw new TypeError("server command must be one non-empty line");
   }
   return command;
-}
-
-async function readOptionalText(
-  fileSystem: ServerRuntimeFileSystem,
-  path: string,
-): Promise<string | undefined> {
-  try {
-    return await fileSystem.readTextFile(path);
-  } catch (error) {
-    if (isMissingPathError(error)) return undefined;
-    throw error;
-  }
-}
-
-function upsertProperty(content: string, key: string, value: string): string {
-  const lines = content.replaceAll("\r\n", "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  const propertyPattern = new RegExp(
-    `^\\s*${key.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s*=`,
-    "u",
-  );
-  const updatedLines: string[] = [];
-  let propertyWritten = false;
-  for (const line of lines) {
-    if (!propertyPattern.test(line)) {
-      updatedLines.push(line);
-      continue;
-    }
-    if (!propertyWritten) updatedLines.push(`${key}=${value}`);
-    propertyWritten = true;
-  }
-  if (!propertyWritten) updatedLines.push(`${key}=${value}`);
-  return `${updatedLines.join("\n")}\n`;
-}
-
-const managedJvmArgumentsBegin = "# >>> SeaShard managed JVM arguments";
-const managedJvmArgumentsEnd = "# <<< SeaShard managed JVM arguments";
-
-/** 保留安装器和用户注释，只接管活动的堆参数及 SeaShard 自己的参数块。 */
-function updateManagedJvmArgumentFile(
-  content: string,
-  managedArguments: readonly string[],
-): string {
-  const sourceLines = content.replaceAll("\r\n", "\n").split("\n");
-  const retained: string[] = [];
-  let insideManagedBlock = false;
-  for (const line of sourceLines) {
-    if (line.trim() === managedJvmArgumentsBegin) {
-      insideManagedBlock = true;
-      continue;
-    }
-    if (line.trim() === managedJvmArgumentsEnd) {
-      insideManagedBlock = false;
-      continue;
-    }
-    if (insideManagedBlock || /^\s*-Xm[sx]\S*\s*$/iu.test(line)) continue;
-    retained.push(line);
-  }
-  while (retained.at(-1) === "") retained.pop();
-  if (retained.length > 0) retained.push("");
-  retained.push(
-    managedJvmArgumentsBegin,
-    ...managedArguments.map(encodeJvmArgumentFileEntry),
-    managedJvmArgumentsEnd,
-  );
-  return `${retained.join("\n")}\n`;
-}
-
-function encodeJvmArgumentFileEntry(argument: string): string {
-  return /\s|"/u.test(argument)
-    ? `"${argument.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
-    : argument;
-}
-
-async function canAccess(fileSystem: ServerRuntimeFileSystem, path: string): Promise<boolean> {
-  try {
-    await fileSystem.access(path);
-    return true;
-  } catch (error) {
-    if (isMissingPathError(error)) return false;
-    throw error;
-  }
-}
-
-function hashFileStreaming(path: string, algorithm: "md5" | "sha256"): Promise<string> {
-  return new Promise((resolveHash, rejectHash) => {
-    const hash = createHash(algorithm);
-    const input = createReadStream(path);
-    input.once("error", rejectHash);
-    input.on("data", (chunk: Buffer) => hash.update(chunk));
-    input.once("end", () => resolveHash(hash.digest("hex")));
-  });
-}
-
-async function defaultFetchPreparationArtifact(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`failed to download preparation artifact: HTTP ${response.status}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {
-  return new Promise((resolveSpawn, rejectSpawn) => {
-    const handleSpawn = (): void => {
-      child.off("error", handleError);
-      resolveSpawn();
-    };
-    const handleError = (error: Error): void => {
-      child.off("spawn", handleSpawn);
-      rejectSpawn(error);
-    };
-    child.once("spawn", handleSpawn);
-    child.once("error", handleError);
-  });
-}
-
-function isMissingPathError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    Reflect.get(error, "code") === "ENOENT"
-  );
 }
 
 function toError(error: unknown): Error {

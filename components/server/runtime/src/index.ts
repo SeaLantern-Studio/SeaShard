@@ -92,4 +92,8 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./manager";
+export * from "./filesystem";
+export * from "./process";
+export * from "./preparation-runner";
+export * from "./runtime-files";
 export * from "./profiles";

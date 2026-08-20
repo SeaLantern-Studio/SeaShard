@@ -1,0 +1,403 @@
+import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
+import { ServerRuntimeManager } from "../components/server/runtime/src/manager.ts";
+import type { SpawnServerProcess } from "../components/server/runtime/src/process.ts";
+import assert from "node:assert/strict";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { delimiter, dirname, resolve } from "node:path";
+import { PassThrough, Writable } from "node:stream";
+import test from "node:test";
+import {
+  createMemoryFileSystem,
+  FakeServerProcess,
+  java17,
+  java21,
+  settings,
+  vanillaInstance,
+} from "./server-runtime-fixtures.ts";
+
+await test("vanilla runtime starts a direct JAR process and streams bidirectional console IO", async () => {
+  const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
+  const propertiesPath = resolve(vanillaInstance.rootPath, "server.properties");
+  const { fileSystem, files } = createMemoryFileSystem(
+    new Map([
+      [vanillaInstance.coreJarPath, "jar"],
+      [eulaPath, "# Minecraft EULA\neula=false\neula=false\n"],
+    ]),
+  );
+  const child = new FakeServerProcess();
+  const spawnCalls: Array<{
+    command: string;
+    arguments_: readonly string[];
+    options: Parameters<SpawnServerProcess>[2];
+  }> = [];
+  const spawnProcess: SpawnServerProcess = (command, arguments_, options) => {
+    spawnCalls.push({ command, arguments_, options });
+    queueMicrotask(() => child.emit("spawn"));
+    return child as unknown as ChildProcessWithoutNullStreams;
+  };
+  const emittedLines: string[] = [];
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [vanillaInstance],
+    scanJavaInstallations: async () => [java17, java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess,
+    now: () => new Date("2026-08-17T13:00:00.000Z"),
+    onConsoleLine: (line) => emittedLines.push(`${line.stream}:${line.text}`),
+  });
+
+  const started = await manager.start(vanillaInstance.id);
+  assert.deepEqual(started, {
+    instanceId: vanillaInstance.id,
+    state: "running",
+    pid: 4_242,
+    startedAt: "2026-08-17T13:00:00.000Z",
+  });
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0]!.command, java21.path);
+  assert.deepEqual(spawnCalls[0]!.arguments_, [
+    "-XX:+UseG1GC",
+    "-Dmotd=Hello World",
+    "-Xms1024M",
+    "-Xmx2048M",
+    "-jar",
+    "server.jar",
+    "nogui",
+  ]);
+  assert.equal(spawnCalls[0]!.options.cwd, resolve(vanillaInstance.rootPath));
+  assert.equal(spawnCalls[0]!.options.windowsHide, true);
+  assert.equal(spawnCalls[0]!.options.env.JAVA_HOME, java21.javaHome);
+  assert.equal(
+    spawnCalls[0]!.options.env.PATH?.startsWith(`${dirname(java21.path)}${delimiter}`),
+    true,
+  );
+  const javaToolOptions = spawnCalls[0]!.options.env.JAVA_TOOL_OPTIONS ?? "";
+  assert.equal(
+    javaToolOptions.endsWith(
+      "-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8",
+    ),
+    true,
+  );
+  assert.equal(files.get(eulaPath), "# Minecraft EULA\neula=true\n");
+  assert.equal(files.get(propertiesPath), "server-port=25566\n");
+
+  child.stdout.write("[Server thread/INFO]: Done\r\nsecond");
+  child.stdout.write(" line\n");
+  child.stdout.write(Buffer.from("c3fcc1eeb2bbb4e6d4da0a", "hex"));
+  child.stdout.write("\u001b]0;Nukkit MOT\u0007");
+  child.stdout.write("22:38:12 [main] [INFO] Ready\u001b[0m\n");
+  child.stdout.write("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8\n");
+  child.stderr.write("0% [        ]\r50% [====    ]\r100% [========]\n");
+  child.stderr.write("warning from java\n");
+  await manager.sendCommand(vanillaInstance.id, "list");
+  assert.equal((child.stdin as PassThrough).read()?.toString(), "list\n");
+  assert.deepEqual(
+    manager
+      .getLogs(vanillaInstance.id)
+      .filter((line) => ["stdout", "stderr", "input"].includes(line.stream))
+      .map((line) => `${line.stream}:${line.text}`),
+    [
+      "stdout:[Server thread/INFO]: Done",
+      "stdout:second line",
+      "stdout:命令不存在",
+      "stdout:22:38:12 [main] [INFO] Ready",
+      "stderr:100% [========]",
+      "stderr:warning from java",
+      "input:> list",
+    ],
+  );
+
+  const stopping = await manager.stop(vanillaInstance.id);
+  assert.equal(stopping.state, "stopping");
+  assert.equal((child.stdin as PassThrough).read()?.toString(), "stop\n");
+  assert.equal((await manager.stop(vanillaInstance.id)).state, "stopping");
+  child.emitExit(0, null);
+  child.stdout.write("saved tail without newline");
+  assert.equal(manager.get(vanillaInstance.id).state, "stopping");
+  child.emitClose(0, null);
+  assert.deepEqual(manager.get(vanillaInstance.id), {
+    instanceId: vanillaInstance.id,
+    state: "stopped",
+    pid: 4_242,
+    startedAt: "2026-08-17T13:00:00.000Z",
+    stoppedAt: "2026-08-17T13:00:00.000Z",
+    exitCode: 0,
+  });
+  const finalLogs = manager.getLogs(vanillaInstance.id);
+  assert.equal(
+    finalLogs.some((line) => line.text === "saved tail without newline"),
+    true,
+  );
+  assert.equal(
+    emittedLines.includes("system:[SeaShard] Vanilla 服务器进程已启动（Java 21.0.7）。"),
+    true,
+  );
+  await manager.dispose();
+});
+
+await test("runtime disposal sends stop, force-terminates on timeout, and waits for close", async () => {
+  const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
+  const propertiesPath = resolve(vanillaInstance.rootPath, "server.properties");
+  const { fileSystem } = createMemoryFileSystem(
+    new Map([
+      [vanillaInstance.coreJarPath, "jar"],
+      [eulaPath, "eula=true\n"],
+      [propertiesPath, "server-port=25566\n"],
+    ]),
+  );
+  const child = new FakeServerProcess(new PassThrough(), false);
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [vanillaInstance],
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess: () => {
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcessWithoutNullStreams;
+    },
+    stopGracePeriodMs: 5,
+  });
+
+  await manager.start(vanillaInstance.id);
+  let disposed = false;
+  const disposeTask = manager.dispose().then(() => {
+    disposed = true;
+  });
+  await new Promise<void>((resolveWait) => setImmediate(resolveWait));
+  assert.equal((child.stdin as PassThrough).read()?.toString(), "stop\n");
+  assert.equal(disposed, false, "dispose must wait for the Java process to close");
+
+  await new Promise<void>((resolveWait) => setTimeout(resolveWait, 15));
+  assert.equal(child.killed, true, "the grace-period timeout must terminate the process");
+  assert.equal(disposed, false, "forced termination still must wait for close");
+  child.emitExit(null, "SIGTERM");
+  child.emitClose(null, "SIGTERM");
+  await disposeTask;
+  assert.equal(disposed, true);
+  assert.equal(manager.get(vanillaInstance.id).state, "stopped");
+});
+
+await test("disposal during asynchronous preparation prevents a late process spawn", async () => {
+  let releaseInstances = (_instances: readonly ServerInstanceSnapshot[]): void => {};
+  const instancesReady = new Promise<readonly ServerInstanceSnapshot[]>((resolveInstances) => {
+    releaseInstances = resolveInstances;
+  });
+  const { fileSystem, accessedPaths } = createMemoryFileSystem(new Map());
+  let spawnCount = 0;
+  const manager = new ServerRuntimeManager({
+    listInstances: () => instancesReady,
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess: () => {
+      spawnCount += 1;
+      return new FakeServerProcess() as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+
+  const startTask = manager.start(vanillaInstance.id);
+  await manager.dispose();
+  releaseInstances([vanillaInstance]);
+  await assert.rejects(startTask, /server runtime is stopped/);
+  assert.equal(spawnCount, 0);
+  assert.deepEqual(accessedPaths, []);
+});
+
+await test("asynchronous stdin failures are handled without escaping as unhandled errors", async () => {
+  class FailingStdin extends Writable {
+    override _write(
+      _chunk: Buffer,
+      _encoding: BufferEncoding,
+      callback: (error?: Error | null) => void,
+    ): void {
+      queueMicrotask(() => callback(Object.assign(new Error("broken pipe"), { code: "EPIPE" })));
+    }
+  }
+
+  const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
+  const propertiesPath = resolve(vanillaInstance.rootPath, "server.properties");
+  const { fileSystem } = createMemoryFileSystem(
+    new Map([
+      [vanillaInstance.coreJarPath, "jar"],
+      [eulaPath, "eula=true\n"],
+      [propertiesPath, "server-port=25566\n"],
+    ]),
+  );
+  const child = new FakeServerProcess(new FailingStdin());
+  const reportedErrors: unknown[] = [];
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [vanillaInstance],
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess: () => {
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcessWithoutNullStreams;
+    },
+    reportError: (error) => reportedErrors.push(error),
+  });
+
+  await manager.start(vanillaInstance.id);
+  await assert.rejects(manager.sendCommand(vanillaInstance.id, "list"), /broken pipe/);
+  await new Promise<void>((resolveWait) => setImmediate(resolveWait));
+  assert.equal(child.killed, true);
+  assert.equal(manager.get(vanillaInstance.id).state, "failed");
+  assert.equal(
+    manager
+      .getLogs(vanillaInstance.id)
+      .some((line) => line.text.includes("服务器标准输入错误：broken pipe")),
+    true,
+  );
+  assert.equal(
+    reportedErrors.some((error) => error instanceof Error),
+    true,
+  );
+  await manager.dispose();
+});
+
+await test("runtime rejects undeclared core types without inspecting files", async () => {
+  const unknownInstance: ServerInstanceSnapshot = {
+    ...vanillaInstance,
+    id: "instance-unknown",
+    rootPath: "C:/SeaShard/servers/instance-unknown",
+    serverType: undefined,
+    coreJarPath: "C:/SeaShard/servers/instance-unknown/unknown.jar",
+  };
+  const { fileSystem, accessedPaths } = createMemoryFileSystem(new Map());
+  let spawnCount = 0;
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [unknownInstance],
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess: () => {
+      spawnCount += 1;
+      return new FakeServerProcess() as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+
+  await assert.rejects(manager.start("instance-unknown"), /core type <missing> is not supported/);
+  assert.equal(spawnCount, 0);
+  assert.deepEqual(accessedPaths, []);
+  await manager.dispose();
+});
+
+await test("Banner submits interactive EULA only when automatic acceptance is enabled", async () => {
+  async function exerciseBanner(autoAcceptEula: boolean): Promise<{
+    initialInput: string | undefined;
+    stopInput: string | undefined;
+    files: Map<string, string | Uint8Array>;
+  }> {
+    const rootPath = `C:/SeaShard/servers/banner-${autoAcceptEula ? "auto" : "manual"}`;
+    const instance: ServerInstanceSnapshot = {
+      ...vanillaInstance,
+      id: `instance-banner-${autoAcceptEula ? "auto" : "manual"}`,
+      name: "Banner",
+      rootPath,
+      coreJarPath: `${rootPath}/banner.jar`,
+      serverType: "banner",
+      gameVersion: "1.21.1",
+      coreArtifactFileName: "banner-1.21.1-170.jar",
+      artifactSha256: "6d5ca32ecb1b79713dda0ad5bc5eb69ad3418a6f5d60c81f63e060c4e1345ec5",
+    };
+    const { fileSystem, files } = createMemoryFileSystem(
+      new Map([[instance.coreJarPath, "banner"]]),
+    );
+    const child = new FakeServerProcess();
+    const manager = new ServerRuntimeManager({
+      listInstances: async () => [instance],
+      scanJavaInstallations: async () => [java17, java21],
+      readSettings: async () => ({ ...settings, autoAcceptEula }),
+      fileSystem,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return child as unknown as ChildProcessWithoutNullStreams;
+      },
+    });
+
+    await manager.start(instance.id);
+    const initialInput = (child.stdin as PassThrough).read()?.toString();
+    await manager.stop(instance.id);
+    const stopInput = (child.stdin as PassThrough).read()?.toString();
+    child.finish(0, null);
+    await manager.dispose();
+    return { initialInput, stopInput, files };
+  }
+
+  const automatic = await exerciseBanner(true);
+  assert.equal(automatic.initialInput, "true\n");
+  assert.equal(automatic.stopInput, "stop\n");
+  assert.equal(automatic.files.has(resolve("C:/SeaShard/servers/banner-auto", "eula.txt")), false);
+  assert.equal(
+    automatic.files.get(resolve("C:/SeaShard/servers/banner-auto", "server.properties")),
+    "server-port=25566\n",
+  );
+
+  const manual = await exerciseBanner(false);
+  assert.equal(manual.initialInput, undefined);
+  assert.equal(manual.stopInput, "stop\n");
+  assert.equal(manual.files.has(resolve("C:/SeaShard/servers/banner-manual", "eula.txt")), false);
+});
+
+await test("Velocity uses end while Nukkit skips EULA but receives server.properties", async () => {
+  async function exerciseDirectCore(
+    serverType: "velocity" | "nukkitx",
+  ): Promise<{ files: Map<string, string | Uint8Array>; stopInput: string | undefined }> {
+    const rootPath = `C:/SeaShard/servers/instance-${serverType}-runtime`;
+    const artifact = serverType === "velocity" ? "velocity.jar" : "Nukkit-MOT-SNAPSHOT.jar";
+    const instance: ServerInstanceSnapshot = {
+      ...vanillaInstance,
+      id: `instance-${serverType}-runtime`,
+      name: serverType,
+      rootPath,
+      coreJarPath: `${rootPath}/${artifact}`,
+      serverType,
+      gameVersion: serverType === "velocity" ? "3.5.0-SNAPSHOT" : "Nukkit-Mot",
+      coreArtifactFileName: artifact,
+    };
+    const { fileSystem, files } = createMemoryFileSystem(
+      new Map([[instance.coreJarPath, "runtime"]]),
+    );
+    const child = new FakeServerProcess();
+    const manager = new ServerRuntimeManager({
+      listInstances: async () => [instance],
+      scanJavaInstallations: async () => [java17, java21],
+      readSettings: async () => settings,
+      fileSystem,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return child as unknown as ChildProcessWithoutNullStreams;
+      },
+    });
+    await manager.start(instance.id);
+    await manager.stop(instance.id);
+    const stopInput = (child.stdin as PassThrough).read()?.toString();
+    child.finish(0, null);
+    await manager.dispose();
+    return { files, stopInput };
+  }
+
+  const velocity = await exerciseDirectCore("velocity");
+  assert.equal(velocity.stopInput, "end\n");
+  assert.equal(
+    velocity.files.has(resolve("C:/SeaShard/servers/instance-velocity-runtime", "eula.txt")),
+    false,
+  );
+  assert.equal(
+    velocity.files.has(
+      resolve("C:/SeaShard/servers/instance-velocity-runtime", "server.properties"),
+    ),
+    false,
+  );
+
+  const nukkit = await exerciseDirectCore("nukkitx");
+  assert.equal(nukkit.stopInput, "stop\n");
+  assert.equal(
+    nukkit.files.has(resolve("C:/SeaShard/servers/instance-nukkitx-runtime", "eula.txt")),
+    false,
+  );
+  assert.equal(
+    nukkit.files.get(resolve("C:/SeaShard/servers/instance-nukkitx-runtime", "server.properties")),
+    "server-port=25566\n",
+  );
+});
