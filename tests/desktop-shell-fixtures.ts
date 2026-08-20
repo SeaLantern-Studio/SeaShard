@@ -347,6 +347,7 @@ export const serverModFilters = {
 } satisfies ServerModFilters;
 
 export const serverModSearchRequest = {
+  resourceType: "mod",
   source: "modrinth",
   query: "server tools",
   tag: "utility",
@@ -360,6 +361,7 @@ export const serverModSearchRequest = {
 export const serverModSearchResult = {
   items: [
     {
+      resourceType: "mod",
       source: "modrinth",
       id: "server-mod-1",
       slug: "server-tools",
@@ -379,6 +381,7 @@ export const serverModSearchResult = {
   total: 1,
 } satisfies ServerModSearchResult;
 export const serverModProjectDetails = {
+  resourceType: "mod",
   projectId: "server-mod-1",
   body: "Complete project description.\n\nSecond paragraph.",
   versions: [
@@ -580,13 +583,14 @@ export async function createDesktopShellHarness(
         serverModSearchRequests.push(request);
         return serverModSearchResult;
       },
-      readServerModProjectDetails: async (projectId) => {
+      readServerModProjectDetails: async (_resourceType, projectId) => {
         serverModDetailProjectIds.push(projectId);
         return serverModProjectDetails;
       },
       installServerMod: async (request) => {
         installedServerMods.push(request);
         return {
+          resourceType: request.resourceType,
           projectId: request.projectId,
           versionId: request.versionId,
           fileName: "server-tools-neoforge-1.21.1.jar",
@@ -598,6 +602,7 @@ export async function createDesktopShellHarness(
       saveServerMod: async (request) => {
         savedServerMods.push(request);
         return {
+          resourceType: request.resourceType,
           projectId: request.projectId,
           versionId: request.versionId,
           fileName: "server-tools-neoforge-1.21.1.jar",

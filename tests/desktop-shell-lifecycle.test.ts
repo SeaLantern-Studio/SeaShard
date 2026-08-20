@@ -107,18 +107,22 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     runtime.invoke(desktopChannels.serverCoreArtifacts, 999, "paper", "1.21.1"),
     /request rejected/,
   );
-  assert.deepEqual(await runtime.invoke(desktopChannels.serverModFilters, 1), serverModFilters);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverModFilters, 1, "mod"),
+    serverModFilters,
+  );
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverModSearch, 1, serverModSearchRequest),
     serverModSearchResult,
   );
   assert.deepEqual(harness.serverModSearchRequests, [serverModSearchRequest]);
   assert.deepEqual(
-    await runtime.invoke(desktopChannels.serverModProjectDetails, 1, "server-mod-1"),
+    await runtime.invoke(desktopChannels.serverModProjectDetails, 1, "mod", "server-mod-1"),
     serverModProjectDetails,
   );
   assert.deepEqual(harness.serverModDetailProjectIds, ["server-mod-1"]);
   const modInstallRequest = {
+    resourceType: "mod",
     projectId: "server-mod-1",
     versionId: "version-neoforge-1",
     instanceId: "instance-paper",
@@ -126,6 +130,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverModInstallToInstance, 1, modInstallRequest),
     {
+      resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-neoforge-1",
       fileName: "server-tools-neoforge-1.21.1.jar",
@@ -139,10 +144,12 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   ]);
   assert.deepEqual(
     await runtime.invoke(desktopChannels.serverModDownloadSaveAs, 1, {
+      resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-neoforge-1",
     }),
     {
+      resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-neoforge-1",
       fileName: "server-tools-neoforge-1.21.1.jar",
@@ -152,6 +159,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   );
   assert.deepEqual(harness.savedServerMods, [
     {
+      resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-neoforge-1",
       destinationDirectory: "C:/SeaShard/resources",
@@ -170,7 +178,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     /request rejected/,
   );
   await assert.rejects(
-    runtime.invoke(desktopChannels.serverModProjectDetails, 1, "../invalid"),
+    runtime.invoke(desktopChannels.serverModProjectDetails, 1, "mod", "../invalid"),
     /project ID is invalid/,
   );
   await assert.rejects(
@@ -180,13 +188,16 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     }),
     /limit must be between/,
   );
-  await assert.rejects(runtime.invoke(desktopChannels.serverModFilters, 999), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModFilters, 999, "mod"),
+    /request rejected/,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverModSearch, 999, serverModSearchRequest),
     /request rejected/,
   );
   await assert.rejects(
-    runtime.invoke(desktopChannels.serverModProjectDetails, 999, "server-mod-1"),
+    runtime.invoke(desktopChannels.serverModProjectDetails, 999, "mod", "server-mod-1"),
     /request rejected/,
   );
   assert.deepEqual(harness.readySnapshots, []);

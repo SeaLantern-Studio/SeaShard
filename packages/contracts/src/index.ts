@@ -56,7 +56,7 @@ export const desktopChannels = {
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
-/** 服务端 Mod 来源面向 Client 的搜索、下载与实例安装 Contract。 */
+/** Modrinth 服务端资源来源面向 Client 的搜索、下载与实例安装 Contract。 */
 export const serverModSourceContract = "seashard.server-mod-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
@@ -203,6 +203,7 @@ export interface ServerCoreSourceClientService {
 }
 
 export type ServerModSource = "modrinth";
+export type ServerModrinthResourceType = "mod" | "modpack" | "datapack";
 export const serverModLoaders = ["fabric", "forge", "neoforge", "quilt"] as const;
 export type ServerModLoader = (typeof serverModLoaders)[number];
 
@@ -231,7 +232,9 @@ export type ServerModEnvironment =
   | "server_only_client_optional"
   | "dedicated_server_only"
   | "client_or_server"
-  | "client_or_server_prefers_both";
+  | "client_or_server_prefers_both"
+  | "client_only_server_optional"
+  | "client_only";
 
 /** 搜索分页的默认值与边界；Host 会再次校验，避免 Renderer 发起无界请求。 */
 export const serverModSearchLimits = {
@@ -245,7 +248,7 @@ export interface ServerModFilterOption {
   label: string;
 }
 
-/** Modrinth 可用于服务端 Mod 检索的稳定筛选元数据。 */
+/** Modrinth 可用于服务端资源检索的稳定筛选元数据。 */
 export interface ServerModFilters {
   sources: readonly ServerModFilterOption[];
   tags: readonly ServerModFilterOption[];
@@ -255,6 +258,7 @@ export interface ServerModFilters {
 
 /** Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。 */
 export interface ServerModSearchRequest {
+  resourceType: ServerModrinthResourceType;
   source: ServerModSource;
   query: string;
   tag: string;
@@ -267,6 +271,7 @@ export interface ServerModSearchRequest {
 
 /** Modrinth 搜索结果的最小安全投影；图标仅允许来自经过 Host 校验的 Modrinth CDN。 */
 export interface ServerModProject {
+  resourceType: ServerModrinthResourceType;
   source: ServerModSource;
   id: string;
   slug: string;
@@ -300,12 +305,14 @@ export interface ServerModVersion {
 
 /** Modrinth 项目长简介及其全部公开版本。 */
 export interface ServerModProjectDetails {
+  resourceType: ServerModrinthResourceType;
   projectId: string;
   body: string;
   versions: readonly ServerModVersion[];
 }
-/** Renderer 只提交 Modrinth 身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
+/** Renderer 只提交资源类型、Modrinth 身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
 export interface ServerModInstallRequest {
+  resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
   instanceId: string;
@@ -313,12 +320,14 @@ export interface ServerModInstallRequest {
 
 /** “另存为”同样只提交 Modrinth 身份，目标目录由 Desktop 系统对话框选择。 */
 export interface ServerModSaveAsRequest {
+  resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
 }
 
-/** Mod 文件完成校验并发布后的稳定结果。 */
+/** Mod 或数据包完成校验并发布后的稳定结果。 */
 export interface ServerModDownloadResult {
+  resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
   fileName: string;
@@ -328,9 +337,12 @@ export interface ServerModDownloadResult {
 }
 
 export interface ServerModSourceClientService {
-  getFilters(): Promise<ServerModFilters>;
+  getFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters>;
   search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
-  getProjectDetails(projectId: string): Promise<ServerModProjectDetails>;
+  getProjectDetails(
+    resourceType: ServerModrinthResourceType,
+    projectId: string,
+  ): Promise<ServerModProjectDetails>;
   installToInstance(request: ServerModInstallRequest): Promise<ServerModDownloadResult>;
   saveAs(request: ServerModSaveAsRequest): Promise<ServerModDownloadResult | undefined>;
 }

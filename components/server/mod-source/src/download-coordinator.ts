@@ -37,21 +37,28 @@ export class ServerModDownloadCoordinator {
     if (!instance) throw new Error(`找不到服务器实例：${request.instanceId}`);
 
     const artifact = await this.catalog.resolveVersionArtifact(
+      request.resourceType,
       request.projectId,
       request.versionId,
     );
     assertCompatibleInstance(artifact, instance);
-    const modDirectory = resolve(
-      instance.rootPath,
-      instance.serverType === "quilt" ? "server/mods" : "mods",
+    const destinationDirectory =
+      artifact.resourceType === "datapack"
+        ? resolve(instance.rootPath, "world", "datapacks")
+        : resolve(instance.rootPath, instance.serverType === "quilt" ? "server/mods" : "mods");
+    const task = await this.startAndWait(
+      artifact,
+      destinationDirectory,
+      request.connections,
+      instance.id,
     );
-    const task = await this.startAndWait(artifact, modDirectory, request.connections, instance.id);
     return resultOf(artifact, task, "instance", instance.id);
   }
 
   async saveToDirectory(value: unknown): Promise<ServerModDownloadResult> {
     const request = parseSaveRequest(value);
     const artifact = await this.catalog.resolveVersionArtifact(
+      request.resourceType,
       request.projectId,
       request.versionId,
     );
@@ -76,8 +83,9 @@ export class ServerModDownloadCoordinator {
       sha512: artifact.sha512,
       connections,
       metadata: {
-        kind: "server-mod",
+        kind: `server-${artifact.resourceType}`,
         userVisible: true,
+        resourceType: artifact.resourceType,
         projectId: artifact.projectId,
         versionId: artifact.versionId,
         fileName: artifact.fileName,
@@ -85,9 +93,11 @@ export class ServerModDownloadCoordinator {
       },
     });
     const completed = await this.downloads.wait(task.id);
-    if (!completed) throw new Error("Mod 下载任务未找到");
+    if (!completed) throw new Error("服务器资源下载任务未找到");
     if (completed.state !== "completed") {
-      throw new Error(completed.error ? `Mod 下载失败：${completed.error}` : "Mod 下载未完成");
+      throw new Error(
+        completed.error ? `服务器资源下载失败：${completed.error}` : "服务器资源下载未完成",
+      );
     }
     return completed;
   }
@@ -97,20 +107,22 @@ function assertCompatibleInstance(
   artifact: ModrinthServerModArtifact,
   instance: ServerInstanceSnapshot,
 ): void {
+  if (!instance.gameVersion || !artifact.gameVersions.includes(instance.gameVersion)) {
+    throw new Error(`该资源版本不支持实例 ${instance.name} 的 Minecraft 版本`);
+  }
+  if (artifact.resourceType === "datapack") return;
   if (!instance.modLoader) {
     throw new Error(`服务器实例 ${instance.name} 不支持安装 Mod`);
   }
   if (!artifact.loaders.includes(instance.modLoader)) {
     throw new Error(`该 Mod 版本不支持 ${formatLoader(instance.modLoader)} 实例 ${instance.name}`);
   }
-  if (!instance.gameVersion || !artifact.gameVersions.includes(instance.gameVersion)) {
-    throw new Error(`该 Mod 版本不支持实例 ${instance.name} 的 Minecraft 版本`);
-  }
 }
 
 function parseInstallRequest(value: unknown): InstallRequest {
-  const record = expectRecord(value, "server mod install request");
+  const record = expectRecord(value, "server resource install request");
   return {
+    resourceType: expectDownloadableResourceType(record.resourceType),
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     instanceId: expectIdentity(record.instanceId, "instance ID", 128),
@@ -119,17 +131,28 @@ function parseInstallRequest(value: unknown): InstallRequest {
 }
 
 function parseSaveRequest(value: unknown): SaveRequest {
-  const record = expectRecord(value, "server mod save request");
+  const record = expectRecord(value, "server resource save request");
   const destinationDirectory = expectString(record.destinationDirectory, "destination directory");
   if (!isAbsolute(destinationDirectory)) {
-    throw new TypeError("server mod destination directory must be absolute");
+    throw new TypeError("server resource destination directory must be absolute");
   }
   return {
+    resourceType: expectDownloadableResourceType(record.resourceType),
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     destinationDirectory: resolve(destinationDirectory),
     connections: expectConnections(record.connections),
   };
+}
+
+function expectDownloadableResourceType(value: unknown): "mod" | "datapack" {
+  if (value === "modpack") {
+    throw new TypeError("server modpack download is not available");
+  }
+  if (value !== "mod" && value !== "datapack") {
+    throw new TypeError("server resource type must be mod or datapack");
+  }
+  return value;
 }
 
 function expectRecord(value: unknown, label: string): Record<string, unknown> {
@@ -177,6 +200,7 @@ function resultOf(
   instanceId?: string,
 ): ServerModDownloadResult {
   return {
+    resourceType: artifact.resourceType,
     projectId: artifact.projectId,
     versionId: artifact.versionId,
     fileName: artifact.fileName,

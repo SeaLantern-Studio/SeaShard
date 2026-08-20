@@ -2,7 +2,10 @@ import {
   desktopChannels,
   type ServerConfigurationWriteRequest,
 } from "../packages/contracts/src/index.ts";
-import { expectFileDownloadTasks } from "../apps/desktop/src/main/contract-validation.ts";
+import {
+  expectFileDownloadTasks,
+  expectServerModSearchResult,
+} from "../apps/desktop/src/main/contract-validation.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserWindow } from "electron";
@@ -14,6 +17,7 @@ import {
   serverInstances,
   serverInstanceStartupSettings,
   serverInstanceContentCounts,
+  serverModSearchResult,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
 
@@ -284,4 +288,19 @@ await test("desktop shell projects only user-visible file downloads", () => {
       },
     ],
   );
+});
+
+await test("desktop shell accepts Modrinth optional-server modpack environments", () => {
+  const result = expectServerModSearchResult({
+    ...serverModSearchResult,
+    items: [
+      {
+        ...serverModSearchResult.items[0],
+        resourceType: "modpack",
+        environment: ["client_only_server_optional"],
+      },
+    ],
+  });
+
+  assert.deepEqual(result.items[0]?.environment, ["client_only_server_optional"]);
 });

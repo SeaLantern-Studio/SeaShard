@@ -9,6 +9,7 @@ import {
   type ServerModSearchRequest,
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
+  type ServerModrinthResourceType,
   type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -26,11 +27,12 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
   }),
   serverMods: Object.freeze({
-    getFilters: () => ipcRenderer.invoke(desktopChannels.serverModFilters),
+    getFilters: (resourceType: ServerModrinthResourceType) =>
+      ipcRenderer.invoke(desktopChannels.serverModFilters, resourceType),
     search: (request: ServerModSearchRequest) =>
       ipcRenderer.invoke(desktopChannels.serverModSearch, request),
-    getProjectDetails: (projectId: string) =>
-      ipcRenderer.invoke(desktopChannels.serverModProjectDetails, projectId),
+    getProjectDetails: (resourceType: ServerModrinthResourceType, projectId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverModProjectDetails, resourceType, projectId),
     installToInstance: (request: ServerModInstallRequest) =>
       ipcRenderer.invoke(desktopChannels.serverModInstallToInstance, request),
     saveAs: (request: ServerModSaveAsRequest) =>

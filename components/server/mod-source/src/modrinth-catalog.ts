@@ -5,6 +5,7 @@ import {
   type ServerModFilters,
   type ServerModProject,
   type ServerModProjectDetails,
+  type ServerModrinthResourceType,
   type ServerModSearchIndex,
   type ServerModSearchRequest,
   type ServerModSearchResult,
@@ -21,7 +22,13 @@ const serverEnvironments = [
   "client_or_server",
   "client_or_server_prefers_both",
 ] as const satisfies readonly ServerModEnvironment[];
+const resourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
 const serverEnvironmentSet = new Set<string>(serverEnvironments);
+const knownEnvironmentSet = new Set<string>([
+  ...serverEnvironments,
+  "client_only_server_optional",
+  "client_only",
+]);
 const searchIndexes = new Set<ServerModSearchIndex>([
   "relevance",
   "downloads",
@@ -95,6 +102,7 @@ export interface ModrinthServerModCatalogOptions {
 
 /** Host 内部下载投影；URL、大小和 SHA-512 不跨 Renderer 边界。 */
 export interface ModrinthServerModArtifact {
+  readonly resourceType: "mod" | "datapack";
   readonly projectId: string;
   readonly versionId: string;
   readonly fileName: string;
@@ -106,17 +114,19 @@ export interface ModrinthServerModArtifact {
 }
 
 /**
- * Modrinth 服务端 Mod 目录。
+ * Modrinth 服务端资源目录。
  *
- * Client 只能传入结构化筛选项；Facet 语句和目标 URL 均在 Host 内构造。筛选元数据按进程缓存，
- * 翻页只请求当前 20 条结果，避免滚动时重复拉取整份目录。
+ * Client 只能传入结构化筛选项；Facet 语句和目标 URL 均在 Host 内构造。筛选元数据按资源类型
+ * 和进程缓存，翻页只请求当前 20 条结果，避免滚动时重复拉取整份目录。
  */
 export class ModrinthServerModCatalog {
   private readonly fetchProvider: () => typeof globalThis.fetch;
   private readonly userAgent: string;
   private readonly baseUrl: URL;
-  private filtersPromise?: Promise<ServerModFilters>;
-
+  private readonly filtersPromises = new Map<
+    ServerModrinthResourceType,
+    Promise<ServerModFilters>
+  >();
   constructor(options: ModrinthServerModCatalogOptions) {
     this.fetchProvider = options.fetchProvider ?? (() => globalThis.fetch);
     this.userAgent = options.userAgent.trim();
@@ -132,23 +142,33 @@ export class ModrinthServerModCatalog {
     this.baseUrl.hash = "";
   }
 
-  async getFilters(): Promise<ServerModFilters> {
-    if (!this.filtersPromise) {
-      const request = this.loadFilters();
-      this.filtersPromise = request;
-      void request.catch(() => {
-        if (this.filtersPromise === request) this.filtersPromise = undefined;
-      });
-    }
-    return this.filtersPromise;
+  async getFilters(resourceTypeValue: unknown): Promise<ServerModFilters> {
+    const resourceType = expectResourceType(resourceTypeValue);
+    const cached = this.filtersPromises.get(resourceType);
+    if (cached) return cached;
+
+    const request = this.loadFilters(resourceType);
+    this.filtersPromises.set(resourceType, request);
+    void request.catch(() => {
+      if (this.filtersPromises.get(resourceType) === request) {
+        this.filtersPromises.delete(resourceType);
+      }
+    });
+    return request;
   }
 
   async search(value: unknown): Promise<ServerModSearchResult> {
     const request = expectSearchRequest(value);
     const facets: string[][] = [
-      ["project_type:mod"],
-      serverEnvironments.map((environment) => `environment:${environment}`),
+      [
+        request.resourceType === "mod"
+          ? "project_type:mod"
+          : `all_project_types:${request.resourceType}`,
+      ],
     ];
+    if (request.resourceType === "mod") {
+      facets.push(serverEnvironments.map((environment) => `environment:${environment}`));
+    }
     if (request.tag) facets.push([`categories:${request.tag}`]);
     if (request.gameVersion) facets.push([`versions:${request.gameVersion}`]);
     if (request.loader) facets.push([`categories:${request.loader}`]);
@@ -160,10 +180,15 @@ export class ModrinthServerModCatalog {
     url.searchParams.set("offset", String(request.offset));
     url.searchParams.set("limit", String(request.limit));
 
-    return parseSearchResult(await this.fetchJson(url));
+    return parseSearchResult(await this.fetchJson(url), request.resourceType);
   }
-  async getProjectDetails(value: unknown): Promise<ServerModProjectDetails> {
-    const projectId = expectProjectId(value);
+
+  async getProjectDetails(
+    resourceTypeValue: unknown,
+    projectValue: unknown,
+  ): Promise<ServerModProjectDetails> {
+    const resourceType = expectResourceType(resourceTypeValue);
+    const projectId = expectProjectId(projectValue);
     const projectPath = `project/${encodeURIComponent(projectId)}`;
     const versionsUrl = this.endpoint(`${projectPath}/version`);
     versionsUrl.searchParams.set("include_changelog", "false");
@@ -171,24 +196,26 @@ export class ModrinthServerModCatalog {
       this.fetchJson(this.endpoint(projectPath)),
       this.fetchJson(versionsUrl),
     ]);
-    return parseProjectDetails(project, versions, projectId);
+    return parseProjectDetails(project, versions, projectId, resourceType);
   }
 
   /** 按稳定版本 ID 重新读取下载元数据，避免信任 Renderer 缓存的 URL 或哈希。 */
   async resolveVersionArtifact(
+    resourceTypeValue: unknown,
     projectValue: unknown,
     versionValue: unknown,
   ): Promise<ModrinthServerModArtifact> {
+    const resourceType = expectDownloadableResourceType(resourceTypeValue);
     const projectId = expectProjectId(projectValue);
     const versionId = expectVersionId(versionValue);
     const [project, version] = await Promise.all([
       this.fetchJson(this.endpoint(`project/${encodeURIComponent(projectId)}`)),
       this.fetchJson(this.endpoint(`version/${encodeURIComponent(versionId)}`)),
     ]);
-    return parseVersionArtifact(project, version, projectId, versionId);
+    return parseVersionArtifact(project, version, resourceType, projectId, versionId);
   }
 
-  private async loadFilters(): Promise<ServerModFilters> {
+  private async loadFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters> {
     const [categories, versions, loaders] = await Promise.all([
       this.fetchJson(this.endpoint("tag/category")),
       this.fetchJson(this.endpoint("tag/game_version")),
@@ -196,9 +223,9 @@ export class ModrinthServerModCatalog {
     ]);
     return {
       sources: [{ id: "modrinth", label: "Modrinth" }],
-      tags: parseTags(categories),
+      tags: parseTags(categories, resourceType),
       versions: parseGameVersions(versions),
-      loaders: parseLoaders(loaders),
+      loaders: parseLoaders(loaders, resourceType),
     };
   }
 
@@ -230,6 +257,7 @@ export class ModrinthServerModCatalog {
 
 function expectSearchRequest(value: unknown): ServerModSearchRequest {
   const record = expectRecord(value, "Modrinth search request");
+  const resourceType = expectResourceType(record.resourceType);
   const query = expectString(record.query, "query").trim();
   const tag = expectFilterId(record.tag, "tag");
   const gameVersion = expectFilterId(record.gameVersion, "game version");
@@ -243,8 +271,8 @@ function expectSearchRequest(value: unknown): ServerModSearchRequest {
   if (!searchIndexes.has(record.index as ServerModSearchIndex)) {
     throw new TypeError("Modrinth search index is invalid");
   }
-  if (loader && !loaderNames.has(loader)) {
-    throw new TypeError("Modrinth search loader is invalid");
+  if (loader && (!loaderNames.has(loader) || resourceType === "datapack")) {
+    throw new TypeError("Modrinth search loader is invalid for this resource type");
   }
   if (!Number.isSafeInteger(record.offset) || (record.offset as number) < 0) {
     throw new TypeError("Modrinth search offset must be a non-negative safe integer");
@@ -259,6 +287,7 @@ function expectSearchRequest(value: unknown): ServerModSearchRequest {
     );
   }
   return {
+    resourceType,
     source: "modrinth",
     query,
     tag,
@@ -268,6 +297,21 @@ function expectSearchRequest(value: unknown): ServerModSearchRequest {
     offset: record.offset as number,
     limit: record.limit as number,
   };
+}
+
+function expectResourceType(value: unknown): ServerModrinthResourceType {
+  if (typeof value !== "string" || !resourceTypes.has(value as ServerModrinthResourceType)) {
+    throw new TypeError("Modrinth resource type is invalid");
+  }
+  return value as ServerModrinthResourceType;
+}
+
+function expectDownloadableResourceType(value: unknown): "mod" | "datapack" {
+  const resourceType = expectResourceType(value);
+  if (resourceType === "modpack") {
+    throw new TypeError("Modrinth modpack download is not available");
+  }
+  return resourceType;
 }
 
 function expectProjectId(value: unknown): string {
@@ -286,10 +330,15 @@ function expectVersionId(value: unknown): string {
   return versionId;
 }
 
-function parseTags(value: unknown): ServerModFilterOption[] {
+function parseTags(
+  value: unknown,
+  resourceType: ServerModrinthResourceType,
+): ServerModFilterOption[] {
+  // Modrinth 的数据包沿用 Mod 项目类别；筛选身份则通过 all_project_types:datapack 保证。
+  const categoryProjectType = resourceType === "datapack" ? "mod" : resourceType;
   const options = expectArray(value, "Modrinth categories")
     .map((item, index) => expectRecord(item, `Modrinth category ${index}`))
-    .filter((item) => item.project_type === "mod" && item.header === "categories")
+    .filter((item) => item.project_type === categoryProjectType && item.header === "categories")
     .map((item) => expectFilterId(item.name, "category name"))
     .filter(Boolean)
     .map((id) => ({ id, label: tagLabels[id] ?? formatIdentifier(id) }));
@@ -309,12 +358,17 @@ function parseGameVersions(value: unknown): ServerModFilterOption[] {
   );
 }
 
-function parseLoaders(value: unknown): ServerModFilterOption[] {
+function parseLoaders(
+  value: unknown,
+  resourceType: ServerModrinthResourceType,
+): ServerModFilterOption[] {
+  if (resourceType === "datapack") return [];
   const options = expectArray(value, "Modrinth loaders")
     .map((item, index) => expectRecord(item, `Modrinth loader ${index}`))
     .filter(
       (item) =>
-        Array.isArray(item.supported_project_types) && item.supported_project_types.includes("mod"),
+        Array.isArray(item.supported_project_types) &&
+        item.supported_project_types.includes(resourceType),
     )
     .map((item) => expectFilterId(item.name, "loader name"))
     .filter((name) => loaderNames.has(name))
@@ -331,7 +385,10 @@ function parseLoaders(value: unknown): ServerModFilterOption[] {
   });
 }
 
-function parseSearchResult(value: unknown): ServerModSearchResult {
+function parseSearchResult(
+  value: unknown,
+  resourceType: ServerModrinthResourceType,
+): ServerModSearchResult {
   const record = expectRecord(value, "Modrinth search result");
   const hits = expectArray(record.hits, "Modrinth search hits");
   const offset = expectNonNegativeInteger(record.offset, "Modrinth result offset");
@@ -341,24 +398,28 @@ function parseSearchResult(value: unknown): ServerModSearchResult {
     throw new Error("Modrinth search returned an oversized page");
   }
   return {
-    items: hits.map(parseProject),
+    items: hits.map((project, index) => parseProject(project, index, resourceType)),
     offset,
     limit,
     total,
   };
 }
 
-function parseProject(value: unknown, index: number): ServerModProject {
+function parseProject(
+  value: unknown,
+  index: number,
+  resourceType: ServerModrinthResourceType,
+): ServerModProject {
   const record = expectRecord(value, `Modrinth project ${index}`);
-  if (record.project_type !== "mod") {
-    throw new Error(`Modrinth project ${index} is not a mod`);
+  if (!matchesSearchResourceType(record, resourceType)) {
+    throw new Error(`Modrinth project ${index} does not match ${resourceType}`);
   }
   const environment = parseStringArray(
     record.environment,
     `Modrinth project ${index} environment`,
     16,
-  ).filter((item): item is ServerModEnvironment => serverEnvironmentSet.has(item));
-  if (environment.length === 0) {
+  ).filter((item): item is ServerModEnvironment => knownEnvironmentSet.has(item));
+  if (resourceType === "mod" && !environment.some((item) => serverEnvironmentSet.has(item))) {
     throw new Error(`Modrinth project ${index} has no server-compatible environment`);
   }
   const dateModified = expectBoundedString(
@@ -372,6 +433,7 @@ function parseProject(value: unknown, index: number): ServerModProject {
   const id = expectBoundedString(record.project_id, `Modrinth project ${index} id`, 64);
   const iconUrl = expectProjectIconUrl(record.icon_url, id, index);
   return {
+    resourceType,
     source: "modrinth",
     id,
     slug: expectBoundedString(record.slug, `Modrinth project ${index} slug`, 128),
@@ -392,24 +454,39 @@ function parseProject(value: unknown, index: number): ServerModProject {
     versions: parseStringArray(record.versions, `Modrinth project ${index} versions`, 512),
   };
 }
+
+function matchesSearchResourceType(
+  project: Record<string, unknown>,
+  resourceType: ServerModrinthResourceType,
+): boolean {
+  if (resourceType !== "datapack") return project.project_type === resourceType;
+  return (
+    project.project_type === "datapack" ||
+    (Array.isArray(project.all_project_types) && project.all_project_types.includes("datapack"))
+  );
+}
 function parseProjectDetails(
   projectValue: unknown,
   versionsValue: unknown,
   expectedProjectId: string,
+  resourceType: ServerModrinthResourceType,
 ): ServerModProjectDetails {
   const project = expectRecord(projectValue, "Modrinth project details");
   const projectId = expectBoundedString(project.id, "Modrinth project details ID", 64);
-  if (projectId !== expectedProjectId || project.project_type !== "mod") {
-    throw new Error("Modrinth project details do not match the requested mod");
+  if (projectId !== expectedProjectId || !matchesDetailResourceType(project, resourceType)) {
+    throw new Error(`Modrinth project details do not match the requested ${resourceType}`);
   }
   const versions = expectArray(versionsValue, "Modrinth project versions");
   if (versions.length > 2_048) {
     throw new Error("Modrinth project returned too many versions");
   }
   return {
+    resourceType,
     projectId,
     body: expectBoundedString(project.body, "Modrinth project body", 200_000, true),
-    versions: versions.map((value, index) => parseProjectVersion(value, index, projectId)),
+    versions: versions
+      .map((value, index) => parseProjectVersion(value, index, projectId))
+      .filter((version) => matchesResourceVersion(version, resourceType)),
   };
 }
 
@@ -465,13 +542,16 @@ function parseProjectVersion(value: unknown, index: number, projectId: string): 
 function parseVersionArtifact(
   projectValue: unknown,
   versionValue: unknown,
+  resourceType: "mod" | "datapack",
   projectId: string,
   versionId: string,
 ): ModrinthServerModArtifact {
   const project = expectRecord(projectValue, "Modrinth download project");
+  if (project.id !== projectId || !matchesDetailResourceType(project, resourceType)) {
+    throw new Error(`Modrinth project does not match the requested ${resourceType}`);
+  }
   if (
-    project.id !== projectId ||
-    project.project_type !== "mod" ||
+    resourceType === "mod" &&
     !["required", "optional", "unknown"].includes(String(project.server_side))
   ) {
     throw new Error("Modrinth project is not compatible with dedicated servers");
@@ -480,6 +560,15 @@ function parseVersionArtifact(
   const version = expectRecord(versionValue, "Modrinth download version");
   if (version.id !== versionId || version.project_id !== projectId) {
     throw new Error("Modrinth version does not belong to the requested project");
+  }
+  const gameVersions = parseStringArray(
+    version.game_versions,
+    "Modrinth download game versions",
+    512,
+  );
+  const loaders = parseStringArray(version.loaders, "Modrinth download loaders", 64);
+  if (resourceType === "datapack" && !loaders.includes("datapack")) {
+    throw new Error("Modrinth version is not a datapack");
   }
   const files = expectArray(version.files, "Modrinth download version files");
   if (files.length === 0 || files.length > 64) {
@@ -493,34 +582,59 @@ function parseVersionArtifact(
     return file;
   });
   const file = fileRecords.find(({ primary }) => primary) ?? fileRecords[0]!;
-  const fileName = expectModJarFileName(file.filename);
+  const fileName = expectResourceFileName(file.filename, resourceType);
   const hashes = expectRecord(file.hashes, "Modrinth download file hashes");
   const sha512 = expectBoundedString(hashes.sha512, "Modrinth download SHA-512", 128).toLowerCase();
   if (!/^[a-f0-9]{128}$/u.test(sha512)) {
     throw new Error("Modrinth download SHA-512 is invalid");
   }
   return {
+    resourceType,
     projectId,
     versionId,
     fileName,
     url: expectModFileUrl(file.url, projectId, fileName),
     sha512,
     size: expectNonNegativeInteger(file.size, "Modrinth download file size"),
-    gameVersions: parseStringArray(version.game_versions, "Modrinth download game versions", 512),
-    loaders: parseStringArray(version.loaders, "Modrinth download loaders", 64),
+    gameVersions,
+    loaders,
   };
 }
 
-function expectModJarFileName(value: unknown): string {
+function matchesDetailResourceType(
+  project: Record<string, unknown>,
+  resourceType: ServerModrinthResourceType,
+): boolean {
+  if (resourceType !== "datapack") return project.project_type === resourceType;
+  return (
+    project.project_type === "datapack" ||
+    (Array.isArray(project.loaders) && project.loaders.includes("datapack"))
+  );
+}
+
+function matchesResourceVersion(
+  version: ServerModVersion,
+  resourceType: ServerModrinthResourceType,
+): boolean {
+  const fileName = version.fileName.toLowerCase();
+  if (resourceType === "modpack") return fileName.endsWith(".mrpack");
+  if (resourceType === "datapack") {
+    return version.loaders.includes("datapack") && fileName.endsWith(".zip");
+  }
+  return !version.loaders.includes("datapack") && fileName.endsWith(".jar");
+}
+
+function expectResourceFileName(value: unknown, resourceType: "mod" | "datapack"): string {
   const fileName = expectBoundedString(value, "Modrinth download file name", 512);
+  const expectedExtension = resourceType === "datapack" ? ".zip" : ".jar";
   if (
-    !fileName.toLowerCase().endsWith(".jar") ||
+    !fileName.toLowerCase().endsWith(expectedExtension) ||
     fileName === "." ||
     fileName === ".." ||
     fileName.includes("/") ||
     fileName.includes("\\")
   ) {
-    throw new Error("Modrinth download file name is invalid");
+    throw new Error(`Modrinth ${resourceType} download file name is invalid`);
   }
   return fileName;
 }

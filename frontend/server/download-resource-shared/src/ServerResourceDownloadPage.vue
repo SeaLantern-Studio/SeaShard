@@ -22,7 +22,6 @@ import {
 } from "cmzya-modern-ui";
 import {
   ArrowLeft,
-  BookOpen,
   Box,
   Check,
   ChevronDown,
@@ -31,7 +30,8 @@ import {
   Download,
   Heart,
   Link2,
-  Puzzle,
+  Archive,
+  Package,
   Search,
   UserRound,
   X,
@@ -43,14 +43,13 @@ import {
   formatServerModVersionRange,
   groupServerModVersions,
   serverModDisplayName,
-  serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
-  compatibleServerModInstances,
-} from "./mod-presentation";
+} from "./resource-presentation";
 
 const props = defineProps<{
-  mods: ServerModSourceClientService;
-  instances: ServerInstanceClientService;
+  resources: ServerModSourceClientService;
+  instances?: ServerInstanceClientService;
+  resourceType: "modpack" | "datapack";
 }>();
 
 const emptyFilters: ServerModFilters = {
@@ -66,7 +65,14 @@ const sortOptions: SelectOption[] = [
   { label: "最新发布", value: "newest" },
   { label: "最近更新", value: "updated" },
 ];
-const favoriteStorageKey = "seashard.server-mod.favorites";
+const resourceLabel = computed(() => (props.resourceType === "modpack" ? "整合包" : "数据包"));
+const resourcePathSegment = computed(() =>
+  props.resourceType === "modpack" ? "modpack" : "datapack",
+);
+const resourceIcon = computed(() => (props.resourceType === "modpack" ? Package : Archive));
+const showLoaderFilter = computed(() => props.resourceType === "modpack");
+const downloadEnabled = computed(() => props.resourceType === "datapack");
+const favoriteStorageKey = computed(() => `seashard.server-${props.resourceType}.favorites`);
 const detailVersionCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
@@ -122,6 +128,7 @@ const compatibleInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const installInstancesLoading = ref(false);
 const installInstancesError = ref("");
 const installPendingTarget = ref<string>();
+const installActionError = ref("");
 let installInstancesRequestId = 0;
 
 const sourceOptions = computed(() => toSelectOptions(filters.value.sources));
@@ -130,9 +137,9 @@ const versionOptions = computed(() => withAllOption("全部版本", filters.valu
 const loaderOptions = computed(() => withAllOption("全部加载器", filters.value.loaders));
 const hasMore = computed(() => projects.value.length < total.value);
 const resultSummary = computed(() => {
-  if (initialLoading.value) return "正在搜索服务端 Mod";
+  if (initialLoading.value) return `正在搜索${resourceLabel.value}`;
   if (searchError.value) return "搜索失败";
-  return `找到 ${total.value.toLocaleString("zh-CN")} 个服务端 Mod`;
+  return `找到 ${total.value.toLocaleString("zh-CN")} 个${resourceLabel.value}`;
 });
 const detailVersions = computed<readonly ServerModVersion[]>(
   () => projectDetails.value?.versions ?? [],
@@ -167,9 +174,6 @@ const detailDescription = computed(
 );
 const selectedProjectIsFavorite = computed(
   () => !!selectedProject.value && favoriteProjectIds.value.has(selectedProject.value.id),
-);
-const mcEncyclopediaUrl = computed(() =>
-  serverModMcEncyclopediaSearchUrl(selectedProject.value?.title ?? ""),
 );
 
 onMounted(() => {
@@ -216,7 +220,7 @@ async function loadFilters(): Promise<void> {
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    filters.value = await props.mods.getFilters("mod");
+    filters.value = await props.resources.getFilters(props.resourceType);
   } catch (error) {
     filtersError.value = errorMessage(error);
   } finally {
@@ -322,14 +326,14 @@ async function loadNextPage(): Promise<void> {
 }
 
 function searchPage(offset: number): Promise<ServerModSearchResult> {
-  return props.mods.search({
-    resourceType: "mod",
+  return props.resources.search({
+    resourceType: props.resourceType,
     source: "modrinth",
     query: query.value,
     tag: tag.value,
     index: sort.value,
     gameVersion: gameVersion.value,
-    loader: loader.value,
+    loader: showLoaderFilter.value ? loader.value : "",
     offset,
     limit: serverModSearchLimits.pageSize,
   });
@@ -414,7 +418,7 @@ async function loadProjectDetails(): Promise<void> {
   detailLoading.value = true;
   detailError.value = "";
   try {
-    const details = await props.mods.getProjectDetails("mod", project.id);
+    const details = await props.resources.getProjectDetails(props.resourceType, project.id);
     if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
       projectDetails.value = details;
     }
@@ -438,17 +442,19 @@ function toggleVersionGroup(groupId: string): void {
 }
 
 async function openInstallModal(version: ServerModVersion): Promise<void> {
+  if (!downloadEnabled.value || !props.instances) return;
   const requestId = ++installInstancesRequestId;
   installVersion.value = version;
   compatibleInstances.value = [];
   installInstancesError.value = "";
+  installActionError.value = "";
   installPendingTarget.value = undefined;
   installModalOpen.value = true;
   installInstancesLoading.value = true;
   try {
     const instances = await props.instances.list();
     if (requestId !== installInstancesRequestId) return;
-    compatibleInstances.value = compatibleServerModInstances(version, instances);
+    compatibleInstances.value = compatibleServerResourceInstances(version, instances);
   } catch (error) {
     if (requestId === installInstancesRequestId) {
       installInstancesError.value = errorMessage(error);
@@ -465,6 +471,7 @@ function closeInstallModal(): void {
   installVersion.value = undefined;
   compatibleInstances.value = [];
   installInstancesError.value = "";
+  installActionError.value = "";
 }
 
 function updateInstallModalVisible(visible: boolean): void {
@@ -476,17 +483,18 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
   const version = installVersion.value;
   if (!project || !version || installPendingTarget.value) return;
   installPendingTarget.value = instance.id;
+  installActionError.value = "";
   let completed = false;
   try {
-    await props.mods.installToInstance({
-      resourceType: "mod",
+    await props.resources.installToInstance({
+      resourceType: "datapack",
       projectId: project.id,
       versionId: version.id,
       instanceId: instance.id,
     });
     completed = true;
   } catch (error) {
-    console.error("Mod 安装失败", error);
+    installActionError.value = errorMessage(error);
   } finally {
     installPendingTarget.value = undefined;
     if (completed) closeInstallModal();
@@ -498,16 +506,17 @@ async function saveModAs(): Promise<void> {
   const version = installVersion.value;
   if (!project || !version || installPendingTarget.value) return;
   installPendingTarget.value = "save-as";
+  installActionError.value = "";
   let completed = false;
   try {
     completed =
-      (await props.mods.saveAs({
-        resourceType: "mod",
+      (await props.resources.saveAs({
+        resourceType: "datapack",
         projectId: project.id,
         versionId: version.id,
       })) !== undefined;
   } catch (error) {
-    console.error("Mod 另存为失败", error);
+    installActionError.value = errorMessage(error);
   } finally {
     installPendingTarget.value = undefined;
     if (completed) closeInstallModal();
@@ -522,7 +531,10 @@ async function copyProjectName(): Promise<void> {
 async function copyProjectLink(): Promise<void> {
   const project = selectedProject.value;
   if (!project) return;
-  await copyDetailValue("link", `https://modrinth.com/mod/${encodeURIComponent(project.slug)}`);
+  await copyDetailValue(
+    "link",
+    `https://modrinth.com/${resourcePathSegment.value}/${encodeURIComponent(project.slug)}`,
+  );
 }
 
 async function copyDetailValue(action: DetailCopyAction, value: string): Promise<void> {
@@ -567,7 +579,7 @@ function toggleFavorite(): void {
   if (next.has(project.id)) next.delete(project.id);
   else next.add(project.id);
   try {
-    localStorage.setItem(favoriteStorageKey, JSON.stringify([...next]));
+    localStorage.setItem(favoriteStorageKey.value, JSON.stringify([...next]));
     favoriteProjectIds.value = next;
   } catch (error) {
     console.error("收藏状态保存失败", error);
@@ -576,7 +588,7 @@ function toggleFavorite(): void {
 
 function readFavoriteProjectIds(): ReadonlySet<string> {
   try {
-    const value = JSON.parse(localStorage.getItem(favoriteStorageKey) ?? "[]") as unknown;
+    const value = JSON.parse(localStorage.getItem(favoriteStorageKey.value) ?? "[]") as unknown;
     if (!Array.isArray(value)) return new Set();
     return new Set(
       value.filter(
@@ -647,6 +659,16 @@ function formatRelativeTime(value: string): string {
   return formatServerModRelativeTime(value, relativeTimeNow.value);
 }
 
+/** 数据包只要求 Minecraft 版本精确匹配，不限制服务器核心或 Mod 加载器。 */
+function compatibleServerResourceInstances(
+  version: ServerModVersion,
+  instances: readonly ServerInstanceSnapshot[],
+): ServerInstanceSnapshot[] {
+  return instances.filter(
+    (instance) => !!instance.gameVersion && version.gameVersions.includes(instance.gameVersion),
+  );
+}
+
 /** Markdown 链接只通过 Electron 的新窗口拦截器交给系统浏览器，避免替换当前 Renderer。 */
 function openDetailMarkdownLink(event: MouseEvent): void {
   const target = event.target;
@@ -664,15 +686,15 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
-  <section class="server-mod-download-page" aria-label="Mod 下载">
+  <section class="server-mod-download-page" :aria-label="`${resourceLabel}下载`">
     <template v-if="selectedProject">
       <div class="mod-detail-page">
         <button class="mod-detail-back" type="button" @click="returnToProjectList">
           <ArrowLeft :size="18" :stroke-width="1.9" aria-hidden="true" />
-          返回 Mod 列表
+          返回{{ resourceLabel }}列表
         </button>
 
-        <section class="mod-detail-summary" aria-label="Mod 项目信息">
+        <section class="mod-detail-summary" :aria-label="`${resourceLabel}项目信息`">
           <div class="mod-detail-summary-main">
             <span class="mod-project-icon mod-detail-icon">
               <img
@@ -683,7 +705,13 @@ function errorMessage(error: unknown): string {
                 referrerpolicy="no-referrer"
                 @error="markProjectIconFailed(selectedProject.id)"
               />
-              <Puzzle v-else :size="28" :stroke-width="1.7" aria-hidden="true" />
+              <component
+                :is="resourceIcon"
+                v-else
+                :size="28"
+                :stroke-width="1.7"
+                aria-hidden="true"
+              />
             </span>
             <div class="mod-detail-project-copy">
               <div class="mod-project-title-line mod-detail-title-line">
@@ -758,11 +786,7 @@ function errorMessage(error: unknown): string {
             </button>
           </div>
 
-          <div class="mod-detail-actions" aria-label="Mod 项目操作">
-            <a class="mod-detail-action" :href="mcEncyclopediaUrl" target="_blank" rel="noreferrer">
-              <BookOpen :size="15" :stroke-width="1.8" aria-hidden="true" />
-              MC 百科
-            </a>
+          <div class="mod-detail-actions" :aria-label="`${resourceLabel}项目操作`">
             <button
               class="mod-detail-action"
               :class="`copy-${copyActionStates.name}`"
@@ -835,7 +859,11 @@ function errorMessage(error: unknown): string {
           <button type="button" @click="loadProjectDetails">重新加载</button>
         </div>
         <template v-else>
-          <div class="mod-filter-grid mod-detail-filter-grid" aria-label="Mod 版本筛选">
+          <div
+            class="mod-filter-grid mod-detail-filter-grid"
+            :class="{ 'single-filter': !showLoaderFilter }"
+            :aria-label="`${resourceLabel}版本筛选`"
+          >
             <label class="mod-filter-field">
               <span>版本</span>
               <Cmz_Select
@@ -846,7 +874,7 @@ function errorMessage(error: unknown): string {
                 @update:model-value="updateDetailGameVersion"
               />
             </label>
-            <label class="mod-filter-field">
+            <label v-if="showLoaderFilter" class="mod-filter-field">
               <span>加载器</span>
               <Cmz_Select
                 :model-value="detailLoader"
@@ -860,7 +888,11 @@ function errorMessage(error: unknown): string {
 
           <div v-if="detailVersionGroups.length === 0" class="mod-result-state mod-detail-state">
             <strong>没有符合筛选条件的版本</strong>
-            <span>尝试选择其他 Minecraft 版本或加载器。</span>
+            <span>{{
+              showLoaderFilter
+                ? "尝试选择其他 Minecraft 版本或加载器。"
+                : "尝试选择其他 Minecraft 版本。"
+            }}</span>
           </div>
           <div v-else class="mod-version-groups">
             <article
@@ -875,7 +907,10 @@ function errorMessage(error: unknown): string {
                 :aria-expanded="expandedVersionGroupId === group.id"
                 @click="toggleVersionGroup(group.id)"
               >
-                <strong>{{ loaderLabel(group.loader) }} {{ group.gameVersion }}</strong>
+                <strong>
+                  <template v-if="showLoaderFilter">{{ loaderLabel(group.loader) }} </template
+                  >{{ group.gameVersion }}
+                </strong>
                 <span>{{ group.versions.length }} 个文件</span>
                 <ChevronDown :size="18" :stroke-width="1.8" aria-hidden="true" />
               </button>
@@ -885,7 +920,12 @@ function errorMessage(error: unknown): string {
                   :key="version.id"
                   class="mod-version-item"
                   type="button"
-                  :aria-label="`下载 ${version.fileName}`"
+                  :disabled="!downloadEnabled"
+                  :aria-label="
+                    downloadEnabled
+                      ? `下载 ${version.fileName}`
+                      : `${version.fileName}，下载暂未开放`
+                  "
                   @click="openInstallModal(version)"
                 >
                   <span class="mod-project-icon mod-version-icon">
@@ -897,7 +937,13 @@ function errorMessage(error: unknown): string {
                       referrerpolicy="no-referrer"
                       @error="markProjectIconFailed(selectedProject.id)"
                     />
-                    <Puzzle v-else :size="16" :stroke-width="1.7" aria-hidden="true" />
+                    <component
+                      :is="resourceIcon"
+                      v-else
+                      :size="16"
+                      :stroke-width="1.7"
+                      aria-hidden="true"
+                    />
                   </span>
                   <strong>{{ version.fileName }}</strong>
                   <span class="mod-version-meta">
@@ -915,8 +961,9 @@ function errorMessage(error: unknown): string {
         </template>
 
         <Cmz_Modal
+          v-if="downloadEnabled"
           :visible="installModalOpen && !!installVersion"
-          title="安装 Mod"
+          title="安装数据包"
           width="520px"
           :close-on-overlay="!installPendingTarget"
           @close="closeInstallModal"
@@ -932,7 +979,13 @@ function errorMessage(error: unknown): string {
                   draggable="false"
                   referrerpolicy="no-referrer"
                 />
-                <Puzzle v-else :size="16" :stroke-width="1.7" aria-hidden="true" />
+                <component
+                  :is="resourceIcon"
+                  v-else
+                  :size="16"
+                  :stroke-width="1.7"
+                  aria-hidden="true"
+                />
               </span>
               <div>
                 <span>准备下载</span>
@@ -975,10 +1028,7 @@ function errorMessage(error: unknown): string {
                     </span>
                     <span class="mod-install-instance-copy">
                       <strong>{{ instance.name }}</strong>
-                      <span
-                        >{{ instance.gameVersion }} ·
-                        {{ loaderLabel(instance.modLoader ?? "") }}</span
-                      >
+                      <span>{{ instance.gameVersion }}</span>
                     </span>
                     <span
                       v-if="installPendingTarget === instance.id"
@@ -991,6 +1041,9 @@ function errorMessage(error: unknown): string {
 
               <div class="mod-install-separator"><span>或</span></div>
             </template>
+            <div v-if="installActionError" class="mod-install-feedback error" role="alert">
+              {{ installActionError }}
+            </div>
             <Cmz_Button
               class="mod-install-save-as"
               variant="outline"
@@ -1012,13 +1065,17 @@ function errorMessage(error: unknown): string {
           class="mod-search-control"
           :model-value="query"
           :maxlength="serverModSearchLimits.maximumQueryLength"
-          placeholder="搜索 Mod 名称或关键词"
-          aria-label="搜索服务端 Mod"
+          :placeholder="`搜索${resourceLabel}名称或关键词`"
+          :aria-label="`搜索${resourceLabel}`"
           @update:model-value="updateQuery"
         />
       </div>
 
-      <div class="mod-filter-grid" aria-label="Mod 搜索筛选">
+      <div
+        class="mod-filter-grid"
+        :class="{ 'without-loader': !showLoaderFilter }"
+        :aria-label="`${resourceLabel}搜索筛选`"
+      >
         <label class="mod-filter-field">
           <span>来源</span>
           <Cmz_Select
@@ -1054,7 +1111,7 @@ function errorMessage(error: unknown): string {
             @update:model-value="updateGameVersion"
           />
         </label>
-        <label class="mod-filter-field">
+        <label v-if="showLoaderFilter" class="mod-filter-field">
           <span>加载器</span>
           <Cmz_Select
             :model-value="loader"
@@ -1079,7 +1136,7 @@ function errorMessage(error: unknown): string {
         >
       </div>
 
-      <div v-if="initialLoading" class="mod-project-list" aria-label="正在加载 Mod">
+      <div v-if="initialLoading" class="mod-project-list" :aria-label="`正在加载${resourceLabel}`">
         <div v-for="index in 6" :key="index" class="mod-project-row mod-project-row-loading">
           <span class="mod-project-icon-placeholder" />
           <span class="mod-project-copy-placeholder">
@@ -1091,13 +1148,13 @@ function errorMessage(error: unknown): string {
       </div>
 
       <div v-else-if="searchError && projects.length === 0" class="mod-result-state" role="alert">
-        <strong>无法加载 Mod</strong>
+        <strong>无法加载{{ resourceLabel }}</strong>
         <span>{{ searchError }}</span>
         <button type="button" @click="resetSearch">重新搜索</button>
       </div>
 
       <div v-else-if="projects.length === 0" class="mod-result-state">
-        <strong>没有找到符合条件的 Mod</strong>
+        <strong>没有找到符合条件的{{ resourceLabel }}</strong>
         <span>尝试减少筛选条件或更换搜索关键词。</span>
       </div>
 
@@ -1118,7 +1175,13 @@ function errorMessage(error: unknown): string {
               referrerpolicy="no-referrer"
               @error="markProjectIconFailed(project.id)"
             />
-            <Puzzle v-else :size="24" :stroke-width="1.7" aria-hidden="true" />
+            <component
+              :is="resourceIcon"
+              v-else
+              :size="24"
+              :stroke-width="1.7"
+              aria-hidden="true"
+            />
           </span>
           <div class="mod-project-copy">
             <div class="mod-project-title-line">
@@ -1187,4 +1250,4 @@ function errorMessage(error: unknown): string {
   </section>
 </template>
 
-<style scoped src="./ServerModDownloadPage.css"></style>
+<style scoped src="./ServerResourceDownloadPage.css"></style>

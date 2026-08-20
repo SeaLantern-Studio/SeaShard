@@ -8,8 +8,11 @@ import {
   serverModSourceContract,
 } from "../packages/contracts/src/index.ts";
 import { serverConfigurationUiManifest } from "../frontend/server/configuration/src/index.ts";
+import { serverDownloadDatapackUiManifest } from "../frontend/server/download-datapack/src/index.ts";
 import { serverDownloadModUiManifest } from "../frontend/server/download-mod/src/index.ts";
+import { serverDownloadModpackUiManifest } from "../frontend/server/download-modpack/src/index.ts";
 import { serverDownloadServerCoreUiManifest } from "../frontend/server/download-servercore/src/index.ts";
+import { serverDownloadWorldUiManifest } from "../frontend/server/download-world/src/index.ts";
 import { serverConsoleUiManifest } from "../frontend/server/console/src/index.ts";
 import { serverInstanceSettingsUiManifest } from "../frontend/server/settings/src/index.ts";
 import { serverLaunchUiManifest } from "../frontend/server/launch/src/index.ts";
@@ -29,6 +32,24 @@ const components = [
     pluginId: "seashard.server-download-mod-ui",
     entryId: "server-download-mod.client",
     permissions: [serverModSourceContract, serverInstanceManagerContract],
+  },
+  {
+    manifest: serverDownloadModpackUiManifest,
+    pluginId: "seashard.server-download-modpack-ui",
+    entryId: "server-download-modpack.client",
+    permissions: [serverModSourceContract],
+  },
+  {
+    manifest: serverDownloadDatapackUiManifest,
+    pluginId: "seashard.server-download-datapack-ui",
+    entryId: "server-download-datapack.client",
+    permissions: [serverModSourceContract, serverInstanceManagerContract],
+  },
+  {
+    manifest: serverDownloadWorldUiManifest,
+    pluginId: "seashard.server-download-world-ui",
+    entryId: "server-download-world.client",
+    permissions: [],
   },
   {
     manifest: serverOverviewUiManifest,

@@ -14,6 +14,7 @@ import type {
   ServerModInstallRequest,
   ServerModSaveAsRequest,
   ServerModSearchRequest,
+  ServerModrinthResourceType,
   ServerModSourceClientService,
   ServerInstanceClientService,
   ServerInstanceSnapshot,
@@ -106,11 +107,14 @@ export interface DesktopShellConfig {
     serverType: string,
     gameVersion: string,
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
-  readServerModFilters(): ReturnType<ServerModSourceClientService["getFilters"]>;
+  readServerModFilters(
+    resourceType: ServerModrinthResourceType,
+  ): ReturnType<ServerModSourceClientService["getFilters"]>;
   searchServerMods(
     request: ServerModSearchRequest,
   ): ReturnType<ServerModSourceClientService["search"]>;
   readServerModProjectDetails(
+    resourceType: ServerModrinthResourceType,
     projectId: string,
   ): ReturnType<ServerModSourceClientService["getProjectDetails"]>;
   installServerMod(request: StartDesktopServerModInstallRequest): Promise<ServerModDownloadResult>;

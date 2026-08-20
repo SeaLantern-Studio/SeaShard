@@ -5,8 +5,11 @@ import type { PluginKernel } from "@seashard/plugin-system";
 import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
 import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui";
 import { serverConsoleUiManifest } from "@seashard/server-console-ui";
+import { serverDownloadDatapackUiManifest } from "@seashard/server-download-datapack-ui";
 import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
+import { serverDownloadModpackUiManifest } from "@seashard/server-download-modpack-ui";
 import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
+import { serverDownloadWorldUiManifest } from "@seashard/server-download-world-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverInstanceSettingsUiManifest } from "@seashard/server-instance-settings-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
@@ -82,6 +85,51 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.server-download-mod.ui",
         entryId: "server-download-mod.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 整合包目录独立发布；下载尚未开放，因此只申请资源目录 Contract。
+  await kernel.registerBuiltIn({
+    manifest: serverDownloadModpackUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-download-modpack.ui",
+        entryId: "server-download-modpack.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 数据包页面可按精确游戏版本安装到任意已登记实例。
+  await kernel.registerBuiltIn({
+    manifest: serverDownloadDatapackUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-download-datapack.ui",
+        entryId: "server-download-datapack.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Modrinth 没有独立世界项目类型；世界页独立说明能力边界，不申请 Host 权限。
+  await kernel.registerBuiltIn({
+    manifest: serverDownloadWorldUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-download-world.ui",
+        entryId: "server-download-world.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

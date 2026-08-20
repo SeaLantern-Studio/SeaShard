@@ -27,7 +27,7 @@ export const serverModSourceManifest: PluginManifest = {
   },
 };
 
-/** 创建独立 Modrinth 目录能力；网络响应在 Host 内校验后才投影给 Client。 */
+/** 创建独立 Modrinth 资源目录能力；网络响应在 Host 内校验后才投影给 Client。 */
 export function createServerModSourceModule(options: ServerModSourceModuleOptions): PluginModule {
   return {
     inject: [downloadContract, serverInstanceManagerContract],
@@ -38,10 +38,10 @@ export function createServerModSourceModule(options: ServerModSourceModuleOption
       const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
       const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
       ctx.provide(serverModSourceContract, {
-        getFilters: async () => asJsonValue(await catalog.getFilters()),
+        getFilters: async (resourceType) => asJsonValue(await catalog.getFilters(resourceType)),
         search: async (request) => asJsonValue(await catalog.search(request)),
-        getProjectDetails: async (projectId) =>
-          asJsonValue(await catalog.getProjectDetails(projectId)),
+        getProjectDetails: async (resourceType, projectId) =>
+          asJsonValue(await catalog.getProjectDetails(resourceType, projectId)),
         installToInstance: async (request) =>
           asJsonValue(await coordinator.installToInstance(request)),
         saveToDirectory: async (request) => asJsonValue(await coordinator.saveToDirectory(request)),

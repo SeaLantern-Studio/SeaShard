@@ -29,6 +29,7 @@ import {
   type ServerModFilters,
   type ServerModDownloadResult,
   type ServerModProject,
+  type ServerModrinthResourceType,
   type ServerModProjectDetails,
   type ServerModSearchResult,
   type ServerModVersion,
@@ -102,7 +103,10 @@ const serverModEnvironments = new Set<ServerModEnvironment>([
   "dedicated_server_only",
   "client_or_server",
   "client_or_server_prefers_both",
+  "client_only_server_optional",
+  "client_only",
 ]);
+const serverModResourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
 
 function isServerModIconUrl(value: unknown, projectId: unknown): value is string {
   if (typeof value !== "string" || typeof projectId !== "string") return false;
@@ -198,10 +202,12 @@ export function expectServerModSearchResult(value: unknown): ServerModSearchResu
 }
 export function expectServerModProjectDetails(value: unknown): ServerModProjectDetails {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("server mod source returned invalid project details");
+    throw new Error("server resource source returned invalid project details");
   }
   const details = value as Record<string, unknown>;
   if (
+    typeof details.resourceType !== "string" ||
+    !serverModResourceTypes.has(details.resourceType as ServerModrinthResourceType) ||
     typeof details.projectId !== "string" ||
     !details.projectId ||
     details.projectId.length > 64 ||
@@ -210,16 +216,17 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
     !Array.isArray(details.versions) ||
     details.versions.length > 2_048
   ) {
-    throw new Error("server mod source returned invalid project details");
+    throw new Error("server resource source returned invalid project details");
   }
   const seen = new Set<string>();
   return {
+    resourceType: details.resourceType as ServerModrinthResourceType,
     projectId: details.projectId,
     body: details.body,
     versions: details.versions.map((version, index) => {
       const parsed = expectServerModVersion(version, index, details.projectId as string);
       if (seen.has(parsed.id)) {
-        throw new Error(`server mod source returned duplicate version ${index}`);
+        throw new Error(`server resource source returned duplicate version ${index}`);
       }
       seen.add(parsed.id);
       return parsed;
@@ -229,29 +236,32 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
 
 export function expectServerModDownloadResult(value: unknown): ServerModDownloadResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("server mod source returned an invalid download result");
+    throw new Error("server resource source returned an invalid download result");
   }
   const result = value as Record<string, unknown>;
+  const extension =
+    result.resourceType === "datapack" ? ".zip" : result.resourceType === "mod" ? ".jar" : "";
   if (
+    !extension ||
     typeof result.projectId !== "string" ||
     !result.projectId ||
     typeof result.versionId !== "string" ||
     !result.versionId ||
     typeof result.fileName !== "string" ||
-    !result.fileName.toLowerCase().endsWith(".jar") ||
+    !result.fileName.toLowerCase().endsWith(extension) ||
     !["instance", "directory"].includes(String(result.destination)) ||
     (result.instanceId !== undefined &&
       (typeof result.instanceId !== "string" || !result.instanceId)) ||
     !Number.isSafeInteger(result.downloadedBytes) ||
     (result.downloadedBytes as number) < 0
   ) {
-    throw new Error("server mod source returned an invalid download result");
+    throw new Error("server resource source returned an invalid download result");
   }
   if (
     (result.destination === "instance" && typeof result.instanceId !== "string") ||
     (result.destination === "directory" && result.instanceId !== undefined)
   ) {
-    throw new Error("server mod source returned an invalid download destination");
+    throw new Error("server resource source returned an invalid download destination");
   }
   return result as unknown as ServerModDownloadResult;
 }
@@ -295,7 +305,7 @@ function expectServerModVersion(
 
 function expectServerModProject(value: unknown, index: number): ServerModProject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`server mod source returned invalid project ${index}`);
+    throw new Error(`server resource source returned invalid project ${index}`);
   }
   const project = value as Record<string, unknown>;
   const requiredStrings = ["id", "slug", "title", "description", "author", "dateModified"] as const;
@@ -305,6 +315,8 @@ function expectServerModProject(value: unknown, index: number): ServerModProject
     16,
   );
   if (
+    typeof project.resourceType !== "string" ||
+    !serverModResourceTypes.has(project.resourceType as ServerModrinthResourceType) ||
     project.source !== "modrinth" ||
     requiredStrings.some(
       (field) =>
@@ -321,9 +333,10 @@ function expectServerModProject(value: unknown, index: number): ServerModProject
     environment.length === 0 ||
     environment.some((item) => !serverModEnvironments.has(item as ServerModEnvironment))
   ) {
-    throw new Error(`server mod source returned invalid project ${index}`);
+    throw new Error(`server resource source returned invalid project ${index}`);
   }
   return {
+    resourceType: project.resourceType as ServerModrinthResourceType,
     source: "modrinth",
     id: project.id as string,
     slug: project.slug as string,

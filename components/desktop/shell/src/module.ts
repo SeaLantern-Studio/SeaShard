@@ -19,6 +19,7 @@ import {
   expectServerCoreSaveAsRequest,
   expectServerModInstallRequest,
   expectServerModProjectId,
+  expectServerModResourceType,
   expectServerModSaveAsRequest,
   expectServerModSearchRequest,
   expectServerStartupDefaultsUpdate,
@@ -505,24 +506,30 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
-        config.runtime.handle(desktopChannels.serverModFilters, async (event) => {
+        config.runtime.handle(desktopChannels.serverModFilters, async (event, resourceType) => {
           if (!ownsWebContents(event.sender.id)) {
-            throw new Error("server mod filters request rejected");
+            throw new Error("server resource filters request rejected");
           }
-          return config.readServerModFilters();
+          return config.readServerModFilters(expectServerModResourceType(resourceType));
         });
         config.runtime.handle(desktopChannels.serverModSearch, async (event, request) => {
           if (!ownsWebContents(event.sender.id)) {
-            throw new Error("server mod search request rejected");
+            throw new Error("server resource search request rejected");
           }
           return config.searchServerMods(expectServerModSearchRequest(request));
         });
-        config.runtime.handle(desktopChannels.serverModProjectDetails, async (event, projectId) => {
-          if (!ownsWebContents(event.sender.id)) {
-            throw new Error("server mod project details request rejected");
-          }
-          return config.readServerModProjectDetails(expectServerModProjectId(projectId));
-        });
+        config.runtime.handle(
+          desktopChannels.serverModProjectDetails,
+          async (event, resourceType, projectId) => {
+            if (!ownsWebContents(event.sender.id)) {
+              throw new Error("server resource project details request rejected");
+            }
+            return config.readServerModProjectDetails(
+              expectServerModResourceType(resourceType),
+              expectServerModProjectId(projectId),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverModInstallToInstance, async (event, value) => {
           ownedWindow(event.sender.id);
           const request = expectServerModInstallRequest(value);
@@ -536,8 +543,9 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           const window = ownedWindow(event.sender.id);
           const request = expectServerModSaveAsRequest(value);
           const settings = await config.readServerSettings();
+          const resourceLabel = request.resourceType === "datapack" ? "数据包" : "Mod";
           const destinationDirectory = await config.runtime.selectDirectory(window, {
-            title: "选择 Mod 保存文件夹",
+            title: `选择${resourceLabel}保存文件夹`,
             buttonLabel: "保存到此文件夹",
             defaultPath: settings.resourceDownloadDirectory,
           });

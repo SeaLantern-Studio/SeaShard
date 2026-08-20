@@ -8,6 +8,7 @@ import {
   type ServerStartupDefaultsUpdate,
   type ServerInstanceStartupSettings,
   type ServerModSearchRequest,
+  type ServerModrinthResourceType,
 } from "@seashard/contracts";
 import {
   createDesktopShellModule,
@@ -128,9 +129,9 @@ export async function registerDesktopShellBridge(
                   gameVersion,
                 ]),
               ),
-            readServerModFilters: async () =>
+            readServerModFilters: async (resourceType: ServerModrinthResourceType) =>
               expectServerModFilters(
-                await kernel.callService(serverModSourceContract, "getFilters", []),
+                await kernel.callService(serverModSourceContract, "getFilters", [resourceType]),
               ),
             searchServerMods: async (request: ServerModSearchRequest) =>
               expectServerModSearchResult(
@@ -138,9 +139,15 @@ export async function registerDesktopShellBridge(
                   request as unknown as JsonValue,
                 ]),
               ),
-            readServerModProjectDetails: async (projectId) =>
+            readServerModProjectDetails: async (
+              resourceType: ServerModrinthResourceType,
+              projectId,
+            ) =>
               expectServerModProjectDetails(
-                await kernel.callService(serverModSourceContract, "getProjectDetails", [projectId]),
+                await kernel.callService(serverModSourceContract, "getProjectDetails", [
+                  resourceType,
+                  projectId,
+                ]),
               ),
             installServerMod: async (request) =>
               expectServerModDownloadResult(

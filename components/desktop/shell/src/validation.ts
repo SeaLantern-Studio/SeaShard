@@ -7,6 +7,7 @@ import {
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
   type ServerModSearchIndex,
+  type ServerModrinthResourceType,
   type ServerModSearchRequest,
   type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
@@ -108,36 +109,42 @@ const serverModSearchIndexes = new Set<ServerModSearchIndex>([
   "updated",
 ]);
 const serverModFilterPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
+const serverModResourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
 const serverModProjectIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 /** 收窄 Renderer 的搜索参数，分页和 Facet 都只能落在公开 Contract 的固定边界内。 */
 export function expectServerModSearchRequest(value: unknown): ServerModSearchRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("server mod search request must be an object");
+    throw new TypeError("server resource search request must be an object");
   }
   const record = value as Record<string, unknown>;
-  const query = expectString(record.query, "server mod search query").trim();
-  const tag = expectServerModFilter(record.tag, "server mod tag");
-  const gameVersion = expectServerModFilter(record.gameVersion, "server mod game version");
-  const loader = expectServerModFilter(record.loader, "server mod loader");
-  const offset = expectSafeInteger(record.offset, "server mod search offset");
-  const limit = expectSafeInteger(record.limit, "server mod search limit");
+  const resourceType = expectServerModResourceType(record.resourceType);
+  const query = expectString(record.query, "server resource search query").trim();
+  const tag = expectServerModFilter(record.tag, "server resource tag");
+  const gameVersion = expectServerModFilter(record.gameVersion, "server resource game version");
+  const loader = expectServerModFilter(record.loader, "server resource loader");
+  const offset = expectSafeInteger(record.offset, "server resource search offset");
+  const limit = expectSafeInteger(record.limit, "server resource search limit");
   if (record.source !== "modrinth") {
-    throw new TypeError("server mod source must be modrinth");
+    throw new TypeError("server resource source must be modrinth");
+  }
+  if (resourceType === "datapack" && loader) {
+    throw new TypeError("server datapack search must not specify a loader");
   }
   if (query.length > serverModSearchLimits.maximumQueryLength || query.includes("\0")) {
-    throw new TypeError("server mod search query is too long or contains NUL");
+    throw new TypeError("server resource search query is too long or contains NUL");
   }
   if (!serverModSearchIndexes.has(record.index as ServerModSearchIndex)) {
-    throw new TypeError("server mod search index is invalid");
+    throw new TypeError("server resource search index is invalid");
   }
-  if (offset < 0) throw new TypeError("server mod search offset must not be negative");
+  if (offset < 0) throw new TypeError("server resource search offset must not be negative");
   if (limit < 1 || limit > serverModSearchLimits.maximumPageSize) {
     throw new TypeError(
-      `server mod search limit must be between 1 and ${serverModSearchLimits.maximumPageSize}`,
+      `server resource search limit must be between 1 and ${serverModSearchLimits.maximumPageSize}`,
     );
   }
   return {
+    resourceType,
     source: "modrinth",
     query,
     tag,
@@ -148,6 +155,16 @@ export function expectServerModSearchRequest(value: unknown): ServerModSearchReq
     limit,
   };
 }
+
+export function expectServerModResourceType(value: unknown): ServerModrinthResourceType {
+  if (
+    typeof value !== "string" ||
+    !serverModResourceTypes.has(value as ServerModrinthResourceType)
+  ) {
+    throw new TypeError("server resource type is invalid");
+  }
+  return value as ServerModrinthResourceType;
+}
 export function expectServerModProjectId(value: unknown): string {
   const projectId = expectString(value, "server mod project ID").trim();
   if (!serverModProjectIdPattern.test(projectId)) {
@@ -157,19 +174,28 @@ export function expectServerModProjectId(value: unknown): string {
 }
 
 export function expectServerModSaveAsRequest(value: unknown): ServerModSaveAsRequest {
-  const record = expectRecord(value, "server mod save-as request");
+  const record = expectRecord(value, "server resource save-as request");
   return {
+    resourceType: expectDownloadableServerModResourceType(record.resourceType),
     projectId: expectServerModProjectId(record.projectId),
-    versionId: expectServerModIdentity(record.versionId, "server mod version ID"),
+    versionId: expectServerModIdentity(record.versionId, "server resource version ID"),
   };
 }
 
 export function expectServerModInstallRequest(value: unknown): ServerModInstallRequest {
-  const record = expectRecord(value, "server mod install request");
+  const record = expectRecord(value, "server resource install request");
   return {
     ...expectServerModSaveAsRequest(record),
     instanceId: expectServerModIdentity(record.instanceId, "server instance ID", 128),
   };
+}
+
+function expectDownloadableServerModResourceType(value: unknown): "mod" | "datapack" {
+  const resourceType = expectServerModResourceType(value);
+  if (resourceType === "modpack") {
+    throw new TypeError("server modpack download is not available");
+  }
+  return resourceType;
 }
 
 function expectServerModFilter(value: unknown, label: string): string {
