@@ -261,11 +261,13 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreDownloadStartManaged), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesList), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesContentCounts), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverInstancesSetStartupSettings), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesOpenFolder), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverInstancesDelete), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationList), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationRead), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverConfigurationWrite), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimePreview), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGet), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStart), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStop), false);

@@ -12,6 +12,7 @@ import {
   paperIconPath,
   paperInstanceIconPath,
   serverCoreTypes,
+  serverInstanceStartupSettings,
   updatedServerStartupSettings,
   javaInstallations,
 } from "./desktop-shell-fixtures.ts";
@@ -87,6 +88,16 @@ await test("desktop shell rejects IPC from unowned renderers", async () => {
     /request rejected/,
   );
   await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesSetStartupSettings, 1, "instance-paper", {
+      minimumMemoryMiB: 512,
+      maximumMemoryMiB: 2_048,
+      serverPort: 25_565,
+      autoAcceptEula: true,
+      jvmArguments: "",
+    }),
+    /request rejected/,
+  );
+  await assert.rejects(
     runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "instance-paper"),
     /request rejected/,
   );
@@ -104,6 +115,15 @@ await test("desktop shell rejects IPC from unowned renderers", async () => {
       1,
       "instance-paper",
       "server.properties",
+    ),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverRuntimePreview,
+      1,
+      "instance-paper",
+      serverInstanceStartupSettings,
     ),
     /request rejected/,
   );

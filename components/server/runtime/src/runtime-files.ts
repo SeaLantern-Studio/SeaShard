@@ -24,9 +24,14 @@ export async function prepareRuntimeFiles(
   }
   if (plan.writesServerProperties) {
     const propertiesPath = resolve(plan.workingDirectory, "server.properties");
-    if ((await readOptionalText(fileSystem, propertiesPath)) === undefined) {
-      await fileSystem.writeTextFile(propertiesPath, `server-port=${settings.defaultServerPort}\n`);
-    }
+    const current = await readOptionalText(fileSystem, propertiesPath);
+    const updated = upsertProperty(
+      current ?? "",
+      "server-port",
+      String(settings.defaultServerPort),
+    );
+    // 端口属于启动设置；每次启动都同步，但不覆写 server.properties 中的其他配置。
+    if (updated !== current) await fileSystem.writeTextFile(propertiesPath, updated);
   }
 }
 

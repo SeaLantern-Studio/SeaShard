@@ -8,6 +8,7 @@ import { serverConsoleUiManifest } from "@seashard/server-console-ui";
 import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
 import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
+import { serverInstanceSettingsUiManifest } from "@seashard/server-instance-settings-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
@@ -111,6 +112,21 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.server-launch.ui",
         entryId: "server-launch.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 实例设置页独立发布，只负责单个服务器的启动参数覆盖和命令预览。
+  await kernel.registerBuiltIn({
+    manifest: serverInstanceSettingsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-instance-settings.ui",
+        entryId: "server-instance-settings.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

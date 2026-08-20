@@ -1,7 +1,11 @@
 import {
+  serverJvmArgumentsMaximumLength,
+  serverPortLimits,
   type JavaInstallationSnapshot,
   type ServerConsoleLine,
   type ServerConsoleStream,
+  type ServerInstanceStartupSettings,
+  type ServerLaunchCommandPreview,
   type ServerInstanceSnapshot,
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
@@ -59,6 +63,23 @@ interface ActiveSession {
   stdinFailure?: Error;
 }
 
+/** 单个实例保存的是完整设置组；存在时整体映射到运行组件现有的全局设置结构。 */
+export function resolveServerRuntimeSettings(
+  instance: ServerInstanceSnapshot,
+  defaults: ServerSettingsSnapshot,
+  override: ServerInstanceStartupSettings | undefined = instance.startupSettings,
+): ServerSettingsSnapshot {
+  if (!override) return defaults;
+  return {
+    ...defaults,
+    defaultMinimumMemoryMiB: override.minimumMemoryMiB,
+    defaultMaximumMemoryMiB: override.maximumMemoryMiB,
+    defaultServerPort: override.serverPort,
+    autoAcceptEula: override.autoAcceptEula,
+    defaultJvmArguments: override.jvmArguments,
+  };
+}
+
 /**
  * 管理已声明启动策略的服务器进程。
  *
@@ -95,6 +116,30 @@ export class ServerRuntimeManager {
     const instanceId = expectInstanceId(value);
     return { ...(this.snapshots.get(instanceId) ?? stoppedSnapshot(instanceId)) };
   }
+  async preview(
+    instanceValue: unknown,
+    startupSettingsValue?: unknown,
+  ): Promise<ServerLaunchCommandPreview> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(instanceValue);
+    const [instance, defaults, installations] = await Promise.all([
+      this.findInstance(instanceId),
+      this.options.readSettings(),
+      this.options.scanJavaInstallations(),
+    ]);
+    this.ensureActive();
+    const override =
+      startupSettingsValue === undefined
+        ? instance.startupSettings
+        : expectServerInstanceStartupSettings(startupSettingsValue);
+    const settings = resolveServerRuntimeSettings(instance, defaults, override);
+    const plan = buildServerLaunchPlan(instance, settings);
+    const java = selectJavaInstallation(installations, plan.java);
+    return {
+      instanceId,
+      command: formatServerLaunchCommand(java.path, plan.arguments),
+    };
+  }
 
   getLogs(instanceValue: unknown, afterSequenceValue: unknown = 0): readonly ServerConsoleLine[] {
     const instanceId = expectInstanceId(instanceValue);
@@ -123,13 +168,14 @@ export class ServerRuntimeManager {
         this.options.readSettings(),
         this.options.scanJavaInstallations(),
       ]);
+      const effectiveSettings = resolveServerRuntimeSettings(instance, settings);
       // 异步扫描期间组件可能开始卸载；此后不得再写实例文件或创建新进程。
       this.ensureActive();
-      const plan = buildServerLaunchPlan(instance, settings);
+      const plan = buildServerLaunchPlan(instance, effectiveSettings);
       const java = selectJavaInstallation(installations, plan.java);
       await this.preparationRunner.prepare(instanceId, java, plan);
       this.ensureActive();
-      await prepareRuntimeFiles(this.fileSystem, plan, settings);
+      await prepareRuntimeFiles(this.fileSystem, plan, effectiveSettings);
       const environment = createJavaEnvironment(java);
 
       child = this.spawnProcess(java.path, plan.arguments, {
@@ -143,7 +189,7 @@ export class ServerRuntimeManager {
       if (this.sessions.get(instanceId) !== session) {
         throw new Error(`server instance ${instanceId} exited before startup completed`);
       }
-      if (plan.eula === "interactive-minecraft" && settings.autoAcceptEula) {
+      if (plan.eula === "interactive-minecraft" && effectiveSettings.autoAcceptEula) {
         // Banner 只从 stdin 接受严格小写 true；提前写入管道，由其到达 EULA 门后读取。
         await this.writeCommand(instanceId, session, "true");
         this.appendLine(instanceId, "input", "> true");
@@ -504,6 +550,63 @@ function stoppedSnapshot(instanceId: string): ServerRuntimeSnapshot {
 
 function isActiveState(state: ServerRuntimeSnapshot["state"]): boolean {
   return state === "starting" || state === "running" || state === "stopping";
+}
+
+/** spawn 不经过 Shell；这里按当前平台生成便于用户阅读和复制的等价命令。 */
+export function formatServerLaunchCommand(
+  executable: string,
+  arguments_: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return [executable, ...arguments_]
+    .map((argument) => quoteCommandArgument(argument, platform))
+    .join(" ");
+}
+
+function quoteCommandArgument(argument: string, platform: NodeJS.Platform): string {
+  if (argument && !/[\s"']/u.test(argument)) return argument;
+  if (platform === "win32") return `"${argument.replaceAll('"', '\\"')}"`;
+  return `'${argument.replaceAll("'", "'\\''")}'`;
+}
+
+function expectServerInstanceStartupSettings(value: unknown): ServerInstanceStartupSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server runtime startup settings must be an object");
+  }
+  const settings = value as Record<string, unknown>;
+  const minimumMemoryMiB = expectPositiveInteger(settings.minimumMemoryMiB, "minimum memory");
+  const maximumMemoryMiB = expectPositiveInteger(settings.maximumMemoryMiB, "maximum memory");
+  const serverPort = expectPositiveInteger(settings.serverPort, "server port");
+  if (minimumMemoryMiB > maximumMemoryMiB) {
+    throw new TypeError("server runtime minimum memory must not exceed maximum memory");
+  }
+  if (serverPort < serverPortLimits.minimum || serverPort > serverPortLimits.maximum) {
+    throw new TypeError("server runtime port is outside the allowed range");
+  }
+  if (typeof settings.autoAcceptEula !== "boolean") {
+    throw new TypeError("server runtime auto accept EULA must be a boolean");
+  }
+  if (
+    typeof settings.jvmArguments !== "string" ||
+    settings.jvmArguments.length > serverJvmArgumentsMaximumLength ||
+    settings.jvmArguments.includes("\0")
+  ) {
+    throw new TypeError("server runtime JVM arguments are invalid");
+  }
+  return {
+    minimumMemoryMiB,
+    maximumMemoryMiB,
+    serverPort,
+    autoAcceptEula: settings.autoAcceptEula,
+    jvmArguments: settings.jvmArguments,
+  };
+}
+
+function expectPositiveInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new TypeError(`server runtime ${label} must be a positive safe integer`);
+  }
+  return value as number;
 }
 
 function expectInstanceId(value: unknown): string {

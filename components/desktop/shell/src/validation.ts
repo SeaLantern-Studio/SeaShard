@@ -1,4 +1,6 @@
 import {
+  serverJvmArgumentsMaximumLength,
+  serverPortLimits,
   serverModSearchLimits,
   type ServerConfigurationWriteRequest,
   type ServerCoreSaveAsRequest,
@@ -6,6 +8,7 @@ import {
   type ServerModSaveAsRequest,
   type ServerModSearchIndex,
   type ServerModSearchRequest,
+  type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 
@@ -46,6 +49,41 @@ export function expectServerStartupDefaultsUpdate(value: unknown): ServerStartup
     defaultServerPort: expectSafeInteger(record.defaultServerPort, "default server port"),
     autoAcceptEula: record.autoAcceptEula,
     defaultJvmArguments: expectString(record.defaultJvmArguments, "default JVM arguments"),
+  };
+}
+export function expectServerInstanceStartupSettings(value: unknown): ServerInstanceStartupSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server instance startup settings must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const minimumMemoryMiB = expectSafeInteger(
+    record.minimumMemoryMiB,
+    "server instance minimum memory",
+  );
+  const maximumMemoryMiB = expectSafeInteger(
+    record.maximumMemoryMiB,
+    "server instance maximum memory",
+  );
+  const serverPort = expectSafeInteger(record.serverPort, "server instance port");
+  if (minimumMemoryMiB <= 0 || maximumMemoryMiB < minimumMemoryMiB) {
+    throw new TypeError("server instance memory range is invalid");
+  }
+  if (serverPort < serverPortLimits.minimum || serverPort > serverPortLimits.maximum) {
+    throw new TypeError("server instance port is outside the allowed range");
+  }
+  if (typeof record.autoAcceptEula !== "boolean") {
+    throw new TypeError("server instance auto accept EULA must be a boolean");
+  }
+  const jvmArguments = expectString(record.jvmArguments, "server instance JVM arguments");
+  if (jvmArguments.length > serverJvmArgumentsMaximumLength || jvmArguments.includes("\0")) {
+    throw new TypeError("server instance JVM arguments are invalid");
+  }
+  return {
+    minimumMemoryMiB,
+    maximumMemoryMiB,
+    serverPort,
+    autoAcceptEula: record.autoAcceptEula,
+    jvmArguments,
   };
 }
 

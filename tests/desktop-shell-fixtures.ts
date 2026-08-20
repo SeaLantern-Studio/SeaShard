@@ -19,7 +19,9 @@ import {
   type ServerConfigurationWriteRequest,
   type ServerConsoleLine,
   type ServerInstanceContentCounts,
+  type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
+  type ServerLaunchCommandPreview,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
@@ -416,6 +418,14 @@ export const serverInstanceContentCounts = {
   plugins: 5,
 } satisfies ServerInstanceContentCounts;
 
+export const serverInstanceStartupSettings = {
+  minimumMemoryMiB: 1_536,
+  maximumMemoryMiB: 4_096,
+  serverPort: 25_570,
+  autoAcceptEula: false,
+  jvmArguments: "-XX:+UseG1GC",
+} satisfies ServerInstanceStartupSettings;
+
 export const serverConfigurationCatalog = {
   instanceId: "instance-paper",
   configurationRootPath: "C:/SeaShard/servers/instance-paper",
@@ -510,6 +520,11 @@ export async function createDesktopShellHarness(
   const startedDownloads: StartDesktopServerCoreDownloadRequest[] = [];
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   const deletedServerInstances: string[] = [];
+  let currentServerInstances: readonly ServerInstanceSnapshot[] = serverInstances;
+  const serverInstanceStartupWrites: Array<{
+    instanceId: string;
+    settings: ServerInstanceStartupSettings;
+  }> = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
   let fileDownloadTasks: FileDownloadTaskSnapshot[] = [
     {
@@ -523,6 +538,10 @@ export async function createDesktopShellHarness(
       createdAt: "2026-08-17T12:00:00.000Z",
     },
   ];
+  const runtimePreviewRequests: Array<{
+    instanceId: string;
+    startupSettings?: ServerInstanceStartupSettings;
+  }> = [];
   const serverModSearchRequests: ServerModSearchRequest[] = [];
   const serverModDetailProjectIds: string[] = [];
   const installedServerMods: StartDesktopServerModInstallRequest[] = [];
@@ -635,8 +654,22 @@ export async function createDesktopShellHarness(
         downloadTasks = [...downloadTasks, task];
         return { instanceId: "instance-managed", task };
       },
-      listServerInstances: async () => serverInstances,
+      listServerInstances: async () => currentServerInstances,
       readServerInstanceContentCounts: async () => serverInstanceContentCounts,
+      writeServerInstanceStartupSettings: async (instanceId, settings) => {
+        serverInstanceStartupWrites.push({ instanceId, settings });
+        const instance = currentServerInstances.find((candidate) => candidate.id === instanceId);
+        if (!instance) throw new Error(`server instance ${instanceId} was not found`);
+        const updated: ServerInstanceSnapshot = {
+          ...instance,
+          startupSettings: settings,
+          updatedAt: "2026-08-17T12:00:02.000Z",
+        };
+        currentServerInstances = currentServerInstances.map((candidate) =>
+          candidate.id === instanceId ? updated : candidate,
+        );
+        return updated;
+      },
       deleteServerInstance: async (instanceId) => {
         deletedServerInstances.push(instanceId);
       },
@@ -651,6 +684,27 @@ export async function createDesktopShellHarness(
           modifiedAt: "2026-08-17T12:00:02.000Z",
         };
         return serverConfigurationDocument;
+      },
+      previewServerRuntime: async (instanceId, startupSettings) => {
+        runtimePreviewRequests.push({
+          instanceId,
+          ...(startupSettings ? { startupSettings } : {}),
+        });
+        const effective = startupSettings ?? serverInstanceStartupSettings;
+        return {
+          instanceId,
+          command: [
+            `"${javaInstallations[0]!.path}"`,
+            effective.jvmArguments,
+            `-Xms${effective.minimumMemoryMiB}M`,
+            `-Xmx${effective.maximumMemoryMiB}M`,
+            "-jar",
+            "server.jar",
+            "nogui",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        } satisfies ServerLaunchCommandPreview;
       },
       readServerRuntime: async () => serverRuntime,
       startServerRuntime: async (instanceId) => {
@@ -745,6 +799,7 @@ export async function createDesktopShellHarness(
     startedDownloads,
     startedManagedDownloads,
     deletedServerInstances,
+    serverInstanceStartupWrites,
     serverModSearchRequests,
     serverModDetailProjectIds,
     installedServerMods,
@@ -752,6 +807,7 @@ export async function createDesktopShellHarness(
     serverCommands,
     configurationWrites,
     inspectedJavaPaths,
+    runtimePreviewRequests,
     removedJavaPaths,
     javaDisabledUpdates,
     saveAsRequest,

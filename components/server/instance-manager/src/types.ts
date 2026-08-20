@@ -3,6 +3,7 @@ import type {
   ServerCoreManagedDownloadRequest,
   ServerInstanceSnapshot,
   ServerInstanceContentCounts,
+  ServerInstanceStartupSettings,
   ServerModLoader,
 } from "@seashard/contracts";
 
@@ -26,6 +27,11 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerCoreManagedDownloadResult>;
   /** 从路径索引读取并合并 server.json 与 seashard.json。 */
   list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 持久化实例专属启动参数，并返回更新后的完整实例投影。 */
+  setStartupSettings(
+    instanceId: string,
+    settings: ServerInstanceStartupSettings,
+  ): Promise<ServerInstanceSnapshot>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */
@@ -63,6 +69,7 @@ export interface PortableSeaShardInstanceManifest {
   storageMode: "managed" | "external";
   source: "downloaded" | "imported";
   icon?: string;
+  startupSettings?: ServerInstanceStartupSettings;
   lastStartedAt?: string;
   totalRuntimeMs?: number;
   createdAt: string;

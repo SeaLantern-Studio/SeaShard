@@ -4,12 +4,14 @@ import {
   serverConfigurationContract,
   serverInstanceManagerContract,
   serverRuntimeContract,
+  serverSettingsContract,
   serverModSourceContract,
 } from "../packages/contracts/src/index.ts";
 import { serverConfigurationUiManifest } from "../frontend/server/configuration/src/index.ts";
 import { serverDownloadModUiManifest } from "../frontend/server/download-mod/src/index.ts";
 import { serverDownloadServerCoreUiManifest } from "../frontend/server/download-servercore/src/index.ts";
 import { serverConsoleUiManifest } from "../frontend/server/console/src/index.ts";
+import { serverInstanceSettingsUiManifest } from "../frontend/server/settings/src/index.ts";
 import { serverLaunchUiManifest } from "../frontend/server/launch/src/index.ts";
 import { serverOverviewUiManifest } from "../frontend/server/overview/src/index.ts";
 import assert from "node:assert/strict";
@@ -39,6 +41,12 @@ const components = [
     pluginId: "seashard.server-launch-ui",
     entryId: "server-launch.client",
     permissions: [serverInstanceManagerContract, serverRuntimeContract],
+  },
+  {
+    manifest: serverInstanceSettingsUiManifest,
+    pluginId: "seashard.server-instance-settings-ui",
+    entryId: "server-instance-settings.client",
+    permissions: [serverInstanceManagerContract, serverRuntimeContract, serverSettingsContract],
   },
   {
     manifest: serverConsoleUiManifest,

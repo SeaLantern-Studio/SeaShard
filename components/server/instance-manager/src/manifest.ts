@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { PortableSeaShardInstanceManifest, PortableServerInformationManifest } from "./types";
+import { parseServerInstanceStartupSettings } from "./startup-settings";
 
 export const portableInstanceMetadataDirectoryName = ".server-info";
 export const portableServerInformationFileName = "server.json";
@@ -51,6 +52,7 @@ export function createPortableSeaShardInstanceManifest(
     storageMode: instance.storageMode,
     source: instance.source,
     ...(icon ? { icon } : {}),
+    ...(instance.startupSettings ? { startupSettings: instance.startupSettings } : {}),
     ...(instance.lastStartedAt ? { lastStartedAt: instance.lastStartedAt } : {}),
     ...(instance.totalRuntimeMs === undefined ? {} : { totalRuntimeMs: instance.totalRuntimeMs }),
     createdAt: instance.createdAt,
@@ -144,6 +146,13 @@ export async function readPortableInstanceManifests(
     artifact?.sha256 === undefined
       ? undefined
       : expectSha256(artifact.sha256, "server.json core.artifact.sha256");
+  const startupSettings =
+    seaShard.startupSettings === undefined
+      ? undefined
+      : parseServerInstanceStartupSettings(
+          seaShard.startupSettings,
+          "seashard.json startupSettings",
+        );
 
   // 旧清单首次读取时补写显式加载器字段；保留未知字段，避免破坏其他工具扩展的服务器信息。
   if (server.modLoader === undefined) {
@@ -170,6 +179,7 @@ export async function readPortableInstanceManifests(
         }),
     ...(artifactFileName ? { coreArtifactFileName: artifactFileName } : {}),
     ...(artifactSha256 ? { artifactSha256 } : {}),
+    ...(startupSettings ? { startupSettings } : {}),
     ...(seaShard.lastStartedAt === undefined
       ? {}
       : {

@@ -167,6 +167,72 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   await manager.dispose();
 });
 
+await test("instance startup settings override global launch values and update an existing port", async () => {
+  const instance: ServerInstanceSnapshot = {
+    ...vanillaInstance,
+    id: "instance-vanilla-overridden",
+    rootPath: "C:/SeaShard/servers/instance-vanilla-overridden",
+    coreJarPath: "C:/SeaShard/servers/instance-vanilla-overridden/server.jar",
+    startupSettings: {
+      minimumMemoryMiB: 768,
+      maximumMemoryMiB: 3_072,
+      serverPort: 25_580,
+      autoAcceptEula: false,
+      jvmArguments: "-XX:+UseZGC",
+    },
+  };
+  const eulaPath = resolve(instance.rootPath, "eula.txt");
+  const propertiesPath = resolve(instance.rootPath, "server.properties");
+  const { fileSystem, files } = createMemoryFileSystem(
+    new Map([
+      [instance.coreJarPath, "jar"],
+      [eulaPath, "# Minecraft EULA\neula=false\n"],
+      [propertiesPath, "# custom\nserver-port=25565\nmotd=SeaShard\n"],
+    ]),
+  );
+  const child = new FakeServerProcess();
+  let arguments_: readonly string[] = [];
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [instance],
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    fileSystem,
+    spawnProcess: (_command, launchArguments) => {
+      arguments_ = launchArguments;
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+  const preview = await manager.preview(instance.id, {
+    minimumMemoryMiB: 1_024,
+    maximumMemoryMiB: 4_096,
+    serverPort: 25_581,
+    autoAcceptEula: true,
+    jvmArguments: "-XX:+UseG1GC",
+  });
+  assert.equal(preview.instanceId, instance.id);
+  assert.equal(preview.command.includes(java21.path), true);
+  assert.equal(
+    preview.command.includes("-XX:+UseG1GC -Xms1024M -Xmx4096M -jar server.jar nogui"),
+    true,
+  );
+
+  await manager.start(instance.id);
+  assert.deepEqual(arguments_, [
+    "-XX:+UseZGC",
+    "-Xms768M",
+    "-Xmx3072M",
+    "-jar",
+    "server.jar",
+    "nogui",
+  ]);
+  assert.equal(files.get(eulaPath), "# Minecraft EULA\neula=false\n");
+  assert.equal(files.get(propertiesPath), "# custom\nserver-port=25580\nmotd=SeaShard\n");
+  await manager.stop(instance.id);
+  child.finish(0, null);
+  await manager.dispose();
+});
+
 await test("runtime disposal sends stop, force-terminates on timeout, and waits for close", async () => {
   const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
   const propertiesPath = resolve(vanillaInstance.rootPath, "server.properties");

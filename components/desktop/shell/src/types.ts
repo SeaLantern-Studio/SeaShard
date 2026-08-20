@@ -16,6 +16,8 @@ import type {
   ServerModSearchRequest,
   ServerModSourceClientService,
   ServerInstanceClientService,
+  ServerInstanceSnapshot,
+  ServerInstanceStartupSettings,
   ServerConsoleLine,
   ServerRuntimeClientService,
   ServerConfigurationCatalog,
@@ -135,12 +137,20 @@ export interface DesktopShellConfig {
   readServerInstanceContentCounts(
     instanceId: string,
   ): ReturnType<ServerInstanceClientService["contentCounts"]>;
+  writeServerInstanceStartupSettings(
+    instanceId: string,
+    settings: ServerInstanceStartupSettings,
+  ): Promise<ServerInstanceSnapshot>;
   deleteServerInstance(instanceId: string): ReturnType<ServerInstanceClientService["delete"]>;
   listServerConfigurations(instanceId: string): Promise<ServerConfigurationCatalog>;
   readServerConfiguration(instanceId: string, path: string): Promise<ServerConfigurationDocument>;
   writeServerConfiguration(
     request: ServerConfigurationWriteRequest,
   ): Promise<ServerConfigurationDocument>;
+  previewServerRuntime(
+    instanceId: string,
+    startupSettings?: ServerInstanceStartupSettings,
+  ): ReturnType<ServerRuntimeClientService["preview"]>;
   readServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["get"]>;
   startServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["start"]>;
   stopServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["stop"]>;

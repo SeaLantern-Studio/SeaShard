@@ -33,10 +33,12 @@ export const desktopChannels = {
   serverInstancesContentCounts: "seashard.server-instances.content-counts",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  serverInstancesSetStartupSettings: "seashard.server-instances.set-startup-settings",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
   serverInstancesDelete: "seashard.server-instances.delete",
   javaRuntimeScan: "seashard.java-runtime.scan",
   serverRuntimeGet: "seashard.server-runtime.get",
+  serverRuntimePreview: "seashard.server-runtime.preview",
   serverRuntimeStart: "seashard.server-runtime.start",
   serverRuntimeStop: "seashard.server-runtime.stop",
   serverRuntimeSendCommand: "seashard.server-runtime.send-command",
@@ -410,6 +412,15 @@ export interface ServerCoreDownloadClientService {
 export type ServerInstanceStorageMode = "managed" | "external";
 export type ServerInstanceSource = "downloaded" | "imported";
 
+/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */
+export interface ServerInstanceStartupSettings {
+  minimumMemoryMiB: number;
+  maximumMemoryMiB: number;
+  serverPort: number;
+  autoAcceptEula: boolean;
+  jvmArguments: string;
+}
+
 /** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */
 export interface ServerInstanceSnapshot {
   id: string;
@@ -431,6 +442,8 @@ export interface ServerInstanceSnapshot {
   lastStartedAt?: string;
   /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */
   totalRuntimeMs?: number;
+  /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */
+  startupSettings?: ServerInstanceStartupSettings;
 }
 
 export interface ServerInstanceContentCounts {
@@ -443,6 +456,11 @@ export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
+  /** 保存实例专属启动参数；该完整设置组优先于全局默认值。 */
+  setStartupSettings(
+    instanceId: string,
+    settings: ServerInstanceStartupSettings,
+  ): Promise<ServerInstanceSnapshot>;
   /** 仅按已登记实例 ID 请求宿主打开实例根目录，不接受 Renderer 提交任意路径。 */
   openFolder(instanceId: string): Promise<void>;
   /** 删除 Host 已登记的托管实例目录及其数据库路径记录。 */
@@ -492,6 +510,12 @@ export function isServerRuntimeSupportedType(value: unknown): value is ServerRun
 export type ServerProcessState = "stopped" | "starting" | "running" | "stopping" | "failed";
 export type ServerConsoleStream = "stdout" | "stderr" | "input" | "system";
 
+/** 启动组件根据当前 Java 选择和核心策略生成的等价命令行。 */
+export interface ServerLaunchCommandPreview {
+  instanceId: string;
+  command: string;
+}
+
 /** 单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。 */
 export interface ServerRuntimeSnapshot {
   instanceId: string;
@@ -514,6 +538,10 @@ export interface ServerConsoleLine {
 
 /** Host 侧服务器进程能力；仅启动实例元数据中明确声明且已实现运行策略的核心。 */
 export interface ServerRuntimeService {
+  preview(
+    instanceId: string,
+    startupSettings?: ServerInstanceStartupSettings,
+  ): Promise<ServerLaunchCommandPreview>;
   get(instanceId: string): Promise<ServerRuntimeSnapshot>;
   start(instanceId: string): Promise<ServerRuntimeSnapshot>;
   stop(instanceId: string): Promise<ServerRuntimeSnapshot>;

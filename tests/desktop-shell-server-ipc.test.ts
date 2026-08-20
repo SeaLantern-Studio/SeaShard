@@ -12,6 +12,7 @@ import {
   initialServerConfigurationDocument,
   serverConfigurationCatalog,
   serverInstances,
+  serverInstanceStartupSettings,
   serverInstanceContentCounts,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
@@ -154,6 +155,48 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     await runtime.invoke(desktopChannels.serverInstancesContentCounts, 1, serverInstances[0]!.id),
     serverInstanceContentCounts,
   );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverInstancesSetStartupSettings,
+      1,
+      "instance-paper",
+      serverInstanceStartupSettings,
+    ),
+    {
+      ...serverInstances[0],
+      startupSettings: serverInstanceStartupSettings,
+      updatedAt: "2026-08-17T12:00:02.000Z",
+    },
+  );
+  assert.deepEqual(harness.serverInstanceStartupWrites, [
+    { instanceId: "instance-paper", settings: serverInstanceStartupSettings },
+  ]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesSetStartupSettings, 1, "instance-paper", {
+      ...serverInstanceStartupSettings,
+      maximumMemoryMiB: 512,
+    }),
+    /memory range is invalid/,
+  );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverRuntimePreview,
+      1,
+      "instance-paper",
+      serverInstanceStartupSettings,
+    ),
+    {
+      instanceId: "instance-paper",
+      command:
+        '"C:/Program Files/Eclipse Adoptium/jdk-21/bin/java.exe" -XX:+UseG1GC -Xms1536M -Xmx4096M -jar server.jar nogui',
+    },
+  );
+  assert.deepEqual(harness.runtimePreviewRequests, [
+    {
+      instanceId: "instance-paper",
+      startupSettings: serverInstanceStartupSettings,
+    },
+  ]);
   assert.equal(
     await runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "instance-paper"),
     undefined,

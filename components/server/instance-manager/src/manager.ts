@@ -19,6 +19,7 @@ import {
 } from "./manifest";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type { CreateManagedServerInstanceRequest } from "./types";
+import { parseServerInstanceStartupSettings } from "./startup-settings";
 
 interface PendingManagedInstance {
   readonly id: string;
@@ -44,7 +45,7 @@ export class ServerInstanceManager {
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
   private readonly deletions = new Map<string, Promise<void>>();
-  private readonly metadataUpdates = new Map<string, Promise<void>>();
+  private readonly metadataUpdates = new Map<string, Promise<ServerInstanceSnapshot>>();
   private disposed = false;
   private iconBackfillTask: Promise<void> | undefined;
 
@@ -77,6 +78,20 @@ export class ServerInstanceManager {
       if (this.iconBackfillTask === task) this.iconBackfillTask = undefined;
     }
     return this.readIndexedInstances();
+  }
+  /** 实例启动设置整体持久化；未设置的旧实例仍继续继承全局默认值。 */
+  async setStartupSettings(
+    instanceValue: unknown,
+    settingsValue: unknown,
+  ): Promise<ServerInstanceSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const startupSettings = parseServerInstanceStartupSettings(settingsValue);
+    return this.updatePrivateManifest(instanceId, (instance) => ({
+      ...instance,
+      startupSettings,
+      updatedAt: this.options.now?.() ?? new Date().toISOString(),
+    }));
   }
 
   /** 只更新 SeaShard 私有清单；服务端核心与 Minecraft 版本等事实保持不变。 */
@@ -233,15 +248,17 @@ export class ServerInstanceManager {
   private async updatePrivateManifest(
     instanceId: string,
     update: (instance: ServerInstanceSnapshot) => ServerInstanceSnapshot,
-  ): Promise<void> {
+  ): Promise<ServerInstanceSnapshot> {
     const previous = this.metadataUpdates.get(instanceId);
     const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
-      await writePortableSeaShardInstanceManifest(update(instance));
+      const updated = update(instance);
+      await writePortableSeaShardInstanceManifest(updated);
+      return updated;
     });
     this.metadataUpdates.set(instanceId, task);
     try {
-      await task;
+      return await task;
     } finally {
       if (this.metadataUpdates.get(instanceId) === task) {
         this.metadataUpdates.delete(instanceId);

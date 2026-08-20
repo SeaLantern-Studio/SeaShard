@@ -72,6 +72,8 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
       });
 
       ctx.provide(serverRuntimeContract, {
+        preview: async (instanceId, startupSettings) =>
+          asJsonValue(await manager.preview(instanceId, startupSettings)),
         get: async (instanceId) => asJsonValue(manager.get(instanceId)),
         start: async (instanceId) => asJsonValue(await manager.start(instanceId)),
         stop: async (instanceId) => asJsonValue(await manager.stop(instanceId)),

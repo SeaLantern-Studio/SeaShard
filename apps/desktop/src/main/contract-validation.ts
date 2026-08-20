@@ -18,7 +18,9 @@ import {
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
   type ServerInstanceContentCounts,
+  type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
+  type ServerLaunchCommandPreview,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
@@ -446,6 +448,38 @@ export function expectManagedDownloadResult(value: unknown): ServerCoreManagedDo
   };
 }
 
+function expectServerInstanceStartupSettings(
+  value: unknown,
+  index: number,
+): ServerInstanceStartupSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server instance manager returned invalid startup settings ${index}`);
+  }
+  const settings = value as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(settings.minimumMemoryMiB) ||
+    (settings.minimumMemoryMiB as number) <= 0 ||
+    !Number.isSafeInteger(settings.maximumMemoryMiB) ||
+    (settings.maximumMemoryMiB as number) < (settings.minimumMemoryMiB as number) ||
+    !Number.isSafeInteger(settings.serverPort) ||
+    (settings.serverPort as number) < serverPortLimits.minimum ||
+    (settings.serverPort as number) > serverPortLimits.maximum ||
+    typeof settings.autoAcceptEula !== "boolean" ||
+    typeof settings.jvmArguments !== "string" ||
+    settings.jvmArguments.length > serverJvmArgumentsMaximumLength ||
+    settings.jvmArguments.includes("\0")
+  ) {
+    throw new Error(`server instance manager returned invalid startup settings ${index}`);
+  }
+  return {
+    minimumMemoryMiB: settings.minimumMemoryMiB as number,
+    maximumMemoryMiB: settings.maximumMemoryMiB as number,
+    serverPort: settings.serverPort as number,
+    autoAcceptEula: settings.autoAcceptEula,
+    jvmArguments: settings.jvmArguments,
+  };
+}
+
 export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] {
   if (!Array.isArray(value)) {
     throw new Error("server instance manager returned invalid instances");
@@ -489,6 +523,10 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
     ) {
       throw new Error(`server instance manager returned invalid instance ${index}`);
     }
+    const startupSettings =
+      instance.startupSettings === undefined
+        ? undefined
+        : expectServerInstanceStartupSettings(instance.startupSettings, index);
     const snapshot = instance as unknown as ServerInstanceSnapshot;
     return {
       ...snapshot,
@@ -497,6 +535,7 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
             iconUrl: `${serverCoreIconScheme}://${serverInstanceIconHost}/${encodeURIComponent(snapshot.id)}`,
           }
         : {}),
+      ...(startupSettings ? { startupSettings } : {}),
     };
   });
 }
@@ -693,6 +732,27 @@ export function expectServerSettingsSnapshot(value: unknown): ServerSettingsSnap
     defaultServerPort: defaultServerPort as number,
     autoAcceptEula,
     defaultJvmArguments,
+  };
+}
+
+export function expectServerLaunchCommandPreview(value: unknown): ServerLaunchCommandPreview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server runtime returned an invalid launch command preview");
+  }
+  const preview = value as Record<string, unknown>;
+  if (
+    typeof preview.instanceId !== "string" ||
+    !preview.instanceId ||
+    typeof preview.command !== "string" ||
+    !preview.command ||
+    preview.command.length > 100_000 ||
+    preview.command.includes("\0")
+  ) {
+    throw new Error("server runtime returned an invalid launch command preview");
+  }
+  return {
+    instanceId: preview.instanceId,
+    command: preview.command,
   };
 }
 

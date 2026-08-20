@@ -6,6 +6,7 @@ import {
   type ServerConsoleLine,
   type ServerConfigurationWriteRequest,
   type ServerStartupDefaultsUpdate,
+  type ServerInstanceStartupSettings,
   type ServerModSearchRequest,
 } from "@seashard/contracts";
 import {
@@ -39,6 +40,7 @@ import {
   expectServerInstanceContentCounts,
   expectServerModProjectDetails,
   expectServerModSearchResult,
+  expectServerLaunchCommandPreview,
   expectServerInstances,
   expectServerRuntimeSnapshot,
   expectServerSettingsSnapshot,
@@ -218,6 +220,21 @@ export async function registerDesktopShellBridge(
                   instanceId,
                 ]),
               ),
+            writeServerInstanceStartupSettings: async (
+              instanceId,
+              settings: ServerInstanceStartupSettings,
+            ) => {
+              const [instance] = expectServerInstances([
+                await kernel.callService(serverInstanceManagerContract, "setStartupSettings", [
+                  instanceId,
+                  settings as unknown as JsonValue,
+                ]),
+              ]);
+              if (!instance) {
+                throw new Error("server instance manager returned no updated instance");
+              }
+              return instance;
+            },
             deleteServerInstance: async (instanceId) => {
               const result = await kernel.callService(serverInstanceManagerContract, "delete", [
                 instanceId,
@@ -239,6 +256,16 @@ export async function registerDesktopShellBridge(
                 await kernel.callService(serverConfigurationContract, "write", [
                   request as unknown as JsonValue,
                 ]),
+              ),
+            previewServerRuntime: async (instanceId, startupSettings) =>
+              expectServerLaunchCommandPreview(
+                await kernel.callService(
+                  serverRuntimeContract,
+                  "preview",
+                  startupSettings
+                    ? [instanceId, startupSettings as unknown as JsonValue]
+                    : [instanceId],
+                ),
               ),
             readServerRuntime: async (instanceId) =>
               expectServerRuntimeSnapshot(

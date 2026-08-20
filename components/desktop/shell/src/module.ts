@@ -13,6 +13,7 @@ import type { BrowserWindow } from "electron";
 import type { DesktopShellConfig } from "./types";
 import {
   expectNonEmptyString,
+  expectServerInstanceStartupSettings,
   expectSafeInteger,
   expectServerConfigurationWriteRequest,
   expectServerCoreSaveAsRequest,
@@ -306,6 +307,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(instanceId, "server instance id"),
           );
         });
+        config.runtime.handle(
+          desktopChannels.serverInstancesSetStartupSettings,
+          (event, instanceId, value) => {
+            ownedWindow(event.sender.id);
+            return config.writeServerInstanceStartupSettings(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectServerInstanceStartupSettings(value),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverInstancesOpenFolder, async (event, value) => {
           ownedWindow(event.sender.id);
           const instanceId = expectNonEmptyString(value, "server instance id");
@@ -357,6 +368,18 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.writeServerConfiguration(expectServerConfigurationWriteRequest(request));
         });
+        config.runtime.handle(
+          desktopChannels.serverRuntimePreview,
+          (event, instanceId, startupSettings) => {
+            ownedWindow(event.sender.id);
+            return config.previewServerRuntime(
+              expectNonEmptyString(instanceId, "server instance id"),
+              startupSettings === undefined
+                ? undefined
+                : expectServerInstanceStartupSettings(startupSettings),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverRuntimeGet, (event, instanceId) => {
           ownedWindow(event.sender.id);
           return config.readServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
@@ -568,12 +591,14 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
           config.runtime.removeHandler(desktopChannels.serverInstancesContentCounts);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSetStartupSettings);
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverConfigurationList);
           config.runtime.removeHandler(desktopChannels.serverConfigurationRead);
           config.runtime.removeHandler(desktopChannels.serverConfigurationWrite);
           config.runtime.removeHandler(desktopChannels.serverRuntimeGet);
+          config.runtime.removeHandler(desktopChannels.serverRuntimePreview);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStart);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStop);
           config.runtime.removeHandler(desktopChannels.serverRuntimeSendCommand);

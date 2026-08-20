@@ -3,6 +3,7 @@ import {
   serverCoreIconScheme,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerInstanceStartupSettings,
   type ServerCoreType,
 } from "../packages/contracts/src/index.ts";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
@@ -175,6 +176,14 @@ const request = {
   connections: 8,
 } as const;
 
+const instanceStartupSettings = {
+  minimumMemoryMiB: 1_536,
+  maximumMemoryMiB: 4_096,
+  serverPort: 25_570,
+  autoAcceptEula: false,
+  jvmArguments: "-XX:+UseG1GC",
+} satisfies ServerInstanceStartupSettings;
+
 await test("managed downloads persist unique instances and split portable manifests", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "seashard-instance-manager-"));
   const databasePath = join(dataRoot, "seashard.sqlite3");
@@ -278,6 +287,30 @@ await test("managed downloads persist unique instances and split portable manife
       plugins: 1,
     });
     await assert.rejects(manager.contentCounts("missing-instance"), /was not found/u);
+    const updatedInstance = await manager.setStartupSettings(
+      countedInstance.id,
+      instanceStartupSettings,
+    );
+    assert.deepEqual(updatedInstance.startupSettings, instanceStartupSettings);
+    const updatedManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.deepEqual(updatedManifest.startupSettings, instanceStartupSettings);
+    await assert.rejects(
+      manager.setStartupSettings(countedInstance.id, {
+        ...instanceStartupSettings,
+        minimumMemoryMiB: 8_192,
+      }),
+      /minimum memory must not exceed maximum memory/,
+    );
+    const persistedInstances = await manager.list();
     assert.deepEqual(coreContents, new Set(["core-task-1\n", "core-task-2\n"]));
     assert.deepEqual(
       new Set(await registry.listManifestPaths()),
@@ -304,20 +337,20 @@ await test("managed downloads persist unique instances and split portable manife
     });
     assert.deepEqual(
       await reloadedManager.list(),
-      instances,
-      "split portable JSON must remain the restart source of truth",
+      persistedInstances,
+      "实例专属启动设置必须随可移植 JSON 跨重启保留",
     );
 
-    const deletedInstance = instances[0]!;
+    const deletedInstance = persistedInstances[0]!;
     await reloadedManager.delete(deletedInstance.id);
     await assert.rejects(access(deletedInstance.rootPath), { code: "ENOENT" });
     assert.deepEqual(
       (await reloadedManager.list()).map(({ id }) => id),
-      instances.slice(1).map(({ id }) => id),
+      persistedInstances.slice(1).map(({ id }) => id),
     );
     assert.deepEqual(
       await registry.listManifestPaths(),
-      instances
+      persistedInstances
         .slice(1)
         .map(({ rootPath }) =>
           join(rootPath, portableInstanceMetadataDirectoryName, portableSeaShardInstanceFileName),

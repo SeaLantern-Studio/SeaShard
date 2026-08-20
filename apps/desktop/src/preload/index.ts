@@ -9,6 +9,7 @@ import {
   type ServerModSearchRequest,
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
+  type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -61,6 +62,8 @@ const api: SeaShardDesktopApi = Object.freeze({
     list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
     contentCounts: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesContentCounts, instanceId),
+    setStartupSettings: (instanceId: string, settings: ServerInstanceStartupSettings) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesSetStartupSettings, instanceId, settings),
     openFolder: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesOpenFolder, instanceId),
     delete: (instanceId: string) =>
@@ -76,6 +79,8 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   serverRuntime: Object.freeze({
     get: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeGet, instanceId),
+    preview: (instanceId: string, startupSettings?: ServerInstanceStartupSettings) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimePreview, instanceId, startupSettings),
     start: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverRuntimeStart, instanceId),
     stop: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeStop, instanceId),

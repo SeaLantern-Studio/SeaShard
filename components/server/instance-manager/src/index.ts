@@ -55,6 +55,8 @@ export function createServerInstanceManagerModule(
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
+        setStartupSettings: async (instanceId, settings) =>
+          asJsonValue(await manager.setStartupSettings(instanceId, settings)),
         recordStartedAt: async (instanceId, startedAt) => {
           await manager.recordStartedAt(instanceId, startedAt);
           return null;
@@ -81,5 +83,6 @@ function asJsonValue(value: unknown): JsonValue {
 
 export * from "./manager";
 export * from "./manifest";
+export * from "./startup-settings";
 export * from "./registry";
 export * from "./types";
