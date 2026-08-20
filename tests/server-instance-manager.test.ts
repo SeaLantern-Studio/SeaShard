@@ -334,6 +334,7 @@ await test("split portable JSON remains authoritative after path registration", 
       createdAt: "2026-08-16T00:00:00.000Z",
       updatedAt: "2026-08-16T00:00:00.000Z",
       lastStartedAt: "2026-08-16T01:00:00.000Z",
+      totalRuntimeMs: 3_600_000,
     } as const;
     const manifestPath = await writePortableInstanceManifests(instance);
     await registry.insertManifestPath(manifestPath);
@@ -366,14 +367,37 @@ await test("split portable JSON remains authoritative after path registration", 
     assert.equal(reloaded?.coreArtifactFileName, "paper-1.21.1-131.jar");
     assert.equal(reloaded?.updatedAt, "2026-08-17T00:00:00.000Z");
     assert.equal(reloaded?.lastStartedAt, "2026-08-16T01:00:00.000Z");
+    assert.equal(reloaded?.totalRuntimeMs, 3_600_000);
     await manager.recordStartedAt("json-authority", "2026-08-18T08:30:00.000Z");
     const [startedInstance] = await manager.list();
     assert.equal(startedInstance?.lastStartedAt, "2026-08-18T08:30:00.000Z");
     assert.equal(startedInstance?.updatedAt, "2026-08-18T08:30:00.000Z");
+    assert.equal(startedInstance?.totalRuntimeMs, 3_600_000);
     const startedManifest = JSON.parse(
       await readFile(manifestPath, "utf8"),
     ) as PortableSeaShardInstanceManifest;
     assert.equal(startedManifest.lastStartedAt, "2026-08-18T08:30:00.000Z");
+    assert.equal(startedManifest.totalRuntimeMs, 3_600_000);
+    await manager.recordRuntime(
+      "json-authority",
+      "2026-08-18T09:00:00.000Z",
+      "2026-08-18T09:01:01.000Z",
+    );
+    const [runtimeInstance] = await manager.list();
+    assert.equal(runtimeInstance?.totalRuntimeMs, 3_661_000);
+    assert.equal(runtimeInstance?.updatedAt, "2026-08-18T09:01:01.000Z");
+    const runtimeManifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as PortableSeaShardInstanceManifest;
+    assert.equal(runtimeManifest.totalRuntimeMs, 3_661_000);
+    await assert.rejects(
+      manager.recordRuntime(
+        "json-authority",
+        "2026-08-18T09:01:01.000Z",
+        "2026-08-18T09:00:00.000Z",
+      ),
+      /stoppedAt must not precede startedAt/,
+    );
     assert.deepEqual(await registry.listManifestPaths(), [manifestPath]);
     await manager.dispose();
   } finally {

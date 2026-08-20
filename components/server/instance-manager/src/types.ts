@@ -26,6 +26,8 @@ export interface ServerInstanceManagerService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */
   recordStartedAt(instanceId: string, startedAt: string): Promise<void>;
+  /** 服务器进程退出后，将本次运行区间累加到实例总运行时长。 */
+  recordRuntime(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>;
   /** 删除托管目录和 SQLite 中对应的 manifest 路径记录。 */
   delete(instanceId: string): Promise<void>;
   /** 只按已注册实例 ID 解析实例内图标，不接受调用方传入任意路径。 */
@@ -57,6 +59,7 @@ export interface PortableSeaShardInstanceManifest {
   source: "downloaded" | "imported";
   icon?: string;
   lastStartedAt?: string;
+  totalRuntimeMs?: number;
   createdAt: string;
   updatedAt: string;
 }

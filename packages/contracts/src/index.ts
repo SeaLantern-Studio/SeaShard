@@ -25,6 +25,7 @@ export const desktopChannels = {
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  serverInstancesOpenFolder: "seashard.server-instances.open-folder",
   serverInstancesDelete: "seashard.server-instances.delete",
   javaRuntimeScan: "seashard.java-runtime.scan",
   serverRuntimeGet: "seashard.server-runtime.get",
@@ -278,11 +279,15 @@ export interface ServerInstanceSnapshot {
   updatedAt: string;
   iconUrl?: string;
   lastStartedAt?: string;
+  /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */
+  totalRuntimeMs?: number;
 }
 
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
 export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 仅按已登记实例 ID 请求宿主打开实例根目录，不接受 Renderer 提交任意路径。 */
+  openFolder(instanceId: string): Promise<void>;
   /** 删除 Host 已登记的托管实例目录及其数据库路径记录。 */
   delete(instanceId: string): Promise<void>;
 }

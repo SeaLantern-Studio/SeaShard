@@ -42,6 +42,7 @@ export class ServerInstanceManager {
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
   private readonly deletions = new Map<string, Promise<void>>();
+  private readonly metadataUpdates = new Map<string, Promise<void>>();
   private disposed = false;
   private iconBackfillTask: Promise<void> | undefined;
 
@@ -81,11 +82,39 @@ export class ServerInstanceManager {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
     const startedAt = expectIsoTimestamp(startedAtValue, "startedAt");
-    const { instance } = await this.findIndexedInstance(instanceId);
-    await writePortableSeaShardInstanceManifest({
+    await this.updatePrivateManifest(instanceId, (instance) => ({
       ...instance,
       lastStartedAt: startedAt,
       updatedAt: startedAt,
+    }));
+  }
+
+  /** 串行读取最新私有清单并累加本次会话，避免与启动时间写入互相覆盖。 */
+  async recordRuntime(
+    instanceValue: unknown,
+    startedAtValue: unknown,
+    stoppedAtValue: unknown,
+  ): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const startedAt = expectIsoTimestamp(startedAtValue, "startedAt");
+    const stoppedAt = expectIsoTimestamp(stoppedAtValue, "stoppedAt");
+    const elapsedMs = Date.parse(stoppedAt) - Date.parse(startedAt);
+    if (elapsedMs < 0) {
+      throw new TypeError("managed server instance stoppedAt must not precede startedAt");
+    }
+    await this.updatePrivateManifest(instanceId, (instance) => {
+      const totalRuntimeMs = (instance.totalRuntimeMs ?? 0) + elapsedMs;
+      if (!Number.isSafeInteger(totalRuntimeMs)) {
+        throw new RangeError(
+          "managed server instance total runtime exceeds the safe integer range",
+        );
+      }
+      return {
+        ...instance,
+        totalRuntimeMs,
+        updatedAt: stoppedAt,
+      };
     });
   }
 
@@ -180,6 +209,27 @@ export class ServerInstanceManager {
     );
     await Promise.allSettled(this.finalizers.values());
     await Promise.allSettled(this.deletions.values());
+    await Promise.allSettled(this.metadataUpdates.values());
+  }
+
+  /** 同一实例的私有清单更新必须串行，后一项始终基于前一项的落盘结果。 */
+  private async updatePrivateManifest(
+    instanceId: string,
+    update: (instance: ServerInstanceSnapshot) => ServerInstanceSnapshot,
+  ): Promise<void> {
+    const previous = this.metadataUpdates.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      await writePortableSeaShardInstanceManifest(update(instance));
+    });
+    this.metadataUpdates.set(instanceId, task);
+    try {
+      await task;
+    } finally {
+      if (this.metadataUpdates.get(instanceId) === task) {
+        this.metadataUpdates.delete(instanceId);
+      }
+    }
   }
 
   /**

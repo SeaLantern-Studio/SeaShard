@@ -62,6 +62,7 @@ export interface DesktopShellRuntime {
     resolvePath: (requestUrl: string) => Promise<string | undefined>,
   ): void;
   removeProtocolHandler(scheme: string): void;
+  openPath(path: string): Promise<string>;
   selectDirectory(
     window: BrowserWindow,
     options: DirectorySelectionOptions,

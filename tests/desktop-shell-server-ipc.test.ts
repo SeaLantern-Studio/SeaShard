@@ -142,6 +142,15 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   assert.deepEqual(harness.startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
   assert.equal(
+    await runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "instance-paper"),
+    undefined,
+  );
+  assert.deepEqual(runtime.openedPaths, [serverInstances[0]!.rootPath]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "missing-instance"),
+    /找不到服务器实例/,
+  );
+  assert.equal(
     await runtime.invoke(desktopChannels.serverInstancesDelete, 1, "instance-paper"),
     undefined,
   );

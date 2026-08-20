@@ -145,6 +145,8 @@ export class FakeDesktopShellRuntime extends EventEmitter implements DesktopShel
   fileSelection: string | undefined = "D:/Java/bin/java.exe";
   fileSelectionWindow?: BrowserWindow;
   fileSelectionOptions?: FileSelectionOptions;
+  readonly openedPaths: string[] = [];
+  openPathResult = "";
 
   constructor(readonly platform: NodeJS.Platform) {
     super();
@@ -210,6 +212,11 @@ export class FakeDesktopShellRuntime extends EventEmitter implements DesktopShel
     const handler = this.handlers.get(channel);
     if (!handler) throw new Error(`missing handler: ${channel}`);
     return handler({ sender: { id: senderId } } as IpcMainInvokeEvent, ...args);
+  }
+
+  async openPath(path: string): Promise<string> {
+    this.openedPaths.push(path);
+    return this.openPathResult;
   }
 
   async selectDirectory(
@@ -332,6 +339,7 @@ export const serverInstances = [
     artifactSha256: "a".repeat(64),
     createdAt: "2026-08-17T12:00:00.000Z",
     updatedAt: "2026-08-17T12:00:01.000Z",
+    totalRuntimeMs: 3_600_000,
   },
 ] satisfies readonly ServerInstanceSnapshot[];
 

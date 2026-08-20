@@ -58,6 +58,8 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
         listInstances: () => instances.list(),
         recordInstanceStartedAt: (instanceId, startedAt) =>
           instances.recordStartedAt(instanceId, startedAt),
+        recordInstanceRuntime: (instanceId, startedAt, stoppedAt) =>
+          instances.recordRuntime(instanceId, startedAt, stoppedAt),
         scanJavaInstallations: () => javaRuntime.scan(),
         readSettings: () => settings.get(),
         ...(options.onConsoleLine

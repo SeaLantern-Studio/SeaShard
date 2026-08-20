@@ -1,4 +1,4 @@
-import type { App, BrowserWindow, Dialog, IpcMain, Net, Protocol } from "electron";
+import type { App, BrowserWindow, Dialog, IpcMain, Net, Protocol, Shell } from "electron";
 import { pathToFileURL } from "node:url";
 import type { DesktopShellRuntime } from "./types";
 
@@ -10,6 +10,7 @@ export function createElectronDesktopShellRuntime(
   electronDialog: Dialog,
   electronProtocol: Protocol,
   electronNet: Net,
+  electronShell: Shell,
 ): DesktopShellRuntime {
   return {
     platform: process.platform,
@@ -28,6 +29,7 @@ export function createElectronDesktopShellRuntime(
       });
     },
     removeProtocolHandler: (scheme) => electronProtocol.unhandle(scheme),
+    openPath: (path) => electronShell.openPath(path),
     selectDirectory: async (window, options) => {
       const result = await electronDialog.showOpenDialog(window, {
         title: options.title,

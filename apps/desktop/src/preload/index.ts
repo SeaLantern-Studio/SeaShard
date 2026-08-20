@@ -41,6 +41,8 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   serverInstances: Object.freeze({
     list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
+    openFolder: (instanceId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesOpenFolder, instanceId),
     delete: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesDelete, instanceId),
   }),

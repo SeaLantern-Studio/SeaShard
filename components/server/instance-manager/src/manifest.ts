@@ -46,6 +46,7 @@ export function createPortableSeaShardInstanceManifest(
     source: instance.source,
     ...(icon ? { icon } : {}),
     ...(instance.lastStartedAt ? { lastStartedAt: instance.lastStartedAt } : {}),
+    ...(instance.totalRuntimeMs === undefined ? {} : { totalRuntimeMs: instance.totalRuntimeMs }),
     createdAt: instance.createdAt,
     updatedAt: instance.updatedAt,
   };
@@ -158,6 +159,14 @@ export async function readPortableInstanceManifests(
       : {
           lastStartedAt: expectString(seaShard.lastStartedAt, "seashard.json lastStartedAt"),
         }),
+    ...(seaShard.totalRuntimeMs === undefined
+      ? {}
+      : {
+          totalRuntimeMs: expectNonNegativeSafeInteger(
+            seaShard.totalRuntimeMs,
+            "seashard.json totalRuntimeMs",
+          ),
+        }),
     createdAt: expectString(seaShard.createdAt, "seashard.json createdAt"),
     updatedAt: expectString(seaShard.updatedAt, "seashard.json updatedAt"),
   };
@@ -222,6 +231,13 @@ function expectString(value: unknown, field: string): string {
     throw new TypeError(`server instance ${field} must be a non-empty string`);
   }
   return value;
+}
+
+function expectNonNegativeSafeInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new TypeError(`server instance ${field} must be a non-negative safe integer`);
+  }
+  return value as number;
 }
 
 function expectRelativePath(value: unknown, field: string): string {

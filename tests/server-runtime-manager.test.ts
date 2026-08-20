@@ -1,6 +1,7 @@
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
 import { ServerRuntimeManager } from "../components/server/runtime/src/manager.ts";
 import type { SpawnServerProcess } from "../components/server/runtime/src/process.ts";
+import { formatRuntimeDuration } from "../frontend/server/launch/src/client/runtime-duration.ts";
 import assert from "node:assert/strict";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { delimiter, dirname, resolve } from "node:path";
@@ -14,6 +15,13 @@ import {
   settings,
   vanillaInstance,
 } from "./server-runtime-fixtures.ts";
+
+await test("runtime duration formatting keeps stable Chinese units", () => {
+  assert.equal(formatRuntimeDuration(0), "0 秒");
+  assert.equal(formatRuntimeDuration(61_000), "1 分 1 秒");
+  assert.equal(formatRuntimeDuration(3_661_000), "1 小时 1 分");
+  assert.equal(formatRuntimeDuration(90_000_000), "1 天 1 小时");
+});
 
 await test("vanilla runtime starts a direct JAR process and streams bidirectional console IO", async () => {
   const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
@@ -37,6 +45,8 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   };
   const emittedLines: string[] = [];
   const recordedStartTimes: Array<{ instanceId: string; startedAt: string }> = [];
+  const recordedRuntimes: Array<{ instanceId: string; startedAt: string; stoppedAt: string }> = [];
+  let now = new Date("2026-08-17T13:00:00.000Z");
   const manager = new ServerRuntimeManager({
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java17, java21],
@@ -44,9 +54,12 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     recordInstanceStartedAt: async (instanceId, startedAt) => {
       recordedStartTimes.push({ instanceId, startedAt });
     },
+    recordInstanceRuntime: async (instanceId, startedAt, stoppedAt) => {
+      recordedRuntimes.push({ instanceId, startedAt, stoppedAt });
+    },
     fileSystem,
     spawnProcess,
-    now: () => new Date("2026-08-17T13:00:00.000Z"),
+    now: () => now,
     onConsoleLine: (line) => emittedLines.push(`${line.stream}:${line.text}`),
   });
 
@@ -124,15 +137,24 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   child.emitExit(0, null);
   child.stdout.write("saved tail without newline");
   assert.equal(manager.get(vanillaInstance.id).state, "stopping");
+  now = new Date("2026-08-17T13:02:03.000Z");
   child.emitClose(0, null);
+  await new Promise<void>((resolveWait) => setImmediate(resolveWait));
   assert.deepEqual(manager.get(vanillaInstance.id), {
     instanceId: vanillaInstance.id,
     state: "stopped",
     pid: 4_242,
     startedAt: "2026-08-17T13:00:00.000Z",
-    stoppedAt: "2026-08-17T13:00:00.000Z",
+    stoppedAt: "2026-08-17T13:02:03.000Z",
     exitCode: 0,
   });
+  assert.deepEqual(recordedRuntimes, [
+    {
+      instanceId: vanillaInstance.id,
+      startedAt: "2026-08-17T13:00:00.000Z",
+      stoppedAt: "2026-08-17T13:02:03.000Z",
+    },
+  ]);
   const finalLogs = manager.getLogs(vanillaInstance.id);
   assert.equal(
     finalLogs.some((line) => line.text === "saved tail without newline"),

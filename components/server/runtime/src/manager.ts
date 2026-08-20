@@ -31,6 +31,7 @@ export interface ServerRuntimeManagerOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
   scanJavaInstallations(): Promise<readonly JavaInstallationSnapshot[]>;
   recordInstanceStartedAt?(instanceId: string, startedAt: string): Promise<void>;
+  recordInstanceRuntime?(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>;
   readSettings(): Promise<ServerSettingsSnapshot>;
   onConsoleLine?(line: ServerConsoleLine): void;
   reportError?(error: unknown): void;
@@ -307,7 +308,9 @@ export class ServerRuntimeManager {
     child.stdin.on("error", (error: Error) => this.handleStdinError(instanceId, child, error));
     child.on("error", (error) => this.handleProcessError(instanceId, child, error));
     // close 在 stdout/stderr 已关闭后触发，能够保证最后一块无换行输出也被解码。
-    child.once("close", (code, signal) => this.handleClose(instanceId, child, code, signal));
+    child.once("close", (code, signal) => {
+      this.handleClose(instanceId, child, code, signal);
+    });
     return session;
   }
 
@@ -319,13 +322,26 @@ export class ServerRuntimeManager {
   ): void {
     const session = this.sessions.get(instanceId);
     if (!session || session.child !== child) return;
+    const closingSnapshot = session.snapshot;
+    const expectedStop = closingSnapshot.state === "stopping" && !session.stdinFailure;
+    if (closingSnapshot.state !== "stopping") {
+      // close 后继续保留 session，令组件卸载等待累计时长真正落盘。
+      session.snapshot = { ...closingSnapshot, state: "stopping" };
+      this.snapshots.set(instanceId, session.snapshot);
+    }
+
+    const releaseSession = (): void => {
+      if (this.sessions.get(instanceId) === session) {
+        this.sessions.delete(instanceId);
+      }
+      session.resolveClosed();
+    };
+
     try {
       session.stdout.end();
       session.stderr.end();
       clearTimeout(session.forceStopTimer);
-      this.sessions.delete(instanceId);
 
-      const expectedStop = session.snapshot.state === "stopping" && !session.stdinFailure;
       const state = session.stdinFailure
         ? "failed"
         : expectedStop || code === 0
@@ -336,23 +352,51 @@ export class ServerRuntimeManager {
         : signal
           ? `服务器进程因信号 ${signal} 退出。`
           : `服务器进程已退出，退出码 ${code ?? "未知"}。`;
+      const stoppedAt = this.nowIso();
       const snapshot: ServerRuntimeSnapshot = {
         instanceId,
         state,
-        ...(session.snapshot.pid === undefined ? {} : { pid: session.snapshot.pid }),
-        ...(session.snapshot.startedAt ? { startedAt: session.snapshot.startedAt } : {}),
-        stoppedAt: this.nowIso(),
+        ...(closingSnapshot.pid === undefined ? {} : { pid: closingSnapshot.pid }),
+        ...(closingSnapshot.startedAt ? { startedAt: closingSnapshot.startedAt } : {}),
+        stoppedAt,
         ...(code === null ? {} : { exitCode: code }),
         ...(state === "failed" ? { error: message } : {}),
       };
-      this.snapshots.set(instanceId, snapshot);
-      this.appendLine(
-        instanceId,
-        state === "failed" ? "stderr" : "system",
-        `[SeaShard] ${message}`,
-      );
-    } finally {
-      session.resolveClosed();
+      const finalize = (): void => {
+        try {
+          this.snapshots.set(instanceId, snapshot);
+          this.appendLine(
+            instanceId,
+            state === "failed" ? "stderr" : "system",
+            `[SeaShard] ${message}`,
+          );
+        } finally {
+          releaseSession();
+        }
+      };
+
+      if (!closingSnapshot.startedAt || !this.options.recordInstanceRuntime) {
+        finalize();
+        return;
+      }
+      const reportAndFinalize = (error: unknown): void => {
+        try {
+          this.options.reportError?.(error);
+        } finally {
+          finalize();
+        }
+      };
+      try {
+        void this.options
+          .recordInstanceRuntime(instanceId, closingSnapshot.startedAt, stoppedAt)
+          .then(finalize, reportAndFinalize)
+          .catch((error) => this.options.reportError?.(error));
+      } catch (error) {
+        reportAndFinalize(error);
+      }
+    } catch (error) {
+      releaseSession();
+      this.options.reportError?.(error);
     }
   }
 

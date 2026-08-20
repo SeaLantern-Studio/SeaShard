@@ -272,6 +272,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.serverInstancesOpenFolder, async (event, value) => {
+          ownedWindow(event.sender.id);
+          const instanceId = expectNonEmptyString(value, "server instance id");
+          const instance = (await config.listServerInstances()).find(
+            (candidate) => candidate.id === instanceId,
+          );
+          if (!instance) throw new Error(`找不到服务器实例：${instanceId}`);
+          const openError = await config.runtime.openPath(instance.rootPath);
+          if (openError) throw new Error(`无法打开服务器文件夹：${openError}`);
+        });
         config.runtime.handle(desktopChannels.serverInstancesDelete, async (event, value) => {
           ownedWindow(event.sender.id);
           const instanceId = expectNonEmptyString(value, "server instance id");
@@ -467,6 +477,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverConfigurationList);
           config.runtime.removeHandler(desktopChannels.serverConfigurationRead);

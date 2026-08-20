@@ -16,7 +16,7 @@ import type { JsonValue } from "@seashard/plugin-sdk";
 import { projectClientEntryPublication, type PluginKernel } from "@seashard/plugin-system";
 import { serverCoreSourceContract } from "@seashard/server-core-source";
 import { serverInstanceManagerContract } from "@seashard/server-instance-manager";
-import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { isAbsolute, join } from "node:path";
 import {
   expectJavaInstallation,
@@ -74,6 +74,7 @@ export async function registerDesktopShellBridge(
               dialog,
               protocol,
               net,
+              shell,
             ),
             preloadPath: join(moduleDirectory, "../preload/index.cjs"),
             rendererFile: join(moduleDirectory, "../renderer/index.html"),

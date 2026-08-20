@@ -156,6 +156,9 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
       optionalStrings.some(
         (field) => instance[field] !== undefined && typeof instance[field] !== "string",
       ) ||
+      (instance.totalRuntimeMs !== undefined &&
+        (!Number.isSafeInteger(instance.totalRuntimeMs) ||
+          (instance.totalRuntimeMs as number) < 0)) ||
       !["managed", "external"].includes(String(instance.storageMode)) ||
       !["downloaded", "imported"].includes(String(instance.source))
     ) {

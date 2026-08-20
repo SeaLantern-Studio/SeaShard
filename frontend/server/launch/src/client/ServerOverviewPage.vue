@@ -6,18 +6,21 @@ import {
   type ServerRuntimeClientService,
   type ServerRuntimeSnapshot,
 } from "@seashard/contracts";
+import { Cmz_Button } from "cmzya-modern-ui";
 import {
   Activity,
   CalendarDays,
   Clock3,
   FileArchive,
   Folder,
+  FolderOpen,
   HardDrive,
   History,
   Server,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ServerInstanceSelection } from "./server-selection";
+import { formatRuntimeDuration } from "./runtime-duration";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;
@@ -38,11 +41,14 @@ const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
 const loading = ref(true);
 const instancesError = ref<string>();
 const runtimeError = ref<string>();
+const openingFolder = ref(false);
+const folderOpenError = ref<string>();
 const currentTime = ref(Date.now());
 let instanceRequestId = 0;
 let runtimeRequestId = 0;
 let runtimeRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
+let instanceProjectionRefreshNeeded = false;
 
 const selectedInstanceId = computed(() => props.selection.instanceId);
 const selectedInstance = computed(() =>
@@ -50,24 +56,18 @@ const selectedInstance = computed(() =>
 );
 const iconSource = computed(() => selectedInstance.value?.iconUrl);
 const currentState = computed(() => runtimeSnapshot.value?.state ?? "stopped");
-const serverActive = computed(() =>
-  ["starting", "running", "stopping"].includes(currentState.value),
-);
+const serverActive = computed(() => isActiveRuntimeState(currentState.value));
 const runtimeStatus = computed(() =>
   runtimeError.value && !runtimeSnapshot.value ? "状态未知" : runtimeStateLabel(currentState.value),
 );
-const runtimeStatusNote = computed(() => {
-  if (runtimeSnapshot.value?.pid) return `进程 PID ${runtimeSnapshot.value.pid}`;
-  if (runtimeError.value) return "运行状态暂时不可用";
-  if (currentState.value === "failed") return runtimeSnapshot.value?.error ?? "服务器进程异常退出";
-  return serverActive.value ? "服务器进程正在响应" : "当前没有运行中的进程";
-});
-const uptime = computed(() => {
-  if (!serverActive.value) return "当前未运行";
-  if (!runtimeSnapshot.value?.startedAt) return "正在启动";
+const cumulativeRuntime = computed(() => {
+  const persistedRuntime = selectedInstance.value?.totalRuntimeMs ?? 0;
+  if (!serverActive.value || !runtimeSnapshot.value?.startedAt) {
+    return formatRuntimeDuration(persistedRuntime);
+  }
   const startedAt = Date.parse(runtimeSnapshot.value.startedAt);
-  if (!Number.isFinite(startedAt)) return "—";
-  return formatDuration(currentTime.value - startedAt);
+  if (!Number.isFinite(startedAt)) return formatRuntimeDuration(persistedRuntime);
+  return formatRuntimeDuration(persistedRuntime + Math.max(0, currentTime.value - startedAt));
 });
 const lastStartedAt = computed(
   () => runtimeSnapshot.value?.startedAt ?? selectedInstance.value?.lastStartedAt,
@@ -82,11 +82,6 @@ const coreFileName = computed(() => {
 });
 const formattedLastStartedAt = computed(() => formatDateTime(lastStartedAt.value, "尚未启动"));
 const formattedCreatedAt = computed(() => formatDateTime(selectedInstance.value?.createdAt));
-const runtimeStartedAtNote = computed(() =>
-  serverActive.value && runtimeSnapshot.value?.startedAt
-    ? `启动于 ${formatDateTime(runtimeSnapshot.value.startedAt)}`
-    : "服务器启动后开始统计",
-);
 
 onMounted(() => {
   void loadInstances();
@@ -107,6 +102,8 @@ watch(
     if (instanceId === previousInstanceId || loading.value) return;
     runtimeSnapshot.value = undefined;
     runtimeError.value = undefined;
+    folderOpenError.value = undefined;
+    instanceProjectionRefreshNeeded = false;
     if (!registeredInstances.value.some((instance) => instance.id === instanceId)) {
       void loadInstances();
       return;
@@ -136,7 +133,7 @@ async function loadInstances(): Promise<void> {
   }
 }
 
-/** 两秒轮询当前实例的进程快照；切换实例后使用请求编号丢弃迟到响应。 */
+/** 两秒轮询当前实例的进程快照；进程退出后重读实例投影以取得已落盘的累计时长。 */
 async function refreshRuntime(): Promise<void> {
   const instanceId = selectedInstanceId.value;
   if (!instanceId) {
@@ -144,15 +141,42 @@ async function refreshRuntime(): Promise<void> {
     return;
   }
   const requestId = ++runtimeRequestId;
+  const wasActive = isActiveRuntimeState(runtimeSnapshot.value?.state);
   try {
     const snapshot = await props.runtime.get(instanceId);
     if (requestId !== runtimeRequestId || instanceId !== selectedInstanceId.value) return;
     runtimeSnapshot.value = snapshot;
+    if (
+      (wasActive && !isActiveRuntimeState(snapshot.state)) ||
+      instanceProjectionNeedsRefresh(snapshot, selectedInstance.value)
+    ) {
+      instanceProjectionRefreshNeeded = true;
+    }
+    if (instanceProjectionRefreshNeeded) {
+      const instances = await props.instances.list();
+      if (requestId !== runtimeRequestId || instanceId !== selectedInstanceId.value) return;
+      registeredInstances.value = instances;
+      instanceProjectionRefreshNeeded = false;
+    }
     runtimeError.value = undefined;
   } catch (error) {
     if (requestId === runtimeRequestId && instanceId === selectedInstanceId.value) {
       runtimeError.value = errorMessage(error);
     }
+  }
+}
+/** Renderer 只提交实例 ID；Host 会重新查询登记目录后再调用系统文件管理器。 */
+async function openSelectedInstanceFolder(): Promise<void> {
+  const instance = selectedInstance.value;
+  if (!instance || openingFolder.value) return;
+  openingFolder.value = true;
+  folderOpenError.value = undefined;
+  try {
+    await props.instances.openFolder(instance.id);
+  } catch (error) {
+    folderOpenError.value = errorMessage(error);
+  } finally {
+    openingFolder.value = false;
   }
 }
 
@@ -164,6 +188,20 @@ function runtimeStateLabel(state: ServerRuntimeSnapshot["state"]): string {
   return "已停止";
 }
 
+function isActiveRuntimeState(state: ServerRuntimeSnapshot["state"] | undefined): boolean {
+  return state === "starting" || state === "running" || state === "stopping";
+}
+
+function instanceProjectionNeedsRefresh(
+  runtime: ServerRuntimeSnapshot,
+  instance: ServerInstanceSnapshot | undefined,
+): boolean {
+  if (!runtime.stoppedAt || !instance) return false;
+  const stoppedAt = Date.parse(runtime.stoppedAt);
+  const updatedAt = Date.parse(instance.updatedAt);
+  return Number.isFinite(stoppedAt) && (!Number.isFinite(updatedAt) || updatedAt < stoppedAt);
+}
+
 function formatDateTime(value: string | undefined, fallback = "—"): string {
   if (!value) return fallback;
   const timestamp = Date.parse(value);
@@ -171,20 +209,8 @@ function formatDateTime(value: string | undefined, fallback = "—"): string {
   return dateTimeFormatter.format(timestamp);
 }
 
-function formatDuration(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
-  const days = Math.floor(totalSeconds / 86_400);
-  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  if (days > 0) return `${days} 天 ${hours} 小时`;
-  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
-  if (minutes > 0) return `${minutes} 分 ${seconds} 秒`;
-  return `${seconds} 秒`;
-}
-
 function storageModeLabel(instance: ServerInstanceSnapshot): string {
-  return instance.storageMode === "managed" ? "SeaShard 托管" : "外部目录";
+  return instance.storageMode === "managed" ? "SeaShard 本地托管" : "外部目录";
 }
 
 function sourceLabel(instance: ServerInstanceSnapshot): string {
@@ -215,7 +241,7 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
-  <section class="server-overview-page" aria-label="当前服务器信息">
+  <section class="server-overview-page" aria-label="服务器信息页面">
     <div v-if="loading" class="overview-state" role="status">
       <span class="overview-loading-bar" aria-hidden="true"></span>
       <span>正在读取服务器信息</span>
@@ -235,57 +261,60 @@ function errorMessage(error: unknown): string {
     </div>
 
     <div v-else class="overview-layout">
-      <aside class="server-identity-panel">
-        <div class="overview-server-icon" :style="instanceStyle(selectedInstance)">
-          <img v-if="iconSource" :src="iconSource" alt="" draggable="false" />
-          <span v-else>{{ instanceMark(selectedInstance) }}</span>
-        </div>
-        <div class="server-identity-copy">
-          <span class="identity-eyebrow">当前服务器</span>
-          <h1>{{ selectedInstance.name }}</h1>
-          <p>{{ coreTypeLabel }} · MC {{ selectedInstance.gameVersion ?? "未知版本" }}</p>
-        </div>
-        <div class="runtime-pill" :class="`runtime-pill--${currentState}`">
-          <span aria-hidden="true"></span>
-          {{ runtimeStatus }}
-        </div>
-      </aside>
+      <div class="overview-sidebar">
+        <aside class="server-identity-panel">
+          <div class="overview-server-icon" :style="instanceStyle(selectedInstance)">
+            <img v-if="iconSource" :src="iconSource" alt="" draggable="false" />
+            <span v-else>{{ instanceMark(selectedInstance) }}</span>
+          </div>
+          <div class="server-identity-copy">
+            <h1>{{ selectedInstance.name }}</h1>
+            <div class="identity-tags" aria-label="服务器核心信息">
+              <span class="identity-tag">{{ coreTypeLabel }}</span>
+              <span class="identity-tag">
+                MC {{ selectedInstance.gameVersion ?? "未知版本" }}
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        <section class="statistics-list" aria-label="服务器统计">
+          <article class="statistic-row">
+            <span class="statistic-label">
+              <Activity :size="16" :stroke-width="1.8" />
+              运行状态
+            </span>
+            <strong>{{ runtimeStatus }}</strong>
+          </article>
+          <article class="statistic-row">
+            <span class="statistic-label">
+              <Clock3 :size="16" :stroke-width="1.8" />
+              累计运行时长
+            </span>
+            <strong>{{ cumulativeRuntime }}</strong>
+          </article>
+          <article class="statistic-row">
+            <span class="statistic-label">
+              <History :size="16" :stroke-width="1.8" />
+              最后启动时间
+            </span>
+            <strong>{{ formattedLastStartedAt }}</strong>
+          </article>
+          <article class="statistic-row">
+            <span class="statistic-label">
+              <CalendarDays :size="16" :stroke-width="1.8" />
+              创建时间
+            </span>
+            <strong>{{ formattedCreatedAt }}</strong>
+          </article>
+          <p v-if="runtimeError" class="runtime-read-warning" role="alert">{{ runtimeError }}</p>
+        </section>
+      </div>
 
       <main class="overview-content">
-        <section class="statistics-grid" aria-label="服务器统计">
-          <article class="statistic-item">
-            <div class="statistic-icon"><Activity :size="18" :stroke-width="1.8" /></div>
-            <span class="statistic-label">运行状态</span>
-            <strong>{{ runtimeStatus }}</strong>
-            <small>{{ runtimeStatusNote }}</small>
-          </article>
-          <article class="statistic-item">
-            <div class="statistic-icon"><Clock3 :size="18" :stroke-width="1.8" /></div>
-            <span class="statistic-label">本次运行时长</span>
-            <strong>{{ uptime }}</strong>
-            <small>{{ runtimeStartedAtNote }}</small>
-          </article>
-          <article class="statistic-item">
-            <div class="statistic-icon"><History :size="18" :stroke-width="1.8" /></div>
-            <span class="statistic-label">最后启动时间</span>
-            <strong>{{ formattedLastStartedAt }}</strong>
-            <small>{{ lastStartedAt ? "最近一次进程启动记录" : "暂无启动记录" }}</small>
-          </article>
-          <article class="statistic-item">
-            <div class="statistic-icon"><CalendarDays :size="18" :stroke-width="1.8" /></div>
-            <span class="statistic-label">创建时间</span>
-            <strong>{{ formattedCreatedAt }}</strong>
-            <small>实例首次加入 SeaShard 的时间</small>
-          </article>
-        </section>
-
         <section class="server-information-panel" aria-labelledby="server-information-title">
           <div class="information-heading">
-            <div>
-              <span class="information-kicker">INSTANCE DETAILS</span>
-              <h2 id="server-information-title">服务器信息</h2>
-            </div>
-            <span v-if="runtimeError" class="runtime-read-warning">{{ runtimeError }}</span>
+            <h2 id="server-information-title">服务器信息</h2>
           </div>
 
           <dl class="information-grid">
@@ -318,7 +347,21 @@ function errorMessage(error: unknown): string {
             </div>
             <div class="information-item information-item--path">
               <dt><Folder :size="16" />本地文件夹</dt>
-              <dd>{{ selectedInstance.rootPath }}</dd>
+              <dd class="folder-path-value">
+                <span>{{ selectedInstance.rootPath }}</span>
+                <Cmz_Button
+                  variant="outline"
+                  size="sm"
+                  :loading="openingFolder"
+                  @click="openSelectedInstanceFolder"
+                >
+                  <FolderOpen :size="14" />
+                  打开
+                </Cmz_Button>
+              </dd>
+              <span v-if="folderOpenError" class="folder-open-error" role="alert">
+                {{ folderOpenError }}
+              </span>
             </div>
           </dl>
         </section>

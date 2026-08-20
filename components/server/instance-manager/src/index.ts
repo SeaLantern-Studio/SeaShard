@@ -58,6 +58,10 @@ export function createServerInstanceManagerModule(
           await manager.recordStartedAt(instanceId, startedAt);
           return null;
         },
+        recordRuntime: async (instanceId, startedAt, stoppedAt) => {
+          await manager.recordRuntime(instanceId, startedAt, stoppedAt);
+          return null;
+        },
         delete: async (instanceId) => {
           await manager.delete(instanceId);
           return null;

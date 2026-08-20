@@ -8,12 +8,13 @@ import type {
   ServerRuntimeSnapshot,
 } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Console, type ConsoleLine } from "cmzya-modern-ui";
-import { Server } from "lucide-vue-next";
+import { Clock3, Server } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ServerInstanceSelection } from "./server-selection";
 import MissingJavaModal from "./MissingJavaModal.vue";
 import { isMissingJavaRuntimeError, runtimeErrorMessage } from "./runtime-error";
 import { BoundedSequenceStore } from "./console-buffer";
+import { formatRuntimeDuration } from "./runtime-duration";
 
 const maximumConsoleLines = 5_000;
 
@@ -30,6 +31,7 @@ const instancesError = ref<string>();
 const consoleLines = ref<ConsoleLine[]>([]);
 const commandHistory = ref<string[]>([]);
 const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
+const currentTime = ref(Date.now());
 const startingServer = ref(false);
 const missingJavaModalOpen = ref(false);
 const missingJavaMessage = ref("");
@@ -38,6 +40,7 @@ let localLines: Array<{ line: ConsoleLine; timestamp: string }> = [];
 let consoleRequestId = 0;
 let runtimeRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let disposeConsoleSubscription: (() => void) | undefined;
+let clockTimer: ReturnType<typeof setInterval> | undefined;
 
 const selectedInstance = computed(() =>
   registeredInstances.value.find((instance) => instance.id === selectedInstanceId.value),
@@ -59,6 +62,16 @@ const startButtonDisabled = computed(
     runtimeSnapshot.value?.state === "running" ||
     runtimeSnapshot.value?.state === "stopping",
 );
+const sessionRuntime = computed(() => {
+  const snapshot = runtimeSnapshot.value;
+  if (snapshot?.state === "starting") return "正在启动";
+  if (!snapshot?.startedAt || (snapshot.state !== "running" && snapshot.state !== "stopping")) {
+    return "当前未运行";
+  }
+  const startedAt = Date.parse(snapshot.startedAt);
+  if (!Number.isFinite(startedAt)) return "—";
+  return formatRuntimeDuration(currentTime.value - startedAt);
+});
 const quickCommands = [
   { label: "白天", command: "time set day" },
   { label: "夜晚", command: "time set night" },
@@ -74,11 +87,15 @@ onMounted(() => {
   disposeConsoleSubscription = props.runtime.onConsoleLine(handleServerConsoleLine);
   void loadInstances();
   runtimeRefreshTimer = setInterval(() => void refreshRuntime(), 2_000);
+  clockTimer = setInterval(() => {
+    currentTime.value = Date.now();
+  }, 1_000);
 });
 
 onBeforeUnmount(() => {
   disposeConsoleSubscription?.();
   clearInterval(runtimeRefreshTimer);
+  clearInterval(clockTimer);
 });
 
 watch(
@@ -294,7 +311,11 @@ function errorMessage(error: unknown): string {
         <span class="server-name-display">
           {{ selectedInstance?.name ?? (loading ? "正在读取服务器" : "未选择服务器") }}
         </span>
-        <!-- 按产品边界不在控制台展示服务器运行状态，状态后续由独立位置负责。 -->
+        <span class="session-runtime-display">
+          <Clock3 :size="14" :stroke-width="1.8" />
+          <span>本次运行</span>
+          <strong>{{ sessionRuntime }}</strong>
+        </span>
       </div>
 
       <div class="toolbar-right">
