@@ -19,8 +19,8 @@ import {
   Server,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { ServerInstanceSelection } from "./server-selection";
-import { formatRuntimeDuration } from "./runtime-duration";
+import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
+import { formatRuntimeDuration } from "@seashard/server-ui-shared/runtime-duration";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;

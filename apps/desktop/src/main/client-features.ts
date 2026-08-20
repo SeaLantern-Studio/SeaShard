@@ -3,8 +3,11 @@ import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import type { PluginKernel } from "@seashard/plugin-system";
 import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
+import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui";
+import { serverConsoleUiManifest } from "@seashard/server-console-ui";
 import { serverDownloadUiManifest } from "@seashard/server-download-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
+import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
 /** 注册只发布 Renderer Client Entry 的内置功能。 */
@@ -69,7 +72,22 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       },
     ],
   });
-  // 服务器启动页读取实例管理器的持久化投影；进程启停状态仍由后续运行组件接管。
+  // 概览页只消费实例投影与运行状态，作为可独立启停的 Client UI 组件发布。
+  await kernel.registerBuiltIn({
+    manifest: serverOverviewUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-overview.ui",
+        entryId: "server-overview.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 启动页独立管理实例选择与进程启停，不再代替其他服务器页面申请权限。
   await kernel.registerBuiltIn({
     manifest: serverLaunchUiManifest,
     loaders: {},
@@ -77,6 +95,36 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.server-launch.ui",
         entryId: "server-launch.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 控制台独立订阅运行日志并发送命令。
+  await kernel.registerBuiltIn({
+    manifest: serverConsoleUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-console.ui",
+        entryId: "server-console.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 配置管理只申请实例读取与配置文件 Contract。
+  await kernel.registerBuiltIn({
+    manifest: serverConfigurationUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-configuration.ui",
+        entryId: "server-configuration.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

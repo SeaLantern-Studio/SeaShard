@@ -1,5 +1,5 @@
 {
-  "name": "@seashard/server-launch-ui",
+  "name": "@seashard/server-console-ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,6 @@
     "@seashard/ui-sdk": "workspace:*",
     "cmzya-modern-ui": "0.6.2",
     "lucide-vue-next": "0.400.0",
-    "vue": "3.5.41",
-    "vue-router": "5.0.3"
+    "vue": "3.5.41"
   }
 }

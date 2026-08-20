@@ -20,9 +20,12 @@ import {
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import type { ServerInstanceSelection } from "./server-selection";
-import MissingJavaModal from "./MissingJavaModal.vue";
-import { isMissingJavaRuntimeError, runtimeErrorMessage } from "./runtime-error";
+import MissingJavaModal from "@seashard/server-ui-shared/missing-java-modal";
+import {
+  isMissingJavaRuntimeError,
+  runtimeErrorMessage,
+} from "@seashard/server-ui-shared/runtime-error";
+import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 
 const props = defineProps<{
   instances: ServerInstanceClientService;

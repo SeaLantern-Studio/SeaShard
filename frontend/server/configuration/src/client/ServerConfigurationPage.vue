@@ -40,7 +40,7 @@ import {
   serverPropertyCategories,
   type ServerPropertyEntry,
 } from "./server-properties";
-import type { ServerInstanceSelection } from "./server-selection";
+import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 type ConfigurationScope = ServerConfigurationFile["scope"];
 
 interface ConfigurationDraft {

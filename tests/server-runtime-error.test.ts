@@ -1,7 +1,7 @@
 import {
   isMissingJavaRuntimeError,
   runtimeErrorMessage,
-} from "../frontend/server/launch/src/client/runtime-error.ts";
+} from "../frontend/server/shared/src/runtime-error.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 

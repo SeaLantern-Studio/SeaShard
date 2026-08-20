@@ -1,7 +1,7 @@
 import {
   parseServerPropertiesSource,
   renderServerPropertiesSource,
-} from "../frontend/server/launch/src/client/server-properties.ts";
+} from "../frontend/server/configuration/src/client/server-properties.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 

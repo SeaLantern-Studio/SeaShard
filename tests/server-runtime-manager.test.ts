@@ -1,7 +1,7 @@
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
 import { ServerRuntimeManager } from "../components/server/runtime/src/manager.ts";
 import type { SpawnServerProcess } from "../components/server/runtime/src/process.ts";
-import { formatRuntimeDuration } from "../frontend/server/launch/src/client/runtime-duration.ts";
+import { formatRuntimeDuration } from "../frontend/server/shared/src/runtime-duration.ts";
 import assert from "node:assert/strict";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { delimiter, dirname, resolve } from "node:path";

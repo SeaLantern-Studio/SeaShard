@@ -1,4 +1,4 @@
-import { BoundedSequenceStore } from "../frontend/server/launch/src/client/console-buffer.ts";
+import { BoundedSequenceStore } from "../frontend/server/console/src/client/console-buffer.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 

@@ -1,4 +1,4 @@
-import { buildChangedConfigurationLines } from "../frontend/server/launch/src/client/config-diff.ts";
+import { buildChangedConfigurationLines } from "../frontend/server/configuration/src/client/config-diff.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 

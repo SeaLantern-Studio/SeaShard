@@ -1,18 +1,18 @@
-import { serverInstanceManagerContract, serverRuntimeContract } from "@seashard/contracts";
+import { serverConfigurationContract, serverInstanceManagerContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
-export const serverLaunchUiManifest: PluginManifest = {
-  id: "seashard.server-launch-ui",
+export const serverConfigurationUiManifest: PluginManifest = {
+  id: "seashard.server-configuration-ui",
   version: "0.0.0",
   publisher: "sealantern-studio",
   entries: [
     {
-      id: "server-launch.client",
+      id: "server-configuration.client",
       runtime: "client",
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [serverInstanceManagerContract, serverRuntimeContract],
+      permissions: [serverInstanceManagerContract, serverConfigurationContract],
       upgradeMode: "stop-first",
     },
   ],

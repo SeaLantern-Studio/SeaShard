@@ -10,11 +10,14 @@ import type {
 import { Cmz_Button, Cmz_Console, type ConsoleLine } from "cmzya-modern-ui";
 import { Clock3, Server } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { ServerInstanceSelection } from "./server-selection";
-import MissingJavaModal from "./MissingJavaModal.vue";
-import { isMissingJavaRuntimeError, runtimeErrorMessage } from "./runtime-error";
+import MissingJavaModal from "@seashard/server-ui-shared/missing-java-modal";
+import { formatRuntimeDuration } from "@seashard/server-ui-shared/runtime-duration";
+import {
+  isMissingJavaRuntimeError,
+  runtimeErrorMessage,
+} from "@seashard/server-ui-shared/runtime-error";
+import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 import { BoundedSequenceStore } from "./console-buffer";
-import { formatRuntimeDuration } from "./runtime-duration";
 
 const maximumConsoleLines = 5_000;
 

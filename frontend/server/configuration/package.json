@@ -1,5 +1,5 @@
 {
-  "name": "@seashard/server-launch-ui",
+  "name": "@seashard/server-configuration-ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,13 +8,17 @@
     "./client": "./src/client/index.ts"
   },
   "dependencies": {
+    "@codemirror/language": "6.12.3",
+    "@codemirror/search": "6.6.0",
+    "@codemirror/state": "6.6.0",
+    "@codemirror/view": "6.41.0",
+    "@lezer/highlight": "1.2.3",
     "@seashard/contracts": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/server-ui-shared": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",
     "cmzya-modern-ui": "0.6.2",
     "lucide-vue-next": "0.400.0",
-    "vue": "3.5.41",
-    "vue-router": "5.0.3"
+    "vue": "3.5.41"
   }
 }

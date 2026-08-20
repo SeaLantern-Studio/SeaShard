@@ -106,6 +106,12 @@ importers:
       '@seashard/server-configuration':
         specifier: workspace:*
         version: link:../../components/server/configuration
+      '@seashard/server-configuration-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/configuration
+      '@seashard/server-console-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/console
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../../components/server/core-source
@@ -118,6 +124,9 @@ importers:
       '@seashard/server-launch-ui':
         specifier: workspace:*
         version: link:../../frontend/server/launch
+      '@seashard/server-overview-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/overview
       '@seashard/server-runtime':
         specifier: workspace:*
         version: link:../../components/server/runtime
@@ -314,6 +323,69 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  frontend/server/configuration:
+    dependencies:
+      '@codemirror/language':
+        specifier: 6.12.3
+        version: 6.12.3
+      '@codemirror/search':
+        specifier: 6.6.0
+        version: 6.6.0
+      '@codemirror/state':
+        specifier: 6.6.0
+        version: 6.6.0
+      '@codemirror/view':
+        specifier: 6.41.0
+        version: 6.41.0
+      '@lezer/highlight':
+        specifier: 1.2.3
+        version: 1.2.3
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/console:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
   frontend/server/download:
     dependencies:
       '@seashard/contracts':
@@ -340,27 +412,15 @@ importers:
 
   frontend/server/launch:
     dependencies:
-      '@codemirror/language':
-        specifier: 6.12.3
-        version: 6.12.3
-      '@codemirror/search':
-        specifier: 6.6.0
-        version: 6.6.0
-      '@codemirror/state':
-        specifier: 6.6.0
-        version: 6.6.0
-      '@codemirror/view':
-        specifier: 6.41.0
-        version: 6.41.0
-      '@lezer/highlight':
-        specifier: 1.2.3
-        version: 1.2.3
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
         version: link:../../../packages/ui-sdk
@@ -376,6 +436,42 @@ importers:
       vue-router:
         specifier: 5.0.3
         version: 5.0.3(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
+
+  frontend/server/overview:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/shared:
+    dependencies:
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
 
   frontend/settings/about:
     dependencies:

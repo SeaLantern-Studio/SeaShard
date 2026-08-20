@@ -1,0 +1,51 @@
+import {
+  serverConfigurationContract,
+  serverInstanceManagerContract,
+  serverRuntimeContract,
+} from "../packages/contracts/src/index.ts";
+import { serverConfigurationUiManifest } from "../frontend/server/configuration/src/index.ts";
+import { serverConsoleUiManifest } from "../frontend/server/console/src/index.ts";
+import { serverLaunchUiManifest } from "../frontend/server/launch/src/index.ts";
+import { serverOverviewUiManifest } from "../frontend/server/overview/src/index.ts";
+import assert from "node:assert/strict";
+import test from "node:test";
+
+const components = [
+  {
+    manifest: serverOverviewUiManifest,
+    pluginId: "seashard.server-overview-ui",
+    entryId: "server-overview.client",
+    permissions: [serverInstanceManagerContract, serverRuntimeContract],
+  },
+  {
+    manifest: serverLaunchUiManifest,
+    pluginId: "seashard.server-launch-ui",
+    entryId: "server-launch.client",
+    permissions: [serverInstanceManagerContract, serverRuntimeContract],
+  },
+  {
+    manifest: serverConsoleUiManifest,
+    pluginId: "seashard.server-console-ui",
+    entryId: "server-console.client",
+    permissions: [serverInstanceManagerContract, serverRuntimeContract],
+  },
+  {
+    manifest: serverConfigurationUiManifest,
+    pluginId: "seashard.server-configuration-ui",
+    entryId: "server-configuration.client",
+    permissions: [serverInstanceManagerContract, serverConfigurationContract],
+  },
+] as const;
+
+await test("server workspace pages publish independent least-privilege client components", () => {
+  assert.equal(new Set(components.map(({ pluginId }) => pluginId)).size, components.length);
+  assert.equal(new Set(components.map(({ entryId }) => entryId)).size, components.length);
+
+  for (const { manifest, pluginId, entryId, permissions } of components) {
+    assert.equal(manifest.id, pluginId);
+    assert.equal(manifest.entries.length, 1);
+    assert.equal(manifest.entries[0]?.id, entryId);
+    assert.equal(manifest.entries[0]?.runtime, "client");
+    assert.deepEqual(manifest.entries[0]?.permissions, permissions);
+  }
+});
