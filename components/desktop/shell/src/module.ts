@@ -17,6 +17,7 @@ import {
   expectServerConfigurationWriteRequest,
   expectServerCoreSaveAsRequest,
   expectServerModSearchRequest,
+  expectServerModProjectId,
   expectServerStartupDefaultsUpdate,
   expectString,
 } from "./validation";
@@ -41,6 +42,31 @@ export const desktopShellManifest: PluginManifest = {
     seaShard: ">=0.0.0 <1.0.0",
   },
 };
+/** 外部导航保持显式白名单；Renderer 无法借新窗口请求打开任意协议或站点。 */
+function trustedExternalUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    const queryKeys = [...url.searchParams.keys()];
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "search.mcmod.cn" ||
+      url.username ||
+      url.password ||
+      url.port ||
+      url.pathname !== "/" ||
+      url.hash ||
+      queryKeys.length !== 1 ||
+      queryKeys[0] !== "s" ||
+      !url.searchParams.get("s") ||
+      (url.searchParams.get("s")?.length ?? 0) > 200
+    ) {
+      return undefined;
+    }
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 创建完整 Desktop Shell。
@@ -100,7 +126,15 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         });
         primaryWindow = window;
 
-        window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+        window.webContents.setWindowOpenHandler(({ url }) => {
+          const externalUrl = trustedExternalUrl(url);
+          if (externalUrl) {
+            void config.runtime
+              .openExternal(externalUrl)
+              .catch((error) => config.reportOpenFailure(error));
+          }
+          return { action: "deny" };
+        });
         window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
           callback(false),
         );
@@ -453,6 +487,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           }
           return config.searchServerMods(expectServerModSearchRequest(request));
         });
+        config.runtime.handle(desktopChannels.serverModProjectDetails, async (event, projectId) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("server mod project details request rejected");
+          }
+          return config.readServerModProjectDetails(expectServerModProjectId(projectId));
+        });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -485,6 +525,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
           config.runtime.removeHandler(desktopChannels.serverModFilters);
           config.runtime.removeHandler(desktopChannels.serverModSearch);
+          config.runtime.removeHandler(desktopChannels.serverModProjectDetails);
           config.runtime.removeHandler(desktopChannels.serverSettingsGet);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);

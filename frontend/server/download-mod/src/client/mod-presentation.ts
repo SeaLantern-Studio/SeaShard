@@ -1,4 +1,8 @@
-import type { ServerModFilterOption, ServerModProject } from "@seashard/contracts";
+import type {
+  ServerModFilterOption,
+  ServerModProject,
+  ServerModVersion,
+} from "@seashard/contracts";
 
 export interface ServerModDisplayName {
   readonly primary: string;
@@ -8,6 +12,12 @@ export interface ServerModDisplayName {
 export interface ServerModDisplayTags {
   readonly categories: readonly string[];
   readonly content: readonly string[];
+}
+export interface ServerModVersionGroup {
+  readonly id: string;
+  readonly gameVersion: string;
+  readonly loader: string;
+  readonly versions: readonly ServerModVersion[];
 }
 
 const hanPattern = /\p{Script=Han}/u;
@@ -19,6 +29,7 @@ const compactDownloadUnits = [
   { threshold: 100_000_000, suffix: "亿" },
   { threshold: 10_000, suffix: "万" },
 ] as const;
+const versionCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 /** Modrinth 没有独立英文标题字段；优先拆分标题内英文，缺失时再用稳定 slug 还原。 */
 export function serverModDisplayName(
@@ -87,6 +98,46 @@ function formatCompactDownloadDigits(value: number): string {
     if (rounded < 1_000) return String(rounded);
   }
   return String(Math.round(value));
+}
+
+/** 将版本按“加载器 + Minecraft 版本”分类，详情页只处理筛选与折叠状态。 */
+export function groupServerModVersions(
+  versions: readonly ServerModVersion[],
+  gameVersionFilter = "",
+  loaderFilter = "",
+): ServerModVersionGroup[] {
+  const groups = new Map<string, ServerModVersion[]>();
+  for (const version of versions) {
+    if (gameVersionFilter && !version.gameVersions.includes(gameVersionFilter)) continue;
+    if (loaderFilter && !version.loaders.includes(loaderFilter)) continue;
+    for (const loader of version.loaders) {
+      if (loaderFilter && loader !== loaderFilter) continue;
+      for (const gameVersion of version.gameVersions) {
+        if (gameVersionFilter && gameVersion !== gameVersionFilter) continue;
+        const id = `${loader}:${gameVersion}`;
+        const group = groups.get(id);
+        if (group) group.push(version);
+        else groups.set(id, [version]);
+      }
+    }
+  }
+  return [...groups.entries()]
+    .map(([id, groupVersions]) => {
+      const separator = id.indexOf(":");
+      return {
+        id,
+        loader: id.slice(0, separator),
+        gameVersion: id.slice(separator + 1),
+        versions: [...groupVersions].sort(
+          (left, right) => Date.parse(right.datePublished) - Date.parse(left.datePublished),
+        ),
+      };
+    })
+    .sort(
+      (left, right) =>
+        versionCollator.compare(right.gameVersion, left.gameVersion) ||
+        left.loader.localeCompare(right.loader, "en"),
+    );
 }
 
 /**

@@ -65,6 +65,7 @@ export interface DesktopShellRuntime {
   ): void;
   removeProtocolHandler(scheme: string): void;
   openPath(path: string): Promise<string>;
+  openExternal(url: string): Promise<void>;
   selectDirectory(
     window: BrowserWindow,
     options: DirectorySelectionOptions,
@@ -93,6 +94,9 @@ export interface DesktopShellConfig {
   searchServerMods(
     request: ServerModSearchRequest,
   ): ReturnType<ServerModSourceClientService["search"]>;
+  readServerModProjectDetails(
+    projectId: string,
+  ): ReturnType<ServerModSourceClientService["getProjectDetails"]>;
   resolveServerCoreIconPath(sha256: string): Promise<string | undefined>;
   resolveServerInstanceIconPath(instanceId: string): Promise<string | undefined>;
   readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;

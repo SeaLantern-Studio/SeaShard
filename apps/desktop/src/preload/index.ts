@@ -26,6 +26,8 @@ const api: SeaShardDesktopApi = Object.freeze({
     getFilters: () => ipcRenderer.invoke(desktopChannels.serverModFilters),
     search: (request: ServerModSearchRequest) =>
       ipcRenderer.invoke(desktopChannels.serverModSearch, request),
+    getProjectDetails: (projectId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverModProjectDetails, projectId),
   }),
   serverSettings: Object.freeze({
     get: () => ipcRenderer.invoke(desktopChannels.serverSettingsGet),

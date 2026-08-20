@@ -9,12 +9,13 @@ import {
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerModFilters,
+  type ServerModProjectDetails,
   type ServerModSearchRequest,
   type ServerModSearchResult,
-  type ServerConsoleLine,
   type ServerConfigurationCatalog,
   type ServerConfigurationDocument,
   type ServerConfigurationWriteRequest,
+  type ServerConsoleLine,
   type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -43,7 +44,7 @@ export class FakeBrowserWindow extends EventEmitter {
   readonly webContents: {
     readonly id: number;
     send: (channel: string, payload: unknown) => void;
-    setWindowOpenHandler: (handler: () => unknown) => void;
+    setWindowOpenHandler: (handler: (details: { url: string }) => unknown) => void;
     readonly session: {
       setPermissionRequestHandler: (
         handler: (
@@ -61,7 +62,7 @@ export class FakeBrowserWindow extends EventEmitter {
   minimized = false;
   maximized = false;
   closeCount = 0;
-  windowOpenHandler?: () => unknown;
+  windowOpenHandler?: (details: { url: string }) => unknown;
   permissionRequestHandler?: (
     contents: unknown,
     permission: string,
@@ -149,6 +150,7 @@ export class FakeDesktopShellRuntime extends EventEmitter implements DesktopShel
   fileSelectionWindow?: BrowserWindow;
   fileSelectionOptions?: FileSelectionOptions;
   readonly openedPaths: string[] = [];
+  readonly openedExternalUrls: string[] = [];
   openPathResult = "";
 
   constructor(readonly platform: NodeJS.Platform) {
@@ -220,6 +222,9 @@ export class FakeDesktopShellRuntime extends EventEmitter implements DesktopShel
   async openPath(path: string): Promise<string> {
     this.openedPaths.push(path);
     return this.openPathResult;
+  }
+  async openExternal(url: string): Promise<void> {
+    this.openedExternalUrls.push(url);
   }
 
   async selectDirectory(
@@ -366,6 +371,20 @@ export const serverModSearchResult = {
   limit: 20,
   total: 1,
 } satisfies ServerModSearchResult;
+export const serverModProjectDetails = {
+  projectId: "server-mod-1",
+  body: "Complete project description.\n\nSecond paragraph.",
+  versions: [
+    {
+      id: "version-neoforge-1",
+      gameVersions: ["1.21.1"],
+      loaders: ["neoforge"],
+      fileName: "server-tools-neoforge-1.21.1.jar",
+      downloads: 4_321,
+      datePublished: "2026-08-17T11:00:00Z",
+    },
+  ],
+} satisfies ServerModProjectDetails;
 
 export const serverInstances = [
   {
@@ -482,6 +501,7 @@ export async function createDesktopShellHarness(
   const deletedServerInstances: string[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
   const serverModSearchRequests: ServerModSearchRequest[] = [];
+  const serverModDetailProjectIds: string[] = [];
   let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
   const serverCommands: string[] = [];
   let serverConsoleListener: ((line: ServerConsoleLine) => void) | undefined;
@@ -515,6 +535,10 @@ export async function createDesktopShellHarness(
       searchServerMods: async (request) => {
         serverModSearchRequests.push(request);
         return serverModSearchResult;
+      },
+      readServerModProjectDetails: async (projectId) => {
+        serverModDetailProjectIds.push(projectId);
+        return serverModProjectDetails;
       },
       resolveServerCoreIconPath: async (sha256) =>
         sha256 === paperIconHash ? paperIconPath : undefined,
@@ -659,6 +683,7 @@ export async function createDesktopShellHarness(
     startedManagedDownloads,
     deletedServerInstances,
     serverModSearchRequests,
+    serverModDetailProjectIds,
     serverCommands,
     configurationWrites,
     inspectedJavaPaths,

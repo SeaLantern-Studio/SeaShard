@@ -23,7 +23,9 @@ import {
   type ServerModFilterOption,
   type ServerModFilters,
   type ServerModProject,
+  type ServerModProjectDetails,
   type ServerModSearchResult,
+  type ServerModVersion,
 } from "@seashard/contracts";
 import { isAbsolute } from "node:path";
 
@@ -186,6 +188,73 @@ export function expectServerModSearchResult(value: unknown): ServerModSearchResu
     offset: result.offset as number,
     limit: result.limit as number,
     total: result.total as number,
+  };
+}
+export function expectServerModProjectDetails(value: unknown): ServerModProjectDetails {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server mod source returned invalid project details");
+  }
+  const details = value as Record<string, unknown>;
+  if (
+    typeof details.projectId !== "string" ||
+    !details.projectId ||
+    details.projectId.length > 64 ||
+    typeof details.body !== "string" ||
+    details.body.length > 200_000 ||
+    !Array.isArray(details.versions) ||
+    details.versions.length > 2_048
+  ) {
+    throw new Error("server mod source returned invalid project details");
+  }
+  const seen = new Set<string>();
+  return {
+    projectId: details.projectId,
+    body: details.body,
+    versions: details.versions.map((version, index) => {
+      const parsed = expectServerModVersion(version, index, details.projectId as string);
+      if (seen.has(parsed.id)) {
+        throw new Error(`server mod source returned duplicate version ${index}`);
+      }
+      seen.add(parsed.id);
+      return parsed;
+    }),
+  };
+}
+
+function expectServerModVersion(
+  value: unknown,
+  index: number,
+  projectId: string,
+): ServerModVersion {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server mod source returned invalid version ${index}`);
+  }
+  const version = value as Record<string, unknown>;
+  if (
+    typeof version.id !== "string" ||
+    !version.id ||
+    version.id.length > 64 ||
+    typeof version.fileName !== "string" ||
+    !version.fileName ||
+    version.fileName.length > 512 ||
+    typeof version.datePublished !== "string" ||
+    Number.isNaN(Date.parse(version.datePublished)) ||
+    !Number.isSafeInteger(version.downloads) ||
+    (version.downloads as number) < 0
+  ) {
+    throw new Error(`server mod source returned invalid version ${index} for ${projectId}`);
+  }
+  return {
+    id: version.id,
+    gameVersions: expectServerModStrings(
+      version.gameVersions,
+      `version ${index} game versions`,
+      512,
+    ),
+    loaders: expectServerModStrings(version.loaders, `version ${index} loaders`, 64),
+    fileName: version.fileName,
+    downloads: version.downloads as number,
+    datePublished: version.datePublished,
   };
 }
 

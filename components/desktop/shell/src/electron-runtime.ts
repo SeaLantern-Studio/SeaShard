@@ -30,6 +30,7 @@ export function createElectronDesktopShellRuntime(
     },
     removeProtocolHandler: (scheme) => electronProtocol.unhandle(scheme),
     openPath: (path) => electronShell.openPath(path),
+    openExternal: (url) => electronShell.openExternal(url),
     selectDirectory: async (window, options) => {
       const result = await electronDialog.showOpenDialog(window, {
         title: options.title,

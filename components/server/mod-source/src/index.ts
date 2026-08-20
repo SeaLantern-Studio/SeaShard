@@ -34,6 +34,8 @@ export function createServerModSourceModule(options: ServerModSourceModuleOption
       ctx.provide(serverModSourceContract, {
         getFilters: async () => asJsonValue(await catalog.getFilters()),
         search: async (request) => asJsonValue(await catalog.search(request)),
+        getProjectDetails: async (projectId) =>
+          asJsonValue(await catalog.getProjectDetails(projectId)),
       });
     },
   };

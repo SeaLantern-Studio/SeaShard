@@ -16,6 +16,7 @@ export const desktopChannels = {
   dialogSelectDirectory: "seashard.dialog.select-directory",
   serverModFilters: "seashard.server-mod.filters",
   serverModSearch: "seashard.server-mod.search",
+  serverModProjectDetails: "seashard.server-mod.project-details",
   serverSettingsGet: "seashard.server-settings.get",
   serverSettingsSetResourceDownloadDirectory:
     "seashard.server-settings.set-resource-download-directory",
@@ -259,10 +260,27 @@ export interface ServerModSearchResult {
   limit: number;
   total: number;
 }
+/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */
+export interface ServerModVersion {
+  id: string;
+  gameVersions: readonly string[];
+  loaders: readonly string[];
+  fileName: string;
+  downloads: number;
+  datePublished: string;
+}
+
+/** Modrinth 项目长简介及其全部公开版本。 */
+export interface ServerModProjectDetails {
+  projectId: string;
+  body: string;
+  versions: readonly ServerModVersion[];
+}
 
 export interface ServerModSourceClientService {
   getFilters(): Promise<ServerModFilters>;
   search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
+  getProjectDetails(projectId: string): Promise<ServerModProjectDetails>;
 }
 /** 默认下载并发数的稳定边界；服务端设置和公共下载器必须保持一致。 */
 export const serverDownloadConnectionLimits = {

@@ -68,6 +68,7 @@ const serverModSearchIndexes = new Set<ServerModSearchIndex>([
   "updated",
 ]);
 const serverModFilterPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
+const serverModProjectIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 /** 收窄 Renderer 的搜索参数，分页和 Facet 都只能落在公开 Contract 的固定边界内。 */
 export function expectServerModSearchRequest(value: unknown): ServerModSearchRequest {
@@ -106,6 +107,13 @@ export function expectServerModSearchRequest(value: unknown): ServerModSearchReq
     offset,
     limit,
   };
+}
+export function expectServerModProjectId(value: unknown): string {
+  const projectId = expectString(value, "server mod project ID").trim();
+  if (!serverModProjectIdPattern.test(projectId)) {
+    throw new TypeError("server mod project ID is invalid");
+  }
+  return projectId;
 }
 
 function expectServerModFilter(value: unknown, label: string): string {

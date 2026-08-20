@@ -4,6 +4,7 @@ import {
   formatServerModDownloadCount,
   formatServerModRelativeTime,
   formatServerModVersionRange,
+  groupServerModVersions,
   serverModDisplayName,
   serverModDisplayTags,
 } from "../frontend/server/download-mod/src/client/mod-presentation.ts";
@@ -82,4 +83,51 @@ await test("mod update times use hour, day, week, and month grains", () => {
   assert.equal(formatServerModRelativeTime("2026-08-04T12:00:00Z", now), "2 周前");
   assert.equal(formatServerModRelativeTime("2026-06-19T12:00:00Z", now), "2 个月前");
   assert.equal(formatServerModRelativeTime("invalid", now), "刚刚");
+});
+
+await test("mod versions group by loader and game version with newest files first", () => {
+  const versions = [
+    {
+      id: "latest-fabric",
+      gameVersions: ["1.21.1", "1.20.1"],
+      loaders: ["fabric"],
+      fileName: "fabric-latest.jar",
+      downloads: 20,
+      datePublished: "2026-08-18T12:00:00Z",
+    },
+    {
+      id: "older-shared",
+      gameVersions: ["1.21.1"],
+      loaders: ["fabric", "forge"],
+      fileName: "shared-older.jar",
+      downloads: 10,
+      datePublished: "2026-08-17T12:00:00Z",
+    },
+    {
+      id: "forge-legacy",
+      gameVersions: ["1.20.1"],
+      loaders: ["forge"],
+      fileName: "forge-legacy.jar",
+      downloads: 5,
+      datePublished: "2026-08-16T12:00:00Z",
+    },
+  ] as const;
+
+  const groups = groupServerModVersions(versions);
+  assert.deepEqual(
+    groups.map(({ id, versions: groupVersions }) => [
+      id,
+      groupVersions.map(({ id: versionId }) => versionId),
+    ]),
+    [
+      ["fabric:1.21.1", ["latest-fabric", "older-shared"]],
+      ["forge:1.21.1", ["older-shared"]],
+      ["fabric:1.20.1", ["latest-fabric"]],
+      ["forge:1.20.1", ["forge-legacy"]],
+    ],
+  );
+  assert.deepEqual(
+    groupServerModVersions(versions, "1.20.1", "forge").map(({ id }) => id),
+    ["forge:1.20.1"],
+  );
 });

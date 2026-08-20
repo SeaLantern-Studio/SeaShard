@@ -154,6 +154,62 @@ await test("Modrinth search builds fixed server facets and returns a bounded saf
     total: 41,
   });
 });
+await test("Modrinth project details expose the full body and primary version files", async () => {
+  const requests: URL[] = [];
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      requests.push(url);
+      if (url.pathname.endsWith("/project/server-mod-1")) {
+        return Response.json({
+          id: "server-mod-1",
+          project_type: "mod",
+          body: "Complete project description.\n\nSecond paragraph.",
+        });
+      }
+      if (url.pathname.endsWith("/project/server-mod-1/version")) {
+        return Response.json([
+          {
+            id: "version-neoforge-1",
+            project_id: "server-mod-1",
+            game_versions: ["1.21.1"],
+            loaders: ["neoforge"],
+            downloads: 4_321,
+            date_published: "2026-08-17T11:00:00Z",
+            files: [
+              { filename: "server-tools-sources.jar", primary: false },
+              { filename: "server-tools-neoforge-1.21.1.jar", primary: true },
+            ],
+          },
+        ]);
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+
+  assert.deepEqual(await catalog.getProjectDetails("server-mod-1"), {
+    projectId: "server-mod-1",
+    body: "Complete project description.\n\nSecond paragraph.",
+    versions: [
+      {
+        id: "version-neoforge-1",
+        gameVersions: ["1.21.1"],
+        loaders: ["neoforge"],
+        fileName: "server-tools-neoforge-1.21.1.jar",
+        downloads: 4_321,
+        datePublished: "2026-08-17T11:00:00Z",
+      },
+    ],
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1]?.searchParams.get("include_changelog"), "false");
+
+  requests.length = 0;
+  await assert.rejects(catalog.getProjectDetails("../invalid"), /project ID is invalid/);
+  assert.equal(requests.length, 0);
+});
 
 await test("Modrinth catalog treats a blank project icon URL as a missing optional icon", async () => {
   const catalog = new ModrinthServerModCatalog({

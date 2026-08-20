@@ -4,9 +4,11 @@ import {
   type ServerModFilterOption,
   type ServerModFilters,
   type ServerModProject,
+  type ServerModProjectDetails,
   type ServerModSearchIndex,
   type ServerModSearchRequest,
   type ServerModSearchResult,
+  type ServerModVersion,
 } from "@seashard/contracts";
 
 export const defaultModrinthApiBaseUrl = "https://api.modrinth.com/v2/";
@@ -45,6 +47,7 @@ const loaderNames = new Set([
 ]);
 const loaderOrder = ["forge", "neoforge", "fabric", "quilt", "sponge"];
 const filterIdPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
+const projectIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 const tagLabels: Readonly<Record<string, string>> = {
   adventure: "冒险",
@@ -147,6 +150,17 @@ export class ModrinthServerModCatalog {
 
     return parseSearchResult(await this.fetchJson(url));
   }
+  async getProjectDetails(value: unknown): Promise<ServerModProjectDetails> {
+    const projectId = expectProjectId(value);
+    const projectPath = `project/${encodeURIComponent(projectId)}`;
+    const versionsUrl = this.endpoint(`${projectPath}/version`);
+    versionsUrl.searchParams.set("include_changelog", "false");
+    const [project, versions] = await Promise.all([
+      this.fetchJson(this.endpoint(projectPath)),
+      this.fetchJson(versionsUrl),
+    ]);
+    return parseProjectDetails(project, versions, projectId);
+  }
 
   private async loadFilters(): Promise<ServerModFilters> {
     const [categories, versions, loaders] = await Promise.all([
@@ -228,6 +242,14 @@ function expectSearchRequest(value: unknown): ServerModSearchRequest {
     offset: record.offset as number,
     limit: record.limit as number,
   };
+}
+
+function expectProjectId(value: unknown): string {
+  const projectId = expectString(value, "Modrinth project ID").trim();
+  if (!projectIdPattern.test(projectId)) {
+    throw new TypeError("Modrinth project ID is invalid");
+  }
+  return projectId;
 }
 
 function parseTags(value: unknown): ServerModFilterOption[] {
@@ -334,6 +356,75 @@ function parseProject(value: unknown, index: number): ServerModProject {
     environment,
     categories: parseStringArray(record.categories, `Modrinth project ${index} categories`, 64),
     versions: parseStringArray(record.versions, `Modrinth project ${index} versions`, 512),
+  };
+}
+function parseProjectDetails(
+  projectValue: unknown,
+  versionsValue: unknown,
+  expectedProjectId: string,
+): ServerModProjectDetails {
+  const project = expectRecord(projectValue, "Modrinth project details");
+  const projectId = expectBoundedString(project.id, "Modrinth project details ID", 64);
+  if (projectId !== expectedProjectId || project.project_type !== "mod") {
+    throw new Error("Modrinth project details do not match the requested mod");
+  }
+  const versions = expectArray(versionsValue, "Modrinth project versions");
+  if (versions.length > 2_048) {
+    throw new Error("Modrinth project returned too many versions");
+  }
+  return {
+    projectId,
+    body: expectBoundedString(project.body, "Modrinth project body", 200_000, true),
+    versions: versions.map((value, index) => parseProjectVersion(value, index, projectId)),
+  };
+}
+
+function parseProjectVersion(value: unknown, index: number, projectId: string): ServerModVersion {
+  const record = expectRecord(value, `Modrinth project version ${index}`);
+  if (record.project_id !== projectId) {
+    throw new Error(`Modrinth project version ${index} belongs to another project`);
+  }
+  const datePublished = expectBoundedString(
+    record.date_published,
+    `Modrinth project version ${index} published date`,
+    64,
+  );
+  if (Number.isNaN(Date.parse(datePublished))) {
+    throw new Error(`Modrinth project version ${index} has an invalid published date`);
+  }
+  const files = expectArray(record.files, `Modrinth project version ${index} files`);
+  if (files.length === 0 || files.length > 64) {
+    throw new Error(`Modrinth project version ${index} has invalid files`);
+  }
+  const parsedFiles = files.map((file, fileIndex) => {
+    const fileRecord = expectRecord(file, `Modrinth project version ${index} file ${fileIndex}`);
+    if (typeof fileRecord.primary !== "boolean") {
+      throw new Error(`Modrinth project version ${index} file ${fileIndex} is invalid`);
+    }
+    return {
+      fileName: expectBoundedString(
+        fileRecord.filename,
+        `Modrinth project version ${index} file ${fileIndex} name`,
+        512,
+      ),
+      primary: fileRecord.primary,
+    };
+  });
+  const primaryFile = parsedFiles.find(({ primary }) => primary) ?? parsedFiles[0]!;
+  return {
+    id: expectBoundedString(record.id, `Modrinth project version ${index} ID`, 64),
+    gameVersions: parseStringArray(
+      record.game_versions,
+      `Modrinth project version ${index} game versions`,
+      512,
+    ),
+    loaders: parseStringArray(record.loaders, `Modrinth project version ${index} loaders`, 64),
+    fileName: primaryFile.fileName,
+    downloads: expectNonNegativeInteger(
+      record.downloads,
+      `Modrinth project version ${index} downloads`,
+    ),
+    datePublished,
   };
 }
 

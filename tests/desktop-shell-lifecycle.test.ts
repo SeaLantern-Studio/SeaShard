@@ -12,6 +12,7 @@ import {
   serverConsoleLine,
   serverCoreTypes,
   serverModFilters,
+  serverModProjectDetails,
   serverModSearchRequest,
   serverModSearchResult,
   snapshot,
@@ -35,7 +36,17 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     sandbox: true,
     nodeIntegration: false,
   });
-  assert.deepEqual(first.windowOpenHandler?.(), { action: "deny" });
+  assert.deepEqual(first.windowOpenHandler?.({ url: "https://untrusted.invalid" }), {
+    action: "deny",
+  });
+  assert.deepEqual(runtime.openedExternalUrls, []);
+  assert.deepEqual(
+    first.windowOpenHandler?.({
+      url: "https://search.mcmod.cn/?s=No+Chat+Reports",
+    }),
+    { action: "deny" },
+  );
+  assert.deepEqual(runtime.openedExternalUrls, ["https://search.mcmod.cn/?s=No+Chat+Reports"]);
   let permissionAllowed: boolean | undefined;
   first.permissionRequestHandler?.(undefined, "notifications", (allowed) => {
     permissionAllowed = allowed;
@@ -87,6 +98,15 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     serverModSearchResult,
   );
   assert.deepEqual(harness.serverModSearchRequests, [serverModSearchRequest]);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverModProjectDetails, 1, "server-mod-1"),
+    serverModProjectDetails,
+  );
+  assert.deepEqual(harness.serverModDetailProjectIds, ["server-mod-1"]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModProjectDetails, 1, "../invalid"),
+    /project ID is invalid/,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverModSearch, 1, {
       ...serverModSearchRequest,
@@ -97,6 +117,10 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   await assert.rejects(runtime.invoke(desktopChannels.serverModFilters, 999), /request rejected/);
   await assert.rejects(
     runtime.invoke(desktopChannels.serverModSearch, 999, serverModSearchRequest),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModProjectDetails, 999, "server-mod-1"),
     /request rejected/,
   );
   assert.deepEqual(harness.readySnapshots, []);
@@ -154,6 +178,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverModFilters), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverModSearch), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverModProjectDetails), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverSettingsGet), false);
   assert.equal(
     runtime.handlers.has(desktopChannels.serverSettingsSetResourceDownloadDirectory),
