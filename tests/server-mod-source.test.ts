@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { serverModSearchLimits } from "../packages/contracts/src/index.ts";
-import { ModrinthServerModCatalog } from "../components/server/mod-source/src/index.ts";
+import {
+  serverModSearchLimits,
+  type ServerInstanceSnapshot,
+} from "../packages/contracts/src/index.ts";
+import type {
+  DownloadService,
+  DownloadTaskSnapshot,
+  StartDownloadRequest,
+} from "../components/network/download/src/index.ts";
+import type { ServerInstanceManagerService } from "../components/server/instance-manager/src/index.ts";
+import {
+  ModrinthServerModCatalog,
+  ServerModDownloadCoordinator,
+} from "../components/server/mod-source/src/index.ts";
+import { resolve } from "node:path";
 
 const apiBaseUrl = "https://api.modrinth.test/v2/";
 const userAgent = "SeaShard/0.0.0-test";
@@ -9,6 +22,71 @@ const userAgent = "SeaShard/0.0.0-test";
 function requestUrl(input: string | URL | Request): URL {
   if (input instanceof URL) return input;
   return new URL(typeof input === "string" ? input : input.url);
+}
+
+class FakeDownloadService implements DownloadService {
+  readonly requests: StartDownloadRequest[] = [];
+  private readonly tasks = new Map<string, DownloadTaskSnapshot>();
+
+  async start(request: StartDownloadRequest): Promise<DownloadTaskSnapshot> {
+    this.requests.push(request);
+    const id = `mod-task-${this.requests.length}`;
+    const task: DownloadTaskSnapshot = {
+      id,
+      url: request.url,
+      destinationPath: request.destinationPath,
+      state: "queued",
+      downloadedBytes: 0,
+      totalBytes: request.expectedBytes ?? 0,
+      connections: request.connections ?? 0,
+      progress: 0,
+      createdAt: "2026-08-20T00:00:00.000Z",
+      ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+    };
+    this.tasks.set(id, task);
+    return task;
+  }
+
+  async snapshot(taskId: string): Promise<DownloadTaskSnapshot | null> {
+    return this.tasks.get(taskId) ?? null;
+  }
+
+  async wait(taskId: string): Promise<DownloadTaskSnapshot | null> {
+    const task = this.tasks.get(taskId);
+    if (!task) return null;
+    const completed: DownloadTaskSnapshot = {
+      ...task,
+      state: "completed",
+      downloadedBytes: task.totalBytes,
+      progress: 100,
+      finishedAt: "2026-08-20T00:00:01.000Z",
+    };
+    this.tasks.set(taskId, completed);
+    return completed;
+  }
+
+  async listTasks(): Promise<readonly DownloadTaskSnapshot[]> {
+    return [...this.tasks.values()];
+  }
+
+  async cancel(): Promise<boolean> {
+    return false;
+  }
+}
+
+function instanceService(
+  instances: readonly ServerInstanceSnapshot[],
+): ServerInstanceManagerService {
+  return {
+    createManaged: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    list: async () => instances,
+    recordStartedAt: async () => {},
+    recordRuntime: async () => {},
+    delete: async () => {},
+    resolveIconPath: async () => null,
+  };
 }
 
 function projectFixture(
@@ -209,6 +287,179 @@ await test("Modrinth project details expose the full body and primary version fi
   requests.length = 0;
   await assert.rejects(catalog.getProjectDetails("../invalid"), /project ID is invalid/);
   assert.equal(requests.length, 0);
+});
+
+await test("Mod download coordinator installs only compatible versions and supports save-as", async () => {
+  const sha512 = "a".repeat(128);
+  const fileName = "server-tools-fabric-1.21.1.jar";
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      if (url.pathname.endsWith("/project/server-mod-1")) {
+        return Response.json({
+          id: "server-mod-1",
+          project_type: "mod",
+          server_side: "required",
+        });
+      }
+      if (url.pathname.endsWith("/version/version-fabric-1")) {
+        return Response.json({
+          id: "version-fabric-1",
+          project_id: "server-mod-1",
+          game_versions: ["1.21.1"],
+          loaders: ["fabric"],
+          files: [
+            {
+              filename: fileName,
+              primary: true,
+              size: 1_024,
+              hashes: { sha512, sha1: "b".repeat(40) },
+              url: `https://cdn.modrinth.com/data/server-mod-1/versions/version-fabric-1/${fileName}`,
+            },
+          ],
+        });
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+  const fabricRoot = resolve("test-fixtures/server-mod/fabric-instance");
+  const fabricInstance: ServerInstanceSnapshot = {
+    id: "fabric-instance",
+    name: "1.21.1-fabric",
+    rootPath: fabricRoot,
+    coreJarPath: resolve(fabricRoot, "server.jar"),
+    storageMode: "managed",
+    source: "downloaded",
+    modLoader: "fabric",
+    serverType: "fabric",
+    gameVersion: "1.21.1",
+    createdAt: "2026-08-20T00:00:00.000Z",
+    updatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  const forgeRoot = resolve("test-fixtures/server-mod/forge-instance");
+  const forgeInstance: ServerInstanceSnapshot = {
+    ...fabricInstance,
+    id: "forge-instance",
+    name: "1.21.1-forge",
+    rootPath: forgeRoot,
+    coreJarPath: resolve(forgeRoot, "server.jar"),
+    modLoader: "forge",
+    serverType: "mohist",
+  };
+  const downloads = new FakeDownloadService();
+  const coordinator = new ServerModDownloadCoordinator(
+    catalog,
+    downloads,
+    instanceService([fabricInstance, forgeInstance]),
+  );
+
+  assert.deepEqual(
+    await coordinator.installToInstance({
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      instanceId: "fabric-instance",
+      connections: 8,
+    }),
+    {
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      fileName,
+      destination: "instance",
+      instanceId: "fabric-instance",
+      downloadedBytes: 1_024,
+    },
+  );
+  assert.deepEqual(downloads.requests[0], {
+    url: `https://cdn.modrinth.com/data/server-mod-1/versions/version-fabric-1/${fileName}`,
+    destinationPath: resolve(fabricRoot, "mods", fileName),
+    expectedBytes: 1_024,
+    sha512,
+    connections: 8,
+    metadata: {
+      kind: "server-mod",
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      fileName,
+      instanceId: "fabric-instance",
+    },
+  });
+
+  await assert.rejects(
+    coordinator.installToInstance({
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      instanceId: "forge-instance",
+      connections: 8,
+    }),
+    /does not support|不支持 Forge/u,
+  );
+  assert.equal(downloads.requests.length, 1, "incompatible instances must not start a download");
+
+  const saveDirectory = resolve("test-fixtures/server-mod/exports");
+  assert.deepEqual(
+    await coordinator.saveToDirectory({
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      destinationDirectory: saveDirectory,
+      connections: 4,
+    }),
+    {
+      projectId: "server-mod-1",
+      versionId: "version-fabric-1",
+      fileName,
+      destination: "directory",
+      downloadedBytes: 1_024,
+    },
+  );
+  assert.equal(downloads.requests[1]?.destinationPath, resolve(saveDirectory, fileName));
+  assert.equal(downloads.requests[1]?.connections, 4);
+});
+
+await test("Modrinth artifact resolution rejects unsupported projects and untrusted file URLs", async () => {
+  let serverSide = "unsupported";
+  let fileUrl =
+    "https://cdn.modrinth.com/data/server-mod-1/versions/version-fabric-1/server-tools.jar";
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      return url.pathname.endsWith("/project/server-mod-1")
+        ? Response.json({
+            id: "server-mod-1",
+            project_type: "mod",
+            server_side: serverSide,
+          })
+        : Response.json({
+            id: "version-fabric-1",
+            project_id: "server-mod-1",
+            game_versions: ["1.21.1"],
+            loaders: ["fabric"],
+            files: [
+              {
+                filename: "server-tools.jar",
+                primary: true,
+                size: 16,
+                hashes: { sha512: "a".repeat(128), sha1: "b".repeat(40) },
+                url: fileUrl,
+              },
+            ],
+          });
+    },
+  });
+
+  await assert.rejects(
+    catalog.resolveVersionArtifact("server-mod-1", "version-fabric-1"),
+    /not compatible with dedicated servers/,
+  );
+  serverSide = "required";
+  fileUrl = "https://untrusted.invalid/server-tools.jar";
+  await assert.rejects(
+    catalog.resolveVersionArtifact("server-mod-1", "version-fabric-1"),
+    /outside the trusted CDN path/,
+  );
 });
 
 await test("Modrinth catalog treats a blank project icon URL as a missing optional icon", async () => {

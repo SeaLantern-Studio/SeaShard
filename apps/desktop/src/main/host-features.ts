@@ -122,29 +122,6 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       },
     ],
   });
-  // Modrinth 目录独立于服务器核心源；只发布受控的服务端 Mod 搜索与筛选能力。
-  await kernel.registerBuiltIn({
-    manifest: serverModSourceManifest,
-    loaders: {
-      "server-mod-source.host": {
-        load: async () =>
-          createServerModSourceModule({
-            fetchProvider: downloadFetchProvider,
-            userAgent: `SeaShard/${seaShardVersion}`,
-          }),
-      },
-    },
-    bindings: [
-      {
-        id: "core.server-mod-source",
-        entryId: "server-mod-source.host",
-        scopeType: "global",
-        scopeId: "global",
-        enabled: true,
-        config: null,
-      },
-    ],
-  });
   // 实例管理器只登记校验成功的托管下载，并在独立目录写入可移植描述文件。
   await kernel.registerBuiltIn({
     manifest: serverInstanceManagerManifest,
@@ -163,6 +140,29 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       {
         id: "core.server-instance-manager",
         entryId: "server-instance-manager.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Modrinth 目录独立于服务器核心源；只发布受控的服务端 Mod 搜索与筛选能力。
+  await kernel.registerBuiltIn({
+    manifest: serverModSourceManifest,
+    loaders: {
+      "server-mod-source.host": {
+        load: async () =>
+          createServerModSourceModule({
+            fetchProvider: downloadFetchProvider,
+            userAgent: `SeaShard/${seaShardVersion}`,
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-mod-source",
+        entryId: "server-mod-source.host",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

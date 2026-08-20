@@ -36,17 +36,32 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     sandbox: true,
     nodeIntegration: false,
   });
-  assert.deepEqual(first.windowOpenHandler?.({ url: "https://untrusted.invalid" }), {
+  assert.deepEqual(first.windowOpenHandler?.({ url: "http://untrusted.invalid" }), {
     action: "deny",
   });
-  assert.deepEqual(runtime.openedExternalUrls, []);
   assert.deepEqual(
     first.windowOpenHandler?.({
-      url: "https://search.mcmod.cn/?s=No+Chat+Reports",
+      url: "https://user:password@untrusted.invalid/private",
     }),
     { action: "deny" },
   );
-  assert.deepEqual(runtime.openedExternalUrls, ["https://search.mcmod.cn/?s=No+Chat+Reports"]);
+  assert.deepEqual(runtime.openedExternalUrls, []);
+  assert.deepEqual(
+    first.windowOpenHandler?.({
+      url: "https://github.com/malte0811/FerriteCore/blob/main/summary.md#memory",
+    }),
+    { action: "deny" },
+  );
+  assert.deepEqual(
+    first.windowOpenHandler?.({
+      url: "https://search.mcmod.cn/s?key=No%2BChat%2BReports&mold=0",
+    }),
+    { action: "deny" },
+  );
+  assert.deepEqual(runtime.openedExternalUrls, [
+    "https://github.com/malte0811/FerriteCore/blob/main/summary.md#memory",
+    "https://search.mcmod.cn/s?key=No%2BChat%2BReports&mold=0",
+  ]);
   let permissionAllowed: boolean | undefined;
   first.permissionRequestHandler?.(undefined, "notifications", (allowed) => {
     permissionAllowed = allowed;
@@ -103,6 +118,57 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     serverModProjectDetails,
   );
   assert.deepEqual(harness.serverModDetailProjectIds, ["server-mod-1"]);
+  const modInstallRequest = {
+    projectId: "server-mod-1",
+    versionId: "version-neoforge-1",
+    instanceId: "instance-paper",
+  } as const;
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverModInstallToInstance, 1, modInstallRequest),
+    {
+      projectId: "server-mod-1",
+      versionId: "version-neoforge-1",
+      fileName: "server-tools-neoforge-1.21.1.jar",
+      destination: "instance",
+      instanceId: "instance-paper",
+      downloadedBytes: 1_024,
+    },
+  );
+  assert.deepEqual(harness.installedServerMods, [
+    { ...modInstallRequest, connections: harness.serverSettings.defaultDownloadConnections },
+  ]);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverModDownloadSaveAs, 1, {
+      projectId: "server-mod-1",
+      versionId: "version-neoforge-1",
+    }),
+    {
+      projectId: "server-mod-1",
+      versionId: "version-neoforge-1",
+      fileName: "server-tools-neoforge-1.21.1.jar",
+      destination: "directory",
+      downloadedBytes: 1_024,
+    },
+  );
+  assert.deepEqual(harness.savedServerMods, [
+    {
+      projectId: "server-mod-1",
+      versionId: "version-neoforge-1",
+      destinationDirectory: "C:/SeaShard/resources",
+      connections: harness.serverSettings.defaultDownloadConnections,
+    },
+  ]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModInstallToInstance, 1, {
+      ...modInstallRequest,
+      versionId: "../invalid",
+    }),
+    /version ID is invalid/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModInstallToInstance, 999, modInstallRequest),
+    /request rejected/,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.serverModProjectDetails, 1, "../invalid"),
     /project ID is invalid/,
@@ -179,6 +245,8 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.serverModFilters), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverModSearch), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverModProjectDetails), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverModInstallToInstance), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverModDownloadSaveAs), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverSettingsGet), false);
   assert.equal(
     runtime.handlers.has(desktopChannels.serverSettingsSetResourceDownloadDirectory),

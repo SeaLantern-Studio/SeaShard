@@ -168,7 +168,7 @@ class FakeServerCoreSource implements ServerCoreSourceService {
 }
 
 const request = {
-  serverType: "arclight fabric",
+  serverType: "arclight-fabric",
   gameVersion: "1.21.1",
   artifactFileName: "arclight-fabric-1.21.1.jar",
   destinationFileName: "server.jar",
@@ -214,7 +214,7 @@ await test("managed downloads persist unique instances and split portable manife
     const instances = await manager.list();
     assert.deepEqual(
       new Set(instances.map(({ name }) => name)),
-      new Set(["1.21.1-arclight_fabric", "1.21.1-arclight_fabric(1)"]),
+      new Set(["1.21.1-arclight-fabric", "1.21.1-arclight-fabric(1)"]),
     );
     assert.equal(
       instances.every(({ storageMode }) => storageMode === "managed"),
@@ -222,6 +222,10 @@ await test("managed downloads persist unique instances and split portable manife
     );
     assert.equal(
       instances.every(({ source }) => source === "downloaded"),
+      true,
+    );
+    assert.equal(
+      instances.every(({ modLoader }) => modLoader === "fabric"),
       true,
     );
     const coreContents = new Set<string>();
@@ -247,6 +251,7 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(seaShardManifest.icon, "icon.png");
       assert.equal("gameVersion" in seaShardManifest, false);
       assert.equal(serverInformation.schemaVersion, 1);
+      assert.equal(serverInformation.modLoader, "fabric");
       assert.equal(serverInformation.core.path, "server.jar");
       assert.equal(serverInformation.core.type, request.serverType);
       assert.equal(serverInformation.core.artifact?.fileName, request.artifactFileName);
@@ -327,6 +332,7 @@ await test("split portable JSON remains authoritative after path registration", 
       coreJarPath,
       storageMode: "managed",
       source: "downloaded",
+      modLoader: null,
       serverType: "paper",
       gameVersion: "1.21.1",
       coreArtifactFileName: "paper-1.21.1-131.jar",
@@ -444,11 +450,12 @@ await test("existing managed instances inherit their server type icon on first r
     await writeFile(coreIconPath, iconBytes);
     const legacyInstance = {
       id: "legacy-instance",
-      name: "1.21.1-arclight_fabric",
+      name: "1.21.1-arclight-fabric",
       rootPath,
       coreJarPath,
       storageMode: "managed",
       source: "downloaded",
+      modLoader: "fabric",
       serverType: request.serverType,
       gameVersion: request.gameVersion,
       artifactSha256: artifactHash,
@@ -456,6 +463,15 @@ await test("existing managed instances inherit their server type icon on first r
       updatedAt: "2026-08-16T00:00:00.000Z",
     } as const;
     const manifestPath = await writePortableInstanceManifests(legacyInstance);
+    const serverInformationPath = join(dirname(manifestPath), portableServerInformationFileName);
+    const { modLoader: _legacyModLoader, ...legacyServerInformation } = JSON.parse(
+      await readFile(serverInformationPath, "utf8"),
+    ) as PortableServerInformationManifest;
+    await writeFile(
+      serverInformationPath,
+      `${JSON.stringify(legacyServerInformation, null, 2)}\n`,
+      "utf8",
+    );
     await registry.insertManifestPath(manifestPath);
     const manager = new ServerInstanceManager({
       managedRoot: join(dataRoot, "servers"),
@@ -467,11 +483,16 @@ await test("existing managed instances inherit their server type icon on first r
     const [instance] = await manager.list();
     const metadataDirectory = join(rootPath, portableInstanceMetadataDirectoryName);
     assert.equal(instance?.iconPath, join(metadataDirectory, "icon.png"));
+    assert.equal(instance?.modLoader, "fabric");
     assert.deepEqual(await readFile(instance!.iconPath!), iconBytes);
     const manifest = JSON.parse(
       await readFile(join(metadataDirectory, portableSeaShardInstanceFileName), "utf8"),
     ) as PortableSeaShardInstanceManifest;
     assert.equal(manifest.icon, "icon.png");
+    const backfilledServerInformation = JSON.parse(
+      await readFile(serverInformationPath, "utf8"),
+    ) as PortableServerInformationManifest;
+    assert.equal(backfilledServerInformation.modLoader, "fabric");
     await manager.dispose();
   } finally {
     await broker.close();

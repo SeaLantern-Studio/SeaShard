@@ -33,6 +33,7 @@ import {
   expectServerCoreStrings,
   expectServerCoreTypes,
   expectServerModFilters,
+  expectServerModDownloadResult,
   expectServerModProjectDetails,
   expectServerModSearchResult,
   expectServerInstances,
@@ -121,6 +122,18 @@ export async function registerDesktopShellBridge(
             readServerModProjectDetails: async (projectId) =>
               expectServerModProjectDetails(
                 await kernel.callService(serverModSourceContract, "getProjectDetails", [projectId]),
+              ),
+            installServerMod: async (request) =>
+              expectServerModDownloadResult(
+                await kernel.callService(serverModSourceContract, "installToInstance", [
+                  request as unknown as JsonValue,
+                ]),
+              ),
+            saveServerMod: async (request) =>
+              expectServerModDownloadResult(
+                await kernel.callService(serverModSourceContract, "saveToDirectory", [
+                  request as unknown as JsonValue,
+                ]),
               ),
             resolveServerCoreIconPath: async (sha256) => {
               const path = await kernel.callService(serverCoreSourceContract, "resolveIconPath", [

@@ -7,6 +7,8 @@ import {
   type ServerCoreSaveAsRequest,
   type ServerConfigurationWriteRequest,
   type ServerModSearchRequest,
+  type ServerModInstallRequest,
+  type ServerModSaveAsRequest,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -28,6 +30,10 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverModSearch, request),
     getProjectDetails: (projectId: string) =>
       ipcRenderer.invoke(desktopChannels.serverModProjectDetails, projectId),
+    installToInstance: (request: ServerModInstallRequest) =>
+      ipcRenderer.invoke(desktopChannels.serverModInstallToInstance, request),
+    saveAs: (request: ServerModSaveAsRequest) =>
+      ipcRenderer.invoke(desktopChannels.serverModDownloadSaveAs, request),
   }),
   serverSettings: Object.freeze({
     get: () => ipcRenderer.invoke(desktopChannels.serverSettingsGet),

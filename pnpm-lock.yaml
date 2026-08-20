@@ -292,9 +292,15 @@ importers:
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../../packages/contracts
+      '@seashard/download':
+        specifier: workspace:*
+        version: link:../../network/download
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../instance-manager
 
   components/server/runtime:
     dependencies:

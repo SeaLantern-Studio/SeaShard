@@ -26,7 +26,7 @@ const components = [
     manifest: serverDownloadModUiManifest,
     pluginId: "seashard.server-download-mod-ui",
     entryId: "server-download-mod.client",
-    permissions: [serverModSourceContract],
+    permissions: [serverModSourceContract, serverInstanceManagerContract],
   },
   {
     manifest: serverOverviewUiManifest,

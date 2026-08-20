@@ -56,6 +56,7 @@ export const vanillaInstance = {
   coreJarPath: "C:/SeaShard/servers/instance-vanilla/server.jar",
   storageMode: "managed",
   source: "downloaded",
+  modLoader: null,
   serverType: "vanilla",
   gameVersion: "1.21.1",
   coreArtifactFileName: "server.jar",

@@ -8,6 +8,7 @@ import {
   type RuntimeSnapshot,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerModDownloadResult,
   type ServerModFilters,
   type ServerModProjectDetails,
   type ServerModSearchRequest,
@@ -29,6 +30,8 @@ import {
   type FileSelectionOptions,
   type DirectorySelectionOptions,
   type StartDesktopServerCoreDownloadRequest,
+  type StartDesktopServerModInstallRequest,
+  type StartDesktopServerModSaveRequest,
   type StartDesktopManagedServerCoreDownloadRequest,
 } from "../components/desktop/shell/src/index.ts";
 import type {
@@ -395,6 +398,7 @@ export const serverInstances = [
     iconPath: paperInstanceIconPath,
     storageMode: "managed",
     source: "downloaded",
+    modLoader: null,
     serverType: "paper",
     gameVersion: "1.21.1",
     coreArtifactFileName: paperArtifact.fileName,
@@ -502,6 +506,8 @@ export async function createDesktopShellHarness(
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
   const serverModSearchRequests: ServerModSearchRequest[] = [];
   const serverModDetailProjectIds: string[] = [];
+  const installedServerMods: StartDesktopServerModInstallRequest[] = [];
+  const savedServerMods: StartDesktopServerModSaveRequest[] = [];
   let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
   const serverCommands: string[] = [];
   let serverConsoleListener: ((line: ServerConsoleLine) => void) | undefined;
@@ -539,6 +545,27 @@ export async function createDesktopShellHarness(
       readServerModProjectDetails: async (projectId) => {
         serverModDetailProjectIds.push(projectId);
         return serverModProjectDetails;
+      },
+      installServerMod: async (request) => {
+        installedServerMods.push(request);
+        return {
+          projectId: request.projectId,
+          versionId: request.versionId,
+          fileName: "server-tools-neoforge-1.21.1.jar",
+          destination: "instance",
+          instanceId: request.instanceId,
+          downloadedBytes: 1_024,
+        } satisfies ServerModDownloadResult;
+      },
+      saveServerMod: async (request) => {
+        savedServerMods.push(request);
+        return {
+          projectId: request.projectId,
+          versionId: request.versionId,
+          fileName: "server-tools-neoforge-1.21.1.jar",
+          destination: "directory",
+          downloadedBytes: 1_024,
+        } satisfies ServerModDownloadResult;
       },
       resolveServerCoreIconPath: async (sha256) =>
         sha256 === paperIconHash ? paperIconPath : undefined,
@@ -684,6 +711,8 @@ export async function createDesktopShellHarness(
     deletedServerInstances,
     serverModSearchRequests,
     serverModDetailProjectIds,
+    installedServerMods,
+    savedServerMods,
     serverCommands,
     configurationWrites,
     inspectedJavaPaths,

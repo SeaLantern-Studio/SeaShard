@@ -17,6 +17,8 @@ export const desktopChannels = {
   serverModFilters: "seashard.server-mod.filters",
   serverModSearch: "seashard.server-mod.search",
   serverModProjectDetails: "seashard.server-mod.project-details",
+  serverModInstallToInstance: "seashard.server-mod.install-to-instance",
+  serverModDownloadSaveAs: "seashard.server-mod-download.save-as",
   serverSettingsGet: "seashard.server-settings.get",
   serverSettingsSetResourceDownloadDirectory:
     "seashard.server-settings.set-resource-download-directory",
@@ -49,7 +51,7 @@ export const desktopChannels = {
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
-/** 服务端 Mod 来源面向 Client 的只读搜索 Contract。 */
+/** 服务端 Mod 来源面向 Client 的搜索、下载与实例安装 Contract。 */
 export const serverModSourceContract = "seashard.server-mod-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
@@ -196,6 +198,27 @@ export interface ServerCoreSourceClientService {
 }
 
 export type ServerModSource = "modrinth";
+export const serverModLoaders = ["fabric", "forge", "neoforge", "quilt"] as const;
+export type ServerModLoader = (typeof serverModLoaders)[number];
+
+const serverCoreModLoaders: Readonly<Record<string, ServerModLoader>> = {
+  "arclight-fabric": "fabric",
+  "arclight-forge": "forge",
+  "arclight-neoforge": "neoforge",
+  banner: "fabric",
+  catserver: "forge",
+  fabric: "fabric",
+  mohist: "forge",
+  neoforge: "neoforge",
+  quilt: "quilt",
+  spongeforge: "forge",
+  youer: "neoforge",
+};
+
+/** 由核心类型确定实例实际支持的 Mod 加载器；纯插件端和原版核心返回 null。 */
+export function serverModLoaderForCoreType(value: unknown): ServerModLoader | null {
+  return typeof value === "string" ? (serverCoreModLoaders[value] ?? null) : null;
+}
 export type ServerModSearchIndex = "relevance" | "downloads" | "follows" | "newest" | "updated";
 export type ServerModEnvironment =
   | "client_and_server"
@@ -276,11 +299,35 @@ export interface ServerModProjectDetails {
   body: string;
   versions: readonly ServerModVersion[];
 }
+/** Renderer 只提交 Modrinth 身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
+export interface ServerModInstallRequest {
+  projectId: string;
+  versionId: string;
+  instanceId: string;
+}
+
+/** “另存为”同样只提交 Modrinth 身份，目标目录由 Desktop 系统对话框选择。 */
+export interface ServerModSaveAsRequest {
+  projectId: string;
+  versionId: string;
+}
+
+/** Mod 文件完成校验并发布后的稳定结果。 */
+export interface ServerModDownloadResult {
+  projectId: string;
+  versionId: string;
+  fileName: string;
+  destination: "instance" | "directory";
+  instanceId?: string;
+  downloadedBytes: number;
+}
 
 export interface ServerModSourceClientService {
   getFilters(): Promise<ServerModFilters>;
   search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
   getProjectDetails(projectId: string): Promise<ServerModProjectDetails>;
+  installToInstance(request: ServerModInstallRequest): Promise<ServerModDownloadResult>;
+  saveAs(request: ServerModSaveAsRequest): Promise<ServerModDownloadResult | undefined>;
 }
 /** 默认下载并发数的稳定边界；服务端设置和公共下载器必须保持一致。 */
 export const serverDownloadConnectionLimits = {
@@ -364,6 +411,8 @@ export interface ServerInstanceSnapshot {
   iconPath?: string;
   storageMode: ServerInstanceStorageMode;
   source: ServerInstanceSource;
+  /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */
+  modLoader: ServerModLoader | null;
   serverType?: string;
   gameVersion?: string;
   coreArtifactFileName?: string;

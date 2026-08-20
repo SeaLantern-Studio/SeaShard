@@ -202,6 +202,7 @@ export class DownloadManager {
       // wx 独占创建临时文件；只有成功取得句柄后，异常路径才有权删除它。
       temporaryFile = await open(task.temporaryPath, "wx");
       ownsTemporaryFile = true;
+      const checksum = requestChecksum(task.request);
       let digest: string | undefined;
       if (task.connections > 1 && knownTotalBytes !== undefined) {
         await temporaryFile.truncate(knownTotalBytes);
@@ -213,6 +214,7 @@ export class DownloadManager {
           headers,
           temporaryFile,
           knownTotalBytes,
+          checksum?.algorithm,
         );
       }
       await temporaryFile.close();
@@ -227,18 +229,18 @@ export class DownloadManager {
       if (task.request.expectedBytes === 0 && task.downloadedBytes !== 0) {
         throw new Error(`download length mismatch: expected 0, received ${task.downloadedBytes}`);
       }
-      if (task.request.sha256) {
-        // 并发分段会乱序到达，不能直接合并 SHA-256 状态，因此完成后顺序读取临时文件。
-        digest ??= await hashFile(task.temporaryPath);
-        if (digest !== task.request.sha256) {
+      if (checksum) {
+        // 并发分段会乱序到达，不能直接合并摘要状态，因此完成后顺序读取临时文件。
+        digest ??= await hashFile(task.temporaryPath, checksum.algorithm);
+        if (digest !== checksum.expected) {
           throw new Error(
-            `download checksum mismatch: expected ${task.request.sha256}, received ${digest}`,
+            `download checksum mismatch: expected ${checksum.expected}, received ${digest}`,
           );
         }
       }
       task.controller.signal.throwIfAborted();
 
-      // 最终路径只会在长度和可选 SHA-256 全部通过后出现。
+      // 最终路径只会在长度和可选摘要全部通过后出现。
       await publishVerifiedFile(task.temporaryPath, task.request.destinationPath);
       ownsTemporaryFile = false;
       task.state = "completed";
@@ -297,13 +299,14 @@ async function probeRemote(
   }
 }
 
-/** 单连接流式下载；同时统计进度和可选 SHA-256，不会把完整文件读入内存。 */
+/** 单连接流式下载；同时统计进度和可选摘要，不会把完整文件读入内存。 */
 async function downloadSingle(
   fetchImplementation: typeof globalThis.fetch,
   task: InternalTask,
   headers: Headers,
   temporaryFile: FileHandle,
   probedBytes: number | undefined,
+  hashAlgorithm: "sha256" | "sha512" | undefined,
 ): Promise<string | undefined> {
   task.connections = 1;
   const response = await fetchImplementation(task.request.url, {
@@ -319,7 +322,7 @@ async function downloadSingle(
     : parseContentLength(response.headers.get("content-length"));
   const expectedBytes = reconcileExpectedBytes(probedBytes, responseBytes);
   task.totalBytes = expectedBytes ?? 0;
-  const hash = task.request.sha256 ? createHash("sha256") : undefined;
+  const hash = hashAlgorithm ? createHash(hashAlgorithm) : undefined;
   const meter = new Transform({
     transform: (chunk: Buffer, _encoding, callback) => {
       hash?.update(chunk);
@@ -501,7 +504,11 @@ function parseStartRequest(
   }
   const destinationPath = normalize(rawDestinationPath);
   const expectedBytes = parseExpectedBytes(record.expectedBytes);
-  const sha256 = parseSha256(record.sha256);
+  const sha256 = parseDigest(record.sha256, "sha256", 64);
+  const sha512 = parseDigest(record.sha512, "sha512", 128);
+  if (sha256 && sha512) {
+    throw new TypeError("download request must provide only one checksum");
+  }
   const connections = parseConnections(record.connections, defaultConnections, maxConnections);
   const headers = normalizeHeaders(record.headers ?? {});
   assertUncontrolledHeaders(headers);
@@ -517,6 +524,7 @@ function parseStartRequest(
     headers,
     ...(expectedBytes === undefined ? {} : { expectedBytes }),
     ...(sha256 ? { sha256 } : {}),
+    ...(sha512 ? { sha512 } : {}),
     ...(metadata === undefined ? {} : { metadata }),
   };
 }
@@ -529,10 +537,20 @@ function parseExpectedBytes(value: unknown): number | undefined {
   return value as number;
 }
 
-function parseSha256(value: unknown): string | undefined {
+function parseDigest(
+  value: unknown,
+  field: "sha256" | "sha512",
+  hexadecimalLength: number,
+): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
-    throw new TypeError("download sha256 must be a 64-character hexadecimal digest");
+  if (
+    typeof value !== "string" ||
+    value.length !== hexadecimalLength ||
+    !/^[a-f0-9]+$/iu.test(value)
+  ) {
+    throw new TypeError(
+      `download ${field} must be a ${hexadecimalLength}-character hexadecimal digest`,
+    );
   }
   return value.toLowerCase();
 }
@@ -646,10 +664,18 @@ async function publishVerifiedFile(temporaryPath: string, destinationPath: strin
   await rm(temporaryPath, { force: true }).catch(() => {});
 }
 
-async function hashFile(path: string): Promise<string> {
-  const hash = createHash("sha256");
+async function hashFile(path: string, algorithm: "sha256" | "sha512"): Promise<string> {
+  const hash = createHash(algorithm);
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest("hex");
+}
+
+function requestChecksum(
+  request: Pick<StartDownloadRequest, "sha256" | "sha512">,
+): { algorithm: "sha256" | "sha512"; expected: string } | undefined {
+  if (request.sha512) return { algorithm: "sha512", expected: request.sha512 };
+  if (request.sha256) return { algorithm: "sha256", expected: request.sha256 };
+  return undefined;
 }
 
 function snapshotOf(task: InternalTask): DownloadTaskSnapshot {

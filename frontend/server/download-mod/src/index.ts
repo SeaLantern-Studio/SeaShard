@@ -1,4 +1,4 @@
-import { serverModSourceContract } from "@seashard/contracts";
+import { serverInstanceManagerContract, serverModSourceContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const serverDownloadModUiManifest: PluginManifest = {
@@ -12,7 +12,7 @@ export const serverDownloadModUiManifest: PluginManifest = {
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [serverModSourceContract],
+      permissions: [serverModSourceContract, serverInstanceManagerContract],
       upgradeMode: "stop-first",
     },
   ],

@@ -427,7 +427,9 @@
 
 .mod-detail-back:focus-visible,
 .mod-detail-action:focus-visible,
-.mod-version-group-trigger:focus-visible {
+.mod-version-group-trigger:focus-visible,
+.mod-version-item:focus-visible,
+.mod-install-instance:focus-visible {
   outline: 2px solid var(--sl-primary);
   outline-offset: 2px;
 }
@@ -520,22 +522,38 @@
 }
 
 .mod-detail-description {
-  display: -webkit-box;
+  max-height: 6.88em;
   overflow: hidden;
   margin: 0;
   color: var(--sl-text-secondary);
   font-size: 0.86rem;
   line-height: 1.72;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+}
+
+.mod-detail-description :deep(.cmz-md) {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.mod-detail-description :deep(.cmz-md > :first-child) {
+  margin-top: 0;
+}
+
+.mod-detail-description :deep(.cmz-md > :last-child) {
+  margin-bottom: 0;
+}
+
+.mod-detail-description :deep(a) {
+  color: var(--sl-primary);
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
 }
 
 .mod-detail-description-block.expanded .mod-detail-description {
-  display: block;
+  max-height: none;
   overflow: visible;
-  -webkit-line-clamp: unset;
 }
 
 .mod-detail-description-toggle {
@@ -703,17 +721,28 @@
 
 .mod-version-item {
   display: grid;
+  width: 100%;
   min-width: 0;
-  grid-template-columns: 30px minmax(0, 1fr) minmax(76px, auto) minmax(92px, auto);
+  grid-template-columns: 30px minmax(0, 1fr) minmax(76px, auto) 92px;
   align-items: center;
   gap: 14px;
   padding: 10px 13px;
+  border: 0;
+  background: transparent;
   color: var(--sl-text-tertiary);
+  font: inherit;
   font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--sl-transition-fast);
 }
 
 .mod-version-item + .mod-version-item {
   border-top: 1px solid color-mix(in srgb, var(--sl-border-light) 68%, transparent);
+}
+
+.mod-version-item:hover {
+  background: var(--sl-bg-secondary);
 }
 
 .mod-version-icon {
@@ -741,7 +770,234 @@
 }
 
 .mod-version-meta:last-child {
-  justify-self: end;
+  width: 100%;
+  justify-self: stretch;
+}
+
+.mod-install-modal {
+  display: flex;
+  max-height: 390px;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mod-install-file {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sl-border-light);
+}
+
+.mod-install-file > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mod-install-file > div > span {
+  color: var(--sl-text-tertiary);
+  font-size: 0.72rem;
+}
+
+.mod-install-file > div > strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-install-modal > h3 {
+  margin: 12px 0 8px;
+  color: var(--sl-text-primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.mod-install-instance-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 10px;
+  scrollbar-gutter: stable;
+}
+
+.mod-install-instance {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--sl-transition-fast);
+}
+
+.mod-install-instance + .mod-install-instance {
+  border-top: 1px solid color-mix(in srgb, var(--sl-border-light) 70%, transparent);
+}
+
+.mod-install-instance:hover:not(:disabled) {
+  background: var(--sl-bg-secondary);
+}
+
+.mod-install-instance:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.mod-install-instance-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 9px;
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.mod-install-instance-icon > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mod-install-instance-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mod-install-instance-copy > strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: 0.82rem;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-install-instance-copy > span {
+  color: var(--sl-text-tertiary);
+  font-size: 0.72rem;
+}
+
+.mod-install-state {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.mod-install-state.error {
+  color: var(--sl-error);
+}
+
+.mod-install-state button {
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mod-install-separator {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 10px 0;
+  color: var(--sl-text-tertiary);
+  font-size: 0.72rem;
+}
+
+.mod-install-separator::before,
+.mod-install-separator::after {
+  height: 1px;
+  flex: 1 1 auto;
+  background: var(--sl-border-light);
+  content: "";
+}
+
+.mod-install-save-as {
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.mod-install-file + .mod-install-save-as {
+  margin-top: 12px;
+}
+
+.mod-install-result {
+  overflow: hidden;
+  margin: 8px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-install-result.success {
+  color: var(--sl-success);
+}
+
+.mod-install-result.error {
+  color: var(--sl-error);
+}
+
+/* 安装弹窗只遮罩当前内容区域，不覆盖应用导航、标题栏和右侧栏。 */
+:global(body:has(.server-mod-download-page) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.server-mod-download-page):has(.right-sidebar.open) .cmz-modal-overlay) {
+  right: calc(var(--sl-sidebar-width) + 20px);
+}
+
+/* 少量实例时随内容收缩，内容超过上限后固定为最大高度并只滚动实例列表。 */
+:global(body:has(.server-mod-download-page) .cmz-modal) {
+  width: min(520px, calc(100% - 32px));
+  height: auto;
+  max-height: 500px;
+  overflow: hidden;
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.server-mod-download-page) .cmz-modal-body) {
+  overflow: hidden;
 }
 
 .mod-load-sentinel {
@@ -855,7 +1111,7 @@
   }
 
   .mod-version-item {
-    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-columns: 30px minmax(0, 1fr) 92px;
     gap: 6px 12px;
   }
 
@@ -870,7 +1126,7 @@
 
   .mod-version-meta:last-child {
     grid-column: 3;
-    justify-self: end;
+    justify-self: stretch;
   }
 }
 
@@ -884,7 +1140,9 @@
   .mod-detail-description-toggle,
   .mod-detail-description-toggle > svg,
   .mod-version-group-trigger,
-  .mod-version-group-trigger > svg {
+  .mod-version-group-trigger > svg,
+  .mod-version-item,
+  .mod-install-instance {
     transition: none;
     animation: none;
   }

@@ -2,6 +2,7 @@ import {
   serverDownloadConnectionLimits,
   serverCoreIconHost,
   serverCoreIconScheme,
+  serverModLoaderForCoreType,
   type ServerCoreManagedDownloadResult,
   type ServerInstanceSnapshot,
 } from "@seashard/contracts";
@@ -327,6 +328,7 @@ export class ServerInstanceManager {
         ...(iconPath ? { iconPath } : {}),
         storageMode: "managed",
         source: "downloaded",
+        modLoader: serverModLoaderForCoreType(task.artifact.serverType),
         serverType: task.artifact.serverType,
         gameVersion: task.artifact.gameVersion,
         coreArtifactFileName: task.artifact.fileName,

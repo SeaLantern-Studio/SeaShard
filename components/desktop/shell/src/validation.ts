@@ -2,6 +2,8 @@ import {
   serverModSearchLimits,
   type ServerConfigurationWriteRequest,
   type ServerCoreSaveAsRequest,
+  type ServerModInstallRequest,
+  type ServerModSaveAsRequest,
   type ServerModSearchIndex,
   type ServerModSearchRequest,
   type ServerStartupDefaultsUpdate,
@@ -116,12 +118,43 @@ export function expectServerModProjectId(value: unknown): string {
   return projectId;
 }
 
+export function expectServerModSaveAsRequest(value: unknown): ServerModSaveAsRequest {
+  const record = expectRecord(value, "server mod save-as request");
+  return {
+    projectId: expectServerModProjectId(record.projectId),
+    versionId: expectServerModIdentity(record.versionId, "server mod version ID"),
+  };
+}
+
+export function expectServerModInstallRequest(value: unknown): ServerModInstallRequest {
+  const record = expectRecord(value, "server mod install request");
+  return {
+    ...expectServerModSaveAsRequest(record),
+    instanceId: expectServerModIdentity(record.instanceId, "server instance ID", 128),
+  };
+}
+
 function expectServerModFilter(value: unknown, label: string): string {
   const filter = expectString(value, label).trim();
   if (filter && !serverModFilterPattern.test(filter)) {
     throw new TypeError(`${label} is invalid`);
   }
   return filter;
+}
+
+function expectRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function expectServerModIdentity(value: unknown, label: string, maximumLength = 64): string {
+  const identity = expectString(value, label).trim();
+  if (identity.length > maximumLength || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(identity)) {
+    throw new TypeError(`${label} is invalid`);
+  }
+  return identity;
 }
 
 export function expectServerConfigurationWriteRequest(

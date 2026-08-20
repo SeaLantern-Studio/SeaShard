@@ -8,6 +8,9 @@ import type {
   ServerCoreManagedDownloadRequest,
   ServerCoreSaveAsRequest,
   ServerCoreSourceClientService,
+  ServerModDownloadResult,
+  ServerModInstallRequest,
+  ServerModSaveAsRequest,
   ServerModSearchRequest,
   ServerModSourceClientService,
   ServerInstanceClientService,
@@ -42,6 +45,15 @@ export interface StartDesktopServerCoreDownloadRequest extends ServerCoreSaveAsR
 }
 
 export interface StartDesktopManagedServerCoreDownloadRequest extends ServerCoreManagedDownloadRequest {
+  readonly connections: number;
+}
+
+export interface StartDesktopServerModInstallRequest extends ServerModInstallRequest {
+  readonly connections: number;
+}
+
+export interface StartDesktopServerModSaveRequest extends ServerModSaveAsRequest {
+  readonly destinationDirectory: string;
   readonly connections: number;
 }
 
@@ -97,6 +109,8 @@ export interface DesktopShellConfig {
   readServerModProjectDetails(
     projectId: string,
   ): ReturnType<ServerModSourceClientService["getProjectDetails"]>;
+  installServerMod(request: StartDesktopServerModInstallRequest): Promise<ServerModDownloadResult>;
+  saveServerMod(request: StartDesktopServerModSaveRequest): Promise<ServerModDownloadResult>;
   resolveServerCoreIconPath(sha256: string): Promise<string | undefined>;
   resolveServerInstanceIconPath(instanceId: string): Promise<string | undefined>;
   readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;

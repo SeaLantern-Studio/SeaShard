@@ -2,6 +2,7 @@ import type {
   ServerCoreManagedDownloadResult,
   ServerCoreManagedDownloadRequest,
   ServerInstanceSnapshot,
+  ServerModLoader,
 } from "@seashard/contracts";
 
 export {
@@ -40,6 +41,7 @@ export interface PortableServerInformationManifest {
   minecraft: {
     version?: string;
   };
+  modLoader: ServerModLoader | null;
   core: {
     path: string;
     type?: string;

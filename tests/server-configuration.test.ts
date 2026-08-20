@@ -128,6 +128,7 @@ const instance = {
   coreJarPath: resolve(rootPath, "server.jar"),
   storageMode: "managed",
   source: "downloaded",
+  modLoader: null,
   serverType: "paper",
   gameVersion: "1.21.1",
   createdAt: "2026-08-17T12:00:00.000Z",
@@ -252,6 +253,7 @@ await test("Quilt configuration resolves files and backups from its generated se
     rootPath: quiltRootPath,
     coreJarPath: resolve(quiltRootPath, "quilt-installer.jar"),
     serverType: "quilt",
+    modLoader: "quilt",
   } satisfies ServerInstanceSnapshot;
   const fileSystem = new MemoryConfigurationFileSystem(quiltRootPath);
   fileSystem.addTextFile(resolve(configurationRootPath, "server.properties"), "motd=Quilt\n");

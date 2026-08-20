@@ -1,4 +1,5 @@
 import type {
+  ServerInstanceSnapshot,
   ServerModFilterOption,
   ServerModProject,
   ServerModVersion,
@@ -51,6 +52,14 @@ export function serverModDisplayName(
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
   return original ? { primary: project.title, original } : { primary: project.title };
+}
+
+/** 按 MC 百科搜索页约定把词组连接为加号，再由 URL 查询参数编码加号。 */
+export function serverModMcEncyclopediaSearchUrl(projectTitle: string): string {
+  const url = new URL("https://search.mcmod.cn/s");
+  url.searchParams.set("key", projectTitle.trim().replace(/\s+/gu, "+"));
+  url.searchParams.set("mold", "0");
+  return url.href;
 }
 
 /** 按 Modrinth 元数据拆分加载器、类别与内容标签，前置库归入类别。 */
@@ -138,6 +147,20 @@ export function groupServerModVersions(
         versionCollator.compare(right.gameVersion, left.gameVersion) ||
         left.loader.localeCompare(right.loader, "en"),
     );
+}
+
+/** 只有加载器与精确 Minecraft 版本都匹配的已登记实例才可成为安装目标。 */
+export function compatibleServerModInstances(
+  version: ServerModVersion,
+  instances: readonly ServerInstanceSnapshot[],
+): ServerInstanceSnapshot[] {
+  return instances.filter(
+    (instance) =>
+      instance.modLoader !== null &&
+      version.loaders.includes(instance.modLoader) &&
+      !!instance.gameVersion &&
+      version.gameVersions.includes(instance.gameVersion),
+  );
 }
 
 /**

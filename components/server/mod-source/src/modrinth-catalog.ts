@@ -93,6 +93,18 @@ export interface ModrinthServerModCatalogOptions {
   readonly baseUrl?: string;
 }
 
+/** Host 内部下载投影；URL、大小和 SHA-512 不跨 Renderer 边界。 */
+export interface ModrinthServerModArtifact {
+  readonly projectId: string;
+  readonly versionId: string;
+  readonly fileName: string;
+  readonly url: string;
+  readonly sha512: string;
+  readonly size: number;
+  readonly gameVersions: readonly string[];
+  readonly loaders: readonly string[];
+}
+
 /**
  * Modrinth 服务端 Mod 目录。
  *
@@ -160,6 +172,20 @@ export class ModrinthServerModCatalog {
       this.fetchJson(versionsUrl),
     ]);
     return parseProjectDetails(project, versions, projectId);
+  }
+
+  /** 按稳定版本 ID 重新读取下载元数据，避免信任 Renderer 缓存的 URL 或哈希。 */
+  async resolveVersionArtifact(
+    projectValue: unknown,
+    versionValue: unknown,
+  ): Promise<ModrinthServerModArtifact> {
+    const projectId = expectProjectId(projectValue);
+    const versionId = expectVersionId(versionValue);
+    const [project, version] = await Promise.all([
+      this.fetchJson(this.endpoint(`project/${encodeURIComponent(projectId)}`)),
+      this.fetchJson(this.endpoint(`version/${encodeURIComponent(versionId)}`)),
+    ]);
+    return parseVersionArtifact(project, version, projectId, versionId);
   }
 
   private async loadFilters(): Promise<ServerModFilters> {
@@ -250,6 +276,14 @@ function expectProjectId(value: unknown): string {
     throw new TypeError("Modrinth project ID is invalid");
   }
   return projectId;
+}
+
+function expectVersionId(value: unknown): string {
+  const versionId = expectString(value, "Modrinth version ID").trim();
+  if (!projectIdPattern.test(versionId)) {
+    throw new TypeError("Modrinth version ID is invalid");
+  }
+  return versionId;
 }
 
 function parseTags(value: unknown): ServerModFilterOption[] {
@@ -426,6 +460,99 @@ function parseProjectVersion(value: unknown, index: number, projectId: string): 
     ),
     datePublished,
   };
+}
+
+function parseVersionArtifact(
+  projectValue: unknown,
+  versionValue: unknown,
+  projectId: string,
+  versionId: string,
+): ModrinthServerModArtifact {
+  const project = expectRecord(projectValue, "Modrinth download project");
+  if (
+    project.id !== projectId ||
+    project.project_type !== "mod" ||
+    !["required", "optional", "unknown"].includes(String(project.server_side))
+  ) {
+    throw new Error("Modrinth project is not compatible with dedicated servers");
+  }
+
+  const version = expectRecord(versionValue, "Modrinth download version");
+  if (version.id !== versionId || version.project_id !== projectId) {
+    throw new Error("Modrinth version does not belong to the requested project");
+  }
+  const files = expectArray(version.files, "Modrinth download version files");
+  if (files.length === 0 || files.length > 64) {
+    throw new Error("Modrinth download version has invalid files");
+  }
+  const fileRecords = files.map((value, index) => {
+    const file = expectRecord(value, `Modrinth download file ${index}`);
+    if (typeof file.primary !== "boolean") {
+      throw new Error(`Modrinth download file ${index} is invalid`);
+    }
+    return file;
+  });
+  const file = fileRecords.find(({ primary }) => primary) ?? fileRecords[0]!;
+  const fileName = expectModJarFileName(file.filename);
+  const hashes = expectRecord(file.hashes, "Modrinth download file hashes");
+  const sha512 = expectBoundedString(hashes.sha512, "Modrinth download SHA-512", 128).toLowerCase();
+  if (!/^[a-f0-9]{128}$/u.test(sha512)) {
+    throw new Error("Modrinth download SHA-512 is invalid");
+  }
+  return {
+    projectId,
+    versionId,
+    fileName,
+    url: expectModFileUrl(file.url, projectId, fileName),
+    sha512,
+    size: expectNonNegativeInteger(file.size, "Modrinth download file size"),
+    gameVersions: parseStringArray(version.game_versions, "Modrinth download game versions", 512),
+    loaders: parseStringArray(version.loaders, "Modrinth download loaders", 64),
+  };
+}
+
+function expectModJarFileName(value: unknown): string {
+  const fileName = expectBoundedString(value, "Modrinth download file name", 512);
+  if (
+    !fileName.toLowerCase().endsWith(".jar") ||
+    fileName === "." ||
+    fileName === ".." ||
+    fileName.includes("/") ||
+    fileName.includes("\\")
+  ) {
+    throw new Error("Modrinth download file name is invalid");
+  }
+  return fileName;
+}
+
+function expectModFileUrl(value: unknown, projectId: string, fileName: string): string {
+  const source = expectBoundedString(value, "Modrinth download file URL", 2_048);
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error("Modrinth download file URL is invalid");
+  }
+  let finalSegment: string;
+  try {
+    finalSegment = decodeURIComponent(url.pathname.slice(url.pathname.lastIndexOf("/") + 1));
+  } catch {
+    throw new Error("Modrinth download file URL is invalid");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "cdn.modrinth.com" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search ||
+    url.hash ||
+    !url.pathname.startsWith(`/data/${encodeURIComponent(projectId)}/versions/`) ||
+    finalSegment !== fileName
+  ) {
+    throw new Error("Modrinth download file URL is outside the trusted CDN path");
+  }
+  return url.href;
 }
 
 function expectArray(value: unknown, label: string): unknown[] {

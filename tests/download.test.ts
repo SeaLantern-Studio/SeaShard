@@ -130,6 +130,50 @@ await test("shared downloader writes verified byte ranges with multiple connecti
   }
 });
 
+await test("shared downloader verifies Modrinth SHA-512 before publishing a file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-download-sha512-"));
+  const source = Buffer.from("verified mod jar bytes", "utf8");
+  const expectedSha512 = createHash("sha512").update(source).digest("hex");
+  const manager = new DownloadManager({
+    fetchProvider: () => async () =>
+      new Response(source, {
+        status: 200,
+        headers: { "content-length": String(source.byteLength) },
+      }),
+    createId: (() => {
+      let number = 0;
+      return () => `task-sha512-${++number}`;
+    })(),
+  });
+
+  try {
+    const verifiedPath = join(directory, "verified.jar");
+    const verified = await manager.start({
+      url: "https://cdn.modrinth.com/data/project/versions/version/verified.jar",
+      destinationPath: verifiedPath,
+      expectedBytes: source.byteLength,
+      sha512: expectedSha512,
+    });
+    assert.equal((await waitForFinished(manager, verified.id)).state, "completed");
+    assert.deepEqual(await readFile(verifiedPath), source);
+
+    const rejectedPath = join(directory, "rejected.jar");
+    const rejected = await manager.start({
+      url: "https://cdn.modrinth.com/data/project/versions/version/rejected.jar",
+      destinationPath: rejectedPath,
+      expectedBytes: source.byteLength,
+      sha512: "0".repeat(128),
+    });
+    const rejectedResult = await waitForFinished(manager, rejected.id);
+    assert.equal(rejectedResult.state, "failed");
+    assert.match(rejectedResult.error ?? "", /checksum mismatch/);
+    await assert.rejects(readFile(rejectedPath), { code: "ENOENT" });
+  } finally {
+    await manager.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test("shared downloader requires a full destination file path", async () => {
   const manager = new DownloadManager();
   try {

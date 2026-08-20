@@ -16,8 +16,10 @@ import {
   expectSafeInteger,
   expectServerConfigurationWriteRequest,
   expectServerCoreSaveAsRequest,
-  expectServerModSearchRequest,
+  expectServerModInstallRequest,
   expectServerModProjectId,
+  expectServerModSaveAsRequest,
+  expectServerModSearchRequest,
   expectServerStartupDefaultsUpdate,
   expectString,
 } from "./validation";
@@ -42,24 +44,15 @@ export const desktopShellManifest: PluginManifest = {
     seaShard: ">=0.0.0 <1.0.0",
   },
 };
-/** 外部导航保持显式白名单；Renderer 无法借新窗口请求打开任意协议或站点。 */
+/**
+ * Renderer 新窗口统一交给系统浏览器，仅允许无凭据、无自定义端口的 HTTPS 地址。
+ * Mod 简介来自远端 Markdown，因此这里是最终的协议安全边界。
+ */
 function trustedExternalUrl(value: string): string | undefined {
   try {
+    if (value.length > 2_048) return undefined;
     const url = new URL(value);
-    const queryKeys = [...url.searchParams.keys()];
-    if (
-      url.protocol !== "https:" ||
-      url.hostname !== "search.mcmod.cn" ||
-      url.username ||
-      url.password ||
-      url.port ||
-      url.pathname !== "/" ||
-      url.hash ||
-      queryKeys.length !== 1 ||
-      queryKeys[0] !== "s" ||
-      !url.searchParams.get("s") ||
-      (url.searchParams.get("s")?.length ?? 0) > 200
-    ) {
+    if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.port) {
       return undefined;
     }
     return url.href;
@@ -493,6 +486,31 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           }
           return config.readServerModProjectDetails(expectServerModProjectId(projectId));
         });
+        config.runtime.handle(desktopChannels.serverModInstallToInstance, async (event, value) => {
+          ownedWindow(event.sender.id);
+          const request = expectServerModInstallRequest(value);
+          const settings = await config.readServerSettings();
+          return config.installServerMod({
+            ...request,
+            connections: settings.defaultDownloadConnections,
+          });
+        });
+        config.runtime.handle(desktopChannels.serverModDownloadSaveAs, async (event, value) => {
+          const window = ownedWindow(event.sender.id);
+          const request = expectServerModSaveAsRequest(value);
+          const settings = await config.readServerSettings();
+          const destinationDirectory = await config.runtime.selectDirectory(window, {
+            title: "选择 Mod 保存文件夹",
+            buttonLabel: "保存到此文件夹",
+            defaultPath: settings.resourceDownloadDirectory,
+          });
+          if (!destinationDirectory) return undefined;
+          return config.saveServerMod({
+            ...request,
+            destinationDirectory,
+            connections: settings.defaultDownloadConnections,
+          });
+        });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -526,6 +544,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverModFilters);
           config.runtime.removeHandler(desktopChannels.serverModSearch);
           config.runtime.removeHandler(desktopChannels.serverModProjectDetails);
+          config.runtime.removeHandler(desktopChannels.serverModInstallToInstance);
+          config.runtime.removeHandler(desktopChannels.serverModDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverSettingsGet);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);

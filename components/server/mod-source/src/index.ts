@@ -1,5 +1,8 @@
-import { serverModSourceContract } from "@seashard/contracts";
+import { serverInstanceManagerContract, serverModSourceContract } from "@seashard/contracts";
+import { downloadContract, type DownloadService } from "@seashard/download";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
+import { ServerModDownloadCoordinator } from "./download-coordinator";
 import { ModrinthServerModCatalog, type ModrinthServerModCatalogOptions } from "./modrinth-catalog";
 
 export type ServerModSourceModuleOptions = ModrinthServerModCatalogOptions;
@@ -15,7 +18,7 @@ export const serverModSourceManifest: PluginManifest = {
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
-      permissions: [],
+      permissions: [downloadContract, serverInstanceManagerContract],
       upgradeMode: "stop-first",
     },
   ],
@@ -27,15 +30,21 @@ export const serverModSourceManifest: PluginManifest = {
 /** 创建独立 Modrinth 目录能力；网络响应在 Host 内校验后才投影给 Client。 */
 export function createServerModSourceModule(options: ServerModSourceModuleOptions): PluginModule {
   return {
-    inject: [],
+    inject: [downloadContract, serverInstanceManagerContract],
     provides: [serverModSourceContract],
     apply(ctx) {
       const catalog = new ModrinthServerModCatalog(options);
+      const downloads = ctx.service<DownloadService>(downloadContract);
+      const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
+      const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
       ctx.provide(serverModSourceContract, {
         getFilters: async () => asJsonValue(await catalog.getFilters()),
         search: async (request) => asJsonValue(await catalog.search(request)),
         getProjectDetails: async (projectId) =>
           asJsonValue(await catalog.getProjectDetails(projectId)),
+        installToInstance: async (request) =>
+          asJsonValue(await coordinator.installToInstance(request)),
+        saveToDirectory: async (request) => asJsonValue(await coordinator.saveToDirectory(request)),
       });
     },
   };
@@ -47,4 +56,5 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./modrinth-catalog";
+export * from "./download-coordinator";
 export * from "./types";

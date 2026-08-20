@@ -1,4 +1,9 @@
-import type { ServerInstanceSnapshot } from "@seashard/contracts";
+import {
+  serverModLoaderForCoreType,
+  serverModLoaders,
+  type ServerInstanceSnapshot,
+  type ServerModLoader,
+} from "@seashard/contracts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
@@ -22,6 +27,7 @@ export function createPortableServerInformationManifest(
   return {
     schemaVersion: 1,
     minecraft: instance.gameVersion ? { version: instance.gameVersion } : {},
+    modLoader: instance.modLoader,
     core: {
       path: relativePathInside(instance.rootPath, instance.coreJarPath, "core JAR"),
       ...(instance.serverType ? { type: instance.serverType } : {}),
@@ -123,6 +129,9 @@ export async function readPortableInstanceManifests(
   const core = expectRecord(server.core, "server.json core");
   const minecraft = expectRecord(server.minecraft, "server.json minecraft");
   const corePath = expectRelativePath(core.path, "server.json core.path");
+  const serverType =
+    core.type === undefined ? undefined : expectString(core.type, "server.json core.type");
+  const modLoader = expectServerModLoader(server.modLoader, serverType);
   const artifact =
     core.artifact === undefined
       ? undefined
@@ -136,6 +145,14 @@ export async function readPortableInstanceManifests(
       ? undefined
       : expectSha256(artifact.sha256, "server.json core.artifact.sha256");
 
+  // 旧清单首次读取时补写显式加载器字段；保留未知字段，避免破坏其他工具扩展的服务器信息。
+  if (server.modLoader === undefined) {
+    await writeJsonAtomically(metadataDirectory, portableServerInformationFileName, {
+      ...server,
+      modLoader,
+    });
+  }
+
   return {
     id: expectString(seaShard.id, "seashard.json id"),
     name: expectString(seaShard.name, "seashard.json name"),
@@ -144,9 +161,8 @@ export async function readPortableInstanceManifests(
     ...(icon ? { iconPath: resolve(metadataDirectory, icon) } : {}),
     storageMode,
     source,
-    ...(core.type === undefined
-      ? {}
-      : { serverType: expectString(core.type, "server.json core.type") }),
+    modLoader,
+    ...(serverType ? { serverType } : {}),
     ...(minecraft.version === undefined
       ? {}
       : {
@@ -259,6 +275,18 @@ function expectSha256(value: unknown, field: string): string {
     throw new TypeError(`server instance ${field} must be a SHA-256 digest`);
   }
   return sha256;
+}
+
+function expectServerModLoader(
+  value: unknown,
+  serverType: string | undefined,
+): ServerModLoader | null {
+  if (value === undefined) return serverModLoaderForCoreType(serverType);
+  if (value === null) return null;
+  if (typeof value !== "string" || !serverModLoaders.includes(value as ServerModLoader)) {
+    throw new TypeError("server instance server.json modLoader is invalid");
+  }
+  return value as ServerModLoader;
 }
 
 function expectEnum<const Value extends string>(

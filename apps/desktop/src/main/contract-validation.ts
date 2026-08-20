@@ -6,6 +6,7 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   serverModSearchLimits,
+  serverModLoaders,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
   type ServerConsoleLine,
@@ -22,6 +23,7 @@ import {
   type ServerModEnvironment,
   type ServerModFilterOption,
   type ServerModFilters,
+  type ServerModDownloadResult,
   type ServerModProject,
   type ServerModProjectDetails,
   type ServerModSearchResult,
@@ -221,6 +223,35 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
   };
 }
 
+export function expectServerModDownloadResult(value: unknown): ServerModDownloadResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server mod source returned an invalid download result");
+  }
+  const result = value as Record<string, unknown>;
+  if (
+    typeof result.projectId !== "string" ||
+    !result.projectId ||
+    typeof result.versionId !== "string" ||
+    !result.versionId ||
+    typeof result.fileName !== "string" ||
+    !result.fileName.toLowerCase().endsWith(".jar") ||
+    !["instance", "directory"].includes(String(result.destination)) ||
+    (result.instanceId !== undefined &&
+      (typeof result.instanceId !== "string" || !result.instanceId)) ||
+    !Number.isSafeInteger(result.downloadedBytes) ||
+    (result.downloadedBytes as number) < 0
+  ) {
+    throw new Error("server mod source returned an invalid download result");
+  }
+  if (
+    (result.destination === "instance" && typeof result.instanceId !== "string") ||
+    (result.destination === "directory" && result.instanceId !== undefined)
+  ) {
+    throw new Error("server mod source returned an invalid download destination");
+  }
+  return result as unknown as ServerModDownloadResult;
+}
+
 function expectServerModVersion(
   value: unknown,
   index: number,
@@ -395,7 +426,12 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
         (!Number.isSafeInteger(instance.totalRuntimeMs) ||
           (instance.totalRuntimeMs as number) < 0)) ||
       !["managed", "external"].includes(String(instance.storageMode)) ||
-      !["downloaded", "imported"].includes(String(instance.source))
+      !["downloaded", "imported"].includes(String(instance.source)) ||
+      !(
+        instance.modLoader === null ||
+        (typeof instance.modLoader === "string" &&
+          (serverModLoaders as readonly string[]).includes(instance.modLoader))
+      )
     ) {
       throw new Error(`server instance manager returned invalid instance ${index}`);
     }

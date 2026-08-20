@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@seashard/contracts": "workspace:*",
-    "@seashard/plugin-sdk": "workspace:*"
+    "@seashard/download": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/server-instance-manager": "workspace:*"
   }
 }

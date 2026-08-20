@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
   serverModSearchLimits,
+  type ServerInstanceClientService,
+  type ServerInstanceSnapshot,
   type ServerModFilterOption,
   type ServerModFilters,
   type ServerModProject,
@@ -10,7 +12,14 @@ import {
   type ServerModSourceClientService,
   type ServerModVersion,
 } from "@seashard/contracts";
-import { Cmz_Input, Cmz_Select, type SelectOption } from "cmzya-modern-ui";
+import {
+  Cmz_Button,
+  Cmz_Input,
+  Cmz_Markdown,
+  Cmz_Modal,
+  Cmz_Select,
+  type SelectOption,
+} from "cmzya-modern-ui";
 import {
   ArrowLeft,
   BookOpen,
@@ -34,11 +43,14 @@ import {
   formatServerModVersionRange,
   groupServerModVersions,
   serverModDisplayName,
+  serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
+  compatibleServerModInstances,
 } from "./mod-presentation";
 
 const props = defineProps<{
   mods: ServerModSourceClientService;
+  instances: ServerInstanceClientService;
 }>();
 
 const emptyFilters: ServerModFilters = {
@@ -59,6 +71,11 @@ const detailVersionCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
 });
+const detailMarkdownFeatures = {
+  alert: false,
+  linkCard: false,
+  container: false,
+} as const;
 
 type DetailCopyAction = "name" | "link";
 type DetailCopyState = "idle" | "success" | "error";
@@ -99,6 +116,15 @@ const copyActionStates = ref<Record<DetailCopyAction, DetailCopyState>>({
 const detailDescriptionExpanded = ref(false);
 let detailRequestId = 0;
 const copyActionTimers = new Map<DetailCopyAction, ReturnType<typeof setTimeout>>();
+const installModalOpen = ref(false);
+const installVersion = ref<ServerModVersion>();
+const compatibleInstances = ref<readonly ServerInstanceSnapshot[]>([]);
+const installInstancesLoading = ref(false);
+const installInstancesError = ref("");
+const installPendingTarget = ref<string>();
+const installResultMessage = ref("");
+const installResultTone = ref<"success" | "error">("success");
+let installInstancesRequestId = 0;
 
 const sourceOptions = computed(() => toSelectOptions(filters.value.sources));
 const tagOptions = computed(() => withAllOption("全部标签", filters.value.tags));
@@ -144,11 +170,9 @@ const detailDescription = computed(
 const selectedProjectIsFavorite = computed(
   () => !!selectedProject.value && favoriteProjectIds.value.has(selectedProject.value.id),
 );
-const mcEncyclopediaUrl = computed(() => {
-  const url = new URL("https://search.mcmod.cn/");
-  url.searchParams.set("s", selectedProject.value?.title ?? "");
-  return url.href;
-});
+const mcEncyclopediaUrl = computed(() =>
+  serverModMcEncyclopediaSearchUrl(selectedProject.value?.title ?? ""),
+);
 
 onMounted(() => {
   observer = new IntersectionObserver(
@@ -186,6 +210,7 @@ onBeforeUnmount(() => {
   if (relativeTimeTimer) clearInterval(relativeTimeTimer);
   detailRequestId += 1;
   resetCopyActions();
+  installInstancesRequestId += 1;
   observer?.disconnect();
 });
 
@@ -413,6 +438,87 @@ function toggleVersionGroup(groupId: string): void {
   expandedVersionGroupId.value = expandedVersionGroupId.value === groupId ? undefined : groupId;
 }
 
+async function openInstallModal(version: ServerModVersion): Promise<void> {
+  const requestId = ++installInstancesRequestId;
+  installVersion.value = version;
+  compatibleInstances.value = [];
+  installInstancesError.value = "";
+  installResultMessage.value = "";
+  installPendingTarget.value = undefined;
+  installModalOpen.value = true;
+  installInstancesLoading.value = true;
+  try {
+    const instances = await props.instances.list();
+    if (requestId !== installInstancesRequestId) return;
+    compatibleInstances.value = compatibleServerModInstances(version, instances);
+  } catch (error) {
+    if (requestId === installInstancesRequestId) {
+      installInstancesError.value = errorMessage(error);
+    }
+  } finally {
+    if (requestId === installInstancesRequestId) installInstancesLoading.value = false;
+  }
+}
+
+function closeInstallModal(): void {
+  if (installPendingTarget.value) return;
+  installInstancesRequestId += 1;
+  installModalOpen.value = false;
+  installVersion.value = undefined;
+  compatibleInstances.value = [];
+  installInstancesError.value = "";
+  installResultMessage.value = "";
+}
+
+function updateInstallModalVisible(visible: boolean): void {
+  if (!visible) closeInstallModal();
+}
+
+async function installModToInstance(instance: ServerInstanceSnapshot): Promise<void> {
+  const project = selectedProject.value;
+  const version = installVersion.value;
+  if (!project || !version || installPendingTarget.value) return;
+  installPendingTarget.value = instance.id;
+  installResultMessage.value = "";
+  try {
+    const result = await props.mods.installToInstance({
+      projectId: project.id,
+      versionId: version.id,
+      instanceId: instance.id,
+    });
+    installResultTone.value = "success";
+    installResultMessage.value = `已将 ${result.fileName} 安装到 ${instance.name}`;
+  } catch (error) {
+    installResultTone.value = "error";
+    installResultMessage.value = errorMessage(error);
+  } finally {
+    installPendingTarget.value = undefined;
+  }
+}
+
+async function saveModAs(): Promise<void> {
+  const project = selectedProject.value;
+  const version = installVersion.value;
+  if (!project || !version || installPendingTarget.value) return;
+  installPendingTarget.value = "save-as";
+  installResultMessage.value = "";
+  try {
+    const result = await props.mods.saveAs({
+      projectId: project.id,
+      versionId: version.id,
+    });
+    if (result) {
+      installResultTone.value = "success";
+      installResultMessage.value = `已将 ${result.fileName} 保存到所选文件夹`;
+    }
+  } catch (error) {
+    installResultTone.value = "error";
+    installResultMessage.value = errorMessage(error);
+  } finally {
+    installPendingTarget.value = undefined;
+  }
+}
+
 async function copyProjectName(): Promise<void> {
   if (!selectedProject.value) return;
   await copyDetailValue("name", selectedProject.value.title);
@@ -546,6 +652,17 @@ function formatRelativeTime(value: string): string {
   return formatServerModRelativeTime(value, relativeTimeNow.value);
 }
 
+/** Markdown 链接只通过 Electron 的新窗口拦截器交给系统浏览器，避免替换当前 Renderer。 */
+function openDetailMarkdownLink(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const link = target.closest("a[href]");
+  if (!(link instanceof HTMLAnchorElement)) return;
+
+  event.preventDefault();
+  window.open(link.href, "_blank", "noopener,noreferrer");
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -627,7 +744,14 @@ function errorMessage(error: unknown): string {
             class="mod-detail-description-block"
             :class="{ expanded: detailDescriptionExpanded }"
           >
-            <p class="mod-detail-description">{{ detailDescription }}</p>
+            <div class="mod-detail-description" @click="openDetailMarkdownLink">
+              <Cmz_Markdown
+                :content="detailDescription"
+                variant="plain"
+                :code-highlight="false"
+                :features="detailMarkdownFeatures"
+              />
+            </div>
             <button
               class="mod-detail-description-toggle"
               type="button"
@@ -761,7 +885,14 @@ function errorMessage(error: unknown): string {
                 <ChevronDown :size="18" :stroke-width="1.8" aria-hidden="true" />
               </button>
               <div v-show="expandedVersionGroupId === group.id" class="mod-version-items">
-                <div v-for="version in group.versions" :key="version.id" class="mod-version-item">
+                <button
+                  v-for="version in group.versions"
+                  :key="version.id"
+                  class="mod-version-item"
+                  type="button"
+                  :aria-label="`下载 ${version.fileName}`"
+                  @click="openInstallModal(version)"
+                >
                   <span class="mod-project-icon mod-version-icon">
                     <img
                       v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
@@ -782,11 +913,109 @@ function errorMessage(error: unknown): string {
                     <Clock3 :size="14" :stroke-width="1.8" aria-hidden="true" />
                     {{ formatRelativeTime(version.datePublished) }}
                   </span>
-                </div>
+                </button>
               </div>
             </article>
           </div>
         </template>
+
+        <Cmz_Modal
+          :visible="installModalOpen && !!installVersion"
+          title="安装 Mod"
+          width="520px"
+          :close-on-overlay="!installPendingTarget"
+          @close="closeInstallModal"
+          @update:visible="updateInstallModalVisible"
+        >
+          <div v-if="installVersion" class="mod-install-modal">
+            <div class="mod-install-file">
+              <span class="mod-project-icon mod-version-icon">
+                <img
+                  v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
+                  :src="selectedProject.iconUrl"
+                  alt=""
+                  draggable="false"
+                  referrerpolicy="no-referrer"
+                />
+                <Puzzle v-else :size="16" :stroke-width="1.7" aria-hidden="true" />
+              </span>
+              <div>
+                <span>准备下载</span>
+                <strong>{{ installVersion.fileName }}</strong>
+              </div>
+            </div>
+
+            <template
+              v-if="
+                installInstancesLoading || !!installInstancesError || compatibleInstances.length > 0
+              "
+            >
+              <h3>下载到</h3>
+              <div class="mod-install-instance-list" aria-label="兼容的服务器实例">
+                <div v-if="installInstancesLoading" class="mod-install-state" role="status">
+                  <span class="mod-loading-spinner" />
+                  正在读取服务器实例
+                </div>
+                <div v-else-if="installInstancesError" class="mod-install-state error" role="alert">
+                  <span>{{ installInstancesError }}</span>
+                  <button type="button" @click="openInstallModal(installVersion)">重新加载</button>
+                </div>
+                <template v-else>
+                  <button
+                    v-for="instance in compatibleInstances"
+                    :key="instance.id"
+                    class="mod-install-instance"
+                    type="button"
+                    :disabled="!!installPendingTarget"
+                    @click="installModToInstance(instance)"
+                  >
+                    <span class="mod-install-instance-icon">
+                      <img
+                        v-if="instance.iconUrl"
+                        :src="instance.iconUrl"
+                        alt=""
+                        draggable="false"
+                      />
+                      <span v-else>{{ instance.name.charAt(0).toUpperCase() }}</span>
+                    </span>
+                    <span class="mod-install-instance-copy">
+                      <strong>{{ instance.name }}</strong>
+                      <span
+                        >{{ instance.gameVersion }} ·
+                        {{ loaderLabel(instance.modLoader ?? "") }}</span
+                      >
+                    </span>
+                    <span
+                      v-if="installPendingTarget === instance.id"
+                      class="mod-loading-spinner"
+                      aria-label="正在安装"
+                    />
+                  </button>
+                </template>
+              </div>
+
+              <div class="mod-install-separator"><span>或</span></div>
+            </template>
+            <Cmz_Button
+              class="mod-install-save-as"
+              variant="outline"
+              :loading="installPendingTarget === 'save-as'"
+              :disabled="!!installPendingTarget"
+              @click="saveModAs"
+            >
+              <Download :size="16" :stroke-width="1.8" aria-hidden="true" />
+              另存为
+            </Cmz_Button>
+            <p
+              v-if="installResultMessage"
+              class="mod-install-result"
+              :class="installResultTone"
+              :role="installResultTone === 'error' ? 'alert' : 'status'"
+            >
+              {{ installResultMessage }}
+            </p>
+          </div>
+        </Cmz_Modal>
       </div>
     </template>
     <template v-else>

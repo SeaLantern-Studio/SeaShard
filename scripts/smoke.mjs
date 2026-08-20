@@ -111,8 +111,8 @@ function verifyPersistedState(databasePath) {
     const operationCount = Number(operations.count);
     const runningOperationCount = Number(operations.running);
     if (
-      packageCount !== 21 ||
-      bindingCount !== 21 ||
+      packageCount !== 22 ||
+      bindingCount !== 22 ||
       generationCount < 13 ||
       publicationCount !== 11 ||
       activePublicationCount !== 0 ||

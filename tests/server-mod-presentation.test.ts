@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Cmz_Markdown } from "cmzya-modern-ui";
+import { createSSRApp, h } from "vue";
+import { renderToString } from "vue/server-renderer";
 import {
+  serverModLoaderForCoreType,
+  type ServerInstanceSnapshot,
+} from "../packages/contracts/src/index.ts";
+import {
+  compatibleServerModInstances,
   formatServerModDownloadCount,
   formatServerModRelativeTime,
   formatServerModVersionRange,
   groupServerModVersions,
   serverModDisplayName,
+  serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
 } from "../frontend/server/download-mod/src/client/mod-presentation.ts";
 
@@ -21,6 +30,37 @@ await test("mod display names append the stable English slug only for Chinese ti
     primary: "机械动力",
     original: "Create",
   });
+});
+
+await test("MC encyclopedia links use the dedicated search route and encoded plus separator", () => {
+  assert.equal(
+    serverModMcEncyclopediaSearchUrl("Fabric API"),
+    "https://search.mcmod.cn/s?key=Fabric%2BAPI&mold=0",
+  );
+  assert.equal(
+    serverModMcEncyclopediaSearchUrl("  Sodium   Extra  "),
+    "https://search.mcmod.cn/s?key=Sodium%2BExtra&mold=0",
+  );
+});
+
+await test("mod descriptions render Markdown while treating embedded HTML as text", async () => {
+  const app = createSSRApp({
+    render: () =>
+      h(Cmz_Markdown, {
+        content:
+          "### FAQ\n\nRead [summary](https://github.com/example/project/blob/main/summary.md).\n\n<script>alert('unsafe')</script>",
+        codeHighlight: false,
+        features: { alert: false, linkCard: false, container: false },
+      }),
+  });
+  const html = await renderToString(app);
+  assert.match(html, /<h3>FAQ<\/h3>/u);
+  assert.match(
+    html,
+    /<a href="https:\/\/github\.com\/example\/project\/blob\/main\/summary\.md">summary<\/a>/u,
+  );
+  assert.doesNotMatch(html, /<script>/u);
+  assert.match(html, /<p>&lt;script&gt;.*&lt;\/script&gt;<\/p>/u);
 });
 
 await test("mod display tags keep loaders and libraries separate from content categories", () => {
@@ -129,5 +169,53 @@ await test("mod versions group by loader and game version with newest files firs
   assert.deepEqual(
     groupServerModVersions(versions, "1.20.1", "forge").map(({ id }) => id),
     ["forge:1.20.1"],
+  );
+});
+
+await test("server core types map to standard Mod loaders without treating plugin cores as Mod servers", () => {
+  assert.equal(serverModLoaderForCoreType("arclight-fabric"), "fabric");
+  assert.equal(serverModLoaderForCoreType("banner"), "fabric");
+  assert.equal(serverModLoaderForCoreType("catserver"), "forge");
+  assert.equal(serverModLoaderForCoreType("spongeforge"), "forge");
+  assert.equal(serverModLoaderForCoreType("arclight-neoforge"), "neoforge");
+  assert.equal(serverModLoaderForCoreType("youer"), "neoforge");
+  assert.equal(serverModLoaderForCoreType("quilt"), "quilt");
+  assert.equal(serverModLoaderForCoreType("paper"), null);
+  assert.equal(serverModLoaderForCoreType("vanilla"), null);
+});
+
+await test("compatible Mod targets require both the exact loader and Minecraft version", () => {
+  const base: ServerInstanceSnapshot = {
+    id: "fabric-compatible",
+    name: "Fabric compatible",
+    rootPath: "C:/SeaShard/servers/fabric-compatible",
+    coreJarPath: "C:/SeaShard/servers/fabric-compatible/server.jar",
+    storageMode: "managed",
+    source: "downloaded",
+    modLoader: "fabric",
+    serverType: "fabric",
+    gameVersion: "1.21.1",
+    createdAt: "2026-08-20T00:00:00.000Z",
+    updatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  const instances: ServerInstanceSnapshot[] = [
+    base,
+    { ...base, id: "forge", name: "Forge", modLoader: "forge", serverType: "mohist" },
+    { ...base, id: "old-fabric", name: "Old Fabric", gameVersion: "1.20.1" },
+    { ...base, id: "paper", name: "Paper", modLoader: null, serverType: "paper" },
+  ];
+  assert.deepEqual(
+    compatibleServerModInstances(
+      {
+        id: "fabric-version",
+        gameVersions: ["1.21.1"],
+        loaders: ["fabric"],
+        fileName: "server-tools.jar",
+        downloads: 10,
+        datePublished: "2026-08-20T00:00:00.000Z",
+      },
+      instances,
+    ).map(({ id }) => id),
+    ["fabric-compatible"],
   );
 });
