@@ -19,8 +19,10 @@ const configurationRootSubdirectories: Readonly<Record<string, string>> = {
   quilt: "server",
 };
 
-const serverConfigurationPaths = [
-  "server.properties",
+/** server.properties 是 Minecraft 服务端的主配置；其余核心附属文件进入“其他配置”。 */
+const serverConfigurationPaths = ["server.properties"] as const;
+
+const otherConfigurationPaths = [
   "bukkit.yml",
   "spigot.yml",
   "paper.yml",
@@ -131,10 +133,15 @@ export class ServerConfigurationManager {
     const instance = await this.resolveInstance(instanceId);
     const rootPath = await this.resolveConfigurationRoot(instance);
     const serverFiles: ServerConfigurationFile[] = [];
+    const otherFiles: ServerConfigurationFile[] = [];
 
     for (const path of serverConfigurationPaths) {
       const descriptor = await this.describeExistingFile(rootPath, path, "server");
       if (descriptor) serverFiles.push(descriptor);
+    }
+    for (const path of otherConfigurationPaths) {
+      const descriptor = await this.describeExistingFile(rootPath, path, "other");
+      if (descriptor) otherFiles.push(descriptor);
     }
 
     const pluginsRoot = resolve(rootPath, "plugins");
@@ -151,6 +158,7 @@ export class ServerConfigurationManager {
         hasPluginsDirectory ||
         (instance.serverType !== undefined && pluginCapableServerTypes.has(instance.serverType)),
       serverFiles,
+      otherFiles,
       plugins,
     };
   }
@@ -214,7 +222,11 @@ export class ServerConfigurationManager {
     path: string,
   ): Promise<ServerConfigurationFile> {
     const catalog = await this.list(instanceId);
-    const files = [...catalog.serverFiles, ...catalog.plugins.flatMap((plugin) => plugin.files)];
+    const files = [
+      ...catalog.serverFiles,
+      ...catalog.otherFiles,
+      ...catalog.plugins.flatMap((plugin) => plugin.files),
+    ];
     const descriptor = files.find((file) => file.path === path);
     if (!descriptor) throw new Error("配置文件不在当前实例的可编辑目录中。");
     return descriptor;

@@ -38,6 +38,7 @@ const iconInput = ref<HTMLInputElement>();
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const selectorOpen = ref(false);
 const instancesLoading = ref(true);
+const emptyStateDelayElapsed = ref(false);
 const instancesError = ref<string>();
 const runtimeError = ref<string>();
 const missingJavaModalOpen = ref(false);
@@ -58,6 +59,8 @@ const deletingInstanceId = ref<string>();
 const deleteError = ref<string>();
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let listRequestId = 0;
+const minimumEmptyStateDelayMs = 240;
+let emptyStateDelayTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingInstanceId =
   typeof route.query.instance === "string" && route.query.instance
     ? route.query.instance
@@ -110,6 +113,9 @@ const sortedInstances = computed(() =>
 );
 
 onMounted(() => {
+  emptyStateDelayTimer = setTimeout(() => {
+    emptyStateDelayElapsed.value = true;
+  }, minimumEmptyStateDelayMs);
   document.addEventListener("pointerdown", closeContextMenus);
   document.addEventListener("keydown", handleDocumentKeydown);
   void loadInstances();
@@ -120,6 +126,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", closeContextMenus);
   document.removeEventListener("keydown", handleDocumentKeydown);
   clearInterval(refreshTimer);
+  clearTimeout(emptyStateDelayTimer);
 });
 
 /** 定时刷新实例与真实进程状态，不用 Renderer 内的临时集合伪造运行状态。 */
@@ -467,6 +474,16 @@ function errorMessage(error: unknown): string {
           </button>
         </div>
       </div>
+    </div>
+
+    <div
+      v-else-if="instancesLoading || !emptyStateDelayElapsed"
+      class="launch-loading-state"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="launch-loading-indicator" aria-hidden="true"></span>
+      <span>正在读取服务器实例</span>
     </div>
 
     <div v-else class="launch-empty-state" role="status">

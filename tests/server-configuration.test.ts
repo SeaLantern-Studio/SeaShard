@@ -167,15 +167,19 @@ function createFixture(): {
   };
 }
 
-await test("configuration manager lists allowlisted server files and recursive plugin text configs", async () => {
+await test("configuration manager separates primary, other, and plugin configuration files", async () => {
   const { manager } = createFixture();
   const catalog = await manager.list(instance.id);
 
   assert.equal(catalog.configurationRootPath, rootPath);
   assert.equal(catalog.pluginSupported, true);
   assert.deepEqual(
-    catalog.serverFiles.map((file) => file.path),
-    ["server.properties", "config/paper-global.yml"],
+    catalog.serverFiles.map((file) => ({ path: file.path, scope: file.scope })),
+    [{ path: "server.properties", scope: "server" }],
+  );
+  assert.deepEqual(
+    catalog.otherFiles.map((file) => ({ path: file.path, scope: file.scope })),
+    [{ path: "config/paper-global.yml", scope: "other" }],
   );
   assert.deepEqual(
     catalog.plugins.map((plugin) => ({
@@ -263,6 +267,7 @@ await test("Quilt configuration resolves files and backups from its generated se
     catalog.serverFiles.map((file) => file.path),
     ["server.properties"],
   );
+  assert.deepEqual(catalog.otherFiles, []);
   const original = await manager.read(quiltInstance.id, "server.properties");
   const saved = await manager.write({
     instanceId: quiltInstance.id,

@@ -23,6 +23,35 @@
 .selector-open .launch-focus-area {
   transform: translate3d(-25%, 0, 0);
 }
+.launch-loading-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.8rem;
+}
+
+.launch-loading-indicator {
+  position: relative;
+  width: 52px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-bg-tertiary);
+}
+
+.launch-loading-indicator::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--sl-primary);
+  content: "";
+  transform: translateX(-70%) scaleX(0.36);
+  animation: launch-loading-progress 900ms ease-in-out infinite;
+}
 
 .launch-empty-state {
   position: absolute;
@@ -268,6 +297,9 @@
   top: 16px;
   right: 16px;
   bottom: 16px;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   width: calc(50% - 30px);
   min-width: 0;
   padding: 20px;
@@ -293,7 +325,14 @@
 
 .instance-list {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   gap: 7px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .instance-list-row {
@@ -502,6 +541,16 @@
   white-space: nowrap;
 }
 
+@keyframes launch-loading-progress {
+  50% {
+    transform: translateX(70%) scaleX(0.72);
+  }
+
+  100% {
+    transform: translateX(170%) scaleX(0.36);
+  }
+}
+
 @keyframes icon-menu-in {
   from {
     opacity: 0;
@@ -543,6 +592,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .launch-loading-indicator::after {
+    animation: none;
+    transform: none;
+  }
+
   .launch-focus-area,
   .instance-selector-panel,
   .instance-icon-button,

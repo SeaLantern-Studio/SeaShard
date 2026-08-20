@@ -348,6 +348,7 @@ export const serverConfigurationCatalog = {
       scope: "server",
     },
   ],
+  otherFiles: [],
   plugins: [],
 } satisfies ServerConfigurationCatalog;
 

@@ -323,7 +323,7 @@ export interface ServerRuntimeClientService extends ServerRuntimeService {
 }
 
 export type ServerConfigurationFileKind = "properties" | "yaml" | "json" | "toml" | "text";
-export type ServerConfigurationFileScope = "server" | "plugin";
+export type ServerConfigurationFileScope = "server" | "other" | "plugin";
 export type ServerConfigurationTextEncoding = "utf-8" | "utf-8-bom";
 
 /** Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。 */
@@ -340,7 +340,7 @@ export interface ServerPluginConfigurationGroup {
   files: readonly ServerConfigurationFile[];
 }
 
-/** 单个实例当前可编辑配置的目录；插件页只在明确支持或已有 plugins 目录时显示。 */
+/** 单个实例当前可编辑配置的目录；其他配置只在实际发现文件时显示。 */
 export interface ServerConfigurationCatalog {
   instanceId: string;
   serverType?: string;
@@ -348,6 +348,7 @@ export interface ServerConfigurationCatalog {
   configurationRootPath: string;
   pluginSupported: boolean;
   serverFiles: readonly ServerConfigurationFile[];
+  otherFiles: readonly ServerConfigurationFile[];
   plugins: readonly ServerPluginConfigurationGroup[];
 }
 

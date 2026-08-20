@@ -192,7 +192,7 @@ export function expectServerConfigurationFile(
     typeof file.name !== "string" ||
     !file.name ||
     !serverConfigurationKinds.has(String(file.kind)) ||
-    !["server", "plugin"].includes(String(file.scope)) ||
+    !["server", "other", "plugin"].includes(String(file.scope)) ||
     (file.pluginName !== undefined && (typeof file.pluginName !== "string" || !file.pluginName))
   ) {
     throw new Error(`server configuration returned invalid ${label}`);
@@ -213,12 +213,16 @@ export function expectServerConfigurationCatalog(value: unknown): ServerConfigur
     (catalog.serverType !== undefined && typeof catalog.serverType !== "string") ||
     typeof catalog.pluginSupported !== "boolean" ||
     !Array.isArray(catalog.serverFiles) ||
+    !Array.isArray(catalog.otherFiles) ||
     !Array.isArray(catalog.plugins)
   ) {
     throw new Error("server configuration returned an invalid catalog");
   }
   const serverFiles = catalog.serverFiles.map((file, index) =>
     expectServerConfigurationFile(file, `server file ${index}`),
+  );
+  const otherFiles = catalog.otherFiles.map((file, index) =>
+    expectServerConfigurationFile(file, `other file ${index}`),
   );
   const plugins = catalog.plugins.map((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -241,6 +245,7 @@ export function expectServerConfigurationCatalog(value: unknown): ServerConfigur
     ...(catalog.serverType ? { serverType: catalog.serverType as string } : {}),
     pluginSupported: catalog.pluginSupported,
     serverFiles,
+    otherFiles,
     plugins,
   };
 }

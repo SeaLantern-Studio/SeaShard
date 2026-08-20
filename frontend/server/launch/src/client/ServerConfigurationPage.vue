@@ -41,6 +41,8 @@ import {
   type ServerPropertyEntry,
 } from "./server-properties";
 import type { ServerInstanceSelection } from "./server-selection";
+type ConfigurationScope = ServerConfigurationFile["scope"];
+
 interface ConfigurationDraft {
   document: ServerConfigurationDocument;
   content: string;
@@ -54,7 +56,7 @@ const props = defineProps<{
 
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const catalog = ref<ServerConfigurationCatalog>();
-const activeScope = ref<"server" | "plugin">("server");
+const activeScope = ref<ConfigurationScope>("server");
 const selectedPath = ref("");
 const selectedPluginName = ref("");
 const editorMode = ref<"visual" | "source">("visual");
@@ -80,18 +82,27 @@ const selectedFile = computed(() =>
 );
 const allFiles = computed(() => [
   ...(catalog.value?.serverFiles ?? []),
+  ...(catalog.value?.otherFiles ?? []),
   ...(catalog.value?.plugins.flatMap((plugin) => plugin.files) ?? []),
 ]);
+const activeConfigurationFiles = computed(() =>
+  activeScope.value === "other"
+    ? (catalog.value?.otherFiles ?? [])
+    : (catalog.value?.serverFiles ?? []),
+);
 const selectedDraft = computed(() =>
   drafts.get(draftKey(selectedInstanceId.value, selectedPath.value)),
 );
 /** 在不依赖 Node path 模块的 Renderer 中，按实例路径风格拼出完整配置文件位置。 */
 const selectedConfigurationLocation = computed(() => {
-  const activeServerPath =
-    selectedFile.value?.scope === "server"
-      ? (selectedDraft.value?.document.path ?? selectedFile.value.path)
+  const activeConfigurationPath =
+    selectedFile.value?.scope !== "plugin"
+      ? (selectedDraft.value?.document.path ?? selectedFile.value?.path)
       : undefined;
-  const filePath = activeServerPath ?? catalog.value?.serverFiles[0]?.path;
+  const filePath =
+    activeConfigurationPath ??
+    catalog.value?.serverFiles[0]?.path ??
+    catalog.value?.otherFiles[0]?.path;
   const rootPath = catalog.value?.configurationRootPath.replace(/[\\/]+$/u, "");
   if (!filePath) return "尚未选择配置文件";
   if (!rootPath) return filePath;
@@ -162,20 +173,29 @@ const addedLineCount = computed(
 const deletedLineCount = computed(
   () => configurationDiffLines.value.filter((line) => line.type === "deletion").length,
 );
-const scopeTabs = computed<TabBarItem[]>(() => [
-  {
-    key: "server",
-    label: "服务器配置",
-    suffixIcon: ConfigurationPathTooltip,
-  },
-  {
+const scopeTabs = computed<TabBarItem[]>(() => {
+  const tabs: TabBarItem[] = [
+    {
+      key: "server",
+      label: "服务器配置",
+      suffixIcon: ConfigurationPathTooltip,
+    },
+  ];
+  if (catalog.value?.otherFiles.length) {
+    tabs.push({
+      key: "other",
+      label: "其他配置",
+    });
+  }
+  tabs.push({
     key: "plugin",
     label: "插件配置",
     disabled: !catalog.value?.pluginSupported,
-  },
-]);
-const serverFileTabs = computed<TabBarItem[]>(() =>
-  (catalog.value?.serverFiles ?? []).map((file) => ({
+  });
+  return tabs;
+});
+const configurationFileTabs = computed<TabBarItem[]>(() =>
+  activeConfigurationFiles.value.map((file) => ({
     key: file.path,
     label: file.name,
     count: fileKindLabel(file),
@@ -268,14 +288,20 @@ function chooseAvailableFile(): void {
     return;
   }
   const firstServerFile = catalog.value?.serverFiles[0];
+  const firstOtherFile = catalog.value?.otherFiles[0];
   const firstPlugin = catalog.value?.plugins[0];
-  const firstFile = firstServerFile ?? firstPlugin?.files[0];
-  selectedPluginName.value = firstServerFile ? "" : (firstPlugin?.name ?? "");
-  if (firstFile) void selectFile(firstFile);
-  else selectedPath.value = "";
+  const firstFile = firstServerFile ?? firstOtherFile ?? firstPlugin?.files[0];
+  selectedPluginName.value = firstFile?.scope === "plugin" ? (firstPlugin?.name ?? "") : "";
+  if (firstFile) {
+    void selectFile(firstFile);
+  } else {
+    activeScope.value = "server";
+    selectedPath.value = "";
+  }
 }
 
-function selectScope(scope: "server" | "plugin"): void {
+function selectScope(scope: ConfigurationScope): void {
+  if (scope === "other" && !catalog.value?.otherFiles.length) return;
   if (scope === "plugin" && !catalog.value?.pluginSupported) return;
   activeScope.value = scope;
   const current = selectedFile.value;
@@ -284,17 +310,18 @@ function selectScope(scope: "server" | "plugin"): void {
     selectedPath.value = "";
     return;
   }
-  const firstFile = catalog.value?.serverFiles[0];
+  const firstFile =
+    scope === "other" ? catalog.value?.otherFiles[0] : catalog.value?.serverFiles[0];
   if (firstFile) void selectFile(firstFile);
   else selectedPath.value = "";
 }
 
 function handleScopeTab(value: string | null): void {
-  if (value === "server" || value === "plugin") selectScope(value);
+  if (value === "server" || value === "other" || value === "plugin") selectScope(value);
 }
 
-function handleServerFileTab(value: string | null): void {
-  const file = catalog.value?.serverFiles.find((candidate) => candidate.path === value);
+function handleConfigurationFileTab(value: string | null): void {
+  const file = activeConfigurationFiles.value.find((candidate) => candidate.path === value);
   if (file) void selectFile(file);
 }
 
@@ -478,26 +505,30 @@ function errorMessage(cause: unknown): string {
         </Cmz_Button>
       </div>
 
-      <template v-if="activeScope === 'server'">
+      <template v-if="activeScope !== 'plugin'">
         <div v-if="catalogLoading" class="loading-state">
           <Cmz_Spinner size="lg" />
           <span>正在扫描配置文件…</span>
         </div>
 
-        <div v-else-if="!catalog?.serverFiles.length" class="empty-state">
+        <div v-else-if="activeConfigurationFiles.length === 0" class="empty-state">
           <FileCode2 :size="30" :stroke-width="1.5" />
-          <strong>尚未生成服务器配置</strong>
-          <span>请先启动一次服务器。</span>
+          <strong>
+            {{ activeScope === "other" ? "尚未发现其他配置" : "尚未生成服务器配置" }}
+          </strong>
+          <span>
+            {{ activeScope === "other" ? "当前实例没有额外配置文件。" : "请先启动一次服务器。" }}
+          </span>
         </div>
 
         <template v-else>
           <Cmz_TabBar
-            v-if="catalog.serverFiles.length > 1"
+            v-if="activeConfigurationFiles.length > 1"
             class="server-file-tabs"
             :model-value="selectedPath"
-            :tabs="serverFileTabs"
+            :tabs="configurationFileTabs"
             :level="2"
-            @update:model-value="handleServerFileTab"
+            @update:model-value="handleConfigurationFileTab"
           />
 
           <div v-if="documentLoading" class="loading-state">
