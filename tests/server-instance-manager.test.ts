@@ -259,6 +259,25 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(serverInformation.minecraft.version, request.gameVersion);
       assert.equal("name" in serverInformation, false);
     }
+
+    const countedInstance = instances[0]!;
+    await Promise.all([
+      mkdir(join(countedInstance.rootPath, "mods"), { recursive: true }),
+      mkdir(join(countedInstance.rootPath, "server", "mods"), { recursive: true }),
+      mkdir(join(countedInstance.rootPath, "plugins"), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(countedInstance.rootPath, "mods", "fabric-api.jar"), ""),
+      writeFile(join(countedInstance.rootPath, "server", "mods", "quilted-fabric-api.JAR"), ""),
+      writeFile(join(countedInstance.rootPath, "mods", "disabled.jar.disabled"), ""),
+      writeFile(join(countedInstance.rootPath, "plugins", "luckperms.jar"), ""),
+      writeFile(join(countedInstance.rootPath, "plugins", "config.yml"), ""),
+    ]);
+    assert.deepEqual(await manager.contentCounts(countedInstance.id), {
+      mods: 2,
+      plugins: 1,
+    });
+    await assert.rejects(manager.contentCounts("missing-instance"), /was not found/u);
     assert.deepEqual(coreContents, new Set(["core-task-1\n", "core-task-2\n"]));
     assert.deepEqual(
       new Set(await registry.listManifestPaths()),

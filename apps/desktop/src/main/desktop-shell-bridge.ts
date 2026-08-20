@@ -36,6 +36,7 @@ import {
   expectServerCoreTypes,
   expectServerModFilters,
   expectServerModDownloadResult,
+  expectServerInstanceContentCounts,
   expectServerModProjectDetails,
   expectServerModSearchResult,
   expectServerInstances,
@@ -210,6 +211,12 @@ export async function registerDesktopShellBridge(
             listServerInstances: async () =>
               expectServerInstances(
                 await kernel.callService(serverInstanceManagerContract, "list", []),
+              ),
+            readServerInstanceContentCounts: async (instanceId) =>
+              expectServerInstanceContentCounts(
+                await kernel.callService(serverInstanceManagerContract, "contentCounts", [
+                  instanceId,
+                ]),
               ),
             deleteServerInstance: async (instanceId) => {
               const result = await kernel.callService(serverInstanceManagerContract, "delete", [

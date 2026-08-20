@@ -2,6 +2,7 @@
 import {
   formatServerCoreType,
   type ServerInstanceClientService,
+  type ServerInstanceContentCounts,
   type ServerInstanceSnapshot,
   type ServerRuntimeClientService,
   type ServerRuntimeSnapshot,
@@ -16,6 +17,8 @@ import {
   FolderOpen,
   HardDrive,
   History,
+  Plug,
+  Puzzle,
   Server,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -38,6 +41,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
+const contentCounts = ref<ServerInstanceContentCounts>();
 const loading = ref(true);
 const instancesError = ref<string>();
 const runtimeError = ref<string>();
@@ -46,6 +50,7 @@ const folderOpenError = ref<string>();
 const currentTime = ref(Date.now());
 let instanceRequestId = 0;
 let runtimeRequestId = 0;
+let contentCountsRequestId = 0;
 let runtimeRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let instanceProjectionRefreshNeeded = false;
@@ -76,10 +81,6 @@ const coreTypeLabel = computed(() => {
   const serverType = selectedInstance.value?.serverType;
   return serverType ? formatServerCoreType(serverType) : "未知核心";
 });
-const coreFileName = computed(() => {
-  const instance = selectedInstance.value;
-  return instance?.coreArtifactFileName ?? fileNameFromPath(instance?.coreJarPath);
-});
 const formattedLastStartedAt = computed(() => formatDateTime(lastStartedAt.value, "尚未启动"));
 const formattedCreatedAt = computed(() => formatDateTime(selectedInstance.value?.createdAt));
 
@@ -103,12 +104,13 @@ watch(
     runtimeSnapshot.value = undefined;
     runtimeError.value = undefined;
     folderOpenError.value = undefined;
+    contentCounts.value = undefined;
     instanceProjectionRefreshNeeded = false;
     if (!registeredInstances.value.some((instance) => instance.id === instanceId)) {
       void loadInstances();
       return;
     }
-    void refreshRuntime();
+    void Promise.all([refreshRuntime(), refreshContentCounts()]);
   },
 );
 
@@ -125,7 +127,7 @@ async function loadInstances(): Promise<void> {
       ? props.selection.instanceId
       : instances[0]?.id;
     props.selection.instanceId = selectedId;
-    await refreshRuntime();
+    await Promise.all([refreshRuntime(), refreshContentCounts()]);
   } catch (error) {
     if (requestId === instanceRequestId) instancesError.value = errorMessage(error);
   } finally {
@@ -163,6 +165,25 @@ async function refreshRuntime(): Promise<void> {
     if (requestId === runtimeRequestId && instanceId === selectedInstanceId.value) {
       runtimeError.value = errorMessage(error);
     }
+  }
+}
+
+/** 数量统计由 Host 限定在当前已登记实例目录，Renderer 不读取本地文件系统。 */
+async function refreshContentCounts(): Promise<void> {
+  const instanceId = selectedInstanceId.value;
+  if (!instanceId) {
+    contentCounts.value = undefined;
+    return;
+  }
+  const requestId = ++contentCountsRequestId;
+  try {
+    const counts = await props.instances.contentCounts(instanceId);
+    if (requestId !== contentCountsRequestId || instanceId !== selectedInstanceId.value) return;
+    contentCounts.value = counts;
+  } catch (error) {
+    if (requestId !== contentCountsRequestId || instanceId !== selectedInstanceId.value) return;
+    contentCounts.value = undefined;
+    console.error("服务器内容数量读取失败", error);
   }
 }
 /** Renderer 只提交实例 ID；Host 会重新查询登记目录后再调用系统文件管理器。 */
@@ -215,10 +236,6 @@ function storageModeLabel(instance: ServerInstanceSnapshot): string {
 
 function sourceLabel(instance: ServerInstanceSnapshot): string {
   return instance.source === "downloaded" ? "核心下载创建" : "本地导入";
-}
-
-function fileNameFromPath(path: string | undefined): string {
-  return path?.split(/[\\/]/u).filter(Boolean).at(-1) ?? "—";
 }
 
 function instanceStyle(instance: ServerInstanceSnapshot): Record<string, string> {
@@ -334,10 +351,6 @@ function errorMessage(error: unknown): string {
               </dd>
             </div>
             <div class="information-item">
-              <dt><FileArchive :size="16" />核心文件</dt>
-              <dd>{{ coreFileName }}</dd>
-            </div>
-            <div class="information-item">
               <dt><HardDrive :size="16" />存储方式</dt>
               <dd>{{ storageModeLabel(selectedInstance) }}</dd>
             </div>
@@ -364,6 +377,19 @@ function errorMessage(error: unknown): string {
               </span>
             </div>
           </dl>
+        </section>
+
+        <section class="content-counts-panel" aria-label="服务器内容数量">
+          <article class="content-count-item">
+            <span class="content-count-icon"><Puzzle :size="18" :stroke-width="1.8" /></span>
+            <span>模组数量</span>
+            <strong>{{ contentCounts?.mods ?? "—" }}</strong>
+          </article>
+          <article class="content-count-item">
+            <span class="content-count-icon"><Plug :size="18" :stroke-width="1.8" /></span>
+            <span>插件数量</span>
+            <strong>{{ contentCounts?.plugins ?? "—" }}</strong>
+          </article>
         </section>
       </main>
     </div>

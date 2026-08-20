@@ -17,6 +17,7 @@ import {
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
+  type ServerInstanceContentCounts,
   type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -498,6 +499,23 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
         : {}),
     };
   });
+}
+
+export function expectServerInstanceContentCounts(value: unknown): ServerInstanceContentCounts {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid content counts");
+  }
+  const mods = Reflect.get(value, "mods");
+  const plugins = Reflect.get(value, "plugins");
+  if (
+    !Number.isSafeInteger(mods) ||
+    (mods as number) < 0 ||
+    !Number.isSafeInteger(plugins) ||
+    (plugins as number) < 0
+  ) {
+    throw new Error("server instance manager returned invalid content counts");
+  }
+  return { mods: mods as number, plugins: plugins as number };
 }
 
 const serverConfigurationKinds = new Set(["properties", "yaml", "json", "toml", "text"]);

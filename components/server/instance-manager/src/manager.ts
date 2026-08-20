@@ -4,11 +4,12 @@ import {
   serverCoreIconScheme,
   serverModLoaderForCoreType,
   type ServerCoreManagedDownloadResult,
+  type ServerInstanceContentCounts,
   type ServerInstanceSnapshot,
 } from "@seashard/contracts";
 import type { ServerCoreSourceService } from "@seashard/server-core-source";
 import { randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
   portableInstanceMetadataDirectoryName,
@@ -199,6 +200,21 @@ export class ServerInstanceManager {
       if (isMissingPathError(error)) return null;
       throw error;
     }
+  }
+
+  /** 只扫描已登记实例的标准内容目录；缺失目录按空目录处理。 */
+  async contentCounts(value: unknown): Promise<ServerInstanceContentCounts> {
+    const instanceId = expectDirectoryName(value, "instance id");
+    const { instance } = await this.findIndexedInstance(instanceId);
+    const [rootMods, serverMods, plugins] = await Promise.all([
+      countJarFiles(resolve(instance.rootPath, "mods")),
+      countJarFiles(resolve(instance.rootPath, "server", "mods")),
+      countJarFiles(resolve(instance.rootPath, "plugins")),
+    ]);
+    return {
+      mods: rootMods + serverMods,
+      plugins,
+    };
   }
 
   /** 停机时取消尚未完成的托管下载，等待目录清理后再卸载依赖组件。 */
@@ -423,6 +439,18 @@ export function normalizeInstanceNamePart(value: string): string {
   const normalized = value.trim().replace(/\s+/gu, "_");
   if (!normalized) throw new TypeError("server instance name part must not be empty");
   return normalized;
+}
+
+/** 标准内容目录只统计直接放置的 JAR；配置文件、子目录和禁用文件不计入数量。 */
+async function countJarFiles(directory: string): Promise<number> {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".jar"))
+      .length;
+  } catch (error) {
+    if (isMissingPathError(error)) return 0;
+    throw error;
+  }
 }
 
 function parseCreateManagedRequest(value: unknown): CreateManagedServerInstanceRequest {

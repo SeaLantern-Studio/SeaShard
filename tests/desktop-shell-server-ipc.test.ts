@@ -12,6 +12,7 @@ import {
   initialServerConfigurationDocument,
   serverConfigurationCatalog,
   serverInstances,
+  serverInstanceContentCounts,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
 
@@ -149,6 +150,10 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   );
   assert.deepEqual(harness.startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverInstancesContentCounts, 1, serverInstances[0]!.id),
+    serverInstanceContentCounts,
+  );
   assert.equal(
     await runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "instance-paper"),
     undefined,

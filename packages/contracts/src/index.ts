@@ -30,6 +30,7 @@ export const desktopChannels = {
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
   fileDownloadListTasks: "seashard.file-download.list-tasks",
   fileDownloadCancel: "seashard.file-download.cancel",
+  serverInstancesContentCounts: "seashard.server-instances.content-counts",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
@@ -432,9 +433,16 @@ export interface ServerInstanceSnapshot {
   totalRuntimeMs?: number;
 }
 
+export interface ServerInstanceContentCounts {
+  mods: number;
+  plugins: number;
+}
+
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
 export interface ServerInstanceClientService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
+  contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 仅按已登记实例 ID 请求宿主打开实例根目录，不接受 Renderer 提交任意路径。 */
   openFolder(instanceId: string): Promise<void>;
   /** 删除 Host 已登记的托管实例目录及其数据库路径记录。 */

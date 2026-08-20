@@ -300,6 +300,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.listServerInstances();
         });
+        config.runtime.handle(desktopChannels.serverInstancesContentCounts, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.readServerInstanceContentCounts(
+            expectNonEmptyString(instanceId, "server instance id"),
+          );
+        });
         config.runtime.handle(desktopChannels.serverInstancesOpenFolder, async (event, value) => {
           ownedWindow(event.sender.id);
           const instanceId = expectNonEmptyString(value, "server instance id");
@@ -561,6 +567,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadSaveAs);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
+          config.runtime.removeHandler(desktopChannels.serverInstancesContentCounts);
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverConfigurationList);

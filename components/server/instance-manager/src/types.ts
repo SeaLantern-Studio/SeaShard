@@ -2,6 +2,7 @@ import type {
   ServerCoreManagedDownloadResult,
   ServerCoreManagedDownloadRequest,
   ServerInstanceSnapshot,
+  ServerInstanceContentCounts,
   ServerModLoader,
 } from "@seashard/contracts";
 
@@ -25,6 +26,8 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerCoreManagedDownloadResult>;
   /** 从路径索引读取并合并 server.json 与 seashard.json。 */
   list(): Promise<readonly ServerInstanceSnapshot[]>;
+  /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
+  contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */
   recordStartedAt(instanceId: string, startedAt: string): Promise<void>;
   /** 服务器进程退出后，将本次运行区间累加到实例总运行时长。 */

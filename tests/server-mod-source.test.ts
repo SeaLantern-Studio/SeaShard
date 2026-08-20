@@ -82,6 +82,7 @@ function instanceService(
       throw new Error("not implemented in fixture");
     },
     list: async () => instances,
+    contentCounts: async () => ({ mods: 0, plugins: 0 }),
     recordStartedAt: async () => {},
     recordRuntime: async () => {},
     delete: async () => {},

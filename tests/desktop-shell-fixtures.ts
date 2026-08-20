@@ -18,6 +18,7 @@ import {
   type ServerConfigurationDocument,
   type ServerConfigurationWriteRequest,
   type ServerConsoleLine,
+  type ServerInstanceContentCounts,
   type ServerInstanceSnapshot,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -410,6 +411,11 @@ export const serverInstances = [
   },
 ] satisfies readonly ServerInstanceSnapshot[];
 
+export const serverInstanceContentCounts = {
+  mods: 3,
+  plugins: 5,
+} satisfies ServerInstanceContentCounts;
+
 export const serverConfigurationCatalog = {
   instanceId: "instance-paper",
   configurationRootPath: "C:/SeaShard/servers/instance-paper",
@@ -630,6 +636,7 @@ export async function createDesktopShellHarness(
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => serverInstances,
+      readServerInstanceContentCounts: async () => serverInstanceContentCounts,
       deleteServerInstance: async (instanceId) => {
         deletedServerInstances.push(instanceId);
       },

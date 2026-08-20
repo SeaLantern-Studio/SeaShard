@@ -132,6 +132,9 @@ export interface DesktopShellConfig {
     request: StartDesktopManagedServerCoreDownloadRequest,
   ): Promise<ServerCoreManagedDownloadResult>;
   listServerInstances(): ReturnType<ServerInstanceClientService["list"]>;
+  readServerInstanceContentCounts(
+    instanceId: string,
+  ): ReturnType<ServerInstanceClientService["contentCounts"]>;
   deleteServerInstance(instanceId: string): ReturnType<ServerInstanceClientService["delete"]>;
   listServerConfigurations(instanceId: string): Promise<ServerConfigurationCatalog>;
   readServerConfiguration(instanceId: string, path: string): Promise<ServerConfigurationDocument>;

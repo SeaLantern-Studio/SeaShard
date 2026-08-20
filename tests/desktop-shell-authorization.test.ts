@@ -83,6 +83,10 @@ await test("desktop shell rejects IPC from unowned renderers", async () => {
   );
   await assert.rejects(runtime.invoke(desktopChannels.serverInstancesList, 1), /request rejected/);
   await assert.rejects(
+    runtime.invoke(desktopChannels.serverInstancesContentCounts, 1, "instance-paper"),
+    /request rejected/,
+  );
+  await assert.rejects(
     runtime.invoke(desktopChannels.serverInstancesOpenFolder, 1, "instance-paper"),
     /request rejected/,
   );
