@@ -2,14 +2,14 @@ import { buildDirectJarPlan } from "../shared/direct-jar";
 import { requiredJavaMajor } from "../shared/java";
 import type { ServerProfileBuilder } from "../types";
 
-/** CraftBukkit 各代沿用外层 JAR，Java 版本由 Minecraft 版本决定。 */
-export const buildBukkitPlan: ServerProfileBuilder = (context) =>
+/** SpongeVanilla 各版本运行原始安装器 JAR，并固定到对应 Minecraft 要求的 Java。 */
+export const buildSpongeVanillaPlan: ServerProfileBuilder = (context) =>
   buildDirectJarPlan(context, {
-    serverType: "bukkit",
-    displayName: "CraftBukkit",
+    serverType: "spongevanilla",
+    displayName: "SpongeVanilla",
     javaMajor: requiredJavaMajor(context.instance.gameVersion),
-    programArguments: ["--nogui"],
+    exactJavaMajor: true,
+    programArguments: [],
     eula: "minecraft",
     writesServerProperties: true,
-    forbiddenWorkingDirectoryCharacters: ["!", "+"],
   });

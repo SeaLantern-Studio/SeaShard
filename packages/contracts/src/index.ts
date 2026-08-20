@@ -268,6 +268,13 @@ export const serverRuntimeSupportedTypes = [
   "leaves",
   "lightfall",
   "pufferfish",
+  "pufferfish_purpur",
+  "spigot",
+  "spongeforge",
+  "spongevanilla",
+  "travertine",
+  "vanilla-snapshot",
+  "youer",
 ] as const;
 export type ServerRuntimeSupportedType = (typeof serverRuntimeSupportedTypes)[number];
 

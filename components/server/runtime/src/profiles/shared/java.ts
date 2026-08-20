@@ -4,6 +4,10 @@ import type { JavaVersionRequirement } from "../types";
 export function minimumJava(major: number, description: string): JavaVersionRequirement {
   return { major, exact: false, description };
 }
+
+export function exactJava(major: number, description: string): JavaVersionRequirement {
+  return { major, exact: true, description };
+}
 /** 用于 Bukkit 等同时具有最低与最高 Java 主版本边界的精确制品。 */
 export function boundedJava(
   minimumMajor: number,
@@ -52,6 +56,7 @@ export function selectJavaInstallation(
 
 /** Vanilla、Paper 系核心按明确的 Minecraft 版本元数据选择 Java。 */
 export function requiredJavaMajor(gameVersion: string | undefined): number {
+  if (/^26\.\d+(?:\.\d+)?(?:[-+].*)?$/u.test(gameVersion ?? "")) return 25;
   const match = gameVersion?.match(/^1\.(\d+)(?:\.(\d+))?/u);
   if (!match) throw new Error("server instance is missing a valid Minecraft version");
   const minor = Number(match[1]);

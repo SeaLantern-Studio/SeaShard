@@ -21,9 +21,16 @@ import { buildNeoForgePlan } from "./cores/neoforge";
 import { buildNukkitxPlan } from "./cores/nukkitx";
 import { buildPaperPlan } from "./cores/paper";
 import { buildPufferfishPlan } from "./cores/pufferfish";
+import { buildPufferfishPurpurPlan } from "./cores/pufferfish-purpur";
 import { buildPurpurPlan } from "./cores/purpur";
 import { buildQuiltPlan } from "./cores/quilt";
 import { buildVanillaPlan } from "./cores/vanilla";
+import { buildSpigotPlan } from "./cores/spigot";
+import { buildSpongeForgePlan } from "./cores/spongeforge";
+import { buildSpongeVanillaPlan } from "./cores/spongevanilla";
+import { buildTravertinePlan } from "./cores/travertine";
+import { buildVanillaSnapshotPlan } from "./cores/vanilla-snapshot";
+import { buildYouerPlan } from "./cores/youer";
 import { buildVelocityPlan } from "./cores/velocity";
 import { buildManagedJvmArguments } from "./shared/jvm-arguments";
 import { validateInstancePaths } from "./shared/paths";
@@ -51,6 +58,13 @@ const profileBuilders = {
   leaves: buildLeavesPlan,
   lightfall: buildLightfallPlan,
   pufferfish: buildPufferfishPlan,
+  pufferfish_purpur: buildPufferfishPurpurPlan,
+  spigot: buildSpigotPlan,
+  spongeforge: buildSpongeForgePlan,
+  spongevanilla: buildSpongeVanillaPlan,
+  travertine: buildTravertinePlan,
+  "vanilla-snapshot": buildVanillaSnapshotPlan,
+  youer: buildYouerPlan,
 } satisfies Record<ServerRuntimeSupportedType, ServerProfileBuilder>;
 
 /**
@@ -76,7 +90,8 @@ export function buildServerLaunchPlan(
 export { parseJvmArguments } from "./shared/jvm-arguments";
 export { requiredJavaMajor, selectJavaInstallation } from "./shared/java";
 export type {
-  FileHashManifestPlan,
+  ServerPreparationCopyPlan,
+  ServerPreparationDownloadPlan,
   JavaVersionRequirement,
   JvmArgumentFilePlan,
   ServerLaunchPlan,

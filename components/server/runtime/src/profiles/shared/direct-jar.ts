@@ -1,7 +1,7 @@
 import type { ServerRuntimeSupportedType } from "@seashard/contracts";
 import { resolve } from "node:path";
 import type { ServerLaunchPlan, ServerProfileContext } from "../types";
-import { boundedJava, minimumJava } from "./java";
+import { boundedJava, exactJava, minimumJava } from "./java";
 import { argumentPath } from "./paths";
 
 export interface DirectJarOptions {
@@ -9,6 +9,7 @@ export interface DirectJarOptions {
   readonly displayName: string;
   readonly javaMajor: number;
   readonly maximumJavaMajor?: number;
+  readonly exactJavaMajor?: boolean;
   readonly jvmArguments?: readonly string[];
   readonly programArguments: readonly string[];
   readonly eula: "minecraft" | "interactive-minecraft" | "none";
@@ -32,8 +33,9 @@ export function buildDirectJarPlan(
   }
 
   const jarArgument = argumentPath(instance.rootPath, instance.coreJarPath);
-  const java =
-    options.maximumJavaMajor === undefined
+  const java = options.exactJavaMajor
+    ? exactJava(options.javaMajor, options.displayName)
+    : options.maximumJavaMajor === undefined
       ? minimumJava(options.javaMajor, options.displayName)
       : boundedJava(options.javaMajor, options.maximumJavaMajor, options.displayName);
   return {

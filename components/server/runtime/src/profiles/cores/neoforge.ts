@@ -1,8 +1,7 @@
 import { basename, resolve } from "node:path";
+import { requiredJavaMajor } from "../shared/java";
 import { argumentPath } from "../shared/paths";
 import type { ServerProfileBuilder } from "../types";
-
-const supportedNeoForgeVersion = "26.1.0.0-alpha.1+snapshot-1";
 
 /** NeoForge 安装后必须通过生成的 JVM 参数文件启动，不能直接运行 installer 或 universal JAR。 */
 export const buildNeoForgePlan: ServerProfileBuilder = ({
@@ -12,8 +11,8 @@ export const buildNeoForgePlan: ServerProfileBuilder = ({
 }) => {
   const artifactName = instance.coreArtifactFileName ?? basename(instance.coreJarPath);
   const version = /^neoforge-(.+)-installer\.jar$/iu.exec(artifactName)?.[1];
-  if (version !== supportedNeoForgeVersion) {
-    throw new Error(`NeoForge installer ${artifactName} is not supported by the verified profile`);
+  if (!version) {
+    throw new Error(`cannot determine NeoForge version from installer artifact ${artifactName}`);
   }
   const rootPath = resolve(instance.rootPath);
   const versionDirectory = resolve(rootPath, "libraries", "net", "neoforged", "neoforge", version);
@@ -41,9 +40,9 @@ export const buildNeoForgePlan: ServerProfileBuilder = ({
     serverType: "neoforge",
     displayName: "NeoForge",
     java: {
-      major: 25,
+      major: requiredJavaMajor(instance.gameVersion),
       exact: true,
-      description: "NeoForge 26.1",
+      description: `NeoForge ${instance.gameVersion}`,
     },
     preparation: {
       description: `NeoForge ${version}`,
@@ -52,7 +51,7 @@ export const buildNeoForgePlan: ServerProfileBuilder = ({
       sentinels,
       closeStdin: true,
       acceptNonZeroWithSentinels: false,
-      classPathArgumentFile: platformArgumentFile,
+      runtimeArgumentFile: platformArgumentFile,
     },
     workingDirectory: rootPath,
     requiredRuntimeFiles: sentinels,

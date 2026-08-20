@@ -9,14 +9,15 @@ import {
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, dirname, resolve } from "node:path";
 import {
   buildServerLaunchPlan,
+  parseJvmArguments,
   selectJavaInstallation,
   type ServerLaunchPlan,
   type ServerPreparationPlan,
-  type FileHashManifestPlan,
+  type ServerPreparationDownloadPlan,
 } from "./profiles";
 
 const maximumConsoleLines = 5_000;
@@ -41,11 +42,16 @@ export type SpawnServerProcess = (
   },
 ) => ChildProcessWithoutNullStreams;
 
+export type FetchPreparationArtifact = (url: string) => Promise<Uint8Array>;
+
 export interface ServerRuntimeFileSystem {
   access(path: string): Promise<void>;
+  copyFile(source: string, target: string): Promise<void>;
+  createDirectory(path: string): Promise<void>;
   readTextFile(path: string): Promise<string>;
+  writeBinaryFile(path: string, content: Uint8Array): Promise<void>;
   writeTextFile(path: string, content: string): Promise<void>;
-  hashFile(path: string, algorithm: "md5"): Promise<string>;
+  hashFile(path: string, algorithm: "md5" | "sha256"): Promise<string>;
 }
 
 export interface ServerRuntimeManagerOptions {
@@ -56,6 +62,7 @@ export interface ServerRuntimeManagerOptions {
   reportError?(error: unknown): void;
   spawnProcess?: SpawnServerProcess;
   fileSystem?: ServerRuntimeFileSystem;
+  fetchPreparationArtifact?: FetchPreparationArtifact;
   now?: () => Date;
   stopGracePeriodMs?: number;
 }
@@ -84,8 +91,13 @@ interface ActivePreparation {
 
 const defaultFileSystem: ServerRuntimeFileSystem = {
   access,
+  copyFile,
+  createDirectory: async (path) => {
+    await mkdir(path, { recursive: true });
+  },
   readTextFile: (path) => readFile(path, "utf8"),
   hashFile: hashFileStreaming,
+  writeBinaryFile: (path, content) => writeFile(path, content),
   writeTextFile: (path, content) => writeFile(path, content, "utf8"),
 };
 
@@ -102,11 +114,14 @@ export class ServerRuntimeManager {
   private readonly fileSystem: ServerRuntimeFileSystem;
   private readonly spawnProcess: SpawnServerProcess;
   private readonly stopGracePeriodMs: number;
+  private readonly fetchPreparationArtifact: FetchPreparationArtifact;
   private disposed = false;
   private disposeTask?: Promise<void>;
 
   constructor(private readonly options: ServerRuntimeManagerOptions) {
     this.fileSystem = options.fileSystem ?? defaultFileSystem;
+    this.fetchPreparationArtifact =
+      options.fetchPreparationArtifact ?? defaultFetchPreparationArtifact;
     this.spawnProcess =
       options.spawnProcess ??
       ((command, arguments_, spawnOptions) =>
@@ -435,6 +450,7 @@ export class ServerRuntimeManager {
   ): Promise<void> {
     const preparation = plan.preparation;
     if (!preparation) return;
+    await this.preparePreparationInputs(instanceId, preparation);
     if (await this.isPreparationComplete(preparation)) {
       this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 已准备完成。`);
       return;
@@ -456,6 +472,108 @@ export class ServerRuntimeManager {
       throw new Error(`${preparation.description} installer exited by signal ${outcome.signal}`);
     }
     this.appendLine(instanceId, "system", `[SeaShard] ${preparation.description} 准备完成。`);
+  }
+
+  /**
+   * Forge 等复合核心的安装器不在核心目录清单中；先校验并补齐固定输入，
+   * 再判断生成物是否完整，避免“已安装”实例漏装模组或重复运行安装器。
+   */
+  private async preparePreparationInputs(
+    instanceId: string,
+    preparation: ServerPreparationPlan,
+  ): Promise<void> {
+    for (const download of preparation.downloads ?? []) {
+      this.ensureActive();
+      const expectedSha256 = await this.resolveDownloadSha256(download);
+      this.ensureActive();
+      if (await this.hasExpectedSha256(download.path, expectedSha256)) continue;
+      this.ensureActive();
+      this.appendLine(
+        instanceId,
+        "system",
+        `[SeaShard] 正在下载 ${preparation.description} 的安装依赖…`,
+      );
+      const content = await this.fetchPreparationArtifact(download.url);
+      this.ensureActive();
+      const actualSha256 = createHash("sha256").update(content).digest("hex");
+      if (actualSha256 !== expectedSha256) {
+        throw new Error(
+          `${preparation.description} downloaded artifact failed SHA-256 verification`,
+        );
+      }
+      await this.fileSystem.createDirectory(dirname(download.path));
+      this.ensureActive();
+      await this.fileSystem.writeBinaryFile(download.path, content);
+      if (!(await this.hasExpectedSha256(download.path, expectedSha256))) {
+        throw new Error(`${preparation.description} installer was not written intact`);
+      }
+    }
+
+    for (const copy of preparation.copies ?? []) {
+      this.ensureActive();
+      const expectedSha256 =
+        copy.sha256 === undefined
+          ? await this.hashExistingFile(copy.source)
+          : this.normalizeSha256(copy.sha256, copy.source);
+      if (!(await this.hasExpectedSha256(copy.source, expectedSha256))) {
+        throw new Error(`${preparation.description} source artifact failed SHA-256 verification`);
+      }
+      this.ensureActive();
+      if (await this.hasExpectedSha256(copy.target, expectedSha256)) continue;
+      this.ensureActive();
+      await this.fileSystem.createDirectory(dirname(copy.target));
+      this.ensureActive();
+      await this.fileSystem.copyFile(copy.source, copy.target);
+      if (!(await this.hasExpectedSha256(copy.target, expectedSha256))) {
+        throw new Error(`${preparation.description} copied artifact failed SHA-256 verification`);
+      }
+    }
+  }
+
+  private async resolveDownloadSha256(download: ServerPreparationDownloadPlan): Promise<string> {
+    if (download.sha256 !== undefined) {
+      return this.normalizeSha256(download.sha256, download.path);
+    }
+    if (!download.sha256Url) {
+      throw new Error(`preparation download ${download.url} is missing SHA-256 metadata`);
+    }
+
+    const cached = download.sha256Path
+      ? await readOptionalText(this.fileSystem, download.sha256Path)
+      : undefined;
+    if (cached !== undefined) return this.normalizeSha256(cached, download.sha256Path!);
+
+    const checksumBytes = await this.fetchPreparationArtifact(download.sha256Url);
+    this.ensureActive();
+    const checksum = this.normalizeSha256(
+      new TextDecoder("utf-8", { fatal: true }).decode(checksumBytes),
+      download.sha256Url,
+    );
+    if (download.sha256Path) {
+      await this.fileSystem.createDirectory(dirname(download.sha256Path));
+      this.ensureActive();
+      await this.fileSystem.writeTextFile(download.sha256Path, `${checksum}\n`);
+    }
+    return checksum;
+  }
+
+  private normalizeSha256(value: string, source: string): string {
+    const normalized = value.trim().split(/\s+/u)[0]?.toLowerCase();
+    if (!normalized || !/^[a-f\d]{64}$/u.test(normalized)) {
+      throw new Error(`invalid SHA-256 declared for preparation input ${source}`);
+    }
+    return normalized;
+  }
+
+  private async hashExistingFile(path: string): Promise<string> {
+    await this.fileSystem.access(path);
+    return (await this.fileSystem.hashFile(path, "sha256")).toLowerCase();
+  }
+
+  private async hasExpectedSha256(path: string, expectedSha256: string): Promise<boolean> {
+    const normalized = this.normalizeSha256(expectedSha256, path);
+    if (!(await canAccess(this.fileSystem, path))) return false;
+    return (await this.fileSystem.hashFile(path, "sha256")).toLowerCase() === normalized;
   }
 
   private async runPreparationProcess(
@@ -518,59 +636,51 @@ export class ServerRuntimeManager {
       if (!(await canAccess(this.fileSystem, path))) return false;
     }
     if (
-      preparation.classPathArgumentFile &&
-      !(await this.hasCompleteArgumentFileClassPath(
+      preparation.runtimeArgumentFile &&
+      !(await this.hasCompleteRuntimeArgumentFile(
         preparation.workingDirectory,
-        preparation.classPathArgumentFile,
+        preparation.runtimeArgumentFile,
       ))
     ) {
       return false;
     }
-    return preparation.hashManifest ? this.hasMatchingHashManifest(preparation.hashManifest) : true;
+    return true;
   }
 
-  /** Mohist 的 installInfo 只含两行无标签 MD5，按集合比较可兼容其固定但未命名的顺序。 */
-  private async hasMatchingHashManifest(manifest: FileHashManifestPlan): Promise<boolean> {
-    const content = await readOptionalText(this.fileSystem, manifest.path);
-    if (content === undefined) return false;
-    const recorded = content
-      .split(/\r?\n/u)
-      .map((line) => line.trim().toLowerCase())
-      .filter((line) => line.length > 0);
-    if (
-      recorded.length !== manifest.targets.length ||
-      recorded.some((hash) => !/^[a-f\d]{32}$/u.test(hash))
-    ) {
-      return false;
-    }
-    const actual = await Promise.all(
-      manifest.targets.map((path) => this.fileSystem.hashFile(path, manifest.algorithm)),
-    );
-    const sortedActual = actual.toSorted();
-    return recorded.toSorted().every((hash, index) => hash === sortedActual[index]);
-  }
-
-  private async hasCompleteArgumentFileClassPath(
+  /** Forge 新版使用 -jar shim，NeoForge 等版本使用 classpath；两种生成格式都按实际目标校验。 */
+  private async hasCompleteRuntimeArgumentFile(
     workingDirectory: string,
     argumentFilePath: string,
   ): Promise<boolean> {
     const content = await readOptionalText(this.fileSystem, argumentFilePath);
     if (content === undefined) return false;
-    const lines = content
+    const uncommented = content
       .replaceAll("\r\n", "\n")
       .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"));
-    const classPathOption = lines.findIndex(
-      (line) => line === "-classpath" || line === "--class-path",
-    );
-    const classPath = classPathOption < 0 ? undefined : lines[classPathOption + 1];
-    if (!classPath) return false;
-    const separator = argumentFilePath.endsWith("win_args.txt") ? ";" : ":";
-    for (const entry of classPath.split(separator).filter(Boolean)) {
-      if (!(await canAccess(this.fileSystem, resolve(workingDirectory, entry)))) return false;
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    let arguments_: readonly string[];
+    try {
+      arguments_ = parseJvmArguments(uncommented);
+    } catch {
+      return false;
     }
-    return true;
+
+    const classPathOption = arguments_.findIndex(
+      (argument) => argument === "-cp" || argument === "-classpath" || argument === "--class-path",
+    );
+    const classPath = classPathOption < 0 ? undefined : arguments_[classPathOption + 1];
+    if (classPath) {
+      const separator = argumentFilePath.endsWith("win_args.txt") ? ";" : ":";
+      for (const entry of classPath.split(separator).filter(Boolean)) {
+        if (!(await canAccess(this.fileSystem, resolve(workingDirectory, entry)))) return false;
+      }
+      return true;
+    }
+
+    const jarOption = arguments_.findIndex((argument) => argument === "-jar");
+    const jarPath = jarOption < 0 ? undefined : arguments_[jarOption + 1];
+    return jarPath ? canAccess(this.fileSystem, resolve(workingDirectory, jarPath)) : false;
   }
 
   private async prepareRuntimeFiles(
@@ -897,7 +1007,7 @@ async function canAccess(fileSystem: ServerRuntimeFileSystem, path: string): Pro
   }
 }
 
-function hashFileStreaming(path: string, algorithm: "md5"): Promise<string> {
+function hashFileStreaming(path: string, algorithm: "md5" | "sha256"): Promise<string> {
   return new Promise((resolveHash, rejectHash) => {
     const hash = createHash(algorithm);
     const input = createReadStream(path);
@@ -905,6 +1015,14 @@ function hashFileStreaming(path: string, algorithm: "md5"): Promise<string> {
     input.on("data", (chunk: Buffer) => hash.update(chunk));
     input.once("end", () => resolveHash(hash.digest("hex")));
   });
+}
+
+async function defaultFetchPreparationArtifact(url: string): Promise<Uint8Array> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`failed to download preparation artifact: HTTP ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 function waitForSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {

@@ -11,8 +11,8 @@ import { Cmz_Button, Cmz_Console, type ConsoleLine } from "cmzya-modern-ui";
 import { Server } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ServerInstanceSelection } from "./server-selection";
-import MissingJava25Modal from "./MissingJava25Modal.vue";
-import { isMissingJava25RuntimeError, runtimeErrorMessage } from "./runtime-error";
+import MissingJavaModal from "./MissingJavaModal.vue";
+import { isMissingJavaRuntimeError, runtimeErrorMessage } from "./runtime-error";
 import { BoundedSequenceStore } from "./console-buffer";
 
 const maximumConsoleLines = 5_000;
@@ -31,8 +31,8 @@ const consoleLines = ref<ConsoleLine[]>([]);
 const commandHistory = ref<string[]>([]);
 const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
 const startingServer = ref(false);
-const missingJava25ModalOpen = ref(false);
-const missingJava25Message = ref("");
+const missingJavaModalOpen = ref(false);
+const missingJavaMessage = ref("");
 const serverLinesBySequence = new BoundedSequenceStore<ServerConsoleLine>(maximumConsoleLines);
 let localLines: Array<{ line: ConsoleLine; timestamp: string }> = [];
 let consoleRequestId = 0;
@@ -158,9 +158,9 @@ async function startSelectedServer(): Promise<void> {
     runtimeSnapshot.value = await props.runtime.start(instance.id);
   } catch (error) {
     const message = runtimeErrorMessage(error);
-    if (isMissingJava25RuntimeError(message)) {
-      missingJava25Message.value = message;
-      missingJava25ModalOpen.value = true;
+    if (isMissingJavaRuntimeError(message)) {
+      missingJavaMessage.value = message;
+      missingJavaModalOpen.value = true;
     } else {
       appendLocalLine("error", `[SeaShard] 启动请求失败：${message}`);
     }
@@ -370,7 +370,7 @@ function errorMessage(error: unknown): string {
         />
       </div>
     </template>
-    <MissingJava25Modal v-model:visible="missingJava25ModalOpen" :message="missingJava25Message" />
+    <MissingJavaModal v-model:visible="missingJavaModalOpen" :message="missingJavaMessage" />
   </section>
 </template>
 

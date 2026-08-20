@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { Cmz_Button, Cmz_Modal } from "cmzya-modern-ui";
 import { AlertTriangle } from "lucide-vue-next";
+import { computed } from "vue";
 
 const props = defineProps<{
   visible: boolean;
   message: string;
 }>();
+
+const title = computed(() => {
+  const majorVersion = /未检测到已启用的 Java (\d+)/u.exec(props.message)?.[1];
+  return majorVersion ? `缺少 Java ${majorVersion}` : "缺少所需 Java";
+});
 
 const emit = defineEmits<{
   "update:visible": [visible: boolean];
@@ -19,7 +25,7 @@ function setVisible(visible: boolean): void {
 <template>
   <Cmz_Modal
     :visible="props.visible"
-    title="缺少 Java 25"
+    :title="title"
     width="440px"
     :close-on-overlay="false"
     @close="setVisible(false)"
