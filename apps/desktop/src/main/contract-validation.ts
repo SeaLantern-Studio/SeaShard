@@ -5,6 +5,7 @@ import {
   serverDownloadConnectionLimits,
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
+  serverModSearchLimits,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
   type ServerConsoleLine,
@@ -18,6 +19,11 @@ import {
   type ServerCoreType,
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
+  type ServerModEnvironment,
+  type ServerModFilterOption,
+  type ServerModFilters,
+  type ServerModProject,
+  type ServerModSearchResult,
 } from "@seashard/contracts";
 import { isAbsolute } from "node:path";
 
@@ -79,6 +85,166 @@ export function expectServerCoreArtifacts(value: unknown): ServerCoreArtifact[] 
     }
     return artifact as unknown as ServerCoreArtifact;
   });
+}
+
+const serverModEnvironments = new Set<ServerModEnvironment>([
+  "client_and_server",
+  "server_only",
+  "server_only_client_optional",
+  "dedicated_server_only",
+  "client_or_server",
+  "client_or_server_prefers_both",
+]);
+
+function isServerModIconUrl(value: unknown, projectId: unknown): value is string {
+  if (typeof value !== "string" || typeof projectId !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "cdn.modrinth.com" &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      !url.search &&
+      !url.hash &&
+      url.pathname.startsWith(`/data/${encodeURIComponent(projectId)}/`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function expectServerModFilterOptions(
+  value: unknown,
+  label: string,
+  maximumItems: number,
+): ServerModFilterOption[] {
+  if (!Array.isArray(value) || value.length > maximumItems) {
+    throw new Error(`server mod source returned invalid ${label}`);
+  }
+  const seen = new Set<string>();
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`server mod source returned invalid ${label} ${index}`);
+    }
+    const id = Reflect.get(item, "id");
+    const optionLabel = Reflect.get(item, "label");
+    if (
+      typeof id !== "string" ||
+      !id ||
+      id.length > 128 ||
+      seen.has(id) ||
+      typeof optionLabel !== "string" ||
+      !optionLabel ||
+      optionLabel.length > 200
+    ) {
+      throw new Error(`server mod source returned invalid ${label} ${index}`);
+    }
+    seen.add(id);
+    return { id, label: optionLabel };
+  });
+}
+
+export function expectServerModFilters(value: unknown): ServerModFilters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server mod source returned invalid filters");
+  }
+  const filters = value as Record<string, unknown>;
+  const sources = expectServerModFilterOptions(filters.sources, "sources", 1);
+  if (sources.length !== 1 || sources[0]?.id !== "modrinth") {
+    throw new Error("server mod source returned invalid sources");
+  }
+  return {
+    sources,
+    tags: expectServerModFilterOptions(filters.tags, "tags", 128),
+    versions: expectServerModFilterOptions(filters.versions, "versions", 1_024),
+    loaders: expectServerModFilterOptions(filters.loaders, "loaders", 64),
+  };
+}
+
+export function expectServerModSearchResult(value: unknown): ServerModSearchResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server mod source returned an invalid search result");
+  }
+  const result = value as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(result.offset) ||
+    (result.offset as number) < 0 ||
+    !Number.isSafeInteger(result.limit) ||
+    (result.limit as number) < 0 ||
+    (result.limit as number) > serverModSearchLimits.maximumPageSize ||
+    !Number.isSafeInteger(result.total) ||
+    (result.total as number) < 0 ||
+    !Array.isArray(result.items) ||
+    result.items.length > (result.limit as number)
+  ) {
+    throw new Error("server mod source returned an invalid search result");
+  }
+  return {
+    items: result.items.map(expectServerModProject),
+    offset: result.offset as number,
+    limit: result.limit as number,
+    total: result.total as number,
+  };
+}
+
+function expectServerModProject(value: unknown, index: number): ServerModProject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server mod source returned invalid project ${index}`);
+  }
+  const project = value as Record<string, unknown>;
+  const requiredStrings = ["id", "slug", "title", "description", "author", "dateModified"] as const;
+  const environment = expectServerModStrings(
+    project.environment,
+    `project ${index} environment`,
+    16,
+  );
+  if (
+    project.source !== "modrinth" ||
+    requiredStrings.some(
+      (field) =>
+        typeof project[field] !== "string" ||
+        (field !== "description" && !project[field]) ||
+        (project[field] as string).length > 1_000,
+    ) ||
+    (project.iconUrl !== undefined && !isServerModIconUrl(project.iconUrl, project.id)) ||
+    Number.isNaN(Date.parse(project.dateModified as string)) ||
+    !Number.isSafeInteger(project.downloads) ||
+    (project.downloads as number) < 0 ||
+    !Number.isSafeInteger(project.follows) ||
+    (project.follows as number) < 0 ||
+    environment.length === 0 ||
+    environment.some((item) => !serverModEnvironments.has(item as ServerModEnvironment))
+  ) {
+    throw new Error(`server mod source returned invalid project ${index}`);
+  }
+  return {
+    source: "modrinth",
+    id: project.id as string,
+    slug: project.slug as string,
+    title: project.title as string,
+    ...(project.iconUrl ? { iconUrl: project.iconUrl as string } : {}),
+    description: project.description as string,
+    author: project.author as string,
+    downloads: project.downloads as number,
+    follows: project.follows as number,
+    dateModified: project.dateModified as string,
+    environment: environment as ServerModEnvironment[],
+    categories: expectServerModStrings(project.categories, `project ${index} categories`, 64),
+    versions: expectServerModStrings(project.versions, `project ${index} versions`, 512),
+  };
+}
+
+function expectServerModStrings(value: unknown, label: string, maximumItems: number): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > maximumItems ||
+    value.some((item) => typeof item !== "string" || !item || item.length > 128)
+  ) {
+    throw new Error(`server mod source returned invalid ${label}`);
+  }
+  return value;
 }
 
 export function expectServerCoreDownloadTask(value: unknown): ServerCoreDownloadTaskSnapshot {

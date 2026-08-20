@@ -8,6 +8,8 @@ import type {
   ServerCoreManagedDownloadRequest,
   ServerCoreSaveAsRequest,
   ServerCoreSourceClientService,
+  ServerModSearchRequest,
+  ServerModSourceClientService,
   ServerInstanceClientService,
   ServerConsoleLine,
   ServerRuntimeClientService,
@@ -87,6 +89,10 @@ export interface DesktopShellConfig {
     serverType: string,
     gameVersion: string,
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
+  readServerModFilters(): ReturnType<ServerModSourceClientService["getFilters"]>;
+  searchServerMods(
+    request: ServerModSearchRequest,
+  ): ReturnType<ServerModSourceClientService["search"]>;
   resolveServerCoreIconPath(sha256: string): Promise<string | undefined>;
   resolveServerInstanceIconPath(instanceId: string): Promise<string | undefined>;
   readServerSettings(): ReturnType<ServerSettingsClientService["get"]>;

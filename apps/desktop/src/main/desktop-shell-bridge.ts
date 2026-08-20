@@ -6,6 +6,7 @@ import {
   type ServerConsoleLine,
   type ServerConfigurationWriteRequest,
   type ServerStartupDefaultsUpdate,
+  type ServerModSearchRequest,
 } from "@seashard/contracts";
 import {
   createDesktopShellModule,
@@ -15,6 +16,7 @@ import {
 import type { JsonValue } from "@seashard/plugin-sdk";
 import { projectClientEntryPublication, type PluginKernel } from "@seashard/plugin-system";
 import { serverCoreSourceContract } from "@seashard/server-core-source";
+import { serverModSourceContract } from "@seashard/server-mod-source";
 import { serverInstanceManagerContract } from "@seashard/server-instance-manager";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { isAbsolute, join } from "node:path";
@@ -30,6 +32,8 @@ import {
   expectServerCoreDownloadTasks,
   expectServerCoreStrings,
   expectServerCoreTypes,
+  expectServerModFilters,
+  expectServerModSearchResult,
   expectServerInstances,
   expectServerRuntimeSnapshot,
   expectServerSettingsSnapshot,
@@ -101,6 +105,16 @@ export async function registerDesktopShellBridge(
                 await kernel.callService(serverCoreSourceContract, "listArtifacts", [
                   serverType,
                   gameVersion,
+                ]),
+              ),
+            readServerModFilters: async () =>
+              expectServerModFilters(
+                await kernel.callService(serverModSourceContract, "getFilters", []),
+              ),
+            searchServerMods: async (request: ServerModSearchRequest) =>
+              expectServerModSearchResult(
+                await kernel.callService(serverModSourceContract, "search", [
+                  request as unknown as JsonValue,
                 ]),
               ),
             resolveServerCoreIconPath: async (sha256) => {

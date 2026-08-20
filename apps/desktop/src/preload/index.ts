@@ -6,6 +6,7 @@ import {
   type ServerConsoleLine,
   type ServerCoreSaveAsRequest,
   type ServerConfigurationWriteRequest,
+  type ServerModSearchRequest,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -20,6 +21,11 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverCoreVersions, serverType),
     listArtifacts: (serverType: string, gameVersion: string) =>
       ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
+  }),
+  serverMods: Object.freeze({
+    getFilters: () => ipcRenderer.invoke(desktopChannels.serverModFilters),
+    search: (request: ServerModSearchRequest) =>
+      ipcRenderer.invoke(desktopChannels.serverModSearch, request),
   }),
   serverSettings: Object.freeze({
     get: () => ipcRenderer.invoke(desktopChannels.serverSettingsGet),

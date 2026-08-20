@@ -1,13 +1,7 @@
-import { Archive, Folder, Package, Puzzle, Server, Star } from "lucide-vue-next";
+import { Archive, Folder, Package, Server, Star } from "lucide-vue-next";
 import type { Component } from "vue";
 
-export type ResourceCategoryId =
-  | "server-core"
-  | "mod"
-  | "modpack"
-  | "datapack"
-  | "world"
-  | "favorites";
+export type ResourceCategoryId = "server-core" | "modpack" | "datapack" | "world" | "favorites";
 
 export interface ResourceCategory {
   readonly id: ResourceCategoryId;
@@ -28,14 +22,6 @@ export const serverCoreResourceCategory: ResourceCategory = {
 };
 
 export const otherResourceCategories: readonly ResourceCategory[] = [
-  {
-    id: "mod",
-    path: "/server/download/mod",
-    label: "Mod",
-    description: "浏览服务端 Mod",
-    icon: Puzzle,
-    order: 20,
-  },
   {
     id: "modpack",
     path: "/server/download/modpack",

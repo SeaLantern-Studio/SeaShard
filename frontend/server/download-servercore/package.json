@@ -1,5 +1,5 @@
 {
-  "name": "@seashard/server-download-ui",
+  "name": "@seashard/server-download-servercore-ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",

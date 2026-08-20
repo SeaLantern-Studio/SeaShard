@@ -14,6 +14,8 @@ export const desktopChannels = {
   serverCoreVersions: "seashard.server-core.versions",
   serverCoreArtifacts: "seashard.server-core.artifacts",
   dialogSelectDirectory: "seashard.dialog.select-directory",
+  serverModFilters: "seashard.server-mod.filters",
+  serverModSearch: "seashard.server-mod.search",
   serverSettingsGet: "seashard.server-settings.get",
   serverSettingsSetResourceDownloadDirectory:
     "seashard.server-settings.set-resource-download-directory",
@@ -46,6 +48,8 @@ export const desktopChannels = {
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
+/** 服务端 Mod 来源面向 Client 的只读搜索 Contract。 */
+export const serverModSourceContract = "seashard.server-mod-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
 export const serverCoreIconHost = "server-core-icon";
@@ -188,6 +192,77 @@ export interface ServerCoreSourceClientService {
   listTypes(): Promise<readonly ServerCoreType[]>;
   listVersions(serverType: string): Promise<readonly string[]>;
   listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
+}
+
+export type ServerModSource = "modrinth";
+export type ServerModSearchIndex = "relevance" | "downloads" | "follows" | "newest" | "updated";
+export type ServerModEnvironment =
+  | "client_and_server"
+  | "server_only"
+  | "server_only_client_optional"
+  | "dedicated_server_only"
+  | "client_or_server"
+  | "client_or_server_prefers_both";
+
+/** 搜索分页的默认值与边界；Host 会再次校验，避免 Renderer 发起无界请求。 */
+export const serverModSearchLimits = {
+  pageSize: 20,
+  maximumPageSize: 50,
+  maximumQueryLength: 200,
+} as const;
+
+export interface ServerModFilterOption {
+  id: string;
+  label: string;
+}
+
+/** Modrinth 可用于服务端 Mod 检索的稳定筛选元数据。 */
+export interface ServerModFilters {
+  sources: readonly ServerModFilterOption[];
+  tags: readonly ServerModFilterOption[];
+  versions: readonly ServerModFilterOption[];
+  loaders: readonly ServerModFilterOption[];
+}
+
+/** Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。 */
+export interface ServerModSearchRequest {
+  source: ServerModSource;
+  query: string;
+  tag: string;
+  index: ServerModSearchIndex;
+  gameVersion: string;
+  loader: string;
+  offset: number;
+  limit: number;
+}
+
+/** Modrinth 搜索结果的最小安全投影；图标仅允许来自经过 Host 校验的 Modrinth CDN。 */
+export interface ServerModProject {
+  source: ServerModSource;
+  id: string;
+  slug: string;
+  title: string;
+  iconUrl?: string;
+  description: string;
+  author: string;
+  downloads: number;
+  follows: number;
+  dateModified: string;
+  environment: readonly ServerModEnvironment[];
+  categories: readonly string[];
+  versions: readonly string[];
+}
+
+export interface ServerModSearchResult {
+  items: readonly ServerModProject[];
+  offset: number;
+  limit: number;
+  total: number;
+}
+
+export interface ServerModSourceClientService {
+  getFilters(): Promise<ServerModFilters>;
+  search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
 }
 /** 默认下载并发数的稳定边界；服务端设置和公共下载器必须保持一致。 */
 export const serverDownloadConnectionLimits = {
@@ -491,6 +566,7 @@ export interface SeaShardDesktopApi {
   serverCore: ServerCoreSourceClientService;
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
+  serverMods: ServerModSourceClientService;
   serverInstances: ServerInstanceClientService;
   serverRuntime: ServerRuntimeClientService;
   serverConfiguration: ServerConfigurationClientService;

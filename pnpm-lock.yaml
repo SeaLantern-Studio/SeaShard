@@ -115,15 +115,21 @@ importers:
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../../components/server/core-source
-      '@seashard/server-download-ui':
+      '@seashard/server-download-mod-ui':
         specifier: workspace:*
-        version: link:../../frontend/server/download
+        version: link:../../frontend/server/download-mod
+      '@seashard/server-download-servercore-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/download-servercore
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../../components/server/instance-manager
       '@seashard/server-launch-ui':
         specifier: workspace:*
         version: link:../../frontend/server/launch
+      '@seashard/server-mod-source':
+        specifier: workspace:*
+        version: link:../../components/server/mod-source
       '@seashard/server-overview-ui':
         specifier: workspace:*
         version: link:../../frontend/server/overview
@@ -281,6 +287,15 @@ importers:
         specifier: workspace:*
         version: link:../core-source
 
+  components/server/mod-source:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+
   components/server/runtime:
     dependencies:
       '@seashard/contracts':
@@ -386,7 +401,28 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
-  frontend/server/download:
+  frontend/server/download-mod:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.6.2
+        version: 0.6.2(patch_hash=b6b09ed20db45e2e783bdfc28c5ad3d87796ae501e4e28e33fc568ea8a8c0dc1)(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/download-servercore:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*

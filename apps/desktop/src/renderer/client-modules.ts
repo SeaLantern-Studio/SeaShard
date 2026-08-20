@@ -13,8 +13,11 @@ export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleL
   "seashard.personalization-ui/personalization.client": {
     load: () => import("@seashard/personalization-ui/client"),
   },
-  "seashard.server-download-ui/server-download.client": {
-    load: () => import("@seashard/server-download-ui/client"),
+  "seashard.server-download-mod-ui/server-download-mod.client": {
+    load: () => import("@seashard/server-download-mod-ui/client"),
+  },
+  "seashard.server-download-servercore-ui/server-download-servercore.client": {
+    load: () => import("@seashard/server-download-servercore-ui/client"),
   },
   "seashard.server-configuration-ui/server-configuration.client": {
     load: () => import("@seashard/server-configuration-ui/client"),

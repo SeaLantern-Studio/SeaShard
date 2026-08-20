@@ -5,7 +5,8 @@ import type { PluginKernel } from "@seashard/plugin-system";
 import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
 import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui";
 import { serverConsoleUiManifest } from "@seashard/server-console-ui";
-import { serverDownloadUiManifest } from "@seashard/server-download-ui";
+import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
+import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
@@ -57,14 +58,29 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       },
     ],
   });
-  // 服务器下载页是独立 Client Entry；真实核心目录通过收窄的只读 Client Service 提供。
+  // 服务器核心下载页独立消费核心目录与下载 Contract。
   await kernel.registerBuiltIn({
-    manifest: serverDownloadUiManifest,
+    manifest: serverDownloadServerCoreUiManifest,
     loaders: {},
     bindings: [
       {
-        id: "core.server-download.ui",
-        entryId: "server-download.client",
+        id: "core.server-download-servercore.ui",
+        entryId: "server-download-servercore.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Mod 下载页单独发布，只申请 Mod 来源 Contract。
+  await kernel.registerBuiltIn({
+    manifest: serverDownloadModUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-download-mod.ui",
+        entryId: "server-download-mod.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

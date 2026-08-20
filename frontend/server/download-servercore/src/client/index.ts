@@ -6,7 +6,7 @@ import {
 } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { defineComponent, h } from "vue";
-import ServerDownloadPage from "./ServerDownloadPage.vue";
+import ServerCoreDownloadPage from "./ServerCoreDownloadPage.vue";
 import { downloadResourceCategories } from "./resource-categories";
 
 export default defineClientUiModule({
@@ -16,8 +16,8 @@ export default defineClientUiModule({
 
     for (const category of downloadResourceCategories) {
       const page = defineComponent({
-        name: `ServerDownload_${category.id}`,
-        setup: () => () => h(ServerDownloadPage, { coreSource, downloads, category }),
+        name: `ServerCoreDownload_${category.id}`,
+        setup: () => () => h(ServerCoreDownloadPage, { coreSource, downloads, category }),
       });
 
       context.contribute("navigation.page", {

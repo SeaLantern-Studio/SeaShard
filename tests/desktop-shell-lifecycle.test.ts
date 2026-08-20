@@ -11,6 +11,9 @@ import {
   paperArtifact,
   serverConsoleLine,
   serverCoreTypes,
+  serverModFilters,
+  serverModSearchRequest,
+  serverModSearchResult,
   snapshot,
 } from "./desktop-shell-fixtures.ts";
 
@@ -78,6 +81,24 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     runtime.invoke(desktopChannels.serverCoreArtifacts, 999, "paper", "1.21.1"),
     /request rejected/,
   );
+  assert.deepEqual(await runtime.invoke(desktopChannels.serverModFilters, 1), serverModFilters);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverModSearch, 1, serverModSearchRequest),
+    serverModSearchResult,
+  );
+  assert.deepEqual(harness.serverModSearchRequests, [serverModSearchRequest]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModSearch, 1, {
+      ...serverModSearchRequest,
+      limit: 51,
+    }),
+    /limit must be between/,
+  );
+  await assert.rejects(runtime.invoke(desktopChannels.serverModFilters, 999), /request rejected/);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModSearch, 999, serverModSearchRequest),
+    /request rejected/,
+  );
   assert.deepEqual(harness.readySnapshots, []);
   assert.deepEqual(await runtime.invoke(desktopChannels.clientBootstrap, 1), {
     protocolVersion: 1,
@@ -131,6 +152,8 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreVersions), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverModFilters), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverModSearch), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverSettingsGet), false);
   assert.equal(
     runtime.handlers.has(desktopChannels.serverSettingsSetResourceDownloadDirectory),

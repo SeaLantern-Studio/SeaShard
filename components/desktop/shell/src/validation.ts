@@ -1,7 +1,10 @@
-import type {
-  ServerConfigurationWriteRequest,
-  ServerCoreSaveAsRequest,
-  ServerStartupDefaultsUpdate,
+import {
+  serverModSearchLimits,
+  type ServerConfigurationWriteRequest,
+  type ServerCoreSaveAsRequest,
+  type ServerModSearchIndex,
+  type ServerModSearchRequest,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 
 export function expectNonEmptyString(value: unknown, label: string): string {
@@ -55,6 +58,62 @@ export function expectServerCoreSaveAsRequest(value: unknown): ServerCoreSaveAsR
     artifactFileName: expectNonEmptyString(record.artifactFileName, "artifact file name"),
     destinationFileName: expectNonEmptyString(record.destinationFileName, "destination file name"),
   };
+}
+
+const serverModSearchIndexes = new Set<ServerModSearchIndex>([
+  "relevance",
+  "downloads",
+  "follows",
+  "newest",
+  "updated",
+]);
+const serverModFilterPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
+
+/** 收窄 Renderer 的搜索参数，分页和 Facet 都只能落在公开 Contract 的固定边界内。 */
+export function expectServerModSearchRequest(value: unknown): ServerModSearchRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("server mod search request must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const query = expectString(record.query, "server mod search query").trim();
+  const tag = expectServerModFilter(record.tag, "server mod tag");
+  const gameVersion = expectServerModFilter(record.gameVersion, "server mod game version");
+  const loader = expectServerModFilter(record.loader, "server mod loader");
+  const offset = expectSafeInteger(record.offset, "server mod search offset");
+  const limit = expectSafeInteger(record.limit, "server mod search limit");
+  if (record.source !== "modrinth") {
+    throw new TypeError("server mod source must be modrinth");
+  }
+  if (query.length > serverModSearchLimits.maximumQueryLength || query.includes("\0")) {
+    throw new TypeError("server mod search query is too long or contains NUL");
+  }
+  if (!serverModSearchIndexes.has(record.index as ServerModSearchIndex)) {
+    throw new TypeError("server mod search index is invalid");
+  }
+  if (offset < 0) throw new TypeError("server mod search offset must not be negative");
+  if (limit < 1 || limit > serverModSearchLimits.maximumPageSize) {
+    throw new TypeError(
+      `server mod search limit must be between 1 and ${serverModSearchLimits.maximumPageSize}`,
+    );
+  }
+  return {
+    source: "modrinth",
+    query,
+    tag,
+    index: record.index as ServerModSearchIndex,
+    gameVersion,
+    loader,
+    offset,
+    limit,
+  };
+}
+
+function expectServerModFilter(value: unknown, label: string): string {
+  const filter = expectString(value, label).trim();
+  if (filter && !serverModFilterPattern.test(filter)) {
+    throw new TypeError(`${label} is invalid`);
+  }
+  return filter;
 }
 
 export function expectServerConfigurationWriteRequest(

@@ -1,9 +1,14 @@
 import {
+  serverCoreDownloadContract,
+  serverCoreSourceContract,
   serverConfigurationContract,
   serverInstanceManagerContract,
   serverRuntimeContract,
+  serverModSourceContract,
 } from "../packages/contracts/src/index.ts";
 import { serverConfigurationUiManifest } from "../frontend/server/configuration/src/index.ts";
+import { serverDownloadModUiManifest } from "../frontend/server/download-mod/src/index.ts";
+import { serverDownloadServerCoreUiManifest } from "../frontend/server/download-servercore/src/index.ts";
 import { serverConsoleUiManifest } from "../frontend/server/console/src/index.ts";
 import { serverLaunchUiManifest } from "../frontend/server/launch/src/index.ts";
 import { serverOverviewUiManifest } from "../frontend/server/overview/src/index.ts";
@@ -11,6 +16,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const components = [
+  {
+    manifest: serverDownloadServerCoreUiManifest,
+    pluginId: "seashard.server-download-servercore-ui",
+    entryId: "server-download-servercore.client",
+    permissions: [serverCoreSourceContract, serverCoreDownloadContract],
+  },
+  {
+    manifest: serverDownloadModUiManifest,
+    pluginId: "seashard.server-download-mod-ui",
+    entryId: "server-download-mod.client",
+    permissions: [serverModSourceContract],
+  },
   {
     manifest: serverOverviewUiManifest,
     pluginId: "seashard.server-overview-ui",

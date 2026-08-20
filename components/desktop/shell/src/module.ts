@@ -16,6 +16,7 @@ import {
   expectSafeInteger,
   expectServerConfigurationWriteRequest,
   expectServerCoreSaveAsRequest,
+  expectServerModSearchRequest,
   expectServerStartupDefaultsUpdate,
   expectString,
 } from "./validation";
@@ -440,6 +441,18 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
+        config.runtime.handle(desktopChannels.serverModFilters, async (event) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("server mod filters request rejected");
+          }
+          return config.readServerModFilters();
+        });
+        config.runtime.handle(desktopChannels.serverModSearch, async (event, request) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("server mod search request rejected");
+          }
+          return config.searchServerMods(expectServerModSearchRequest(request));
+        });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -470,6 +483,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreTypes);
           config.runtime.removeHandler(desktopChannels.serverCoreVersions);
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
+          config.runtime.removeHandler(desktopChannels.serverModFilters);
+          config.runtime.removeHandler(desktopChannels.serverModSearch);
           config.runtime.removeHandler(desktopChannels.serverSettingsGet);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetResourceDownloadDirectory);
           config.runtime.removeHandler(desktopChannels.serverSettingsSetDefaultDownloadConnections);

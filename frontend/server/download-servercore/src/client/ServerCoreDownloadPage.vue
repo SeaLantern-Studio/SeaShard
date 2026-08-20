@@ -472,4 +472,4 @@ function errorMessage(error: unknown): string {
   </section>
 </template>
 
-<style scoped src="./ServerDownloadPage.css"></style>
+<style scoped src="./ServerCoreDownloadPage.css"></style>

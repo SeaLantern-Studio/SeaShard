@@ -13,6 +13,7 @@ import {
   createServerCoreSourceModule,
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
+import { createServerModSourceModule, serverModSourceManifest } from "@seashard/server-mod-source";
 import {
   createServerConfigurationModule,
   serverConfigurationManifest,
@@ -114,6 +115,29 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       {
         id: "core.server-core-source",
         entryId: "server-core-source.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Modrinth 目录独立于服务器核心源；只发布受控的服务端 Mod 搜索与筛选能力。
+  await kernel.registerBuiltIn({
+    manifest: serverModSourceManifest,
+    loaders: {
+      "server-mod-source.host": {
+        load: async () =>
+          createServerModSourceModule({
+            fetchProvider: downloadFetchProvider,
+            userAgent: `SeaShard/${seaShardVersion}`,
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.server-mod-source",
+        entryId: "server-mod-source.host",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

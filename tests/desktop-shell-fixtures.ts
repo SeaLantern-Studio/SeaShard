@@ -8,6 +8,9 @@ import {
   type RuntimeSnapshot,
   type ServerCoreArtifact,
   type ServerCoreDownloadTaskSnapshot,
+  type ServerModFilters,
+  type ServerModSearchRequest,
+  type ServerModSearchResult,
   type ServerConsoleLine,
   type ServerConfigurationCatalog,
   type ServerConfigurationDocument,
@@ -324,6 +327,46 @@ export const serverCoreTypes = [
   },
 ] satisfies readonly ServerCoreType[];
 
+export const serverModFilters = {
+  sources: [{ id: "modrinth", label: "Modrinth" }],
+  tags: [{ id: "utility", label: "实用工具" }],
+  versions: [{ id: "1.21.1", label: "1.21.1" }],
+  loaders: [{ id: "fabric", label: "Fabric" }],
+} satisfies ServerModFilters;
+
+export const serverModSearchRequest = {
+  source: "modrinth",
+  query: "server tools",
+  tag: "utility",
+  index: "downloads",
+  gameVersion: "1.21.1",
+  loader: "fabric",
+  offset: 0,
+  limit: 20,
+} satisfies ServerModSearchRequest;
+
+export const serverModSearchResult = {
+  items: [
+    {
+      source: "modrinth",
+      id: "server-mod-1",
+      slug: "server-tools",
+      title: "Server Tools",
+      description: "Utilities for dedicated servers.",
+      author: "SeaLantern",
+      downloads: 12_345,
+      follows: 678,
+      dateModified: "2026-08-17T10:00:00Z",
+      environment: ["server_only"],
+      categories: ["fabric", "utility"],
+      versions: ["1.21.1"],
+    },
+  ],
+  offset: 0,
+  limit: 20,
+  total: 1,
+} satisfies ServerModSearchResult;
+
 export const serverInstances = [
   {
     id: "instance-paper",
@@ -438,6 +481,7 @@ export async function createDesktopShellHarness(
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   const deletedServerInstances: string[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
+  const serverModSearchRequests: ServerModSearchRequest[] = [];
   let serverRuntime: ServerRuntimeSnapshot = stoppedServerRuntime;
   const serverCommands: string[] = [];
   let serverConsoleListener: ((line: ServerConsoleLine) => void) | undefined;
@@ -467,6 +511,11 @@ export async function createDesktopShellHarness(
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>
         serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
+      readServerModFilters: async () => serverModFilters,
+      searchServerMods: async (request) => {
+        serverModSearchRequests.push(request);
+        return serverModSearchResult;
+      },
       resolveServerCoreIconPath: async (sha256) =>
         sha256 === paperIconHash ? paperIconPath : undefined,
       resolveServerInstanceIconPath: async (instanceId) =>
@@ -609,6 +658,7 @@ export async function createDesktopShellHarness(
     startedDownloads,
     startedManagedDownloads,
     deletedServerInstances,
+    serverModSearchRequests,
     serverCommands,
     configurationWrites,
     inspectedJavaPaths,
