@@ -2,6 +2,7 @@ import {
   desktopChannels,
   type ServerConfigurationWriteRequest,
 } from "../packages/contracts/src/index.ts";
+import { expectFileDownloadTasks } from "../apps/desktop/src/main/contract-validation.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserWindow } from "electron";
@@ -125,6 +126,13 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   );
   assert.equal(await runtime.invoke(desktopChannels.serverCoreDownloadCancel, 1, "task-1"), true);
   assert.equal(harness.downloadTasks[0]?.state, "cancelled");
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.fileDownloadListTasks, 1),
+    harness.fileDownloadTasks,
+  );
+  assert.equal(await runtime.invoke(desktopChannels.fileDownloadCancel, 1, "mod-task-1"), true);
+  assert.equal(harness.fileDownloadTasks[0]?.state, "cancelled");
+  assert.equal(await runtime.invoke(desktopChannels.fileDownloadCancel, 1, "missing-task"), false);
   runtime.directorySelection = undefined;
   assert.equal(
     await runtime.invoke(desktopChannels.serverCoreDownloadSaveAs, 1, saveAsRequest),
@@ -187,4 +195,45 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     /must be a string/,
   );
   await shell.dispose();
+});
+
+await test("desktop shell projects only user-visible file downloads", () => {
+  const commonTask = {
+    id: "mod-task-1",
+    url: "https://cdn.modrinth.com/data/project/version/mod.jar",
+    destinationPath: "C:/SeaShard/resources/mod.jar",
+    state: "completed",
+    downloadedBytes: 1_024,
+    totalBytes: 1_024,
+    connections: 8,
+    progress: 100,
+    createdAt: "2026-08-17T12:00:00.000Z",
+    finishedAt: "2026-08-17T12:00:01.000Z",
+  } as const;
+  assert.deepEqual(
+    expectFileDownloadTasks([
+      {
+        ...commonTask,
+        metadata: { kind: "server-mod", userVisible: true },
+      },
+      {
+        ...commonTask,
+        id: "icon-task-1",
+        metadata: { kind: "server-core-icon" },
+      },
+    ]),
+    [
+      {
+        id: commonTask.id,
+        destinationPath: commonTask.destinationPath,
+        state: commonTask.state,
+        downloadedBytes: commonTask.downloadedBytes,
+        totalBytes: commonTask.totalBytes,
+        connections: commonTask.connections,
+        progress: commonTask.progress,
+        createdAt: commonTask.createdAt,
+        finishedAt: commonTask.finishedAt,
+      },
+    ],
+  );
 });

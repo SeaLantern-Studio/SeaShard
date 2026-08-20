@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ServerCoreDownloadTaskSnapshot } from "@seashard/contracts";
+import type { FileDownloadTaskSnapshot } from "@seashard/contracts";
 import { AlertCircle, Check, Download, X, XCircle } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
@@ -8,7 +8,7 @@ const finishedDismissMs = 30_000;
 const viewedDismissMs = 8_000;
 
 const root = ref<HTMLElement>();
-const currentTask = ref<ServerCoreDownloadTaskSnapshot>();
+const currentTask = ref<FileDownloadTaskSnapshot>();
 const panelOpen = ref(false);
 const speedBytesPerSecond = ref(0);
 const ringSize = reactive({ width: 0, height: 0 });
@@ -36,7 +36,7 @@ const isCancelled = computed(() => currentTask.value?.state === "cancelled");
 const progress = computed(() => clampProgress(currentTask.value?.progress ?? 0));
 const fileName = computed(() => {
   const path = currentTask.value?.destinationPath;
-  return path?.split(/[\\/]/u).at(-1) ?? "服务器核心";
+  return path?.split(/[\\/]/u).at(-1) ?? "下载任务";
 });
 const stateLabel = computed(() => {
   if (isCompleted.value) return "下载完成";
@@ -90,7 +90,7 @@ async function refreshTasks(): Promise<void> {
   if (refreshPending) return;
   refreshPending = true;
   try {
-    const tasks = (await window.seashard.serverCoreDownload.listTasks()).filter(
+    const tasks = (await window.seashard.fileDownloads.listTasks()).filter(
       (task) => !hiddenTaskIds.has(task.id),
     );
     const newestFirst = [...tasks].reverse();
@@ -103,7 +103,7 @@ async function refreshTasks(): Promise<void> {
   }
 }
 
-function applyTask(next: ServerCoreDownloadTaskSnapshot | undefined): void {
+function applyTask(next: FileDownloadTaskSnapshot | undefined): void {
   const now = performance.now();
   if (!next) {
     currentTask.value = undefined;
@@ -146,7 +146,7 @@ function closeFromOutside(event: PointerEvent): void {
 async function cancelTask(): Promise<void> {
   const task = currentTask.value;
   if (!task || !isActive.value) return;
-  await window.seashard.serverCoreDownload.cancel(task.id);
+  await window.seashard.fileDownloads.cancel(task.id);
   await refreshTasks();
 }
 
@@ -200,7 +200,7 @@ function clampProgress(value: number): number {
   return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
-function isTerminal(state: ServerCoreDownloadTaskSnapshot["state"]): boolean {
+function isTerminal(state: FileDownloadTaskSnapshot["state"]): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
 

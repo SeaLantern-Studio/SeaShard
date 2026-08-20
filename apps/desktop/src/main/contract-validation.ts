@@ -7,6 +7,7 @@ import {
   serverPortLimits,
   serverModSearchLimits,
   serverModLoaders,
+  type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
   type ServerConsoleLine,
@@ -345,6 +346,58 @@ function expectServerModStrings(value: unknown, label: string, maximumItems: num
     throw new Error(`server mod source returned invalid ${label}`);
   }
   return value;
+}
+
+/** 公共下载中心只投影显式标记为用户可见的任务，并剥离 URL 与业务 metadata。 */
+export function expectFileDownloadTasks(value: unknown): FileDownloadTaskSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("download service returned invalid file download tasks");
+  }
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error("download service returned an invalid file download task");
+    }
+    const task = item as Record<string, unknown>;
+    const metadata = task.metadata;
+    if (
+      !metadata ||
+      typeof metadata !== "object" ||
+      Array.isArray(metadata) ||
+      Reflect.get(metadata, "userVisible") !== true
+    ) {
+      return [];
+    }
+    return [expectFileDownloadTask(task)];
+  });
+}
+
+function expectFileDownloadTask(task: Record<string, unknown>): FileDownloadTaskSnapshot {
+  const state = task.state;
+  const stringFields = ["id", "destinationPath", "createdAt"] as const;
+  const numericFields = ["downloadedBytes", "totalBytes", "connections", "progress"] as const;
+  if (
+    stringFields.some((field) => typeof task[field] !== "string" || !task[field]) ||
+    numericFields.some(
+      (field) => typeof task[field] !== "number" || !Number.isFinite(task[field]),
+    ) ||
+    !["queued", "downloading", "completed", "failed", "cancelled"].includes(String(state)) ||
+    (task.finishedAt !== undefined && typeof task.finishedAt !== "string") ||
+    (task.error !== undefined && typeof task.error !== "string")
+  ) {
+    throw new Error("download service returned an invalid file download task");
+  }
+  return {
+    id: task.id as string,
+    destinationPath: task.destinationPath as string,
+    state: state as FileDownloadTaskSnapshot["state"],
+    downloadedBytes: task.downloadedBytes as number,
+    totalBytes: task.totalBytes as number,
+    connections: task.connections as number,
+    progress: task.progress as number,
+    createdAt: task.createdAt as string,
+    ...(task.finishedAt === undefined ? {} : { finishedAt: task.finishedAt as string }),
+    ...(task.error === undefined ? {} : { error: task.error as string }),
+  };
 }
 
 export function expectServerCoreDownloadTask(value: unknown): ServerCoreDownloadTaskSnapshot {

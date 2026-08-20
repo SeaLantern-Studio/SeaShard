@@ -379,6 +379,7 @@ await test("Mod download coordinator installs only compatible versions and suppo
     connections: 8,
     metadata: {
       kind: "server-mod",
+      userVisible: true,
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
       fileName,

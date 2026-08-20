@@ -28,6 +28,8 @@ export const desktopChannels = {
   serverCoreDownloadSaveAs: "seashard.server-core-download.save-as",
   serverCoreDownloadListTasks: "seashard.server-core-download.list-tasks",
   serverCoreDownloadCancel: "seashard.server-core-download.cancel",
+  fileDownloadListTasks: "seashard.file-download.list-tasks",
+  fileDownloadCancel: "seashard.file-download.cancel",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
@@ -353,12 +355,8 @@ export const serverPortLimits = {
 /** 防止无界 IPC 与持久化输入；该值只限制参数文本，不改变 JVM 参数语义。 */
 export const serverJvmArgumentsMaximumLength = 8_192;
 
-export type ServerCoreDownloadTaskState =
-  | "queued"
-  | "downloading"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type FileDownloadTaskState = "queued" | "downloading" | "completed" | "failed" | "cancelled";
+export type ServerCoreDownloadTaskState = FileDownloadTaskState;
 
 /** “另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。 */
 export interface ServerCoreSaveAsRequest {
@@ -376,12 +374,11 @@ export interface ServerCoreManagedDownloadResult {
   task: ServerCoreDownloadTaskSnapshot;
 }
 
-/** 顶栏和下载页共享的服务器核心任务投影。 */
-export interface ServerCoreDownloadTaskSnapshot {
+/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */
+export interface FileDownloadTaskSnapshot {
   id: string;
-  artifact: ServerCoreArtifact;
   destinationPath: string;
-  state: ServerCoreDownloadTaskState;
+  state: FileDownloadTaskState;
   downloadedBytes: number;
   totalBytes: number;
   connections: number;
@@ -389,6 +386,16 @@ export interface ServerCoreDownloadTaskSnapshot {
   createdAt: string;
   finishedAt?: string;
   error?: string;
+}
+
+export interface FileDownloadClientService {
+  listTasks(): Promise<readonly FileDownloadTaskSnapshot[]>;
+  cancel(taskId: string): Promise<boolean>;
+}
+
+/** 顶栏和下载页共享的服务器核心任务投影。 */
+export interface ServerCoreDownloadTaskSnapshot extends FileDownloadTaskSnapshot {
+  artifact: ServerCoreArtifact;
 }
 
 /** 当前 Client 平台实现托管下载、另存为、进度读取和取消。 */
@@ -633,6 +640,7 @@ export interface SeaShardDesktopApi {
   serverCore: ServerCoreSourceClientService;
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
+  fileDownloads: FileDownloadClientService;
   serverMods: ServerModSourceClientService;
   serverInstances: ServerInstanceClientService;
   serverRuntime: ServerRuntimeClientService;

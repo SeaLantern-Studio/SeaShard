@@ -122,8 +122,6 @@ const compatibleInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const installInstancesLoading = ref(false);
 const installInstancesError = ref("");
 const installPendingTarget = ref<string>();
-const installResultMessage = ref("");
-const installResultTone = ref<"success" | "error">("success");
 let installInstancesRequestId = 0;
 
 const sourceOptions = computed(() => toSelectOptions(filters.value.sources));
@@ -443,7 +441,6 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
   installVersion.value = version;
   compatibleInstances.value = [];
   installInstancesError.value = "";
-  installResultMessage.value = "";
   installPendingTarget.value = undefined;
   installModalOpen.value = true;
   installInstancesLoading.value = true;
@@ -467,7 +464,6 @@ function closeInstallModal(): void {
   installVersion.value = undefined;
   compatibleInstances.value = [];
   installInstancesError.value = "";
-  installResultMessage.value = "";
 }
 
 function updateInstallModalVisible(visible: boolean): void {
@@ -479,20 +475,19 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
   const version = installVersion.value;
   if (!project || !version || installPendingTarget.value) return;
   installPendingTarget.value = instance.id;
-  installResultMessage.value = "";
+  let completed = false;
   try {
-    const result = await props.mods.installToInstance({
+    await props.mods.installToInstance({
       projectId: project.id,
       versionId: version.id,
       instanceId: instance.id,
     });
-    installResultTone.value = "success";
-    installResultMessage.value = `已将 ${result.fileName} 安装到 ${instance.name}`;
+    completed = true;
   } catch (error) {
-    installResultTone.value = "error";
-    installResultMessage.value = errorMessage(error);
+    console.error("Mod 安装失败", error);
   } finally {
     installPendingTarget.value = undefined;
+    if (completed) closeInstallModal();
   }
 }
 
@@ -501,21 +496,18 @@ async function saveModAs(): Promise<void> {
   const version = installVersion.value;
   if (!project || !version || installPendingTarget.value) return;
   installPendingTarget.value = "save-as";
-  installResultMessage.value = "";
+  let completed = false;
   try {
-    const result = await props.mods.saveAs({
-      projectId: project.id,
-      versionId: version.id,
-    });
-    if (result) {
-      installResultTone.value = "success";
-      installResultMessage.value = `已将 ${result.fileName} 保存到所选文件夹`;
-    }
+    completed =
+      (await props.mods.saveAs({
+        projectId: project.id,
+        versionId: version.id,
+      })) !== undefined;
   } catch (error) {
-    installResultTone.value = "error";
-    installResultMessage.value = errorMessage(error);
+    console.error("Mod 另存为失败", error);
   } finally {
     installPendingTarget.value = undefined;
+    if (completed) closeInstallModal();
   }
 }
 
@@ -1006,14 +998,6 @@ function errorMessage(error: unknown): string {
               <Download :size="16" :stroke-width="1.8" aria-hidden="true" />
               另存为
             </Cmz_Button>
-            <p
-              v-if="installResultMessage"
-              class="mod-install-result"
-              :class="installResultTone"
-              :role="installResultTone === 'error' ? 'alert' : 'status'"
-            >
-              {{ installResultMessage }}
-            </p>
           </div>
         </Cmz_Modal>
       </div>

@@ -77,6 +77,7 @@ export class ServerModDownloadCoordinator {
       connections,
       metadata: {
         kind: "server-mod",
+        userVisible: true,
         projectId: artifact.projectId,
         versionId: artifact.versionId,
         fileName: artifact.fileName,

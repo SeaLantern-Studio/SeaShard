@@ -950,24 +950,6 @@
   margin-top: 12px;
 }
 
-.mod-install-result {
-  overflow: hidden;
-  margin: 8px 0 0;
-  font-size: 0.74rem;
-  line-height: 1.35;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mod-install-result.success {
-  color: var(--sl-success);
-}
-
-.mod-install-result.error {
-  color: var(--sl-error);
-}
-
 /* 安装弹窗只遮罩当前内容区域，不覆盖应用导航、标题栏和右侧栏。 */
 :global(body:has(.server-mod-download-page) .cmz-modal-overlay) {
   top: calc(var(--sl-header-height) + 8px);

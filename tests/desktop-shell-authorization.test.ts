@@ -131,6 +131,14 @@ await test("desktop shell rejects IPC from unowned renderers", async () => {
     /request rejected/,
   );
   await assert.rejects(
+    runtime.invoke(desktopChannels.fileDownloadListTasks, 1),
+    /request rejected/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.fileDownloadCancel, 1, "mod-task-1"),
+    /request rejected/,
+  );
+  await assert.rejects(
     runtime.invoke(desktopChannels.serverRuntimeGet, 1, "instance-paper"),
     /request rejected/,
   );

@@ -434,6 +434,14 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(taskId, "server core download task id"),
           );
         });
+        config.runtime.handle(desktopChannels.fileDownloadListTasks, (event) => {
+          ownedWindow(event.sender.id);
+          return config.listFileDownloadTasks();
+        });
+        config.runtime.handle(desktopChannels.fileDownloadCancel, (event, taskId) => {
+          ownedWindow(event.sender.id);
+          return config.cancelFileDownload(expectNonEmptyString(taskId, "file download task id"));
+        });
 
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
@@ -569,6 +577,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.javaRuntimeSetDisabled);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
+          config.runtime.removeHandler(desktopChannels.fileDownloadListTasks);
+          config.runtime.removeHandler(desktopChannels.fileDownloadCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

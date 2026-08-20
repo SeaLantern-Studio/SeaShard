@@ -3,6 +3,7 @@ import {
   runtimeDiagnosticsContract,
   type ClientEntryPublication,
   type DesktopShellService,
+  type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type RuntimeDiagnosticsService,
   type RuntimeSnapshot,
@@ -504,6 +505,18 @@ export async function createDesktopShellHarness(
   const startedManagedDownloads: StartDesktopManagedServerCoreDownloadRequest[] = [];
   const deletedServerInstances: string[] = [];
   let downloadTasks: ServerCoreDownloadTaskSnapshot[] = [];
+  let fileDownloadTasks: FileDownloadTaskSnapshot[] = [
+    {
+      id: "mod-task-1",
+      destinationPath: "C:/SeaShard/resources/server-tools-neoforge-1.21.1.jar",
+      state: "downloading",
+      downloadedBytes: 512,
+      totalBytes: 1_024,
+      connections: 16,
+      progress: 50,
+      createdAt: "2026-08-17T12:00:00.000Z",
+    },
+  ];
   const serverModSearchRequests: ServerModSearchRequest[] = [];
   const serverModDetailProjectIds: string[] = [];
   const installedServerMods: StartDesktopServerModInstallRequest[] = [];
@@ -669,6 +682,22 @@ export async function createDesktopShellHarness(
         javaDisabledUpdates.push({ installationId, disabled });
         return disabled;
       },
+      listFileDownloadTasks: async () => fileDownloadTasks,
+      cancelFileDownload: async (taskId) => {
+        const task = fileDownloadTasks.find((candidate) => candidate.id === taskId);
+        if (!task || ["completed", "failed", "cancelled"].includes(task.state)) return false;
+        fileDownloadTasks = fileDownloadTasks.map((candidate) =>
+          candidate.id === taskId
+            ? {
+                ...candidate,
+                state: "cancelled",
+                finishedAt: "2026-08-17T12:00:01.000Z",
+                error: "download cancelled",
+              }
+            : candidate,
+        );
+        return true;
+      },
       listServerCoreDownloadTasks: async () => downloadTasks,
       cancelServerCoreDownload: async (taskId) => {
         const task = downloadTasks.find((candidate) => candidate.id === taskId);
@@ -724,6 +753,9 @@ export async function createDesktopShellHarness(
     },
     get downloadTasks() {
       return downloadTasks;
+    },
+    get fileDownloadTasks() {
+      return fileDownloadTasks;
     },
     get serverRuntime() {
       return serverRuntime;

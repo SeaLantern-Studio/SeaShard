@@ -13,6 +13,7 @@ import {
   createElectronDesktopShellRuntime,
   desktopShellManifest,
 } from "@seashard/desktop-shell";
+import { downloadContract } from "@seashard/download";
 import type { JsonValue } from "@seashard/plugin-sdk";
 import { projectClientEntryPublication, type PluginKernel } from "@seashard/plugin-system";
 import { serverCoreSourceContract } from "@seashard/server-core-source";
@@ -21,6 +22,7 @@ import { serverInstanceManagerContract } from "@seashard/server-instance-manager
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { isAbsolute, join } from "node:path";
 import {
+  expectFileDownloadTasks,
   expectJavaInstallation,
   expectJavaInstallations,
   expectManagedDownloadResult,
@@ -66,6 +68,20 @@ export async function registerDesktopShellBridge(
 ): Promise<void> {
   const { kernel, moduleDirectory, developmentUrl, smokeMode } = options;
   let smokeQuitScheduled = false;
+  const listFileDownloadTasks = async () =>
+    expectFileDownloadTasks(await kernel.callService(downloadContract, "listTasks", []));
+  /**
+   * Renderer 只能取消已投影到公共下载条的任务，不能借任务 ID 操作图标缓存等内部下载。
+   */
+  const cancelFileDownload = async (taskId: string): Promise<boolean> => {
+    const visibleTasks = await listFileDownloadTasks();
+    if (!visibleTasks.some((task) => task.id === taskId)) return false;
+    const cancelled = await kernel.callService(downloadContract, "cancel", [taskId]);
+    if (typeof cancelled !== "boolean") {
+      throw new Error("download service returned an invalid cancellation result");
+    }
+    return cancelled;
+  };
   // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
   await kernel.registerBuiltIn({
     manifest: desktopShellManifest,
@@ -273,6 +289,8 @@ export async function registerDesktopShellBridge(
               }
               return result;
             },
+            listFileDownloadTasks,
+            cancelFileDownload,
             listServerCoreDownloadTasks: async () =>
               expectServerCoreDownloadTasks(
                 await kernel.callService(serverCoreSourceContract, "listTasks", []),

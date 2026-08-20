@@ -1,5 +1,7 @@
 import type {
   ClientEntryPublication,
+  FileDownloadClientService,
+  FileDownloadTaskSnapshot,
   JavaRuntimeManagerService,
   RuntimeSnapshot,
   ServerCoreDownloadClientService,
@@ -154,6 +156,8 @@ export interface DesktopShellConfig {
     installationId: string,
     disabled: boolean,
   ): ReturnType<JavaRuntimeManagerService["setDisabled"]>;
+  listFileDownloadTasks(): Promise<readonly FileDownloadTaskSnapshot[]>;
+  cancelFileDownload(taskId: string): ReturnType<FileDownloadClientService["cancel"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
   readClientEntryPublication(): ClientEntryPublication;

@@ -65,6 +65,7 @@ export class ServerCoreSourceCoordinator {
         connections: request.connections,
         metadata: {
           kind: metadataKind,
+          userVisible: true,
           artifact: { ...artifact },
         },
       });

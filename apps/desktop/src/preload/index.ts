@@ -53,6 +53,10 @@ const api: SeaShardDesktopApi = Object.freeze({
     cancel: (taskId: string) =>
       ipcRenderer.invoke(desktopChannels.serverCoreDownloadCancel, taskId),
   }),
+  fileDownloads: Object.freeze({
+    listTasks: () => ipcRenderer.invoke(desktopChannels.fileDownloadListTasks),
+    cancel: (taskId: string) => ipcRenderer.invoke(desktopChannels.fileDownloadCancel, taskId),
+  }),
   serverInstances: Object.freeze({
     list: () => ipcRenderer.invoke(desktopChannels.serverInstancesList),
     openFolder: (instanceId: string) =>
