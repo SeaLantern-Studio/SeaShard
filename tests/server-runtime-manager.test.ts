@@ -36,10 +36,14 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     return child as unknown as ChildProcessWithoutNullStreams;
   };
   const emittedLines: string[] = [];
+  const recordedStartTimes: Array<{ instanceId: string; startedAt: string }> = [];
   const manager = new ServerRuntimeManager({
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java17, java21],
     readSettings: async () => settings,
+    recordInstanceStartedAt: async (instanceId, startedAt) => {
+      recordedStartTimes.push({ instanceId, startedAt });
+    },
     fileSystem,
     spawnProcess,
     now: () => new Date("2026-08-17T13:00:00.000Z"),
@@ -53,6 +57,12 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     pid: 4_242,
     startedAt: "2026-08-17T13:00:00.000Z",
   });
+  assert.deepEqual(recordedStartTimes, [
+    {
+      instanceId: vanillaInstance.id,
+      startedAt: "2026-08-17T13:00:00.000Z",
+    },
+  ]);
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0]!.command, java21.path);
   assert.deepEqual(spawnCalls[0]!.arguments_, [

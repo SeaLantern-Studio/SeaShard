@@ -149,6 +149,7 @@ function leaveDownload(): void {
 
 function serverItemForPath(path: string): InstanceItemId {
   if (path.startsWith("/server/download")) return "download";
+  if (path.startsWith("/server/overview")) return "overview";
   if (path.startsWith("/server/console")) return "console";
   if (path.startsWith("/server/configuration")) return "configuration";
   return "launch";
@@ -161,6 +162,8 @@ function selectInstanceItem(id: InstanceItemId): void {
       navigate("/server/download");
     } else if (id === "launch") {
       navigate("/server/launch");
+    } else if (id === "overview") {
+      navigate("/server/overview");
     } else if (id === "console") {
       navigate("/server/console");
     } else if (id === "configuration") {

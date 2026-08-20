@@ -56,6 +56,8 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
       const settings = ctx.service<ServerSettingsClientService>(serverSettingsContract);
       const manager = new ServerRuntimeManager({
         listInstances: () => instances.list(),
+        recordInstanceStartedAt: (instanceId, startedAt) =>
+          instances.recordStartedAt(instanceId, startedAt),
         scanJavaInstallations: () => javaRuntime.scan(),
         readSettings: () => settings.get(),
         ...(options.onConsoleLine

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type {
-  ServerCoreArtifact,
-  ServerCoreDownloadClientService,
-  ServerCoreDownloadTaskSnapshot,
-  ServerCoreSourceClientService,
-  ServerCoreType,
+import {
+  formatServerCoreType,
+  type ServerCoreArtifact,
+  type ServerCoreDownloadClientService,
+  type ServerCoreDownloadTaskSnapshot,
+  type ServerCoreSourceClientService,
+  type ServerCoreType,
 } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Input, Cmz_Tooltip } from "cmzya-modern-ui";
 import { ArrowLeft, ChevronDown, Download, Save } from "lucide-vue-next";
@@ -56,7 +57,7 @@ const versionCollator = new Intl.Collator("en", {
 const coreCards = computed<readonly CoreCard[]>(() =>
   catalogTypes.value.map((type) => ({
     id: type.id,
-    label: type.id === "vanilla" ? "原版核心" : formatCoreType(type.id),
+    label: formatServerCoreType(type.id),
     ...(type.iconUrl ? { iconUrl: type.iconUrl } : {}),
   })),
 );
@@ -261,47 +262,6 @@ async function saveArtifactAs(): Promise<void> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-const coreTypeNames: Readonly<Record<string, string>> = {
-  "arclight-fabric": "Arclight Fabric",
-  "arclight-forge": "Arclight Forge",
-  "arclight-neoforge": "Arclight NeoForge",
-  banner: "Banner",
-  bukkit: "Bukkit",
-  bungeecord: "BungeeCord",
-  catserver: "CatServer",
-  fabric: "Fabric",
-  folia: "Folia",
-  leaf: "Leaf",
-  leaves: "Leaves",
-  lightfall: "Lightfall",
-  mohist: "Mohist",
-  neoforge: "NeoForge",
-  nukkitx: "NukkitX",
-  paper: "Paper",
-  pufferfish: "Pufferfish",
-  pufferfish_purpur: "Pufferfish Purpur",
-  purpur: "Purpur",
-  quilt: "Quilt",
-  spigot: "Spigot",
-  spongeforge: "SpongeForge",
-  spongevanilla: "SpongeVanilla",
-  travertine: "Travertine",
-  "vanilla-snapshot": "原版快照",
-  velocity: "Velocity",
-  youer: "Youer",
-};
-
-function formatCoreType(type: string): string {
-  return (
-    coreTypeNames[type] ??
-    type
-      .split(/[-_]/u)
-      .filter(Boolean)
-      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-      .join(" ")
-  );
 }
 </script>
 

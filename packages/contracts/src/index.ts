@@ -129,6 +129,48 @@ export interface ServerCoreType {
   id: string;
   iconUrl?: string;
 }
+const serverCoreTypeNames: Readonly<Record<string, string>> = {
+  "arclight-fabric": "Arclight Fabric",
+  "arclight-forge": "Arclight Forge",
+  "arclight-neoforge": "Arclight NeoForge",
+  banner: "Banner",
+  bukkit: "Bukkit",
+  bungeecord: "BungeeCord",
+  catserver: "CatServer",
+  fabric: "Fabric",
+  folia: "Folia",
+  leaf: "Leaf",
+  leaves: "Leaves",
+  lightfall: "Lightfall",
+  mohist: "Mohist",
+  neoforge: "NeoForge",
+  nukkitx: "NukkitX",
+  paper: "Paper",
+  pufferfish: "Pufferfish",
+  pufferfish_purpur: "Pufferfish Purpur",
+  purpur: "Purpur",
+  quilt: "Quilt",
+  spigot: "Spigot",
+  spongeforge: "SpongeForge",
+  spongevanilla: "SpongeVanilla",
+  travertine: "Travertine",
+  vanilla: "原版核心",
+  "vanilla-snapshot": "原版快照",
+  velocity: "Velocity",
+  youer: "Youer",
+};
+
+/** 核心目录、实例页和运行页共享同一显示名称，未知类型再按标识符安全回退。 */
+export function formatServerCoreType(type: string): string {
+  return (
+    serverCoreTypeNames[type] ??
+    type
+      .split(/[-_]/u)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+      .join(" ")
+  );
+}
 
 /** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */
 export interface ServerCoreArtifact {

@@ -76,6 +76,19 @@ export class ServerInstanceManager {
     return this.readIndexedInstances();
   }
 
+  /** 只更新 SeaShard 私有清单；服务端核心与 Minecraft 版本等事实保持不变。 */
+  async recordStartedAt(instanceValue: unknown, startedAtValue: unknown): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const startedAt = expectIsoTimestamp(startedAtValue, "startedAt");
+    const { instance } = await this.findIndexedInstance(instanceId);
+    await writePortableSeaShardInstanceManifest({
+      ...instance,
+      lastStartedAt: startedAt,
+      updatedAt: startedAt,
+    });
+  }
+
   /** 删除仅限由 SeaShard 管理且仍位于 managedRoot 直属目录中的实例。 */
   async delete(value: unknown): Promise<void> {
     if (this.disposed) throw new Error("server instance manager is stopped");
@@ -379,6 +392,15 @@ function expectString(value: unknown, field: string): string {
     throw new TypeError(`managed server instance ${field} must be a non-empty string`);
   }
   return value;
+}
+
+function expectIsoTimestamp(value: unknown, field: string): string {
+  const timestamp = expectString(value, field);
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== timestamp) {
+    throw new TypeError(`managed server instance ${field} must be an ISO timestamp`);
+  }
+  return timestamp;
 }
 function expectDirectoryName(value: unknown, field: string): string {
   const name = expectString(value, field);

@@ -366,6 +366,14 @@ await test("split portable JSON remains authoritative after path registration", 
     assert.equal(reloaded?.coreArtifactFileName, "paper-1.21.1-131.jar");
     assert.equal(reloaded?.updatedAt, "2026-08-17T00:00:00.000Z");
     assert.equal(reloaded?.lastStartedAt, "2026-08-16T01:00:00.000Z");
+    await manager.recordStartedAt("json-authority", "2026-08-18T08:30:00.000Z");
+    const [startedInstance] = await manager.list();
+    assert.equal(startedInstance?.lastStartedAt, "2026-08-18T08:30:00.000Z");
+    assert.equal(startedInstance?.updatedAt, "2026-08-18T08:30:00.000Z");
+    const startedManifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as PortableSeaShardInstanceManifest;
+    assert.equal(startedManifest.lastStartedAt, "2026-08-18T08:30:00.000Z");
     assert.deepEqual(await registry.listManifestPaths(), [manifestPath]);
     await manager.dispose();
   } finally {

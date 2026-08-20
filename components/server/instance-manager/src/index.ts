@@ -54,6 +54,10 @@ export function createServerInstanceManagerModule(
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
+        recordStartedAt: async (instanceId, startedAt) => {
+          await manager.recordStartedAt(instanceId, startedAt);
+          return null;
+        },
         delete: async (instanceId) => {
           await manager.delete(instanceId);
           return null;

@@ -30,6 +30,7 @@ const defaultStopGracePeriodMs = 15_000;
 export interface ServerRuntimeManagerOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
   scanJavaInstallations(): Promise<readonly JavaInstallationSnapshot[]>;
+  recordInstanceStartedAt?(instanceId: string, startedAt: string): Promise<void>;
   readSettings(): Promise<ServerSettingsSnapshot>;
   onConsoleLine?(line: ServerConsoleLine): void;
   reportError?(error: unknown): void;
@@ -148,11 +149,12 @@ export class ServerRuntimeManager {
         this.appendLine(instanceId, "system", "[SeaShard] 已提交交互式 Minecraft EULA 同意。");
       }
 
+      const startedAt = this.nowIso();
       const runningSnapshot: ServerRuntimeSnapshot = {
         instanceId,
         state: "running",
         ...(child.pid === undefined ? {} : { pid: child.pid }),
-        startedAt: this.nowIso(),
+        startedAt,
       };
       session.snapshot = runningSnapshot;
       this.snapshots.set(instanceId, runningSnapshot);
@@ -161,6 +163,11 @@ export class ServerRuntimeManager {
         "system",
         `[SeaShard] ${plan.displayName} 服务器进程已启动（Java ${java.version}）。`,
       );
+      try {
+        await this.options.recordInstanceStartedAt?.(instanceId, startedAt);
+      } catch (error) {
+        this.options.reportError?.(error);
+      }
       return { ...runningSnapshot };
     } catch (error) {
       const session = child ? this.sessions.get(instanceId) : undefined;
