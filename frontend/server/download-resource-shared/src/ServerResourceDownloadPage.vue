@@ -952,8 +952,8 @@ function errorMessage(error: unknown): string {
                 @click="toggleVersionGroup(group.id)"
               >
                 <strong>
-                  <template v-if="showLoaderFilter || !group.loader"
-                    >{{ group.loader ? loaderLabel(group.loader) : "通用" }}
+                  <template v-if="showLoaderFilter && group.loader"
+                    >{{ loaderLabel(group.loader) }}
                   </template>
                   {{ group.gameVersion }}
                 </strong>
