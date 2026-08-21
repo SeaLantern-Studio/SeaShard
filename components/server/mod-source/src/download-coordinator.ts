@@ -3,6 +3,7 @@ import {
   serverDownloadConnectionLimits,
   type ServerInstanceSnapshot,
   type ServerModDownloadResult,
+  type ServerModDownloadableResourceType,
   type ServerModInstallRequest,
   type ServerModLoader,
   type ServerModSaveAsRequest,
@@ -146,12 +147,11 @@ function assertCompatibleInstance(
     throw new Error(`该 Mod 版本不支持 ${formatLoader(instance.modLoader)} 实例 ${instance.name}`);
   }
 }
-
 function parseInstallRequest(value: unknown): InstallRequest {
   const record = expectRecord(value, "server resource install request");
   return {
     source: expectSource(record.source),
-    resourceType: expectDownloadableResourceType(record.resourceType),
+    resourceType: expectInstallableResourceType(record.resourceType),
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     instanceId: expectIdentity(record.instanceId, "instance ID", 128),
@@ -182,12 +182,16 @@ function expectSource(value: unknown): "modrinth" | "curseforge" {
   return value;
 }
 
-function expectDownloadableResourceType(value: unknown): "mod" | "datapack" {
-  if (value === "modpack") {
-    throw new TypeError("server modpack download is not available");
-  }
+function expectInstallableResourceType(value: unknown): "mod" | "datapack" {
   if (value !== "mod" && value !== "datapack") {
     throw new TypeError("server resource type must be mod or datapack");
+  }
+  return value;
+}
+
+function expectDownloadableResourceType(value: unknown): ServerModDownloadableResourceType {
+  if (value !== "mod" && value !== "modpack" && value !== "datapack" && value !== "world") {
+    throw new TypeError("server resource type is invalid");
   }
   return value;
 }

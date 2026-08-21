@@ -523,9 +523,15 @@ importers:
 
   frontend/server/download-world:
     dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
+      '@seashard/server-download-resource-shared':
+        specifier: workspace:*
+        version: link:../download-resource-shared
       '@seashard/ui-sdk':
         specifier: workspace:*
         version: link:../../../packages/ui-sdk

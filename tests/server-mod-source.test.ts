@@ -834,7 +834,7 @@ await test("Modrinth uses resource-specific facets for modpacks and datapacks", 
   assert.equal(datapack.items[0]?.resourceType, "datapack");
 });
 
-await test("Datapacks install into any exact-version instance and modpack downloads stay disabled", async () => {
+await test("Datapacks install into any exact-version instance and non-installable packs stay guarded", async () => {
   const sha512 = "d".repeat(128);
   const fileName = "server-datapack-1.21.1.zip";
   let requests = 0;
@@ -993,12 +993,12 @@ await test("Datapacks install into any exact-version instance and modpack downlo
       instanceId: "paper-instance",
       connections: 8,
     }),
-    /modpack download is not available/u,
+    /server resource type must be mod or datapack/u,
   );
   assert.equal(
     requests,
     requestsBeforeModpack,
-    "disabled modpack download must not reach Modrinth",
+    "non-installable modpack requests must not reach Modrinth",
   );
 });
 
@@ -1086,7 +1086,7 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
   assert.equal(requested.at(-1)?.searchParams.get("modLoaderType"), "4");
   assert.equal(search.items[0]?.source, "curseforge");
   assert.equal(search.items[0]?.id, "123");
-
+  assert.equal(search.items[0]?.iconUrl, "https://media.forgecdn.net/mod/icon.png");
   const details = await catalog.getProjectDetails("mod", "123");
   assert.deepEqual(details.versions[0], {
     id: "456",
@@ -1110,4 +1110,115 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
     gameVersions: ["1.21.1"],
     loaders: ["fabric"],
   });
+});
+await test("CurseForge uses resource class IDs and supports pack/world archives", async () => {
+  const baseUrl = "https://mod.mcimirror.test/curseforge/v1/";
+  const requested: URL[] = [];
+  const catalog = new CurseForgeServerModCatalog({
+    baseUrl,
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      requested.push(url);
+      if (url.pathname.endsWith("/mods/search")) {
+        const classId = url.searchParams.get("classId");
+        const projectId = classId === "4471" ? 1606092 : classId === "17" ? 1620741 : 1694001;
+        return Response.json({
+          data: [
+            {
+              id: projectId,
+              slug: `resource-${classId}`,
+              name: `Resource ${classId}`,
+              summary: "A downloadable Minecraft resource.",
+              logo: { url: "https://media.forgecdn.net/avatars/resource.png" },
+              authors: [{ name: "SeaLantern" }],
+              downloadCount: 12,
+              dateModified: "2026-08-18T12:00:00Z",
+              latestFilesIndexes: [{ gameVersion: "1.21.1" }],
+              categories: [],
+            },
+          ],
+          pagination: { index: 0, pageSize: 20, totalCount: 1 },
+        });
+      }
+      if (url.pathname.endsWith("/categories")) return new Response("missing", { status: 404 });
+      if (url.pathname.endsWith("/mods/1606092")) {
+        return Response.json({
+          data: {
+            id: 1606092,
+            summary: "A modpack archive.",
+            allowModDistribution: true,
+            isAvailable: true,
+          },
+        });
+      }
+      if (url.pathname.endsWith("/mods/1606092/files")) {
+        return Response.json({
+          data: [
+            {
+              id: 2606092,
+              modId: 1606092,
+              fileName: "resource-pack.zip",
+              fileLength: 4_096,
+              downloadCount: 20,
+              fileDate: "2026-08-18T12:00:00Z",
+              gameVersions: ["1.21.1"],
+              sortableGameVersions: [],
+              hashes: [{ algo: 1, value: "b".repeat(40) }],
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/mods/1606092/files/2606092/download-url")) {
+        return Response.json({
+          data: "https://edge.forgecdn.net/files/100/200/resource-pack.zip",
+        });
+      }
+      if (url.pathname.endsWith("/mods/1606092/files/2606092")) {
+        return Response.json({
+          data: {
+            id: 2606092,
+            modId: 1606092,
+            fileName: "resource-pack.zip",
+            fileLength: 4_096,
+            downloadCount: 20,
+            fileDate: "2026-08-18T12:00:00Z",
+            gameVersions: ["1.21.1"],
+            sortableGameVersions: [],
+            hashes: [{ algo: 1, value: "b".repeat(40) }],
+          },
+        });
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+
+  for (const [resourceType, classId] of [
+    ["modpack", "4471"],
+    ["datapack", "694"],
+    ["world", "17"],
+  ] as const) {
+    const result = await catalog.search({
+      source: "curseforge",
+      resourceType,
+      query: "",
+      tag: "",
+      index: "downloads",
+      gameVersion: "",
+      loader: "",
+      offset: 0,
+      limit: 20,
+    });
+    assert.equal(result.items[0]?.resourceType, resourceType);
+    assert.equal(requested.at(-1)?.searchParams.get("classId"), classId);
+  }
+
+  const details = await catalog.getProjectDetails("modpack", "1606092");
+  assert.equal(details.resourceType, "modpack");
+  assert.equal(details.versions[0]?.fileName, "resource-pack.zip");
+
+  const artifact = await catalog.resolveVersionArtifact("modpack", "1606092", "2606092");
+  assert.equal(artifact.resourceType, "modpack");
+  assert.equal(artifact.fileName, "resource-pack.zip");
+  assert.equal(artifact.url, "https://mod.mcimirror.top/files/100/200/resource-pack.zip");
 });

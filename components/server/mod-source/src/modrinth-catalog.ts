@@ -9,6 +9,7 @@ import {
   type ServerModSearchIndex,
   type ServerModSearchRequest,
   type ServerModSearchResult,
+  type ServerModDownloadableResourceType,
   type ServerModrinthResourceType,
   type ServerModVersion,
 } from "@seashard/contracts";
@@ -28,7 +29,7 @@ const serverEnvironments = [
   "client_or_server",
   "client_or_server_prefers_both",
 ] as const satisfies readonly ServerModEnvironment[];
-const resourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
+const resourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack", "world"]);
 const serverEnvironmentSet = new Set<string>(serverEnvironments);
 const knownEnvironmentSet = new Set<string>([
   ...serverEnvironments,
@@ -379,12 +380,8 @@ function expectResourceType(value: unknown): ServerModrinthResourceType {
   return value as ServerModrinthResourceType;
 }
 
-function expectDownloadableResourceType(value: unknown): "mod" | "datapack" {
-  const resourceType = expectResourceType(value);
-  if (resourceType === "modpack") {
-    throw new TypeError("Modrinth modpack download is not available");
-  }
-  return resourceType;
+function expectDownloadableResourceType(value: unknown): "mod" | "modpack" | "datapack" | "world" {
+  return expectResourceType(value);
 }
 
 function expectProjectId(value: unknown): string {
@@ -641,7 +638,7 @@ function parseProjectVersion(value: unknown, index: number, projectId: string): 
 function parseVersionArtifact(
   projectValue: unknown,
   versionValue: unknown,
-  resourceType: "mod" | "datapack",
+  resourceType: ServerModDownloadableResourceType,
   projectId: string,
   versionId: string,
   fallbackFileBaseUrl?: URL,
@@ -720,17 +717,24 @@ function matchesResourceVersion(
 ): boolean {
   const fileName = version.fileName.toLowerCase();
   if (resourceType === "modpack") return fileName.endsWith(".mrpack");
-  if (resourceType === "datapack") {
-    return version.loaders.includes("datapack") && fileName.endsWith(".zip");
+  if (resourceType === "datapack" || resourceType === "world") {
+    return fileName.endsWith(".zip");
   }
   return !version.loaders.includes("datapack") && fileName.endsWith(".jar");
 }
 
-function expectResourceFileName(value: unknown, resourceType: "mod" | "datapack"): string {
+function expectResourceFileName(
+  value: unknown,
+  resourceType: "mod" | "modpack" | "datapack" | "world",
+): string {
   const fileName = expectBoundedString(value, "Modrinth download file name", 512);
-  const expectedExtension = resourceType === "datapack" ? ".zip" : ".jar";
+  const lower = fileName.toLowerCase();
+  const validExtension =
+    resourceType === "mod"
+      ? lower.endsWith(".jar")
+      : lower.endsWith(".zip") || (resourceType === "modpack" && lower.endsWith(".mrpack"));
   if (
-    !fileName.toLowerCase().endsWith(expectedExtension) ||
+    !validExtension ||
     fileName === "." ||
     fileName === ".." ||
     fileName.includes("/") ||

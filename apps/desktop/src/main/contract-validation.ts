@@ -107,7 +107,12 @@ const serverModEnvironments = new Set<ServerModEnvironment>([
   "client_only_server_optional",
   "client_only",
 ]);
-const serverModResourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
+const serverModResourceTypes = new Set<ServerModrinthResourceType>([
+  "mod",
+  "modpack",
+  "datapack",
+  "world",
+]);
 
 function isServerModIconUrl(value: unknown, projectId: unknown, source: unknown): value is string {
   if (typeof value !== "string" || typeof projectId !== "string") return false;
@@ -249,23 +254,29 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
     }),
   };
 }
-
 export function expectServerModDownloadResult(value: unknown): ServerModDownloadResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("server resource source returned an invalid download result");
   }
   const result = value as Record<string, unknown>;
-  const extension =
-    result.resourceType === "datapack" ? ".zip" : result.resourceType === "mod" ? ".jar" : "";
+  const fileName = typeof result.fileName === "string" ? result.fileName : "";
+  const validExtensions =
+    result.resourceType === "mod"
+      ? [".jar"]
+      : result.resourceType === "modpack"
+        ? [".mrpack", ".zip"]
+        : result.resourceType === "datapack" || result.resourceType === "world"
+          ? [".zip"]
+          : [];
   if (
     (result.source !== "modrinth" && result.source !== "curseforge") ||
-    !extension ||
+    validExtensions.length === 0 ||
     typeof result.projectId !== "string" ||
     !result.projectId ||
     typeof result.versionId !== "string" ||
     !result.versionId ||
     typeof result.fileName !== "string" ||
-    !result.fileName.toLowerCase().endsWith(extension) ||
+    !validExtensions.some((extension) => fileName.toLowerCase().endsWith(extension)) ||
     !["instance", "directory"].includes(String(result.destination)) ||
     (result.instanceId !== undefined &&
       (typeof result.instanceId !== "string" || !result.instanceId)) ||

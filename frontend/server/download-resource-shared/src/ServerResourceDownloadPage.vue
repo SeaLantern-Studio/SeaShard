@@ -9,6 +9,7 @@ import {
   type ServerModProjectDetails,
   type ServerModSearchIndex,
   type ServerModSearchResult,
+  type ServerModSource,
   type ServerModSourceClientService,
   type ServerModVersion,
 } from "@seashard/contracts";
@@ -45,15 +46,17 @@ import {
   serverModDisplayName,
   serverModDisplayTags,
 } from "./resource-presentation";
-
 const props = defineProps<{
   resources: ServerModSourceClientService;
   instances?: ServerInstanceClientService;
-  resourceType: "modpack" | "datapack";
+  resourceType: "modpack" | "datapack" | "world";
 }>();
 
 const emptyFilters: ServerModFilters = {
-  sources: [{ id: "modrinth", label: "Modrinth" }],
+  sources: [
+    { id: "modrinth", label: "Modrinth" },
+    { id: "curseforge", label: "CurseForge" },
+  ],
   tags: [],
   versions: [],
   loaders: [],
@@ -65,13 +68,20 @@ const sortOptions: SelectOption[] = [
   { label: "最新发布", value: "newest" },
   { label: "最近更新", value: "updated" },
 ];
-const resourceLabel = computed(() => (props.resourceType === "modpack" ? "整合包" : "数据包"));
-const resourcePathSegment = computed(() =>
-  props.resourceType === "modpack" ? "modpack" : "datapack",
+const resourceLabel = computed(() =>
+  props.resourceType === "modpack" ? "整合包" : props.resourceType === "world" ? "世界" : "数据包",
 );
-const resourceIcon = computed(() => (props.resourceType === "modpack" ? Package : Archive));
+const resourcePathSegment = computed(() => {
+  if (props.resourceType === "modpack") return "modpack";
+  if (props.resourceType === "world") return "world";
+  return "datapack";
+});
+const resourceIcon = computed(() =>
+  props.resourceType === "modpack" ? Package : props.resourceType === "world" ? Box : Archive,
+);
 const showLoaderFilter = computed(() => props.resourceType === "modpack");
-const downloadEnabled = computed(() => props.resourceType === "datapack");
+const canInstallToInstance = computed(() => props.resourceType === "datapack" && !!props.instances);
+const downloadEnabled = computed(() => true);
 const favoriteStorageKey = computed(() => `seashard.server-${props.resourceType}.favorites`);
 const detailVersionCollator = new Intl.Collator("en", {
   numeric: true,
@@ -90,7 +100,7 @@ const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
 const filtersError = ref("");
 const query = ref("");
-const source = ref("modrinth");
+const source = ref<ServerModSource>("modrinth");
 const tag = ref("");
 const sort = ref<ServerModSearchIndex>("downloads");
 const gameVersion = ref("");
@@ -221,7 +231,14 @@ async function loadFilters(): Promise<void> {
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    filters.value = await props.resources.getFilters(props.resourceType, "modrinth");
+    const next = await props.resources.getFilters(props.resourceType, source.value);
+    filters.value = {
+      ...next,
+      sources: [
+        { id: "modrinth", label: "Modrinth" },
+        { id: "curseforge", label: "CurseForge" },
+      ],
+    };
   } catch (error) {
     filtersError.value = errorMessage(error);
   } finally {
@@ -240,8 +257,14 @@ function updateQuery(value: string | number): void {
 }
 
 function updateSource(value: string | number): void {
-  if (value !== "modrinth" || source.value === value) return;
+  if ((value !== "modrinth" && value !== "curseforge") || source.value === value) {
+    return;
+  }
   source.value = value;
+  tag.value = "";
+  gameVersion.value = "";
+  loader.value = "";
+  void loadFilters();
   void resetSearch();
 }
 
@@ -327,11 +350,10 @@ async function loadNextPage(): Promise<void> {
     }
   }
 }
-
 function searchPage(offset: number): Promise<ServerModSearchResult> {
   return props.resources.search({
     resourceType: props.resourceType,
-    source: "modrinth",
+    source: source.value,
     query: query.value,
     tag: tag.value,
     index: sort.value,
@@ -423,7 +445,7 @@ async function loadProjectDetails(): Promise<void> {
   try {
     const details = await props.resources.getProjectDetails(
       props.resourceType,
-      "modrinth",
+      project.source,
       project.id,
     );
     if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
@@ -449,7 +471,7 @@ function toggleVersionGroup(groupId: string): void {
 }
 
 async function openInstallModal(version: ServerModVersion): Promise<void> {
-  if (!downloadEnabled.value || !props.instances) return;
+  if (!downloadEnabled.value) return;
   const requestId = ++installInstancesRequestId;
   installVersion.value = version;
   compatibleInstances.value = [];
@@ -457,6 +479,10 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
   installActionError.value = "";
   installPendingTarget.value = undefined;
   installModalOpen.value = true;
+  if (!canInstallToInstance.value || !props.instances) {
+    installInstancesLoading.value = false;
+    return;
+  }
   installInstancesLoading.value = true;
   try {
     const instances = await props.instances.list();
@@ -488,13 +514,13 @@ function updateInstallModalVisible(visible: boolean): void {
 async function installModToInstance(instance: ServerInstanceSnapshot): Promise<void> {
   const project = selectedProject.value;
   const version = installVersion.value;
-  if (!project || !version || installPendingTarget.value) return;
+  if (!canInstallToInstance.value || !project || !version || installPendingTarget.value) return;
   installPendingTarget.value = instance.id;
   installActionError.value = "";
   let completed = false;
   try {
     await props.resources.installToInstance({
-      source: "modrinth",
+      source: project.source,
       resourceType: "datapack",
       projectId: project.id,
       versionId: version.id,
@@ -519,8 +545,8 @@ async function saveModAs(): Promise<void> {
   try {
     completed =
       (await props.resources.saveAs({
-        source: "modrinth",
-        resourceType: "datapack",
+        source: project.source,
+        resourceType: props.resourceType,
         projectId: project.id,
         versionId: version.id,
       })) !== undefined;
@@ -972,7 +998,7 @@ function errorMessage(error: unknown): string {
         <Cmz_Modal
           v-if="downloadEnabled"
           :visible="installModalOpen && !!installVersion"
-          title="安装数据包"
+          :title="`${resourceLabel}下载`"
           width="520px"
           :close-on-overlay="!installPendingTarget"
           @close="closeInstallModal"
@@ -1004,7 +1030,10 @@ function errorMessage(error: unknown): string {
 
             <template
               v-if="
-                installInstancesLoading || !!installInstancesError || compatibleInstances.length > 0
+                canInstallToInstance &&
+                (installInstancesLoading ||
+                  !!installInstancesError ||
+                  compatibleInstances.length > 0)
               "
             >
               <h3>下载到</h3>

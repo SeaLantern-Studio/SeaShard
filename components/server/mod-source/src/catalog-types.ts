@@ -1,4 +1,5 @@
 import type {
+  ServerModDownloadableResourceType,
   ServerModFilters,
   ServerModProjectDetails,
   ServerModSearchRequest,
@@ -10,7 +11,7 @@ import type {
 /** Host 内部下载投影；Renderer 永远不能提供 URL、哈希或最终路径。 */
 export interface ServerModArtifact {
   readonly source: ServerModSource;
-  readonly resourceType: "mod" | "datapack";
+  readonly resourceType: ServerModDownloadableResourceType;
   readonly projectId: string;
   readonly versionId: string;
   readonly fileName: string;
@@ -33,7 +34,7 @@ export interface ServerModCatalogImplementation {
     projectId: string,
   ): Promise<ServerModProjectDetails>;
   resolveVersionArtifact(
-    resourceType: "mod" | "datapack",
+    resourceType: ServerModDownloadableResourceType,
     projectId: string,
     versionId: string,
   ): Promise<ServerModArtifact>;
@@ -52,7 +53,7 @@ export interface ServerModCatalog {
     projectId: string,
   ): Promise<ServerModProjectDetails>;
   resolveVersionArtifact(
-    resourceType: "mod" | "datapack",
+    resourceType: ServerModDownloadableResourceType,
     source: ServerModSource,
     projectId: string,
     versionId: string,

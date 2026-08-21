@@ -10,9 +10,16 @@ import {
 import type { ServerModArtifact, ServerModCatalogImplementation } from "./catalog-types";
 
 /** MCIM 的 CurseForge 兼容 API；不在桌面端保存官方 CurseForge API Key。 */
-export const defaultMcimCurseForgeApiBaseUrl = "https://mod.mcimirror.top/curseforge/v1/";
 export const curseForgeMinecraftGameId = 432;
-export const curseForgeMinecraftModClassId = 6;
+/** MCIM 提供的 CurseForge 兼容接口；分类 ID 与官方 CurseForge API 保持一致。 */
+export const defaultMcimCurseForgeApiBaseUrl = "https://mod.mcimirror.top/curseforge/v1/";
+export const curseForgeMinecraftClassIds: Readonly<Record<ServerModrinthResourceType, number>> = {
+  mod: 6,
+  modpack: 4471,
+  datapack: 694,
+  world: 17,
+};
+export const curseForgeMinecraftModClassId = curseForgeMinecraftClassIds.mod;
 
 const loaderIds = new Map([
   ["forge", 1],
@@ -48,8 +55,10 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   private readonly fetchProvider: () => typeof globalThis.fetch;
   private readonly userAgent: string;
   private readonly baseUrl: URL;
-  private filtersPromise?: Promise<ServerModFilters>;
-
+  private readonly filtersPromises = new Map<
+    ServerModrinthResourceType,
+    Promise<ServerModFilters>
+  >();
   constructor(options: CurseForgeServerModCatalogOptions) {
     this.fetchProvider = options.fetchProvider ?? (() => globalThis.fetch);
     this.userAgent = options.userAgent.trim();
@@ -63,19 +72,13 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   }
 
   async getFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters> {
-    if (resourceType !== "mod") {
-      return {
-        sources: [{ id: "curseforge", label: "CurseForge" }],
-        tags: [],
-        versions: [],
-        loaders: [],
-      };
-    }
-    if (this.filtersPromise) return this.filtersPromise;
-    const request = this.loadFilters();
-    this.filtersPromise = request;
+    const cached = this.filtersPromises.get(resourceType);
+    if (cached) return cached;
+    const request = this.loadFilters(resourceType);
+    this.filtersPromises.set(resourceType, request);
     void request.catch(() => {
-      if (this.filtersPromise === request) this.filtersPromise = undefined;
+      if (this.filtersPromises.get(resourceType) === request)
+        this.filtersPromises.delete(resourceType);
     });
     return request;
   }
@@ -83,7 +86,7 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   async search(request: ServerModSearchRequest): Promise<ServerModSearchResult> {
     const url = this.endpoint("mods/search");
     url.searchParams.set("gameId", String(curseForgeMinecraftGameId));
-    url.searchParams.set("classId", String(curseForgeMinecraftModClassId));
+    url.searchParams.set("classId", String(classIdFor(request.resourceType)));
     url.searchParams.set("index", String(request.offset));
     url.searchParams.set("pageSize", String(request.limit));
     if (request.query) url.searchParams.set("searchFilter", request.query);
@@ -97,28 +100,31 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
     const sort = sortFor(request.index);
     url.searchParams.set("sortField", sort.field);
     url.searchParams.set("sortOrder", sort.order);
-    return parseSearchResult(await this.fetchJson(url), request.offset, request.limit);
+    return parseSearchResult(
+      await this.fetchJson(url),
+      request.resourceType,
+      request.offset,
+      request.limit,
+    );
   }
 
   async getProjectDetails(
     resourceType: ServerModrinthResourceType,
     projectValue: unknown,
   ): Promise<ServerModProjectDetails> {
-    if (resourceType !== "mod") throw new TypeError("CurseForge only supports Mod resources");
     const projectId = expectCurseForgeId(projectValue, "CurseForge project ID");
     const [modValue, filesValue] = await Promise.all([
       this.fetchJson(this.endpoint(`mods/${projectId}`)),
       this.fetchJson(this.endpoint(`mods/${projectId}/files?pageSize=50&index=0`)),
     ]);
-    return parseProjectDetails(modValue, filesValue, String(projectId));
+    return parseProjectDetails(modValue, filesValue, String(projectId), resourceType);
   }
 
   async resolveVersionArtifact(
-    resourceType: "mod" | "datapack",
+    resourceType: ServerModrinthResourceType,
     projectValue: unknown,
     versionValue: unknown,
   ): Promise<ServerModArtifact> {
-    if (resourceType !== "mod") throw new TypeError("CurseForge only supports Mod downloads");
     const projectId = expectCurseForgeId(projectValue, "CurseForge project ID");
     const fileId = expectCurseForgeId(versionValue, "CurseForge file ID");
     const [modValue, fileValue, downloadValue] = await Promise.all([
@@ -126,33 +132,53 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
       this.fetchJson(this.endpoint(`mods/${projectId}/files/${fileId}`)),
       this.fetchJson(this.endpoint(`mods/${projectId}/files/${fileId}/download-url`)),
     ]);
-    return parseArtifact(modValue, fileValue, downloadValue, String(projectId), String(fileId));
+    return parseArtifact(
+      modValue,
+      fileValue,
+      downloadValue,
+      String(projectId),
+      String(fileId),
+      resourceType,
+    );
   }
 
-  private async loadFilters(): Promise<ServerModFilters> {
-    const value = await this.fetchJson(
-      this.endpoint(
-        `categories?gameId=${curseForgeMinecraftGameId}&classId=${curseForgeMinecraftModClassId}`,
-      ),
-    );
-    const record = expectRecord(value, "CurseForge categories response");
-    const categories = expectArray(record.data, "CurseForge categories");
-    const tags = categories
-      .map((item, index) => {
-        const category = expectRecord(item, `CurseForge category ${index}`);
+  private async loadFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters> {
+    const classId = classIdFor(resourceType);
+    try {
+      const value = await this.fetchJson(
+        this.endpoint(`categories?gameId=${curseForgeMinecraftGameId}&classId=${classId}`),
+      );
+      const record = expectRecord(value, "CurseForge categories response");
+      const categories = expectArray(record.data, "CurseForge categories");
+      const tags = categories
+        .map((item, index) => {
+          const category = expectRecord(item, `CurseForge category ${index}`);
+          return {
+            id: String(expectNonNegativeInteger(category.id, `CurseForge category ${index} ID`)),
+            label: expectBoundedString(category.name, `CurseForge category ${index} name`, 128),
+          };
+        })
+        .sort((left, right) => left.label.localeCompare(right.label, "en"));
+      return {
+        sources: [{ id: "curseforge", label: "CurseForge" }],
+        tags,
+        versions: [],
+        loaders:
+          resourceType === "mod"
+            ? [...loaderNames].map((id) => ({ id, label: loaderLabels[id] ?? id }))
+            : [],
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("HTTP 404")) {
         return {
-          id: String(expectNonNegativeInteger(category.id, `CurseForge category ${index} ID`)),
-          label: expectBoundedString(category.name, `CurseForge category ${index} name`, 128),
+          sources: [{ id: "curseforge", label: "CurseForge" }],
+          tags: [],
+          versions: [],
+          loaders: [],
         };
-      })
-      .sort((left, right) => left.label.localeCompare(right.label, "en"));
-    return {
-      sources: [{ id: "curseforge", label: "CurseForge" }],
-      tags,
-      // MCIM 当前没有暴露独立版本枚举；搜索接口仍接受用户选择的版本值。
-      versions: [],
-      loaders: [...loaderNames].map((id) => ({ id, label: loaderLabels[id] ?? id })),
-    };
+      }
+      throw error;
+    }
   }
 
   private endpoint(path: string): URL {
@@ -174,8 +200,13 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   }
 }
 
+function classIdFor(resourceType: ServerModrinthResourceType): number {
+  return curseForgeMinecraftClassIds[resourceType];
+}
+
 function parseSearchResult(
   value: unknown,
+  resourceType: ServerModrinthResourceType,
   expectedOffset: number,
   expectedLimit: number,
 ): ServerModSearchResult {
@@ -191,7 +222,7 @@ function parseSearchResult(
   return {
     items: items.flatMap((item, index) => {
       try {
-        return [parseProject(item, index)];
+        return [parseProject(item, index, resourceType)];
       } catch {
         return [];
       }
@@ -202,7 +233,11 @@ function parseSearchResult(
   };
 }
 
-function parseProject(value: unknown, index: number): ServerModProject {
+function parseProject(
+  value: unknown,
+  index: number,
+  resourceType: ServerModrinthResourceType,
+): ServerModProject {
   const project = expectRecord(value, `CurseForge project ${index}`);
   const id = String(expectCurseForgeId(project.id, `CurseForge project ${index} ID`));
   const logo =
@@ -219,7 +254,7 @@ function parseProject(value: unknown, index: number): ServerModProject {
     : [];
   const latestFiles = Array.isArray(project.latestFilesIndexes) ? project.latestFilesIndexes : [];
   return {
-    resourceType: "mod",
+    resourceType,
     source: "curseforge",
     id,
     slug: expectBoundedString(project.slug, `CurseForge project ${index} slug`, 256),
@@ -252,18 +287,19 @@ function parseProjectDetails(
   modValue: unknown,
   filesValue: unknown,
   projectId: string,
+  resourceType: ServerModrinthResourceType,
 ): ServerModProjectDetails {
-  const mod = expectRecord(modValue, "CurseForge project details");
+  const mod = unwrapDataRecord(modValue, "CurseForge project details");
   if (String(expectCurseForgeId(mod.id, "CurseForge project details ID")) !== projectId) {
     throw new Error("CurseForge project details do not match the request");
   }
   return {
-    resourceType: "mod",
+    resourceType,
     source: "curseforge",
     projectId,
     body: expectBoundedString(mod.summary ?? "", "CurseForge project summary", 200_000, true),
     versions: parseFilesResponse(filesValue).map((file, index) =>
-      parseVersion(file, index, projectId),
+      parseVersion(file, index, projectId, resourceType),
     ),
   };
 }
@@ -272,6 +308,7 @@ function parseVersion(
   value: Record<string, unknown>,
   index: number,
   projectId: string,
+  resourceType: ServerModrinthResourceType,
 ): ServerModVersion {
   const file = parseFile(value, `CurseForge project file ${index}`);
   if (String(file.modId) !== projectId)
@@ -280,7 +317,7 @@ function parseVersion(
     id: String(file.id),
     gameVersions: parseGameVersions(file.gameVersions),
     loaders: parseLoaders(file.gameVersions, file.sortableGameVersions),
-    fileName: expectResourceFileName(file.fileName),
+    fileName: expectResourceFileName(file.fileName, resourceType),
     downloads: expectNonNegativeInteger(file.downloadCount ?? 0, "CurseForge file downloads"),
     datePublished: expectDate(file.fileDate, "CurseForge file date"),
   };
@@ -292,8 +329,9 @@ function parseArtifact(
   downloadValue: unknown,
   projectId: string,
   fileId: string,
+  resourceType: ServerModrinthResourceType,
 ): ServerModArtifact {
-  const mod = expectRecord(modValue, "CurseForge download project");
+  const mod = unwrapDataRecord(modValue, "CurseForge download project");
   if (String(expectCurseForgeId(mod.id, "CurseForge download project ID")) !== projectId) {
     throw new Error("CurseForge project does not match the requested project");
   }
@@ -308,10 +346,10 @@ function parseArtifact(
   const downloadUrl = expectHttpsUrl(downloadRecord.data, "CurseForge download URL");
   return {
     source: "curseforge",
-    resourceType: "mod",
+    resourceType,
     projectId,
     versionId: fileId,
-    fileName: expectResourceFileName(file.fileName),
+    fileName: expectResourceFileName(file.fileName, resourceType),
     url: toCurseForgeMirrorFileUrl(downloadUrl, String(file.fileName)),
     ...(parseSha1(file.hashes) ? { sha1: parseSha1(file.hashes) } : {}),
     size: expectNonNegativeInteger(file.fileLength ?? 0, "CurseForge file size"),
@@ -330,6 +368,13 @@ function parseFileResponse(value: unknown, index = 0): Record<string, unknown> {
   const record = expectRecord(value, `CurseForge file ${index}`);
   return record.data && typeof record.data === "object" && !Array.isArray(record.data)
     ? expectRecord(record.data, `CurseForge file ${index} data`)
+    : record;
+}
+
+function unwrapDataRecord(value: unknown, label: string): Record<string, unknown> {
+  const record = expectRecord(value, label);
+  return record.data && typeof record.data === "object" && !Array.isArray(record.data)
+    ? expectRecord(record.data, `${label} data`)
     : record;
 }
 
@@ -429,13 +474,14 @@ function expectHttpsUrl(value: unknown, label: string): string {
   return url.href;
 }
 
-function expectResourceFileName(value: unknown): string {
+function expectResourceFileName(value: unknown, resourceType: ServerModrinthResourceType): string {
   const fileName = expectBoundedString(value, "CurseForge file name", 512);
-  if (
-    !fileName.toLowerCase().endsWith(".jar") ||
-    fileName.includes("/") ||
-    fileName.includes("\\")
-  ) {
+  const lower = fileName.toLowerCase();
+  const validExtension =
+    resourceType === "mod"
+      ? lower.endsWith(".jar")
+      : lower.endsWith(".zip") || (resourceType === "modpack" && lower.endsWith(".mrpack"));
+  if (!validExtension || fileName.includes("/") || fileName.includes("\\")) {
     throw new Error("CurseForge file name is invalid");
   }
   return fileName;

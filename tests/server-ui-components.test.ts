@@ -49,7 +49,7 @@ const components = [
     manifest: serverDownloadWorldUiManifest,
     pluginId: "seashard.server-download-world-ui",
     entryId: "server-download-world.client",
-    permissions: [],
+    permissions: [serverModSourceContract],
   },
   {
     manifest: serverOverviewUiManifest,

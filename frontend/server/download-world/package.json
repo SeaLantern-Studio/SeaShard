@@ -8,7 +8,9 @@
     "./client": "./src/client/index.ts"
   },
   "dependencies": {
+    "@seashard/contracts": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/server-download-resource-shared": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",
     "lucide-vue-next": "0.400.0",
     "vue": "3.5.41"

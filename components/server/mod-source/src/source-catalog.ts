@@ -1,4 +1,5 @@
 import type {
+  ServerModDownloadableResourceType,
   ServerModFilters,
   ServerModProjectDetails,
   ServerModSearchRequest,
@@ -37,9 +38,8 @@ export class ServerModSourceCatalog implements ServerModCatalog {
   ): Promise<ServerModProjectDetails> {
     return this.forSource(source).getProjectDetails(resourceType, projectId);
   }
-
   resolveVersionArtifact(
-    resourceType: "mod" | "datapack",
+    resourceType: ServerModDownloadableResourceType,
     source: ServerModSource,
     projectId: string,
     versionId: string,

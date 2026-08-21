@@ -202,7 +202,8 @@ export interface ServerCoreSourceClientService {
 }
 
 export type ServerModSource = "modrinth" | "curseforge";
-export type ServerModrinthResourceType = "mod" | "modpack" | "datapack";
+export type ServerModrinthResourceType = "mod" | "modpack" | "datapack" | "world";
+export type ServerModDownloadableResourceType = ServerModrinthResourceType;
 export const serverModLoaders = ["fabric", "forge", "neoforge", "quilt"] as const;
 export type ServerModLoader = (typeof serverModLoaders)[number];
 
@@ -322,14 +323,14 @@ export interface ServerModInstallRequest {
 /** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */
 export interface ServerModSaveAsRequest {
   source: ServerModSource;
-  resourceType: "mod" | "datapack";
+  resourceType: ServerModDownloadableResourceType;
   projectId: string;
   versionId: string;
 }
-/** 多来源 Mod 或数据包完成校验并发布后的稳定结果。 */
+/** 多来源资源完成校验并发布后的稳定结果。 */
 export interface ServerModDownloadResult {
   source: ServerModSource;
-  resourceType: "mod" | "datapack";
+  resourceType: ServerModDownloadableResourceType;
   projectId: string;
   versionId: string;
   fileName: string;

@@ -4,6 +4,7 @@ import {
   serverModSearchLimits,
   type ServerConfigurationWriteRequest,
   type ServerCoreSaveAsRequest,
+  type ServerModDownloadableResourceType,
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
   type ServerModSearchIndex,
@@ -109,8 +110,13 @@ const serverModSearchIndexes = new Set<ServerModSearchIndex>([
   "newest",
   "updated",
 ]);
+const serverModResourceTypes = new Set<ServerModrinthResourceType>([
+  "mod",
+  "modpack",
+  "datapack",
+  "world",
+]);
 const serverModFilterPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
-const serverModResourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
 const serverModProjectIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 /** 收窄 Renderer 的搜索参数，分页和 Facet 都只能落在公开 Contract 的固定边界内。 */
@@ -127,9 +133,6 @@ export function expectServerModSearchRequest(value: unknown): ServerModSearchReq
   const offset = expectSafeInteger(record.offset, "server resource search offset");
   const limit = expectSafeInteger(record.limit, "server resource search limit");
   const source = expectServerModSource(record.source);
-  if (resourceType !== "mod" && source !== "modrinth") {
-    throw new TypeError("CurseForge only supports Mod resources");
-  }
   if (resourceType === "datapack" && loader) {
     throw new TypeError("server datapack search must not specify a loader");
   }
@@ -194,15 +197,24 @@ export function expectServerModSaveAsRequest(value: unknown): ServerModSaveAsReq
 export function expectServerModInstallRequest(value: unknown): ServerModInstallRequest {
   const record = expectRecord(value, "server resource install request");
   return {
-    ...expectServerModSaveAsRequest(record),
+    source: expectServerModSource(record.source),
+    resourceType: expectInstallableServerModResourceType(record.resourceType),
+    projectId: expectServerModProjectId(record.projectId),
+    versionId: expectServerModIdentity(record.versionId, "server resource version ID"),
     instanceId: expectServerModIdentity(record.instanceId, "server instance ID", 128),
   };
 }
 
-function expectDownloadableServerModResourceType(value: unknown): "mod" | "datapack" {
+function expectDownloadableServerModResourceType(
+  value: unknown,
+): ServerModDownloadableResourceType {
+  return expectServerModResourceType(value);
+}
+
+function expectInstallableServerModResourceType(value: unknown): "mod" | "datapack" {
   const resourceType = expectServerModResourceType(value);
-  if (resourceType === "modpack") {
-    throw new TypeError("server modpack download is not available");
+  if (resourceType !== "mod" && resourceType !== "datapack") {
+    throw new TypeError("server resource install type must be mod or datapack");
   }
   return resourceType;
 }
