@@ -18,9 +18,10 @@ import {
   writePortableInstanceManifests,
   writePortableSeaShardInstanceManifest,
 } from "./manifest";
+import { createWorldBackup } from "./world-backup";
 import { listWorldStorage, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
-import type { CreateManagedServerInstanceRequest } from "./types";
+import type { CreateManagedServerInstanceRequest, ServerWorldBackupSnapshot } from "./types";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
 
 interface PendingManagedInstance {
@@ -47,6 +48,7 @@ export class ServerInstanceManager {
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
   private readonly deletions = new Map<string, Promise<void>>();
+  private readonly instanceOperations = new Map<string, Promise<void>>();
   private readonly worldSwitches = new Map<string, Promise<ServerWorldStorageSnapshot>>();
   private readonly metadataUpdates = new Map<string, Promise<ServerInstanceSnapshot>>();
   private disposed = false;
@@ -149,7 +151,9 @@ export class ServerInstanceManager {
       throw new Error(`server instance ${instanceId} is already being deleted`);
     }
 
-    const task = this.deleteManagedInstance(instanceId);
+    const task = this.runInstanceOperation(instanceId, () =>
+      this.deleteManagedInstance(instanceId),
+    );
     this.deletions.set(instanceId, task);
     try {
       await task;
@@ -256,6 +260,22 @@ export class ServerInstanceManager {
       if (this.worldSwitches.get(instanceId) === task) this.worldSwitches.delete(instanceId);
     }
   }
+  /** 串行创建同一实例的世界备份，避免与实例删除并发访问源目录。 */
+  async createWorldBackup(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+  ): Promise<ServerWorldBackupSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return createWorldBackup(
+        instance,
+        worldIdValue,
+        this.options.now ? { now: this.options.now } : {},
+      );
+    });
+  }
 
   /** 停机时取消尚未完成的托管下载，等待目录清理后再卸载依赖组件。 */
   async dispose(): Promise<void> {
@@ -266,6 +286,7 @@ export class ServerInstanceManager {
     );
     await Promise.allSettled(this.finalizers.values());
     await Promise.allSettled(this.deletions.values());
+    await Promise.allSettled(this.instanceOperations.values());
     await Promise.allSettled(this.metadataUpdates.values());
   }
 
@@ -289,6 +310,22 @@ export class ServerInstanceManager {
         this.metadataUpdates.delete(instanceId);
       }
     }
+  }
+
+  /** 同一实例的破坏性目录操作与备份共享串行队列。 */
+  private runInstanceOperation<T>(instanceId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.instanceOperations.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(operation);
+    const settled = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.instanceOperations.set(instanceId, settled);
+    return task.finally(() => {
+      if (this.instanceOperations.get(instanceId) === settled) {
+        this.instanceOperations.delete(instanceId);
+      }
+    });
   }
 
   /**

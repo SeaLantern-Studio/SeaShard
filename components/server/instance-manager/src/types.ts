@@ -19,6 +19,15 @@ export {
 export interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {
   connections: number;
 }
+/** 一次世界备份的结果；只在 Host 实例管理组件内部传递，不暴露给 Renderer 合同。 */
+export interface ServerWorldBackupSnapshot {
+  readonly instanceId: string;
+  readonly worldId: string;
+  readonly worldDirectoryName: string;
+  readonly fileName: string;
+  readonly createdAt: string;
+  readonly sizeBytes: number;
+}
 
 /** 实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。 */
 export interface ServerInstanceManagerService {
@@ -37,6 +46,8 @@ export interface ServerInstanceManagerService {
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 列出实例下的原生世界、下载世界或分维度世界。 */
   listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  /** 创建指定逻辑世界的 ZIP 备份；调用方负责保证服务端已停机。 */
+  createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>;
   /** 修改实例 server.properties 的 level-name；Desktop Shell 负责运行态停机门禁。 */
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */

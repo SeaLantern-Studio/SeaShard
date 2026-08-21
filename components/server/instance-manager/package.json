@@ -10,6 +10,7 @@
     "@seashard/contracts": "workspace:*",
     "@seashard/database": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
-    "@seashard/server-core-source": "workspace:*"
+    "@seashard/server-core-source": "workspace:*",
+    "fflate": "0.8.3"
   }
 }

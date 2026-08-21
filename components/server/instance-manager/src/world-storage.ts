@@ -93,6 +93,31 @@ export async function listWorldStorage(
     dimensions,
   };
 }
+export interface WorldStorageDirectory {
+  readonly id: string;
+  readonly groupId: string;
+  readonly absolutePath: string;
+}
+
+/** 按存档投影解析真实世界目录；split 模式会一次返回同一逻辑世界的全部维度。 */
+export async function resolveWorldStorageDirectories(
+  instance: ServerInstanceSnapshot,
+  requestedId: unknown,
+): Promise<readonly WorldStorageDirectory[]> {
+  const worldId = expectWorldId(requestedId);
+  const rootPath = await resolveWorldRoot(instance);
+  const unified = supportsUnifiedWorldStorage(instance.serverType);
+  const worlds = await discoverWorlds(rootPath, unified);
+  if (unified) {
+    const world = worlds.find((candidate) => candidate.id === worldId);
+    if (!world) throw new Error("目标存档不存在或不属于当前服务器实例。");
+    return [{ ...world, groupId: world.id }];
+  }
+
+  const targets = worlds.filter((world) => splitWorldGroupId(world.id) === worldId);
+  if (targets.length === 0) throw new Error("目标存档不存在或不属于当前服务器实例。");
+  return targets.map((world) => ({ ...world, groupId: worldId }));
+}
 
 /** 只允许切换扫描结果中的目录，并通过 server.properties 的 level-name 完成切换。 */
 export async function switchWorldStorage(

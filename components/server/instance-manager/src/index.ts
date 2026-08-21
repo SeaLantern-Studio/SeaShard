@@ -52,10 +52,11 @@ export function createServerInstanceManagerModule(
       });
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
-        list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listWorldStorage: async (instanceId) =>
           asJsonValue(await manager.listWorldStorage(instanceId)),
+        createWorldBackup: async (instanceId, worldId) =>
+          asJsonValue(await manager.createWorldBackup(instanceId, worldId)),
         switchWorld: async (instanceId, worldId) =>
           asJsonValue(await manager.switchWorld(instanceId, worldId)),
         setStartupSettings: async (instanceId, settings) =>
@@ -85,6 +86,7 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./manager";
+export * from "./world-backup";
 export * from "./manifest";
 export * from "./startup-settings";
 export * from "./registry";

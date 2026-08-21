@@ -301,6 +301,9 @@ importers:
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../core-source
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
 
   components/server/mod-source:
     dependencies:
