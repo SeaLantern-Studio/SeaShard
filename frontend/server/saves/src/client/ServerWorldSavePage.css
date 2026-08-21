@@ -471,21 +471,10 @@
   min-width: 0;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 8px 14px;
   border: 1px solid var(--sl-border-light);
   border-radius: var(--sl-radius-md);
   background: var(--sl-surface);
-}
-
-.world-save-backup-icon {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--sl-surface-secondary);
-  color: var(--sl-primary);
 }
 
 .world-save-backup-actions {
@@ -651,6 +640,10 @@
   gap: 4px;
 }
 
+.world-save-backup-row .world-save-card-copy {
+  gap: 2px;
+}
+
 .world-save-card-copy strong {
   font-size: var(--sl-font-size-md);
 }
@@ -661,6 +654,10 @@
 }
 
 .world-save-meta > small {
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-detail-header .world-save-card-copy small {
   font-size: var(--sl-font-size-xs);
 }
 
@@ -694,7 +691,6 @@
 .world-save-dimension-row > .world-save-current-label {
   right: 52px;
 }
-
 .world-save-dimension-row > .world-save-info-anchor {
   position: absolute;
   top: 50%;
@@ -702,4 +698,54 @@
   display: grid;
   place-items: center;
   transform: translateY(-50%);
+}
+
+.world-save-info-button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-sm);
+  background: color-mix(in srgb, var(--sl-surface) 92%, var(--sl-bg-secondary));
+  color: var(--sl-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--sl-transition-fast),
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast);
+}
+
+.world-save-info-button:hover {
+  border-color: color-mix(in srgb, var(--sl-primary) 28%, var(--sl-border));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary-dark);
+}
+
+.world-save-info-button:active {
+  background: color-mix(in srgb, var(--sl-primary) 16%, var(--sl-surface));
+}
+
+/* 存档确认框只遮罩当前工作区，不覆盖应用导航与标题栏。 */
+:global(body:has(.server-world-save-page) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.server-world-save-page):has(.right-sidebar.open) .cmz-modal-overlay) {
+  right: calc(var(--sl-sidebar-width) + 20px);
+}
+
+:global(body:has(.server-world-save-page) .cmz-modal) {
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

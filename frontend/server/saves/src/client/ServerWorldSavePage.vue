@@ -406,15 +406,14 @@ function errorMessage(cause: unknown): string {
             </button>
             <span v-if="save.current" class="world-save-current-label">当前</span>
             <span class="world-save-info-anchor">
-              <Cmz_Button
-                variant="outline"
-                size="sm"
-                icon-only
+              <button
+                type="button"
+                class="world-save-info-button"
                 aria-label="查看存档详情"
                 @click="openDetails(save.id, save.name)"
               >
                 <Info :size="17" :stroke-width="1.8" />
-              </Cmz_Button>
+              </button>
             </span>
           </article>
         </div>
@@ -478,15 +477,14 @@ function errorMessage(cause: unknown): string {
                 </button>
                 <span v-if="group.current" class="world-save-current-label">当前</span>
                 <span class="world-save-info-anchor">
-                  <Cmz_Button
-                    variant="outline"
-                    size="sm"
-                    icon-only
+                  <button
+                    type="button"
+                    class="world-save-info-button"
                     aria-label="查看存档详情"
                     @click.stop="openDetails(group.id, group.name)"
                   >
                     <Info :size="17" :stroke-width="1.8" />
-                  </Cmz_Button>
+                  </button>
                 </span>
               </div>
             </div>
@@ -540,7 +538,15 @@ function errorMessage(cause: unknown): string {
         </div>
         <div v-else class="world-save-backup-list">
           <article v-for="backup in backups" :key="backup.fileName" class="world-save-backup-row">
-            <span class="world-save-backup-icon"><Archive :size="19" :stroke-width="1.7" /></span>
+            <span class="world-save-icon world-save-icon--small">
+              <img
+                v-if="detailSave?.iconDataUrl"
+                :src="detailSave.iconDataUrl"
+                alt=""
+                draggable="false"
+              />
+              <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
+            </span>
             <span class="world-save-card-copy"
               ><strong>{{ backup.fileName }}</strong
               ><span
@@ -560,6 +566,7 @@ function errorMessage(cause: unknown): string {
               <Cmz_Button
                 variant="ghost"
                 size="sm"
+                color="var(--sl-error)"
                 :disabled="Boolean(backupWorkingFile)"
                 @click="deleteTarget = backup"
                 ><Trash2 :size="15" :stroke-width="1.8" />删除</Cmz_Button
@@ -570,7 +577,12 @@ function errorMessage(cause: unknown): string {
       </section>
     </div>
 
-    <Cmz_Modal :visible="Boolean(restoreTarget)" title="恢复备份" width="440px">
+    <Cmz_Modal
+      :visible="Boolean(restoreTarget)"
+      title="恢复备份"
+      width="440px"
+      @close="restoreTarget = undefined"
+    >
       <div class="world-save-warning">
         <strong>确认恢复此备份？</strong>
         <p>{{ restoreTarget?.fileName }} 将覆盖当前存档目录。</p>
@@ -580,17 +592,27 @@ function errorMessage(cause: unknown): string {
         ><Cmz_Button variant="solid" @click="restoreBackup">恢复</Cmz_Button></template
       >
     </Cmz_Modal>
-    <Cmz_Modal :visible="Boolean(deleteTarget)" title="删除备份" width="440px">
+    <Cmz_Modal
+      :visible="Boolean(deleteTarget)"
+      title="删除备份"
+      width="440px"
+      @close="deleteTarget = undefined"
+    >
       <div class="world-save-warning">
         <strong>确认删除此备份？</strong>
         <p>{{ deleteTarget?.fileName }} 删除后无法恢复。</p>
       </div>
       <template #footer
         ><Cmz_Button variant="ghost" @click="deleteTarget = undefined">取消</Cmz_Button
-        ><Cmz_Button variant="solid" @click="deleteBackup">删除</Cmz_Button></template
+        ><Cmz_Button color="var(--sl-error)" @click="deleteBackup">删除</Cmz_Button></template
       >
     </Cmz_Modal>
-    <Cmz_Modal :visible="serverActiveWarning" title="无法操作存档" width="440px">
+    <Cmz_Modal
+      :visible="serverActiveWarning"
+      title="无法操作存档"
+      width="440px"
+      @close="serverActiveWarning = false"
+    >
       <div class="world-save-warning">
         <strong>服务器正在运行</strong>
         <p>需要关停服务器之后才能操作存档。</p>
