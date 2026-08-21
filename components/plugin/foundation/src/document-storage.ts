@@ -244,7 +244,7 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
     return decodeDocument(result.row as DocumentRow);
   }
 
-  /** 删除也支持 revision 前置条件，防止旧 generation 删除新 generation 的数据。 */
+  /** 删除也支持 revision 前置条件，防止旧运行实例删除新运行实例的数据。 */
   private async delete(
     ownerId: string,
     runtimeId: string,

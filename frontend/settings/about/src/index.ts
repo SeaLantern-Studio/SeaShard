@@ -12,7 +12,6 @@ export const aboutUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

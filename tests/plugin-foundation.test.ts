@@ -14,7 +14,7 @@ import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
 import { Context } from "cordis";
 import { databaseWorkerEntry } from "./plugin-test-fixtures.ts";
 
-await test("plugin foundation boots after database and repairs persisted runtime state", async () => {
+await test("plugin foundation keeps only package and Binding persistence", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-foundation-"));
   const descriptors = () => [
     createPluginFoundationBootstrapDescriptor({
@@ -30,49 +30,18 @@ await test("plugin foundation boots after database and repairs persisted runtime
   ];
 
   try {
-    const firstRoot = new Context();
-    const firstLoader = new BootstrapLoader(firstRoot);
+    const root = new Context();
+    const loader = new BootstrapLoader(root);
     try {
-      await firstLoader.start(descriptors());
+      await loader.start(descriptors());
       assert.deepEqual(
-        firstLoader.snapshot().map((component) => component.id),
+        loader.snapshot().map((component) => component.id),
         ["seashard.database-sqlite", "seashard.plugin-foundation"],
       );
-
-      const store = firstRoot["plugin-foundation"].store;
-      await store.saveRuntimePublication({
-        runtimeId: "example.runtime",
-        generation: 3,
-        epoch: 7,
-      });
-      await store.saveRuntimeOperation({
-        id: "operation-1",
-        runtimeId: "example.runtime",
-        kind: "reload",
-        mode: "stop-first",
-        status: "running",
-        step: "prepare",
-        currentGeneration: 3,
-        candidateGeneration: 4,
-        attentionRequired: false,
-      });
+      assert.deepEqual(await root["plugin-foundation"].store.listBindings(), []);
+      assert.deepEqual(await root["plugin-foundation"].store.listCurrentPackages(), []);
     } finally {
-      await firstLoader.dispose();
-    }
-
-    const secondRoot = new Context();
-    const secondLoader = new BootstrapLoader(secondRoot);
-    try {
-      await secondLoader.start(descriptors());
-      const store = secondRoot["plugin-foundation"].store;
-      const publication = (await store.listRuntimePublications())[0];
-      assert.equal(publication?.generation, null);
-      assert.equal(publication?.epoch, 8);
-      const operation = (await store.listRuntimeOperations())[0];
-      assert.equal(operation?.status, "interrupted");
-      assert.match(operation?.error ?? "", /stopped before the operation completed/);
-    } finally {
-      await secondLoader.dispose();
+      await loader.dispose();
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -187,7 +156,6 @@ await test("plugin foundation exposes managed storage with runtime isolation and
       actorType: "plugin",
       actorId: "example.plugin",
       runtimeId: "example.runtime-a",
-      generation: 1,
       scopeType: "global",
       scopeId: "global",
       scopeChain: [{ type: "global", id: "global" }],

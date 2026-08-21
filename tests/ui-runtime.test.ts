@@ -132,7 +132,6 @@ await test("client entry projection excludes Main paths and loader objects", () 
         targets: ["desktop" as const],
         activationScopes: ["global" as const],
         permissions: [],
-        upgradeMode: "stop-first" as const,
       },
     ],
     compatibility: { seaShard: ">=0.0.0 <1.0.0" },

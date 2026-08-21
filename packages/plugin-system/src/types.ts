@@ -1,13 +1,9 @@
 import type {
-  JsonValue,
   PluginBinding,
   PluginEntryManifest,
   PluginManifest,
   PluginSourceKind,
   PluginTrustLevel,
-  RuntimeGenerationSnapshot,
-  RuntimeOperationSnapshot,
-  RuntimePublicationSnapshot,
 } from "@seashard/plugin-sdk";
 
 export interface PluginPackageRecord {
@@ -48,28 +44,6 @@ export interface ResolvedEntry {
 export interface ResolvedClientEntrySnapshot {
   revision: number;
   entries: readonly ResolvedEntry[];
-}
-
-export interface StoredRuntimeGeneration extends RuntimeGenerationSnapshot {
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StoredRuntimePublication extends RuntimePublicationSnapshot {
-  updatedAt: string;
-}
-
-export interface StoredRuntimeOperation extends RuntimeOperationSnapshot {
-  startedAt: string;
-  updatedAt: string;
-}
-
-export interface JournalRecord {
-  id: number;
-  occurredAt: string;
-  category: string;
-  aggregateId: string;
-  payload: JsonValue;
 }
 
 export interface BuiltInModuleLoader {

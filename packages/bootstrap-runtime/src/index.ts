@@ -27,7 +27,7 @@ const contractPattern = /^[a-z][a-z0-9.*:-]{0,126}$/;
 const digestPattern = /^[a-f0-9]{64}$/;
 
 /**
- * 在普通 ComponentSupervisor 创建前装载受保护组件。
+ * 在普通插件运行时创建前装载受保护组件。
  *
  * Loader 只负责固定依赖图、Cordis 生命周期绑定和失败回滚；它不读取插件目录，
  * 也不根据数据库中的启用状态决定是否启动组件。

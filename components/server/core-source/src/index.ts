@@ -24,7 +24,6 @@ export const serverCoreSourceManifest: PluginManifest = {
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
       permissions: [downloadContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

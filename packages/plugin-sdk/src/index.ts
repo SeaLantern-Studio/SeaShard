@@ -9,9 +9,9 @@ export type HostProfile = "electron" | "node" | "docker";
 export type ClientTarget = "desktop" | "web" | "mobile";
 export type PluginRuntime = "host" | "client";
 export type ActivationScope = "global" | "workspace" | "server" | "agent" | "client-session";
-export type UpgradeMode = "hot-swap" | "stop-first";
 export type PluginSourceKind = "builtin" | "development" | "installed";
 export type PluginTrustLevel = "builtin" | "official" | "local-full-trust" | "package-full-trust";
+
 export type OperatingSystem =
   | "win32"
   | "darwin"
@@ -22,17 +22,7 @@ export type OperatingSystem =
   | "sunos";
 export type CpuArchitecture = "x64" | "arm64" | "ia32" | "arm" | "riscv64" | "ppc64" | "s390x";
 
-export type RuntimeGenerationPhase = "prepared" | "running" | "failed" | "terminated";
-export type RuntimeOperationKind = "activate" | "replace" | "reload" | "deactivate";
-export type RuntimeOperationStatus = "running" | "completed" | "failed" | "interrupted";
-export type RuntimeOperationStep =
-  | "prepare"
-  | "wait-dependencies"
-  | "start-candidate"
-  | "publish"
-  | "drain-previous"
-  | "stop-previous"
-  | "rollback";
+export type RuntimePluginState = "active" | "failed";
 
 export interface PluginCompatibility {
   seaShard: string;
@@ -47,7 +37,6 @@ export interface PluginEntryManifest {
   targets?: ClientTarget[];
   activationScopes: ActivationScope[];
   permissions: string[];
-  upgradeMode: UpgradeMode;
   os?: OperatingSystem[];
   arch?: CpuArchitecture[];
 }
@@ -80,7 +69,6 @@ export interface ExecutionContext {
   actorType: "core" | "plugin" | "client" | "agent" | "task";
   actorId: string;
   runtimeId?: string;
-  generation?: number;
   scopeType: ActivationScope;
   scopeId: string;
   permissionRevision: number;
@@ -123,7 +111,6 @@ export interface PluginStorageBroker {
 export interface PluginContext {
   readonly execution: ExecutionContext;
   readonly runtimeId: string;
-  readonly generation: number;
   readonly storage: PluginStorage;
   effect(execute: () => Awaitable<Disposable | void>, label?: string): void;
   provide(contract: string, provider: ServiceProvider): void;
@@ -153,45 +140,16 @@ export interface PluginModule {
   apply(ctx: PluginContext, config: JsonValue): Awaitable<Disposable | void>;
 }
 
-export interface RuntimeGenerationSnapshot {
+export interface RuntimePluginSnapshot {
   runtimeId: string;
   pluginId: string;
   pluginVersion: string;
   entryId: string;
-  bindingId: string;
-  source: PluginSourceKind;
-  trust: PluginTrustLevel;
-  scopeType: ActivationScope;
-  scopeId: string;
-  generation: number;
-  phase: RuntimeGenerationPhase;
-  upgradeMode: UpgradeMode;
   host: "core" | "node-plugin-host" | "client";
-  dependencies: readonly string[];
-  error?: string;
-}
-
-export interface RuntimePublicationSnapshot {
-  runtimeId: string;
-  generation: number | null;
-  epoch: number;
-}
-
-export interface RuntimeOperationSnapshot {
-  id: string;
-  runtimeId: string;
-  kind: RuntimeOperationKind;
-  mode: UpgradeMode;
-  status: RuntimeOperationStatus;
-  step: RuntimeOperationStep;
-  currentGeneration: number | null;
-  candidateGeneration: number | null;
-  attentionRequired: boolean;
+  state: RuntimePluginState;
   error?: string;
 }
 
 export interface RuntimeControlSnapshot {
-  generations: readonly RuntimeGenerationSnapshot[];
-  publications: readonly RuntimePublicationSnapshot[];
-  operations: readonly RuntimeOperationSnapshot[];
+  plugins: readonly RuntimePluginSnapshot[];
 }

@@ -1,9 +1,4 @@
-import type {
-  PreparedRuntime,
-  RuntimeBackend,
-  RuntimeHandle,
-  SupervisedEntry,
-} from "@seashard/component-supervisor";
+import type { PreparedPlugin, RunningPlugin } from "./runtime";
 import type {
   ExecutionContext,
   JsonValue,
@@ -34,60 +29,48 @@ import type {
   StoragePutPayload,
 } from "./host-protocol";
 import { PluginRegistry } from "./registry";
-import {
-  ContributionRegistry,
-  PluginEventBus,
-  RuntimePublicationRegistry,
-  ServiceRegistry,
-} from "./runtime-registries";
+import { ContributionRegistry, PluginEventBus, ServiceRegistry } from "./runtime-registries";
+import type { ResolvedEntry } from "./types";
 
 interface RuntimeRegistries {
-  publications: RuntimePublicationRegistry;
   services: ServiceRegistry;
   contributions: ContributionRegistry;
   events: PluginEventBus;
   storage: PluginStorageBroker;
 }
 
-export class PluginRuntimeBackend implements RuntimeBackend {
+/**
+ * 将插件包转换成 Cordis Fiber 或独立 Plugin Host 的运行句柄。
+ *
+ * 该后端只负责模块装载和资源释放，不维护持久化运行态。
+ */
+export class PluginRuntimeBackend {
   constructor(
     private readonly root: Context,
     private readonly registry: PluginRegistry,
     private readonly registries: RuntimeRegistries,
     private readonly pluginHostEntry: string,
-    private readonly onHostFailure?: (runtimeId: string, generation: number, error: Error) => void,
+    private readonly onHostFailure?: (runtimeId: string, error: Error) => void,
   ) {}
 
-  prepare(entry: SupervisedEntry, generation: number): Promise<PreparedRuntime> {
-    if (entry.host === "core") return this.prepareBuiltIn(entry, generation);
-    if (entry.host === "node-plugin-host") return this.prepareExternal(entry, generation);
+  prepare(entry: ResolvedEntry): Promise<PreparedPlugin> {
+    if (entry.host === "core") return this.prepareBuiltIn(entry);
+    if (entry.host === "node-plugin-host") return this.prepareExternal(entry);
     throw new Error(`client entry requires a connected client runtime: ${entry.runtimeId}`);
   }
 
   dependencyAvailable(contract: string, execution: ExecutionContext): boolean {
     return this.registries.services.has(contract, execution);
   }
-  publish(runtimeId: string, generation: number) {
-    this.registries.services.assertPublishable(runtimeId, generation);
-    this.registries.services.resumeRuntime(runtimeId, generation);
-    return this.registries.publications.publish(runtimeId, generation);
-  }
 
-  withdraw(runtimeId: string, generation: number) {
-    return this.registries.publications.withdraw(runtimeId, generation);
-  }
-
-  private async prepareBuiltIn(
-    entry: SupervisedEntry,
-    generation: number,
-  ): Promise<PreparedRuntime> {
+  private async prepareBuiltIn(entry: ResolvedEntry): Promise<PreparedPlugin> {
     const loader = this.registry.getBuiltInLoader(entry.package.manifest.id, entry.entry.id);
     if (!loader) throw new Error(`built-in module loader is missing: ${entry.runtimeId}`);
     const module = validatePluginModule(await loader.load());
     const config = await validateConfig(module, entry.binding.config);
     const dependencies = validateContracts(module.inject ?? [], "inject");
     const provides = validateContracts(module.provides ?? [], "provides");
-    const execution = createPluginExecution(entry, generation);
+    const execution = createPluginExecution(entry);
     const registries = this.registries;
     let consumed = false;
 
@@ -103,7 +86,6 @@ export class PluginRuntimeBackend implements RuntimeBackend {
             const pluginContext = createLocalPluginContext(
               cordisContext,
               entry,
-              generation,
               execution,
               registries,
             );
@@ -114,10 +96,10 @@ export class PluginRuntimeBackend implements RuntimeBackend {
         const fiber = this.root.plugin(adapter);
         try {
           await fiber;
-          return new LocalRuntimeHandle(fiber, entry.runtimeId, generation, registries);
+          return new LocalRuntimeHandle(fiber, entry.runtimeId, registries);
         } catch (error) {
           await fiber.dispose();
-          removeRuntimeRegistrations(registries, entry.runtimeId, generation);
+          removeRuntimeRegistrations(registries, entry.runtimeId);
           throw error;
         }
       },
@@ -127,29 +109,23 @@ export class PluginRuntimeBackend implements RuntimeBackend {
     };
   }
 
-  private async prepareExternal(
-    entry: SupervisedEntry,
-    generation: number,
-  ): Promise<PreparedRuntime> {
-    const execution = createPluginExecution(entry, generation);
+  private async prepareExternal(entry: ResolvedEntry): Promise<PreparedPlugin> {
+    const execution = createPluginExecution(entry);
     const session = new PluginHostSession(
       this.pluginHostEntry,
       entry,
-      generation,
       execution,
       this.registries,
-      (error) => this.onHostFailure?.(entry.runtimeId, generation, error),
+      (error) => this.onHostFailure?.(entry.runtimeId, error),
     );
     try {
       const modulePath = join(entry.package.rootPath, entry.entry.module.slice(2));
       const moduleUrl = pathToFileURL(modulePath);
       moduleUrl.searchParams.set("runtime", entry.runtimeId);
-      moduleUrl.searchParams.set("generation", String(generation));
       const prepared = (await session.request("prepare", {
         moduleUrl: moduleUrl.href,
         config: entry.binding.config,
         runtimeId: entry.runtimeId,
-        generation,
         execution,
       } satisfies PrepareRuntimePayload)) as unknown as PreparedRuntimePayload;
       let consumed = false;
@@ -161,7 +137,7 @@ export class PluginRuntimeBackend implements RuntimeBackend {
           consumed = true;
           try {
             await session.request("start", null);
-            return new ExternalRuntimeHandle(session, entry.runtimeId, generation, this.registries);
+            return new ExternalRuntimeHandle(session, entry.runtimeId, this.registries);
           } catch (error) {
             await session.close();
             throw error;
@@ -180,44 +156,34 @@ export class PluginRuntimeBackend implements RuntimeBackend {
   }
 }
 
-class LocalRuntimeHandle implements RuntimeHandle {
+class LocalRuntimeHandle implements RunningPlugin {
   constructor(
     private readonly fiber: Fiber,
     private readonly runtimeId: string,
-    private readonly generation: number,
     private readonly registries: RuntimeRegistries,
   ) {}
-
-  drain(): Promise<void> {
-    return this.registries.services.drainRuntime(this.runtimeId, this.generation);
-  }
 
   async stop(): Promise<void> {
     try {
       await this.fiber.dispose();
     } finally {
-      removeRuntimeRegistrations(this.registries, this.runtimeId, this.generation);
+      removeRuntimeRegistrations(this.registries, this.runtimeId);
     }
   }
 }
 
-class ExternalRuntimeHandle implements RuntimeHandle {
+class ExternalRuntimeHandle implements RunningPlugin {
   constructor(
     private readonly session: PluginHostSession,
     private readonly runtimeId: string,
-    private readonly generation: number,
     private readonly registries: RuntimeRegistries,
   ) {}
-
-  drain(): Promise<void> {
-    return this.registries.services.drainRuntime(this.runtimeId, this.generation);
-  }
 
   async stop(): Promise<void> {
     try {
       await this.session.request("stop", null);
     } finally {
-      removeRuntimeRegistrations(this.registries, this.runtimeId, this.generation);
+      removeRuntimeRegistrations(this.registries, this.runtimeId);
       await this.session.close();
     }
   }
@@ -240,8 +206,7 @@ class PluginHostSession {
 
   constructor(
     pluginHostEntry: string,
-    private readonly entry: SupervisedEntry,
-    private readonly generation: number,
+    private readonly entry: ResolvedEntry,
     private readonly execution: ExecutionContext,
     private readonly registries: RuntimeRegistries,
     private readonly onUnexpectedExit: (error: Error) => void,
@@ -254,8 +219,8 @@ class PluginHostSession {
       },
       stdio: ["ignore", "inherit", "inherit", "ipc"],
     });
-    this.child.on("message", (message: HostProtocolMessage) => {
-      void this.receive(message);
+    this.child.on("message", (message) => {
+      void this.receive(message as HostProtocolMessage);
     });
     this.child.once("error", (error) => this.fail(error));
     this.child.once("exit", (code, signal) => {
@@ -290,11 +255,8 @@ class PluginHostSession {
       if (!request) return;
       this.pending.delete(message.id);
       clearTimeout(request.timer);
-      if (message.ok) {
-        request.resolve(message.value);
-      } else {
-        request.reject(new Error(message.error ?? "plugin host request failed"));
-      }
+      if (message.ok) request.resolve(message.value);
+      else request.reject(new Error(message.error ?? "plugin host request failed"));
       return;
     }
     if (message.type === "request") {
@@ -389,7 +351,6 @@ class PluginHostSession {
     const dispose = this.registries.services.register(
       payload.contract,
       this.entry.runtimeId,
-      this.generation,
       scopeFor(this.entry),
       provider,
     );
@@ -400,7 +361,6 @@ class PluginHostSession {
     const registration = this.registries.contributions.register(
       payload.kind,
       this.entry.runtimeId,
-      this.generation,
       scopeFor(this.entry),
       payload.value,
     );
@@ -411,7 +371,6 @@ class PluginHostSession {
     const dispose = this.registries.events.on(
       payload.event,
       this.entry.runtimeId,
-      this.generation,
       scopeFor(this.entry),
       async (eventPayload) => {
         await this.request("dispatch-event", {
@@ -441,7 +400,7 @@ class PluginHostSession {
     this.pending.clear();
     for (const dispose of this.registrationDisposers.values()) dispose();
     this.registrationDisposers.clear();
-    removeRuntimeRegistrations(this.registries, this.entry.runtimeId, this.generation);
+    removeRuntimeRegistrations(this.registries, this.entry.runtimeId);
   }
 
   private closeProcess(): Promise<void> {
@@ -467,8 +426,7 @@ class PluginHostSession {
 
 function createLocalPluginContext(
   cordisContext: Context,
-  entry: SupervisedEntry,
-  generation: number,
+  entry: ResolvedEntry,
   execution: ExecutionContext,
   registries: RuntimeRegistries,
 ): PluginContext {
@@ -476,14 +434,13 @@ function createLocalPluginContext(
   return {
     execution,
     runtimeId: entry.runtimeId,
-    generation,
     storage: registries.storage.for(execution),
     effect(execute, label) {
       cordisContext.effect(async () => (await execute()) ?? (() => {}), label);
     },
     provide(contract, provider) {
       cordisContext.effect(
-        () => registries.services.register(contract, entry.runtimeId, generation, scope, provider),
+        () => registries.services.register(contract, entry.runtimeId, scope, provider),
         `service ${contract}`,
       );
     },
@@ -501,19 +458,13 @@ function createLocalPluginContext(
       ) as T;
     },
     contribute(kind, value) {
-      const registration = registries.contributions.register(
-        kind,
-        entry.runtimeId,
-        generation,
-        scope,
-        value,
-      );
+      const registration = registries.contributions.register(kind, entry.runtimeId, scope, value);
       cordisContext.effect(() => registration.dispose, `contribution ${kind}`);
       return registration.id;
     },
     on(event, handler) {
       cordisContext.effect(
-        () => registries.events.on(event, entry.runtimeId, generation, scope, handler),
+        () => registries.events.on(event, entry.runtimeId, scope, handler),
         `event ${event}`,
       );
     },
@@ -523,16 +474,12 @@ function createLocalPluginContext(
   };
 }
 
-export function createPluginExecution(
-  entry: SupervisedEntry,
-  generation: number,
-): ExecutionContext {
+function createPluginExecution(entry: ResolvedEntry): ExecutionContext {
   const ownScope = scopeFor(entry);
   return {
     actorType: "plugin",
     actorId: entry.package.manifest.id,
     runtimeId: entry.runtimeId,
-    generation,
     scopeType: ownScope.type,
     scopeId: ownScope.id,
     scopeChain:
@@ -542,18 +489,14 @@ export function createPluginExecution(
   };
 }
 
-function scopeFor(entry: SupervisedEntry): ScopeAddress {
+function scopeFor(entry: ResolvedEntry): ScopeAddress {
   return { type: entry.binding.scopeType, id: entry.binding.scopeId };
 }
 
-function removeRuntimeRegistrations(
-  registries: RuntimeRegistries,
-  runtimeId: string,
-  generation: number,
-): void {
-  registries.services.removeRuntime(runtimeId, generation);
-  registries.contributions.removeRuntime(runtimeId, generation);
-  registries.events.removeRuntime(runtimeId, generation);
+function removeRuntimeRegistrations(registries: RuntimeRegistries, runtimeId: string): void {
+  registries.services.removeRuntime(runtimeId);
+  registries.contributions.removeRuntime(runtimeId);
+  registries.events.removeRuntime(runtimeId);
 }
 
 function validatePluginModule(value: unknown): PluginModule {

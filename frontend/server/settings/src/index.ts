@@ -17,7 +17,6 @@ export const serverInstanceSettingsUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [serverInstanceManagerContract, serverRuntimeContract, serverSettingsContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

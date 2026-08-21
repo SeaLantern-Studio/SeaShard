@@ -44,8 +44,7 @@ onBeforeUnmount(() => {
         <p class="section-label">SYSTEM DIAGNOSTICS</p>
         <h1>运行状态</h1>
         <p class="intro-copy">
-          查看当前宿主、已发布组件及其 generation。该页面由内置 Client Entry
-          注册，页面卸载时会同步停止轮询。
+          查看当前宿主与插件 Fiber 状态。该页面由内置 Client Entry 注册，页面卸载时会同步停止轮询。
         </p>
       </div>
       <div class="intro-actions">
@@ -90,8 +89,8 @@ onBeforeUnmount(() => {
       <section class="component-section">
         <div class="section-heading">
           <div>
-            <p class="section-label">PUBLISHED RUNTIMES</p>
-            <h2>ComponentSupervisor</h2>
+            <p class="section-label">PLUGIN RUNTIMES</p>
+            <h2>Cordis 插件</h2>
           </div>
           <time>{{ new Date(snapshot.startedAt).toLocaleString() }}</time>
         </div>
@@ -107,7 +106,6 @@ onBeforeUnmount(() => {
               <code>{{ component.id }}</code>
             </div>
             <div class="component-meta">
-              <span>generation {{ component.generation }}</span>
               <span class="phase" :class="`phase--${component.phase}`">{{ component.phase }}</span>
             </div>
           </article>

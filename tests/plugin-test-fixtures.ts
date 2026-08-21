@@ -17,7 +17,6 @@ export const validManifest: PluginManifest = {
       hostProfiles: ["electron"],
       activationScopes: ["global"],
       permissions: ["example.echo"],
-      upgradeMode: "hot-swap",
     },
   ],
   compatibility: { seaShard: ">=0.0.0 <1.0.0" },

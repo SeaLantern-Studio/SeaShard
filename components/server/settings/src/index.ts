@@ -28,7 +28,6 @@ export const serverSettingsManifest: PluginManifest = {
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
       permissions: [],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

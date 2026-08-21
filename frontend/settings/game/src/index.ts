@@ -13,7 +13,6 @@ export const gameSettingsUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [javaRuntimeManagerContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

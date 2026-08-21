@@ -13,7 +13,6 @@ export const personalizationUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [uiAppearanceContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

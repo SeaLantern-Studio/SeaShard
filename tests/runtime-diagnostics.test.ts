@@ -1,66 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectRuntimeSnapshot } from "../components/diagnostics/runtime/src/index.ts";
-import type {
-  RuntimeControlSnapshot,
-  RuntimeGenerationSnapshot,
-  RuntimeOperationSnapshot,
-} from "../packages/plugin-sdk/src/index.ts";
+import type { RuntimeControlSnapshot } from "../packages/plugin-sdk/src/index.ts";
 
-await test("runtime diagnostics projects publications, operations, and host state", () => {
-  const generation = (
-    runtimeId: string,
-    generationNumber: number,
-    phase: RuntimeGenerationSnapshot["phase"],
-  ): RuntimeGenerationSnapshot => ({
-    runtimeId,
-    pluginId: `plugin.${runtimeId}`,
-    pluginVersion: "1.0.0",
-    entryId: "host",
-    bindingId: runtimeId,
-    source: "builtin",
-    trust: "builtin",
-    scopeType: "global",
-    scopeId: "global",
-    generation: generationNumber,
-    phase,
-    upgradeMode: "hot-swap",
-    host: "core",
-    dependencies: [],
-  });
-  const operation = (
-    runtimeId: string,
-    status: RuntimeOperationSnapshot["status"],
-    step: RuntimeOperationSnapshot["step"],
-    error?: string,
-  ): RuntimeOperationSnapshot => ({
-    id: `operation.${runtimeId}`,
-    runtimeId,
-    kind: "activate",
-    mode: "hot-swap",
-    status,
-    step,
-    currentGeneration: null,
-    candidateGeneration: 1,
-    attentionRequired: false,
-    ...(error ? { error } : {}),
-  });
+await test("runtime diagnostics projects active and failed Cordis plugins", () => {
   const control: RuntimeControlSnapshot = {
-    generations: [
-      generation("active", 1, "running"),
-      generation("active", 2, "failed"),
-      generation("blocked", 1, "prepared"),
-      generation("failed", 1, "failed"),
-      generation("retired", 1, "terminated"),
-      generation("updating", 1, "prepared"),
-    ],
-    publications: [{ runtimeId: "active", generation: 1, epoch: 1 }],
-    operations: [
-      operation("active", "running", "start-candidate"),
-      operation("blocked", "running", "wait-dependencies"),
-      operation("failed", "failed", "prepare", "candidate failed"),
-      operation("retired", "completed", "stop-previous"),
-      operation("updating", "running", "prepare"),
+    plugins: [
+      {
+        runtimeId: "active",
+        pluginId: "plugin.active",
+        pluginVersion: "1.0.0",
+        entryId: "host",
+        host: "core",
+        state: "active",
+      },
+      {
+        runtimeId: "failed",
+        pluginId: "plugin.failed",
+        pluginVersion: "1.0.0",
+        entryId: "host",
+        host: "core",
+        state: "failed",
+        error: "plugin startup failed",
+      },
     ],
   };
 
@@ -71,17 +33,11 @@ await test("runtime diagnostics projects publications, operations, and host stat
   });
   assert.equal(snapshot.state, "degraded");
   assert.deepEqual(
-    snapshot.components.map(({ id, generation: number, phase }) => ({ id, number, phase })),
+    snapshot.components.map(({ id, phase, error }) => ({ id, phase, error })),
     [
-      { id: "active", number: 1, phase: "active" },
-      { id: "blocked", number: 1, phase: "blocked" },
-      { id: "failed", number: 1, phase: "failed" },
-      { id: "updating", number: 1, phase: "updating" },
+      { id: "active", phase: "active", error: undefined },
+      { id: "failed", phase: "failed", error: "plugin startup failed" },
     ],
-  );
-  assert.equal(
-    snapshot.components.find((component) => component.id === "failed")?.error,
-    "candidate failed",
   );
 
   const stopping = projectRuntimeSnapshot(control, {

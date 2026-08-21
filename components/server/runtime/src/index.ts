@@ -37,7 +37,6 @@ export const serverRuntimeManifest: PluginManifest = {
         javaRuntimeManagerContract,
         serverSettingsContract,
       ],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

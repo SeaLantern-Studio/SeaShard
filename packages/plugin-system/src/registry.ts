@@ -155,6 +155,7 @@ export class PluginRegistry {
     const runtimeIds = new Set<string>();
 
     for (const binding of await this.store.listBindings()) {
+      if (!binding.enabled) continue;
       const record = packages.get(binding.pluginId);
       if (!record) {
         issues.push(`binding ${binding.id} references unavailable plugin ${binding.pluginId}`);

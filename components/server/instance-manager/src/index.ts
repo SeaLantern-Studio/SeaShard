@@ -26,7 +26,6 @@ export const serverInstanceManagerManifest: PluginManifest = {
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
       permissions: [serverCoreSourceContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

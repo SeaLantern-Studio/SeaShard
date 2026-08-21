@@ -128,9 +128,7 @@ async function shutdown(): Promise<void> {
     try {
       await kernel?.dispose();
       const activeUnits =
-        kernel
-          ?.runtimeSnapshot()
-          .publications.filter((publication) => publication.generation !== null).length ?? 0;
+        kernel?.runtimeSnapshot().plugins.filter((plugin) => plugin.state === "active").length ?? 0;
       const diagnostics = kernel?.diagnostics() ?? {
         services: 0,
         contributions: 0,

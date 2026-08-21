@@ -1,4 +1,3 @@
-import { ComponentSupervisor } from "@seashard/component-supervisor";
 import type {
   ExecutionContext,
   JsonValue,
@@ -12,13 +11,9 @@ import { Context } from "cordis";
 import { mkdir } from "node:fs/promises";
 import { PluginInstaller } from "./installer";
 import { PluginRegistry } from "./registry";
-import { PluginRuntimeBackend } from "./runtime-backend";
-import {
-  ContributionRegistry,
-  PluginEventBus,
-  RuntimePublicationRegistry,
-  ServiceRegistry,
-} from "./runtime-registries";
+import { PluginRuntime, type PluginRuntimeAdapter } from "./runtime";
+import { PluginRuntimeBackend as DefaultPluginRuntimeBackend } from "./runtime-backend";
+import { ContributionRegistry, PluginEventBus, ServiceRegistry } from "./runtime-registries";
 import { PluginStore } from "./store";
 import type {
   BuiltInPackageRegistration,
@@ -44,12 +39,11 @@ export interface PluginKernelOptions {
 export class PluginKernel {
   readonly installer: PluginInstaller;
   readonly registry: PluginRegistry;
-  readonly publications = new RuntimePublicationRegistry();
-  readonly services = new ServiceRegistry(this.publications);
-  readonly contributions = new ContributionRegistry(this.publications);
-  readonly events = new PluginEventBus(this.publications);
+  readonly services = new ServiceRegistry();
+  readonly contributions = new ContributionRegistry();
+  readonly events = new PluginEventBus();
 
-  private readonly supervisor: ComponentSupervisor;
+  private readonly runtime: PluginRuntime;
   private readonly coreDisposers: Array<() => void> = [];
   private readonly clientEntryListeners = new Set<
     (snapshot: ResolvedClientEntrySnapshot) => void
@@ -65,38 +59,30 @@ export class PluginKernel {
   ) {
     this.installer = new PluginInstaller(this.store, options.dataRoot, options.seaShardVersion);
     this.registry = new PluginRegistry(this.store, options.seaShardVersion);
-    let supervisor: ComponentSupervisor;
-    const backend = new PluginRuntimeBackend(
+    let runtime: PluginRuntime;
+    const backend: PluginRuntimeAdapter = new DefaultPluginRuntimeBackend(
       options.root,
       this.registry,
       {
-        publications: this.publications,
         services: this.services,
         contributions: this.contributions,
         events: this.events,
         storage: options.pluginStorage,
       },
       options.pluginHostEntry,
-      (runtimeId, generation, error) => {
-        void supervisor.runtimeFailed(runtimeId, generation, error).catch((failure) => {
-          console.error(
-            `failed to persist runtime failure for ${runtimeId}@${generation}`,
-            failure,
-          );
-        });
+      (runtimeId, error) => {
+        void runtime.runtimeFailed(runtimeId, error);
       },
     );
-    supervisor = new ComponentSupervisor(backend, this.store);
-    this.supervisor = supervisor;
+    runtime = new PluginRuntime(backend, (error) => {
+      console.error("plugin runtime failed", error);
+    });
+    this.runtime = runtime;
   }
 
   static async create(options: PluginKernelOptions): Promise<PluginKernel> {
     await mkdir(options.dataRoot, { recursive: true });
-    const kernel = new PluginKernel(options, options.store);
-    for (const publication of await options.store.listRuntimePublications()) {
-      kernel.publications.seedEpoch(publication.runtimeId, publication.epoch);
-    }
-    return kernel;
+    return new PluginKernel(options, options.store);
   }
 
   registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
@@ -104,8 +90,7 @@ export class PluginKernel {
   }
 
   registerCoreService(contract: string, provider: ServiceProvider): void {
-    const dispose = this.services.register(contract, "seashard.core", 0, globalScope(), provider);
-    this.publications.publish("seashard.core", 0);
+    const dispose = this.services.register(contract, "seashard.core", globalScope(), provider);
     this.coreDisposers.push(dispose);
   }
 
@@ -139,31 +124,16 @@ export class PluginKernel {
             (entry) => entry.id === binding.entryId && entry.runtime === "host",
           ),
         );
-      if (enabledHostBindings.length) {
-        const snapshot = this.supervisor.snapshot();
-        const publications = new Map(
-          snapshot.publications.map((publication) => [publication.runtimeId, publication]),
+      const plugins = new Map(
+        this.runtime.snapshot().plugins.map((plugin) => [plugin.runtimeId, plugin]),
+      );
+      const failed = enabledHostBindings.find((binding) => {
+        const plugin = plugins.get(binding.id);
+        return (
+          !plugin || plugin.pluginVersion !== record.manifest.version || plugin.state !== "active"
         );
-        const generations = new Map(
-          snapshot.generations.map((generation) => [
-            `${generation.runtimeId}@${generation.generation}`,
-            generation,
-          ]),
-        );
-        const failed = enabledHostBindings.find((binding) => {
-          const publication = publications.get(binding.id);
-          const generation =
-            publication?.generation === null || publication?.generation === undefined
-              ? undefined
-              : generations.get(`${binding.id}@${publication.generation}`);
-          return (
-            !generation ||
-            generation.pluginVersion !== record.manifest.version ||
-            generation.phase !== "running"
-          );
-        });
-        if (failed) throw new Error(`plugin activation failed for binding ${failed.id}`);
-      }
+      });
+      if (failed) throw new Error(`plugin activation failed for binding ${failed.id}`);
     } catch (error) {
       if (previous) {
         await this.registry.selectPackageVersion(previous);
@@ -181,11 +151,11 @@ export class PluginKernel {
   }
 
   async reload(runtimeId: string): Promise<void> {
-    await this.supervisor.reload(runtimeId);
+    await this.runtime.reload(runtimeId);
   }
 
   runtimeSnapshot(): RuntimeControlSnapshot {
-    return this.supervisor.snapshot();
+    return this.runtime.snapshot();
   }
 
   clientEntrySnapshot(): ResolvedClientEntrySnapshot {
@@ -243,7 +213,7 @@ export class PluginKernel {
       architecture: this.options.architecture,
     });
     const clientEntries = entries.filter((entry) => entry.host === "client");
-    await this.supervisor.reconcile(entries.filter((entry) => entry.host !== "client"));
+    await this.runtime.reconcile(entries.filter((entry) => entry.host !== "client"));
     this.publishClientEntries(clientEntries);
   }
 
@@ -270,7 +240,7 @@ export class PluginKernel {
   }
 
   private async disposeKernel(): Promise<void> {
-    await this.supervisor.dispose();
+    await this.runtime.dispose();
     for (const dispose of this.coreDisposers.reverse()) dispose();
     this.clientEntryListeners.clear();
   }

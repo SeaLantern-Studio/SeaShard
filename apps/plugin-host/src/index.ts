@@ -24,7 +24,6 @@ interface PreparedState {
   module: PluginModule;
   config: JsonValue;
   runtimeId: string;
-  generation: number;
   execution: ExecutionContext;
 }
 
@@ -110,9 +109,9 @@ async function prepare(payload: PrepareRuntimePayload): Promise<JsonValue> {
     module,
     config,
     runtimeId: payload.runtimeId,
-    generation: payload.generation,
     execution: payload.execution,
   };
+
   return { dependencies, provides };
 }
 
@@ -138,7 +137,6 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
   return {
     execution: state.execution,
     runtimeId: state.runtimeId,
-    generation: state.generation,
     storage: {
       async get(key) {
         return (await request("storage-get", {

@@ -39,7 +39,6 @@ export const desktopShellManifest: PluginManifest = {
       activationScopes: ["global"],
       permissions: [runtimeDiagnosticsContract],
       // BrowserWindow 和 ipcMain Channel 都是 Electron 进程级独占资源。
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

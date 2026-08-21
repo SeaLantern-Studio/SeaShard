@@ -90,42 +90,14 @@ function verifyPersistedState(databasePath) {
   try {
     const packages = database.prepare("SELECT COUNT(*) AS count FROM plugin_current").get();
     const bindings = database.prepare("SELECT COUNT(*) AS count FROM plugin_bindings").get();
-    const generations = database
-      .prepare("SELECT COUNT(*) AS count FROM plugin_runtime_generations")
-      .get();
-    const publications = database
-      .prepare(
-        "SELECT COUNT(*) AS count, SUM(generation IS NOT NULL) AS active FROM plugin_runtime_publications",
-      )
-      .get();
-    const operations = database
-      .prepare(
-        "SELECT COUNT(*) AS count, SUM(status = 'running') AS running FROM plugin_runtime_operations",
-      )
-      .get();
     const packageCount = Number(packages.count);
     const bindingCount = Number(bindings.count);
-    const generationCount = Number(generations.count);
-    const publicationCount = Number(publications.count);
-    const activePublicationCount = Number(publications.active);
-    const operationCount = Number(operations.count);
-    const runningOperationCount = Number(operations.running);
-    if (
-      packageCount !== 26 ||
-      bindingCount !== 26 ||
-      generationCount < 13 ||
-      publicationCount !== 11 ||
-      activePublicationCount !== 0 ||
-      operationCount < 17 ||
-      runningOperationCount !== 0
-    ) {
+    if (packageCount !== 26 || bindingCount !== 26) {
       throw new Error(
-        `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}, generations=${generationCount}, publications=${publicationCount}, activePublications=${activePublicationCount}, operations=${operationCount}, runningOperations=${runningOperationCount}`,
+        `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}`,
       );
     }
-    console.log(
-      `SEASHARD_SMOKE_PERSISTED packages=${packageCount} bindings=${bindingCount} generations=${generationCount} publications=${publicationCount} operations=${operationCount}`,
-    );
+    console.log(`SEASHARD_SMOKE_PERSISTED packages=${packageCount} bindings=${bindingCount}`);
   } finally {
     database.close();
   }

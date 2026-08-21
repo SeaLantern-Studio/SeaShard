@@ -9,8 +9,7 @@
       "module": "./dist/host.js",
       "hostProfiles": ["electron", "node", "docker"],
       "activationScopes": ["global"],
-      "permissions": ["seashard.smoke.marker"],
-      "upgradeMode": "hot-swap"
+      "permissions": ["seashard.smoke.marker"]
     }
   ],
   "compatibility": {

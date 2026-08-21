@@ -32,7 +32,6 @@ export interface PrepareRuntimePayload {
   moduleUrl: string;
   config: JsonValue;
   runtimeId: string;
-  generation: number;
   execution: ExecutionContext;
 }
 

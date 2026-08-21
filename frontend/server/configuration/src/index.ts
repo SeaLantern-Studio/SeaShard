@@ -13,7 +13,6 @@ export const serverConfigurationUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [serverInstanceManagerContract, serverConfigurationContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

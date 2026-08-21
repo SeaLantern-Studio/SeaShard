@@ -61,8 +61,6 @@ export function createPluginFoundationBootstrapDescriptor(
 
       try {
         const store = await PluginStore.create(database, options.seaShardVersion);
-        await store.interruptRuntimeOperations();
-        await store.invalidateRuntimePublications();
 
         const storageRoot = join(options.dataRoot, "plugin-data");
         await mkdir(storageRoot, { recursive: true });

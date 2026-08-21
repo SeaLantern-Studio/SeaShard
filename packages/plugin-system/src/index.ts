@@ -6,6 +6,7 @@ export * from "./manifest";
 export * from "./package-files";
 export * from "./registry";
 export * from "./runtime-backend";
+export * from "./runtime";
 export * from "./runtime-registries";
 export * from "./store";
 export * from "./types";

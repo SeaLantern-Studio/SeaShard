@@ -7,14 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
 import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
-import {
-  RuntimePublicationRegistry,
-  ServiceRegistry,
-} from "../packages/plugin-system/src/runtime-registries.ts";
+import { ServiceRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
 import { PluginStore } from "../packages/plugin-system/src/store.ts";
 import { databaseWorkerEntry, validManifest } from "./plugin-test-fixtures.ts";
 
-await test("plugin system starts from the current schema without legacy migration", async () => {
+await test("plugin system starts from the current package and Binding schema", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-store-"));
   const databasePath = join(directory, "seashard.sqlite3");
   let broker: SQLiteDatabaseBroker | undefined;
@@ -25,8 +22,7 @@ await test("plugin system starts from the current schema without legacy migratio
       workerEntry: new URL("../apps/database-worker/dist/index.js", import.meta.url),
       readWorkers: 1,
     });
-    const store = await PluginStore.create(broker, "0.0.0");
-    assert.equal(await store.nextGeneration("example.runtime"), 1);
+    await PluginStore.create(broker, "0.0.0");
     await broker.close();
     broker = undefined;
 
@@ -44,26 +40,28 @@ await test("plugin system starts from the current schema without legacy migratio
           `SELECT COUNT(*) AS count
              FROM sqlite_schema
             WHERE type = 'table'
+              AND name IN ('plugin_packages', 'plugin_current', 'plugin_trust', 'plugin_bindings')`,
+        )
+        .get() as { count: number };
+      const legacyTables = database
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM sqlite_schema
+            WHERE type = 'table'
               AND name IN (
-                'plugin_packages', 'plugin_current', 'plugin_trust',
-                'plugin_bindings', 'plugin_runtime_counters',
-                'plugin_runtime_generations', 'plugin_runtime_publications',
-                'plugin_runtime_operations', 'operation_journal'
+                'plugin_runtime_counters',
+                'plugin_runtime_generations',
+                'plugin_runtime_publications',
+                'plugin_runtime_operations',
+                'operation_journal'
               )`,
         )
         .get() as { count: number };
-      const legacyTable = database
-        .prepare(
-          `SELECT 1 AS present
-             FROM sqlite_schema
-            WHERE type = 'table' AND name IN ('schema_migrations', 'plugin_runtime_units')`,
-        )
-        .get();
 
       assert.equal(namespace.version, 1);
       assert.equal(namespace.compatibility_floor, 1);
-      assert.equal(currentTables.count, 9);
-      assert.equal(legacyTable, undefined);
+      assert.equal(currentTables.count, 4);
+      assert.equal(legacyTables.count, 0);
     } finally {
       database.close();
     }
@@ -137,51 +135,24 @@ await test("built-in inventory removes retired packages and bindings before reco
   }
 });
 
-await test("service publication switches generations before draining old leases", async () => {
-  const publications = new RuntimePublicationRegistry();
-  const registry = new ServiceRegistry(publications);
-  registry.register(
+await test("service registry selects the nearest active provider", async () => {
+  const registry = new ServiceRegistry();
+  const globalDispose = registry.register(
     "example.echo",
     "global-provider",
-    1,
     { type: "global", id: "global" },
-    {
-      echo: () => "global",
-    },
+    { echo: () => "global" },
   );
-  publications.publish("global-provider", 1);
-
-  let release: (() => void) | undefined;
-  registry.register(
+  const serverDispose = registry.register(
     "example.echo",
     "server-provider",
-    1,
     { type: "server", id: "server-a" },
-    {
-      echo: async () => {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        return "server-one";
-      },
-    },
+    { echo: () => "server-one" },
   );
-  registry.register(
-    "example.echo",
-    "server-provider",
-    2,
-    { type: "server", id: "server-a" },
-    {
-      echo: () => "server-two",
-    },
-  );
-  publications.publish("server-provider", 1);
-
   const execution: ExecutionContext = {
     actorType: "plugin",
     actorId: "caller",
     runtimeId: "caller",
-    generation: 1,
     scopeType: "server",
     scopeId: "server-a",
     scopeChain: [
@@ -192,22 +163,19 @@ await test("service publication switches generations before draining old leases"
     permissionRevision: 1,
   };
 
-  const oldCall = registry.call("example.echo", "echo", [], execution);
-  publications.publish("server-provider", 2);
+  assert.equal(await registry.call("example.echo", "echo", [], execution), "server-one");
+  serverDispose();
+  const replacementDispose = registry.register(
+    "example.echo",
+    "server-provider",
+    { type: "server", id: "server-a" },
+    { echo: () => "server-two" },
+  );
   assert.equal(await registry.call("example.echo", "echo", [], execution), "server-two");
-
-  let drained = false;
-  const drain = registry.drainRuntime("server-provider", 1).then(() => {
-    drained = true;
-  });
-  await Promise.resolve();
-  assert.equal(drained, false);
-  release?.();
-  assert.equal(await oldCall, "server-one");
-  await drain;
-  assert.equal(drained, true);
   await assert.rejects(
     registry.call("example.echo", "echo", [], { ...execution, permissions: [] }),
     /not allowed/,
   );
+  replacementDispose();
+  globalDispose();
 });

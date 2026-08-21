@@ -27,8 +27,7 @@ my-plugin/
       "module": "./dist/host.js",
       "hostProfiles": ["electron", "node", "docker"],
       "activationScopes": ["global"],
-      "permissions": ["seashard.logger"],
-      "upgradeMode": "hot-swap"
+      "permissions": ["seashard.logger"]
     }
   ],
   "compatibility": {
@@ -48,7 +47,6 @@ my-plugin/
 | `hostProfiles`           | 至少一个：`electron`、`node`、`docker`                               |
 | `activationScopes`       | 可选范围：`global`、`workspace`、`server`、`agent`、`client-session` |
 | `permissions`            | 该入口允许调用的 SeaShard 服务 contract；遵循最小权限原则            |
-| `upgradeMode`            | `hot-swap` 或 `stop-first`，见下文                                   |
 | `compatibility.seaShard` | 当前插件支持的 SeaShard semver 范围                                  |
 
 可用 `os` 和 `arch` 限制平台。清单采用严格校验，未知字段会直接拒绝。
@@ -124,7 +122,6 @@ export async function apply(ctx: PluginContext, rawConfig: JsonValue) {
 | API                                                   | 用途                                                     |
 | ----------------------------------------------------- | -------------------------------------------------------- |
 | `ctx.runtimeId`                                       | 当前 binding 的稳定运行实例标识                          |
-| `ctx.generation`                                      | 本次启动代次；每次替换或回滚都会变化                     |
 | `ctx.execution`                                       | 当前 actor、scope chain 和权限信息                       |
 | `ctx.effect(setup, label?)`                           | 注册监听器、定时器、文件句柄、子进程等副作用及其清理函数 |
 | `ctx.provide(contract, provider)`                     | 发布服务；注册和撤销由运行时跟踪                         |
@@ -155,16 +152,13 @@ await ctx.storage.delete("state/session", { expectedRevision: saved.revision });
 
 核心权威 SQLite 与托管插件存储分别由受保护的 Bootstrap Component 提供，都不是第三方插件可安装、禁用或替换的普通插件。当前第三方持久化接口只有 `ctx.storage`；SDK 不提供 `database.integrated`、原始 SQL 或数据库文件句柄。即使插件已获得完整机器访问信任，也不要直接打开或修改 `seashard.sqlite3`、`plugin-data/documents.sqlite3`，否则可能绕过生命周期、并发控制和备份边界并造成数据损坏。
 
-## 5. 生命周期与升级模式
+## 5. 生命周期与停用、替换
 
-不要在模块顶层创建监听器、定时器、进程或其他副作用。全部放进 `apply()`，并通过 `ctx.effect()` 或 `apply()` 返回的清理函数释放。`provide`、`contribute`、`on` 已自动关联生命周期。
+不要在模块顶层创建监听器、定时器、进程或其他副作用。全部放进 `apply()`，并通过 `ctx.effect()` 或 `apply()` 返回的清理函数释放。`provide`、`contribute`、`on` 已自动关联 Cordis Fiber 生命周期。
 
-清理可能发生在升级、停用、启动失败或应用退出时；清理代码应可安全执行，并等待异步资源真正关闭。
+清理可能发生在停用、启动失败或应用退出时；清理代码应可安全执行，并等待异步资源真正关闭。
 
-- **`hot-swap`**：新旧 generation 会短暂同时运行，新版本发布后旧版本才排空并停止。仅适合能够并存的实现；不要争抢固定端口、全局 IPC handler、唯一文件锁等资源。
-- **`stop-first`**：先撤下并停止旧版本，再启动新版本。适合独占资源，但升级期间可能短暂无服务；新版本失败时，SeaShard 会重新启动旧规格。
-
-不确定时选择 `stop-first`。不要把 `generation` 当作持久数据主键；需要跨 reload 保留的普通状态优先使用 `ctx.storage`，并通过 revision CAS 处理并发更新。
+启用插件时，SeaShard 创建 Cordis Fiber；关闭插件时，直接释放该 Fiber。替换版本采用“停止旧版本，再启动新版本”的顺序，因此替换期间插件功能可能短暂不可用，但软件进程不会重启。启动失败会报告错误，旧版本不会以热切换方式并行保留。
 
 ## 6. 打包与发布
 

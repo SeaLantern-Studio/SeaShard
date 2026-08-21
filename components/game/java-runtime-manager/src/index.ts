@@ -24,7 +24,6 @@ export const javaRuntimeManagerManifest: PluginManifest = {
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
       permissions: [],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

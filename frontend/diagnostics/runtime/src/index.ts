@@ -13,7 +13,6 @@ export const runtimeDiagnosticsUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [runtimeDiagnosticsContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

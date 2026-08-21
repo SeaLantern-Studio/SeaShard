@@ -7,7 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@seashard/component-supervisor": "workspace:*",
     "@seashard/contracts": "workspace:*",
     "@seashard/database": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",

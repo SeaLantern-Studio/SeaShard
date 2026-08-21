@@ -13,7 +13,6 @@ export const serverDownloadModpackUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [serverModSourceContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

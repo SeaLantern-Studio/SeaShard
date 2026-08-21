@@ -1,20 +1,15 @@
 import { defineDataCapsule } from "@seashard/database";
 
+/**
+ * 插件持久化只保存包、信任、当前版本和用户 Binding。
+ * 运行时 Fiber 状态由 Cordis 在进程内维护，不再落库。
+ * 未上线项目直接采用当前 schema，旧本地数据库不提供迁移或兼容读取。
+ */
 export const pluginSystemDataCapsule = defineDataCapsule({
   namespace: "plugin_system",
   schemaVersion: 1,
   compatibilityFloor: 1,
-  tables: [
-    "plugin_packages",
-    "plugin_current",
-    "plugin_trust",
-    "plugin_bindings",
-    "plugin_runtime_counters",
-    "plugin_runtime_generations",
-    "plugin_runtime_publications",
-    "plugin_runtime_operations",
-    "operation_journal",
-  ],
+  tables: ["plugin_packages", "plugin_current", "plugin_trust", "plugin_bindings"],
   migrations: [
     {
       version: 1,
@@ -59,73 +54,14 @@ export const pluginSystemDataCapsule = defineDataCapsule({
           config_json TEXT NOT NULL,
           updated_at TEXT NOT NULL
         ) STRICT`,
-        `CREATE TABLE plugin_runtime_counters (
-          runtime_id TEXT PRIMARY KEY,
-          last_generation INTEGER NOT NULL
-        ) STRICT`,
-        `CREATE TABLE plugin_runtime_generations (
-          runtime_id TEXT NOT NULL,
-          plugin_id TEXT NOT NULL,
-          plugin_version TEXT NOT NULL,
-          entry_id TEXT NOT NULL,
-          binding_id TEXT NOT NULL,
-          source_kind TEXT NOT NULL,
-          trust_level TEXT NOT NULL,
-          scope_type TEXT NOT NULL,
-          scope_id TEXT NOT NULL,
-          generation INTEGER NOT NULL,
-          phase TEXT NOT NULL,
-          upgrade_mode TEXT NOT NULL,
-          host_kind TEXT NOT NULL,
-          dependencies_json TEXT NOT NULL,
-          error TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          PRIMARY KEY (runtime_id, generation)
-        ) STRICT`,
-        `CREATE TABLE plugin_runtime_publications (
-          runtime_id TEXT PRIMARY KEY,
-          generation INTEGER,
-          epoch INTEGER NOT NULL,
-          updated_at TEXT NOT NULL
-        ) STRICT`,
-        `CREATE TABLE plugin_runtime_operations (
-          id TEXT PRIMARY KEY,
-          runtime_id TEXT NOT NULL,
-          kind TEXT NOT NULL,
-          mode TEXT NOT NULL,
-          status TEXT NOT NULL,
-          step TEXT NOT NULL,
-          current_generation INTEGER,
-          candidate_generation INTEGER,
-          attention_required INTEGER NOT NULL CHECK (attention_required IN (0, 1)),
-          error TEXT,
-          started_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        ) STRICT`,
-        `CREATE TABLE operation_journal (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          occurred_at TEXT NOT NULL,
-          category TEXT NOT NULL,
-          aggregate_id TEXT NOT NULL,
-          payload_json TEXT NOT NULL
-        ) STRICT`,
         "CREATE INDEX plugin_bindings_plugin_idx ON plugin_bindings(plugin_id)",
-        "CREATE INDEX runtime_generations_binding_idx ON plugin_runtime_generations(binding_id, generation)",
-        "CREATE INDEX runtime_operations_runtime_idx ON plugin_runtime_operations(runtime_id, started_at)",
-        "CREATE INDEX journal_aggregate_idx ON operation_journal(aggregate_id, id)",
       ],
       verify: [
         {
-          sql: `SELECT COUNT(*) = 9 AS valid
+          sql: `SELECT COUNT(*) = 4 AS valid
                   FROM sqlite_schema
                  WHERE type = 'table'
-                   AND name IN (
-                     'plugin_packages', 'plugin_current', 'plugin_trust',
-                     'plugin_bindings', 'plugin_runtime_counters',
-                     'plugin_runtime_generations', 'plugin_runtime_publications',
-                     'plugin_runtime_operations', 'operation_journal'
-                   )`,
+                   AND name IN ('plugin_packages', 'plugin_current', 'plugin_trust', 'plugin_bindings')`,
           column: "valid",
           equals: 1,
         },
@@ -270,143 +206,6 @@ export const pluginSystemDataCapsule = defineDataCapsule({
       sql: `SELECT id, plugin_id, entry_id, scope_type, scope_id, enabled, config_json
               FROM plugin_bindings
              WHERE plugin_id = ?
-             ORDER BY id`,
-    },
-    {
-      id: "generation.next",
-      access: "write",
-      result: "get",
-      sql: `INSERT INTO plugin_runtime_counters (runtime_id, last_generation)
-            VALUES (?, 1)
-            ON CONFLICT(runtime_id) DO UPDATE SET
-              last_generation = plugin_runtime_counters.last_generation + 1
-            RETURNING last_generation`,
-    },
-    {
-      id: "generation.save",
-      access: "write",
-      result: "run",
-      sql: `INSERT INTO plugin_runtime_generations (
-              runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-              trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-              host_kind, dependencies_json, error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(runtime_id, generation) DO UPDATE SET
-              phase = excluded.phase,
-              dependencies_json = excluded.dependencies_json,
-              error = excluded.error,
-              updated_at = excluded.updated_at`,
-    },
-    {
-      id: "generation.list",
-      access: "read",
-      result: "all",
-      sql: `SELECT runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-                   trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-                   host_kind, dependencies_json, error, created_at, updated_at
-              FROM plugin_runtime_generations
-             ORDER BY runtime_id, generation`,
-    },
-    {
-      id: "generation.list-by-runtime",
-      access: "read",
-      result: "all",
-      sql: `SELECT runtime_id, plugin_id, plugin_version, entry_id, binding_id, source_kind,
-                   trust_level, scope_type, scope_id, generation, phase, upgrade_mode,
-                   host_kind, dependencies_json, error, created_at, updated_at
-              FROM plugin_runtime_generations
-             WHERE runtime_id = ?
-             ORDER BY generation`,
-    },
-    {
-      id: "publication.save",
-      access: "write",
-      result: "run",
-      sql: `INSERT INTO plugin_runtime_publications (runtime_id, generation, epoch, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(runtime_id) DO UPDATE SET
-              generation = excluded.generation,
-              epoch = excluded.epoch,
-              updated_at = excluded.updated_at`,
-    },
-    {
-      id: "publication.list",
-      access: "read",
-      result: "all",
-      sql: `SELECT runtime_id, generation, epoch, updated_at
-              FROM plugin_runtime_publications
-             ORDER BY runtime_id`,
-    },
-    {
-      id: "publication.invalidate",
-      access: "write",
-      result: "run",
-      sql: `UPDATE plugin_runtime_publications
-               SET generation = NULL,
-                   epoch = epoch + 1,
-                   updated_at = ?
-             WHERE generation IS NOT NULL`,
-    },
-    {
-      id: "operation.save",
-      access: "write",
-      result: "run",
-      sql: `INSERT INTO plugin_runtime_operations (
-              id, runtime_id, kind, mode, status, step, current_generation,
-              candidate_generation, attention_required, error, started_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              status = excluded.status,
-              step = excluded.step,
-              current_generation = excluded.current_generation,
-              candidate_generation = excluded.candidate_generation,
-              attention_required = excluded.attention_required,
-              error = excluded.error,
-              updated_at = excluded.updated_at`,
-    },
-    {
-      id: "operation.list",
-      access: "read",
-      result: "all",
-      sql: `SELECT id, runtime_id, kind, mode, status, step, current_generation,
-                   candidate_generation, attention_required, error, started_at, updated_at
-              FROM plugin_runtime_operations
-             ORDER BY started_at, id`,
-    },
-    {
-      id: "operation.list-by-runtime",
-      access: "read",
-      result: "all",
-      sql: `SELECT id, runtime_id, kind, mode, status, step, current_generation,
-                   candidate_generation, attention_required, error, started_at, updated_at
-              FROM plugin_runtime_operations
-             WHERE runtime_id = ?
-             ORDER BY started_at, id`,
-    },
-    {
-      id: "operation.interrupt",
-      access: "write",
-      result: "run",
-      sql: `UPDATE plugin_runtime_operations
-               SET status = 'interrupted',
-                   error = COALESCE(error, 'SeaShard stopped before the operation completed'),
-                   updated_at = ?
-             WHERE status = 'running'`,
-    },
-    {
-      id: "journal.append",
-      access: "write",
-      result: "run",
-      sql: `INSERT INTO operation_journal (occurred_at, category, aggregate_id, payload_json)
-            VALUES (?, ?, ?, ?)`,
-    },
-    {
-      id: "journal.list",
-      access: "read",
-      result: "all",
-      sql: `SELECT id, occurred_at, category, aggregate_id, payload_json
-              FROM operation_journal
-             WHERE id > ?
              ORDER BY id`,
     },
   ],

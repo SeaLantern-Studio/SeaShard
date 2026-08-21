@@ -19,7 +19,6 @@ export const serverModSourceManifest: PluginManifest = {
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
       permissions: [downloadContract, serverInstanceManagerContract],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

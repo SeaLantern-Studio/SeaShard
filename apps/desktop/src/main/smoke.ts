@@ -1,5 +1,5 @@
 import { serverInstanceManagerContract } from "@seashard/server-instance-manager";
-import { type RuntimeControlSnapshot, type RuntimeGenerationSnapshot } from "@seashard/plugin-sdk";
+import type { RuntimeControlSnapshot, RuntimePluginSnapshot } from "@seashard/plugin-sdk";
 import { type PluginKernel, type PluginPackageRecord } from "@seashard/plugin-system";
 import { expectServerInstances } from "./contract-validation";
 
@@ -69,9 +69,9 @@ export async function verifySmokeRuntime(
       "activationCount",
       [],
     );
-    const before = publishedGeneration(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
+    const before = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
     await pluginKernel.reload("smoke.external-plugin");
-    const after = publishedGeneration(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
+    const after = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
     const reloadedEcho = await pluginKernel.callService("seashard.smoke.echo", "echo", ["reload"]);
     const activationAfter = await pluginKernel.callService(
       "seashard.smoke.echo",
@@ -81,34 +81,28 @@ export async function verifySmokeRuntime(
     if (
       !before ||
       !after ||
-      after.generation <= before.generation ||
-      after.phase !== "running" ||
+      after.state !== "active" ||
       reloadedEcho !== "core-smoke:reload" ||
       typeof activationBefore !== "number" ||
       typeof activationAfter !== "number" ||
       activationAfter !== activationBefore + 1 ||
       pluginKernel.diagnostics().contributions !== 1
     ) {
-      throw new Error("external plugin reload did not preserve a single published generation");
+      throw new Error("external plugin reload did not produce an active plugin");
     }
     console.log(`SEASHARD_PLUGIN_SMOKE_ECHO ${echo}`);
-    console.log(
-      `SEASHARD_PLUGIN_SMOKE_RELOADED before=${before.generation} after=${after.generation}`,
-    );
+    console.log(`SEASHARD_PLUGIN_SMOKE_RELOADED version=${after.pluginVersion}`);
     console.log(
       `SEASHARD_PLUGIN_SMOKE_STORAGE before=${activationBefore} after=${activationAfter}`,
     );
   }
 }
 
-function publishedGeneration(
+function activePlugin(
   snapshot: RuntimeControlSnapshot,
   runtimeId: string,
-): RuntimeGenerationSnapshot | undefined {
-  const publication = snapshot.publications.find((candidate) => candidate.runtimeId === runtimeId);
-  if (publication?.generation === null || publication?.generation === undefined) return undefined;
-  return snapshot.generations.find(
-    (generation) =>
-      generation.runtimeId === runtimeId && generation.generation === publication.generation,
+): RuntimePluginSnapshot | undefined {
+  return snapshot.plugins.find(
+    (plugin) => plugin.runtimeId === runtimeId && plugin.state === "active",
   );
 }

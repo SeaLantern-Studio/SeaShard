@@ -704,12 +704,6 @@ importers:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
 
-  packages/component-supervisor:
-    dependencies:
-      '@seashard/plugin-sdk':
-        specifier: workspace:*
-        version: link:../plugin-sdk
-
   packages/contracts:
     dependencies:
       '@seashard/plugin-sdk':
@@ -722,9 +716,6 @@ importers:
 
   packages/plugin-system:
     dependencies:
-      '@seashard/component-supervisor':
-        specifier: workspace:*
-        version: link:../component-supervisor
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../contracts

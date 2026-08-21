@@ -1,6 +1,6 @@
 import type { ActivationScope, JsonValue } from "@seashard/plugin-sdk";
 
-export type RuntimePhase = "active" | "updating" | "blocked" | "failed";
+export type RuntimePhase = "active" | "failed";
 
 export const desktopChannels = {
   runtimeSnapshot: "seashard.runtime.snapshot",
@@ -79,11 +79,10 @@ export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
 
-/** 面向客户端的单个 runtime 投影视图。 */
+/** 面向客户端的单个插件运行视图。 */
 export type ComponentSnapshot = {
   id: string;
   displayName: string;
-  generation: number;
   phase: RuntimePhase;
   error?: string;
 };

@@ -12,7 +12,6 @@ export const serverDownloadWorldUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       permissions: [],
-      upgradeMode: "stop-first",
     },
   ],
   compatibility: {

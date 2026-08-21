@@ -6,8 +6,8 @@ import type {
   OperatingSystem,
   PluginEntryManifest,
   PluginManifest,
-  UpgradeMode,
 } from "@seashard/plugin-sdk";
+
 import { satisfies, valid, validRange } from "semver";
 
 const pluginIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
@@ -22,7 +22,6 @@ const activationScopes = [
   "agent",
   "client-session",
 ] as const satisfies readonly ActivationScope[];
-const upgradeModes = ["hot-swap", "stop-first"] as const satisfies readonly UpgradeMode[];
 const operatingSystems = [
   "win32",
   "darwin",
@@ -125,7 +124,6 @@ function parseEntry(input: unknown, index: number, issues: string[]): PluginEntr
       "targets",
       "activationScopes",
       "permissions",
-      "upgradeMode",
       "os",
       "arch",
     ],
@@ -148,14 +146,12 @@ function parseEntry(input: unknown, index: number, issues: string[]): PluginEntr
   ) ?? ["global"];
   const permissions =
     optionalPatternArray(value.permissions, `${path}.permissions`, permissionPattern, issues) ?? [];
-  const upgradeMode = enumAt(value.upgradeMode, `${path}.upgradeMode`, upgradeModes, issues);
   const entry: PluginEntryManifest = {
     id,
     runtime,
     module,
     activationScopes: scopes,
     permissions,
-    upgradeMode,
   };
 
   if (runtime === "host") {
