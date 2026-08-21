@@ -440,6 +440,7 @@
 }
 
 .mod-detail-summary {
+  min-width: 0;
   padding: 18px;
   border: 1px solid var(--sl-border-light);
   border-radius: 14px;
