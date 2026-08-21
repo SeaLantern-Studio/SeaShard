@@ -283,13 +283,43 @@ await test("server core types map to standard Mod loaders without treating plugi
   assert.equal(serverModLoaderForCoreType("paper"), null);
   assert.equal(serverModLoaderForCoreType("vanilla"), null);
 });
-await test("world downloads allow unified Java saves and Paper conversion, but reject other cores", () => {
-  assert.equal(supportsUnifiedWorldStorage("vanilla"), true);
-  assert.equal(supportsUnifiedWorldStorage("fabric"), true);
-  assert.equal(supportsUnifiedWorldStorage("forge"), true);
-  assert.equal(supportsUnifiedWorldStorage("paper"), true);
-  assert.equal(supportsUnifiedWorldStorage("spigot"), false);
-  assert.equal(supportsUnifiedWorldStorage("velocity"), false);
+await test("world downloads allow every verified vanilla-layout core and reject split/proxy cores", () => {
+  const supported = [
+    "vanilla",
+    "vanilla-snapshot",
+    "forge",
+    "fabric",
+    "quilt",
+    "neoforge",
+    "spongeforge",
+    "spongevanilla",
+    "paper",
+    "purpur",
+    "folia",
+    "pufferfish",
+    "pufferfish_purpur",
+    "leaf",
+    "leaves",
+    "arclight-fabric",
+    "arclight-forge",
+    "arclight-neoforge",
+    "banner",
+    "mohist",
+    "youer",
+  ];
+  const rejected = [
+    "bukkit",
+    "spigot",
+    "catserver",
+    "velocity",
+    "bungeecord",
+    "lightfall",
+    "travertine",
+    "nukkitx",
+  ];
+  assert.equal(new Set([...supported, ...rejected]).size, 29);
+  for (const serverType of supported) assert.equal(supportsUnifiedWorldStorage(serverType), true);
+  for (const serverType of rejected) assert.equal(supportsUnifiedWorldStorage(serverType), false);
 });
 
 await test("compatible Mod targets require both the exact loader and Minecraft version", () => {

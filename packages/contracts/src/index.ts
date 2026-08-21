@@ -517,7 +517,7 @@ export const serverRuntimeSupportedTypes = [
   "youer",
 ] as const;
 export type ServerRuntimeSupportedType = (typeof serverRuntimeSupportedTypes)[number];
-/** 只有采用 Vanilla 单目录多维度布局的 Java 核心才支持普通世界存档直装。 */
+/** 可接收普通 Java 世界存档的核心；Paper 系列会在启动时自动转换其维度布局。 */
 const unifiedWorldServerTypes = new Set([
   "vanilla",
   "vanilla-snapshot",
@@ -525,7 +525,23 @@ const unifiedWorldServerTypes = new Set([
   "fabric",
   "quilt",
   "neoforge",
+  "spongeforge",
+  "spongevanilla",
   "paper",
+  "purpur",
+  "folia",
+  "pufferfish",
+  "pufferfish_purpur",
+  "leaf",
+  "leaves",
+  // Arclight 默认使用原版维度目录；开启 symlink-world 后才额外生成 Bukkit 映射。
+  "arclight-fabric",
+  "arclight-forge",
+  "arclight-neoforge",
+  // 这三个混合核心的实测首个世界均为单根目录 + DIM/维度目录。
+  "banner",
+  "mohist",
+  "youer",
 ]);
 
 export function supportsUnifiedWorldStorage(value: unknown): boolean {
