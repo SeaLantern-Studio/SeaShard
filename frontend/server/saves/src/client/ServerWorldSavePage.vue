@@ -405,7 +405,7 @@ function errorMessage(cause: unknown): string {
               </span>
             </button>
             <span v-if="save.current" class="world-save-current-label">当前</span>
-            <span class="world-save-info">
+            <span class="world-save-info-anchor">
               <Cmz_Button
                 variant="outline"
                 size="sm"
@@ -477,7 +477,7 @@ function errorMessage(cause: unknown): string {
                   </span>
                 </button>
                 <span v-if="group.current" class="world-save-current-label">当前</span>
-                <span class="world-save-info">
+                <span class="world-save-info-anchor">
                   <Cmz_Button
                     variant="outline"
                     size="sm"

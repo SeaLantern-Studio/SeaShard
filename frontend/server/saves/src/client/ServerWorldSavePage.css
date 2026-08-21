@@ -391,8 +391,12 @@
   background: color-mix(in srgb, var(--sl-primary-bg) 30%, transparent);
 }
 
-.world-save-card > .world-save-current,
-.world-save-card > .world-save-info {
+.world-save-card > .world-save-current {
+  position: absolute;
+  z-index: 1;
+}
+
+.world-save-card > .world-save-info-anchor {
   position: absolute;
   z-index: 1;
 }
@@ -420,7 +424,7 @@
   padding: 6px 8px;
 }
 
-.world-save-dimension-row .world-save-info {
+.world-save-dimension-row .world-save-info-anchor {
   align-self: center;
 }
 
@@ -660,9 +664,11 @@
   font-size: var(--sl-font-size-xs);
 }
 
-.world-save-card > .world-save-info {
+.world-save-card > .world-save-info-anchor {
   top: 50%;
   right: 14px;
+  display: grid;
+  place-items: center;
   transform: translateY(-50%);
 }
 
@@ -689,9 +695,11 @@
   right: 52px;
 }
 
-.world-save-dimension-row > .world-save-info {
+.world-save-dimension-row > .world-save-info-anchor {
   position: absolute;
   top: 50%;
   right: 8px;
+  display: grid;
+  place-items: center;
   transform: translateY(-50%);
 }
