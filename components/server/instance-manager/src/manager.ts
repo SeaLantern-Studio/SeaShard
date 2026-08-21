@@ -10,7 +10,7 @@ import {
 } from "@seashard/contracts";
 import type { ServerCoreSourceService } from "@seashard/server-core-source";
 import { randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import {
   portableInstanceMetadataDirectoryName,
@@ -103,7 +103,46 @@ export class ServerInstanceManager {
       updatedAt: this.options.now?.() ?? new Date().toISOString(),
     }));
   }
-
+  /** 保存实例自定义图标；图标文件与实例私有清单一并持久化。 */
+  async setIcon(
+    instanceValue: unknown,
+    iconDataUrlValue: unknown,
+  ): Promise<ServerInstanceSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const icon = parseInstanceIconDataUrl(iconDataUrlValue);
+    const previous = this.metadataUpdates.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      const metadataDirectory = resolve(instance.rootPath, portableInstanceMetadataDirectoryName);
+      const iconPath = resolve(metadataDirectory, `icon-${randomUUID()}.${icon.extension}`);
+      await mkdir(metadataDirectory, { recursive: true });
+      await writeFile(iconPath, icon.bytes);
+      const updated = {
+        ...instance,
+        iconPath,
+        updatedAt: this.options.now?.() ?? new Date().toISOString(),
+      };
+      try {
+        await writePortableSeaShardInstanceManifest(updated);
+      } catch (error) {
+        await rm(iconPath, { force: true });
+        throw error;
+      }
+      if (instance.iconPath && resolve(instance.iconPath) !== iconPath) {
+        await rm(instance.iconPath, { force: true });
+      }
+      return updated;
+    });
+    this.metadataUpdates.set(instanceId, task);
+    try {
+      return await task;
+    } finally {
+      if (this.metadataUpdates.get(instanceId) === task) {
+        this.metadataUpdates.delete(instanceId);
+      }
+    }
+  }
   /** 只更新 SeaShard 私有清单；服务端核心与 Minecraft 版本等事实保持不变。 */
   async recordStartedAt(instanceValue: unknown, startedAtValue: unknown): Promise<void> {
     if (this.disposed) throw new Error("server instance manager is stopped");
@@ -641,6 +680,64 @@ function expectConnections(value: unknown): number {
     );
   }
   return value as number;
+}
+
+const maximumInstanceIconBytes = 512 * 1024;
+const instanceIconDataUrlPattern =
+  /^data:(image\/png|image\/jpeg|image\/webp|image\/gif);base64,([A-Za-z0-9+/]+={0,2})$/u;
+
+function parseInstanceIconDataUrl(value: unknown): {
+  readonly bytes: Buffer;
+  readonly extension: "png" | "jpg" | "webp" | "gif";
+} {
+  const dataUrl = expectString(value, "icon");
+  const match = instanceIconDataUrlPattern.exec(dataUrl);
+  if (!match) {
+    throw new TypeError("managed server instance icon must be a supported base64 image");
+  }
+  const mimeType = match[1];
+  const bytes = Buffer.from(match[2]!, "base64");
+  if (bytes.byteLength === 0 || bytes.byteLength > maximumInstanceIconBytes) {
+    throw new TypeError("managed server instance icon exceeds the 512 KiB limit");
+  }
+  if (!hasImageSignature(mimeType!, bytes)) {
+    throw new TypeError("managed server instance icon content does not match its MIME type");
+  }
+  return {
+    bytes,
+    extension:
+      mimeType === "image/png"
+        ? "png"
+        : mimeType === "image/jpeg"
+          ? "jpg"
+          : mimeType === "image/webp"
+            ? "webp"
+            : "gif",
+  };
+}
+
+function hasImageSignature(mimeType: string, bytes: Buffer): boolean {
+  if (mimeType === "image/png") {
+    return (
+      bytes.length >= 8 &&
+      bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    );
+  }
+  if (mimeType === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mimeType === "image/webp") {
+    return (
+      bytes.length >= 12 &&
+      bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+      bytes.subarray(8, 12).toString("ascii") === "WEBP"
+    );
+  }
+  return (
+    bytes.length >= 6 &&
+    (bytes.subarray(0, 6).toString("ascii") === "GIF87a" ||
+      bytes.subarray(0, 6).toString("ascii") === "GIF89a")
+  );
 }
 
 function isMissingPathError(error: unknown): boolean {

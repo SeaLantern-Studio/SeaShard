@@ -359,7 +359,7 @@ async function confirmDeleteInstance(): Promise<void> {
   }
 }
 
-/** 当前仅保留会话内预览；实例图标持久化将在实例设置能力接入时交给 Host。 */
+/** 读取图标后交给 Host 写入实例私有元数据，页面切换后仍从实例清单恢复。 */
 async function applyCustomIcon(event: Event): Promise<void> {
   const input = event.currentTarget as HTMLInputElement;
   const file = input.files?.[0];
@@ -368,7 +368,17 @@ async function applyCustomIcon(event: Event): Promise<void> {
 
   input.value = "";
   const source = await readImageFile(file).catch(() => undefined);
-  if (source) customIconSources.set(instance.id, source);
+  if (!source) return;
+  try {
+    const saved = await props.instances.setIcon(instance.id, source);
+    customIconSources.delete(instance.id);
+    registeredInstances.value = registeredInstances.value.map((candidate) =>
+      candidate.id === saved.id ? saved : candidate,
+    );
+    instancesError.value = undefined;
+  } catch (error) {
+    instancesError.value = errorMessage(error);
+  }
 }
 
 function readImageFile(file: File): Promise<string> {

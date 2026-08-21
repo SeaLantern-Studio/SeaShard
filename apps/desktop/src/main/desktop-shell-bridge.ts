@@ -317,6 +317,18 @@ export async function registerDesktopShellBridge(
               }
               return instance;
             },
+            writeServerInstanceIcon: async (instanceId, iconDataUrl) => {
+              const [instance] = expectServerInstances([
+                await kernel.callService(serverInstanceManagerContract, "setIcon", [
+                  instanceId,
+                  iconDataUrl,
+                ]),
+              ]);
+              if (!instance) {
+                throw new Error("server instance manager returned no updated instance");
+              }
+              return instance;
+            },
             deleteServerInstance: async (instanceId) => {
               const result = await kernel.callService(serverInstanceManagerContract, "delete", [
                 instanceId,

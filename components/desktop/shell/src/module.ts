@@ -381,6 +381,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
+        config.runtime.handle(
+          desktopChannels.serverInstancesSetIcon,
+          (event, instanceId, iconDataUrl) => {
+            ownedWindow(event.sender.id);
+            return config.writeServerInstanceIcon(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(iconDataUrl, "server instance icon"),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverInstancesOpenFolder, async (event, value) => {
           ownedWindow(event.sender.id);
           const instanceId = expectNonEmptyString(value, "server instance id");
@@ -672,6 +682,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverInstancesWorlds);
           config.runtime.removeHandler(desktopChannels.serverInstancesSwitchWorld);
           config.runtime.removeHandler(desktopChannels.serverInstancesSetStartupSettings);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSetIcon);
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverInstancesWorldBackups);

@@ -170,6 +170,7 @@ export interface DesktopShellConfig {
     instanceId: string,
     settings: ServerInstanceStartupSettings,
   ): Promise<ServerInstanceSnapshot>;
+  writeServerInstanceIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceSnapshot>;
   deleteServerInstance(instanceId: string): ReturnType<ServerInstanceClientService["delete"]>;
   listServerConfigurations(instanceId: string): Promise<ServerConfigurationCatalog>;
   readServerConfiguration(instanceId: string, path: string): Promise<ServerConfigurationDocument>;

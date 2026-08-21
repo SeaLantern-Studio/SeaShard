@@ -33,6 +33,8 @@ export interface ServerInstanceManagerService {
     instanceId: string,
     settings: ServerInstanceStartupSettings,
   ): Promise<ServerInstanceSnapshot>;
+  /** 保存实例自定义图标并返回最新实例投影。 */
+  setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceSnapshot>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 切换 server.properties 中的 level-name，并返回最新存档投影。 */

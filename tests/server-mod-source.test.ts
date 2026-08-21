@@ -116,6 +116,9 @@ function instanceService(
     setStartupSettings: async () => {
       throw new Error("not implemented in fixture");
     },
+    setIcon: async () => {
+      throw new Error("not implemented in fixture");
+    },
     recordStartedAt: async () => {},
     recordRuntime: async () => {},
     delete: async () => {},

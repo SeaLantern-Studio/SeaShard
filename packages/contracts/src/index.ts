@@ -40,6 +40,7 @@ export const desktopChannels = {
   serverInstancesRestoreWorldBackup: "seashard.server-instances.restore-world-backup",
   serverInstancesDeleteWorldBackup: "seashard.server-instances.delete-world-backup",
   serverInstancesSetStartupSettings: "seashard.server-instances.set-startup-settings",
+  serverInstancesSetIcon: "seashard.server-instances.set-icon",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
   serverInstancesDelete: "seashard.server-instances.delete",
   javaRuntimeScan: "seashard.java-runtime.scan",
@@ -539,11 +540,13 @@ export interface ServerInstanceClientService extends ServerInstanceWorldService 
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
-  /** 保存实例专属启动参数；该完整设置组优先于全局默认值。 */
+  /** 保存实例专属启动参数；该完整设置组优先于全局启动默认值。 */
   setStartupSettings(
     instanceId: string,
     settings: ServerInstanceStartupSettings,
   ): Promise<ServerInstanceSnapshot>;
+  /** 保存实例自定义图标并返回最新实例投影。 */
+  setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceSnapshot>;
   /** 仅按已登记实例 ID 请求宿主打开实例根目录，不接受 Renderer 提交任意路径。 */
   openFolder(instanceId: string): Promise<void>;
   /** 删除 Host 已登记的托管实例目录及其数据库路径记录。 */

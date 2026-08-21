@@ -710,6 +710,11 @@ export async function createDesktopShellHarness(
         );
         return updated;
       },
+      writeServerInstanceIcon: async (instanceId) => {
+        const instance = currentServerInstances.find((candidate) => candidate.id === instanceId);
+        if (!instance) throw new Error(`server instance ${instanceId} was not found`);
+        return instance;
+      },
       deleteServerInstance: async (instanceId) => {
         deletedServerInstances.push(instanceId);
       },

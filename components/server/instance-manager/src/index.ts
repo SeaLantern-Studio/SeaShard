@@ -70,6 +70,8 @@ export function createServerInstanceManagerModule(
           asJsonValue(await manager.switchWorld(instanceId, worldId)),
         setStartupSettings: async (instanceId, settings) =>
           asJsonValue(await manager.setStartupSettings(instanceId, settings)),
+        setIcon: async (instanceId, iconDataUrl) =>
+          asJsonValue(await manager.setIcon(instanceId, iconDataUrl)),
         recordStartedAt: async (instanceId, startedAt) => {
           await manager.recordStartedAt(instanceId, startedAt);
           return null;

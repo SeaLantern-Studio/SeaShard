@@ -310,7 +310,28 @@ await test("managed downloads persist unique instances and split portable manife
       }),
       /minimum memory must not exceed maximum memory/,
     );
-    const persistedInstances = await manager.list();
+    const customIconDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const customIconBytes = Buffer.from(customIconDataUrl.split(",")[1]!, "base64");
+    const customIconInstance = await manager.setIcon(countedInstance.id, customIconDataUrl);
+    assert.notEqual(customIconInstance.iconPath, countedInstance.iconPath);
+    assert.deepEqual(await readFile(customIconInstance.iconPath!), customIconBytes);
+    await assert.rejects(access(countedInstance.iconPath!), { code: "ENOENT" });
+    const customIconManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.match(customIconManifest.icon ?? "", /^icon-[a-f0-9-]+\.png$/u);
+    let persistedInstances = await manager.list();
+    persistedInstances = persistedInstances.map((instance) =>
+      instance.id === customIconInstance.id ? customIconInstance : instance,
+    );
     assert.deepEqual(coreContents, new Set(["core-task-1\n", "core-task-2\n"]));
     assert.deepEqual(
       new Set(await registry.listManifestPaths()),
