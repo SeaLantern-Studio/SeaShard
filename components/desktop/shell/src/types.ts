@@ -4,26 +4,27 @@ import type {
   FileDownloadTaskSnapshot,
   JavaRuntimeManagerService,
   RuntimeSnapshot,
+  ServerConfigurationCatalog,
+  ServerConfigurationDocument,
+  ServerConfigurationWriteRequest,
+  ServerConsoleLine,
   ServerCoreDownloadClientService,
   ServerCoreDownloadTaskSnapshot,
-  ServerCoreManagedDownloadResult,
   ServerCoreManagedDownloadRequest,
+  ServerCoreManagedDownloadResult,
   ServerCoreSaveAsRequest,
   ServerCoreSourceClientService,
+  ServerInstanceClientService,
+  ServerInstanceSnapshot,
+  ServerInstanceStartupSettings,
   ServerModDownloadResult,
   ServerModInstallRequest,
   ServerModSaveAsRequest,
   ServerModSearchRequest,
-  ServerModrinthResourceType,
+  ServerModSource,
   ServerModSourceClientService,
-  ServerInstanceClientService,
-  ServerInstanceSnapshot,
-  ServerInstanceStartupSettings,
-  ServerConsoleLine,
+  ServerModrinthResourceType,
   ServerRuntimeClientService,
-  ServerConfigurationCatalog,
-  ServerConfigurationDocument,
-  ServerConfigurationWriteRequest,
   ServerSettingsClientService,
   ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
@@ -109,12 +110,14 @@ export interface DesktopShellConfig {
   ): ReturnType<ServerCoreSourceClientService["listArtifacts"]>;
   readServerModFilters(
     resourceType: ServerModrinthResourceType,
+    source: ServerModSource,
   ): ReturnType<ServerModSourceClientService["getFilters"]>;
   searchServerMods(
     request: ServerModSearchRequest,
   ): ReturnType<ServerModSourceClientService["search"]>;
   readServerModProjectDetails(
     resourceType: ServerModrinthResourceType,
+    source: ServerModSource,
     projectId: string,
   ): ReturnType<ServerModSourceClientService["getProjectDetails"]>;
   installServerMod(request: StartDesktopServerModInstallRequest): Promise<ServerModDownloadResult>;

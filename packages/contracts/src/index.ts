@@ -56,7 +56,7 @@ export const desktopChannels = {
 export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
 /** 服务端核心源面向 Client 的只读 Contract。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
-/** Modrinth 服务端资源来源面向 Client 的搜索、下载与实例安装 Contract。 */
+/** Modrinth 与 CurseForge 服务端资源来源面向 Client 的搜索、下载与实例安装 Contract。 */
 export const serverModSourceContract = "seashard.server-mod-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
@@ -201,7 +201,7 @@ export interface ServerCoreSourceClientService {
   listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>;
 }
 
-export type ServerModSource = "modrinth";
+export type ServerModSource = "modrinth" | "curseforge";
 export type ServerModrinthResourceType = "mod" | "modpack" | "datapack";
 export const serverModLoaders = ["fabric", "forge", "neoforge", "quilt"] as const;
 export type ServerModLoader = (typeof serverModLoaders)[number];
@@ -268,7 +268,7 @@ export interface ServerModSearchRequest {
   limit: number;
 }
 
-/** Modrinth 搜索结果的最小安全投影；图标仅允许来自经过 Host 校验的 Modrinth CDN。 */
+/** 多来源 Mod 搜索结果的最小安全投影；图标仅允许来自受信任的上游 CDN。 */
 export interface ServerModProject {
   resourceType: ServerModrinthResourceType;
   source: ServerModSource;
@@ -302,30 +302,33 @@ export interface ServerModVersion {
   datePublished: string;
 }
 
-/** Modrinth 项目长简介及其全部公开版本。 */
+/** 多来源项目长简介及其全部公开版本。 */
 export interface ServerModProjectDetails {
   resourceType: ServerModrinthResourceType;
+  source: ServerModSource;
   projectId: string;
   body: string;
   versions: readonly ServerModVersion[];
 }
-/** Renderer 只提交资源类型、Modrinth 身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
+/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
 export interface ServerModInstallRequest {
+  source: ServerModSource;
   resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
   instanceId: string;
 }
 
-/** “另存为”同样只提交 Modrinth 身份，目标目录由 Desktop 系统对话框选择。 */
+/** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */
 export interface ServerModSaveAsRequest {
+  source: ServerModSource;
   resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
 }
-
-/** Mod 或数据包完成校验并发布后的稳定结果。 */
+/** 多来源 Mod 或数据包完成校验并发布后的稳定结果。 */
 export interface ServerModDownloadResult {
+  source: ServerModSource;
   resourceType: "mod" | "datapack";
   projectId: string;
   versionId: string;
@@ -334,12 +337,15 @@ export interface ServerModDownloadResult {
   instanceId?: string;
   downloadedBytes: number;
 }
-
 export interface ServerModSourceClientService {
-  getFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters>;
+  getFilters(
+    resourceType: ServerModrinthResourceType,
+    source: ServerModSource,
+  ): Promise<ServerModFilters>;
   search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
   getProjectDetails(
     resourceType: ServerModrinthResourceType,
+    source: ServerModSource,
     projectId: string,
   ): Promise<ServerModProjectDetails>;
   installToInstance(request: ServerModInstallRequest): Promise<ServerModDownloadResult>;

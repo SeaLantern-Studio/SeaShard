@@ -9,6 +9,7 @@ import {
   type ServerModSearchRequest,
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
+  type ServerModSource,
   type ServerModrinthResourceType,
   type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
@@ -27,12 +28,16 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverCoreArtifacts, serverType, gameVersion),
   }),
   serverMods: Object.freeze({
-    getFilters: (resourceType: ServerModrinthResourceType) =>
-      ipcRenderer.invoke(desktopChannels.serverModFilters, resourceType),
+    getFilters: (resourceType: ServerModrinthResourceType, source: ServerModSource) =>
+      ipcRenderer.invoke(desktopChannels.serverModFilters, resourceType, source),
     search: (request: ServerModSearchRequest) =>
       ipcRenderer.invoke(desktopChannels.serverModSearch, request),
-    getProjectDetails: (resourceType: ServerModrinthResourceType, projectId: string) =>
-      ipcRenderer.invoke(desktopChannels.serverModProjectDetails, resourceType, projectId),
+    getProjectDetails: (
+      resourceType: ServerModrinthResourceType,
+      source: ServerModSource,
+      projectId: string,
+    ) =>
+      ipcRenderer.invoke(desktopChannels.serverModProjectDetails, resourceType, source, projectId),
     installToInstance: (request: ServerModInstallRequest) =>
       ipcRenderer.invoke(desktopChannels.serverModInstallToInstance, request),
     saveAs: (request: ServerModSaveAsRequest) =>

@@ -11,8 +11,10 @@ import type {
 } from "../components/network/download/src/index.ts";
 import type { ServerInstanceManagerService } from "../components/server/instance-manager/src/index.ts";
 import {
+  CurseForgeServerModCatalog,
   ModrinthServerModCatalog,
   ServerModDownloadCoordinator,
+  ServerModSourceCatalog,
 } from "../components/server/mod-source/src/index.ts";
 import { resolve } from "node:path";
 
@@ -338,6 +340,7 @@ await test("Modrinth project details expose the full body and primary version fi
 
   assert.deepEqual(await catalog.getProjectDetails("mod", "server-mod-1"), {
     resourceType: "mod",
+    source: "modrinth",
     projectId: "server-mod-1",
     body: "Complete project description.\n\nSecond paragraph.",
     versions: [
@@ -420,13 +423,14 @@ await test("Mod download coordinator installs only compatible versions and suppo
   };
   const downloads = new FakeDownloadService();
   const coordinator = new ServerModDownloadCoordinator(
-    catalog,
+    new ServerModSourceCatalog(catalog, catalog),
     downloads,
     instanceService([fabricInstance, forgeInstance]),
   );
 
   assert.deepEqual(
     await coordinator.installToInstance({
+      source: "modrinth",
       resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
@@ -435,6 +439,7 @@ await test("Mod download coordinator installs only compatible versions and suppo
     }),
     {
       resourceType: "mod",
+      source: "modrinth",
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
       fileName,
@@ -463,6 +468,7 @@ await test("Mod download coordinator installs only compatible versions and suppo
   await assert.rejects(
     coordinator.installToInstance({
       resourceType: "mod",
+      source: "modrinth",
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
       instanceId: "forge-instance",
@@ -476,12 +482,14 @@ await test("Mod download coordinator installs only compatible versions and suppo
   assert.deepEqual(
     await coordinator.saveToDirectory({
       resourceType: "mod",
+      source: "modrinth",
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
       destinationDirectory: saveDirectory,
       connections: 4,
     }),
     {
+      source: "modrinth",
       resourceType: "mod",
       projectId: "server-mod-1",
       versionId: "version-fabric-1",
@@ -578,10 +586,15 @@ await test("MCIM file fallback preserves checksum and destination after failure"
 
   const downloads = new FakeDownloadService();
   downloads.failedUrls.add(officialUrl);
-  const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instanceService([]));
+  const coordinator = new ServerModDownloadCoordinator(
+    new ServerModSourceCatalog(catalog, catalog),
+    downloads,
+    instanceService([]),
+  );
   const destinationDirectory = resolve("test-fixtures/server-mod/fallback-exports");
   await coordinator.saveToDirectory({
     resourceType: "mod",
+    source: "modrinth",
     projectId: "server-mod-1",
     versionId: "version-fabric-1",
     destinationDirectory,
@@ -883,6 +896,7 @@ await test("Datapacks install into any exact-version instance and modpack downlo
   });
   assert.deepEqual(await catalog.getProjectDetails("datapack", "server-datapack-1"), {
     resourceType: "datapack",
+    source: "modrinth",
     projectId: "server-datapack-1",
     body: "A dedicated-server datapack.",
     versions: [
@@ -919,13 +933,14 @@ await test("Datapacks install into any exact-version instance and modpack downlo
   };
   const downloads = new FakeDownloadService();
   const coordinator = new ServerModDownloadCoordinator(
-    catalog,
+    new ServerModSourceCatalog(catalog, catalog),
     downloads,
     instanceService([matchingInstance, mismatchedInstance]),
   );
 
   assert.deepEqual(
     await coordinator.installToInstance({
+      source: "modrinth",
       resourceType: "datapack",
       projectId: "server-datapack-1",
       versionId: "datapack-version-1",
@@ -933,6 +948,7 @@ await test("Datapacks install into any exact-version instance and modpack downlo
       connections: 8,
     }),
     {
+      source: "modrinth",
       resourceType: "datapack",
       projectId: "server-datapack-1",
       versionId: "datapack-version-1",
@@ -958,6 +974,7 @@ await test("Datapacks install into any exact-version instance and modpack downlo
 
   await assert.rejects(
     coordinator.installToInstance({
+      source: "modrinth",
       resourceType: "datapack",
       projectId: "server-datapack-1",
       versionId: "datapack-version-1",
@@ -969,6 +986,7 @@ await test("Datapacks install into any exact-version instance and modpack downlo
   const requestsBeforeModpack = requests;
   await assert.rejects(
     coordinator.installToInstance({
+      source: "modrinth",
       resourceType: "modpack",
       projectId: "server-modpack-1",
       versionId: "modpack-version-1",
@@ -982,4 +1000,114 @@ await test("Datapacks install into any exact-version instance and modpack downlo
     requestsBeforeModpack,
     "disabled modpack download must not reach Modrinth",
   );
+});
+
+await test("CurseForge MCIM catalog searches, reads details, and normalizes mirror downloads", async () => {
+  const baseUrl = "https://mod.mcimirror.test/curseforge/v1/";
+  const requested: URL[] = [];
+  const fileName = "server-tools-fabric-1.21.1.jar";
+  const sha1 = "a".repeat(40);
+  const file = {
+    id: 456,
+    modId: 123,
+    fileName,
+    fileLength: 2_048,
+    downloadCount: 987,
+    fileDate: "2026-08-18T12:00:00Z",
+    gameVersions: ["1.21.1", "Fabric"],
+    sortableGameVersions: [{ gameVersionName: "Fabric" }],
+    hashes: [{ algo: 1, value: sha1 }],
+  };
+  const catalog = new CurseForgeServerModCatalog({
+    baseUrl,
+    userAgent,
+    fetchProvider: () => async (input, init) => {
+      const url = requestUrl(input);
+      requested.push(url);
+      assert.equal(new Headers(init?.headers).get("user-agent"), userAgent);
+      if (url.pathname.endsWith("/mods/search")) {
+        return Response.json({
+          data: [
+            {
+              id: 123,
+              slug: "server-tools",
+              name: "Server Tools",
+              summary: "Utilities for dedicated servers.",
+              logo: { url: "https://media.forgecdn.net/ mod/icon.png".replace(" ", "") },
+              authors: [{ name: "SeaLantern" }],
+              downloadCount: 12_345,
+              dateModified: "2026-08-17T10:00:00Z",
+              latestFilesIndexes: [{ gameVersion: "1.21.1" }],
+              categories: [{ name: "Utility" }],
+            },
+          ],
+          pagination: { index: 0, pageSize: 20, totalCount: 1 },
+        });
+      }
+      if (url.pathname.endsWith("/categories")) {
+        return Response.json({ data: [{ id: 7, name: "Utility" }] });
+      }
+      if (url.pathname.endsWith("/mods/123/files/456/download-url")) {
+        return Response.json({
+          data: `https://edge.forgecdn.net/files/7091/801/${fileName}`,
+        });
+      }
+      if (url.pathname.endsWith("/mods/123/files/456")) return Response.json({ data: file });
+      if (url.pathname.endsWith("/mods/123/files")) return Response.json({ data: [file] });
+      if (url.pathname.endsWith("/mods/123")) {
+        return Response.json({
+          id: 123,
+          summary: "Utilities for dedicated servers.",
+          allowModDistribution: true,
+          isAvailable: true,
+        });
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+
+  const filters = await catalog.getFilters("mod");
+  assert.deepEqual(filters.sources, [{ id: "curseforge", label: "CurseForge" }]);
+  assert.deepEqual(filters.tags, [{ id: "7", label: "Utility" }]);
+
+  const search = await catalog.search({
+    source: "curseforge",
+    resourceType: "mod",
+    query: "server tools",
+    tag: "7",
+    index: "downloads",
+    gameVersion: "1.21.1",
+    loader: "fabric",
+    offset: 0,
+    limit: 20,
+  });
+  assert.equal(requested.at(-1)?.searchParams.get("gameId"), "432");
+  assert.equal(requested.at(-1)?.searchParams.get("classId"), "6");
+  assert.equal(requested.at(-1)?.searchParams.get("modLoaderType"), "4");
+  assert.equal(search.items[0]?.source, "curseforge");
+  assert.equal(search.items[0]?.id, "123");
+
+  const details = await catalog.getProjectDetails("mod", "123");
+  assert.deepEqual(details.versions[0], {
+    id: "456",
+    gameVersions: ["1.21.1"],
+    loaders: ["fabric"],
+    fileName,
+    downloads: 987,
+    datePublished: "2026-08-18T12:00:00Z",
+  });
+
+  const artifact = await catalog.resolveVersionArtifact("mod", "123", "456");
+  assert.deepEqual(artifact, {
+    source: "curseforge",
+    resourceType: "mod",
+    projectId: "123",
+    versionId: "456",
+    fileName,
+    url: `https://mod.mcimirror.top/files/7091/801/${fileName}`,
+    sha1,
+    size: 2_048,
+    gameVersions: ["1.21.1"],
+    loaders: ["fabric"],
+  });
 });

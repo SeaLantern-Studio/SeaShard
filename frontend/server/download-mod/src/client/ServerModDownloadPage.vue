@@ -7,9 +7,10 @@ import {
   type ServerModFilters,
   type ServerModProject,
   type ServerModProjectDetails,
+  type ServerModSourceClientService,
   type ServerModSearchIndex,
   type ServerModSearchResult,
-  type ServerModSourceClientService,
+  type ServerModSource,
   type ServerModVersion,
 } from "@seashard/contracts";
 import {
@@ -18,6 +19,7 @@ import {
   Cmz_Markdown,
   Cmz_Modal,
   Cmz_Select,
+  Cmz_Toast,
   type SelectOption,
 } from "cmzya-modern-ui";
 import {
@@ -37,6 +39,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useToast } from "cmzya-modern-ui";
 import {
   formatServerModDownloadCount,
   formatServerModRelativeTime,
@@ -52,9 +55,13 @@ const props = defineProps<{
   mods: ServerModSourceClientService;
   instances: ServerInstanceClientService;
 }>();
+const toast = useToast();
 
 const emptyFilters: ServerModFilters = {
-  sources: [{ id: "modrinth", label: "Modrinth" }],
+  sources: [
+    { id: "modrinth", label: "Modrinth" },
+    { id: "curseforge", label: "CurseForge" },
+  ],
   tags: [],
   versions: [],
   loaders: [],
@@ -84,7 +91,7 @@ const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
 const filtersError = ref("");
 const query = ref("");
-const source = ref("modrinth");
+const source = ref<ServerModSource>("modrinth");
 const tag = ref("");
 const sort = ref<ServerModSearchIndex>("downloads");
 const gameVersion = ref("");
@@ -217,7 +224,14 @@ async function loadFilters(): Promise<void> {
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    filters.value = await props.mods.getFilters("mod");
+    const next = await props.mods.getFilters("mod", source.value);
+    filters.value = {
+      ...next,
+      sources: [
+        { id: "modrinth", label: "Modrinth" },
+        { id: "curseforge", label: "CurseForge" },
+      ],
+    };
   } catch (error) {
     filtersError.value = errorMessage(error);
   } finally {
@@ -236,8 +250,9 @@ function updateQuery(value: string | number): void {
 }
 
 function updateSource(value: string | number): void {
-  if (value !== "modrinth" || source.value === value) return;
+  if ((value !== "modrinth" && value !== "curseforge") || source.value === value) return;
   source.value = value;
+  void loadFilters();
   void resetSearch();
 }
 
@@ -327,7 +342,7 @@ async function loadNextPage(): Promise<void> {
 function searchPage(offset: number): Promise<ServerModSearchResult> {
   return props.mods.search({
     resourceType: "mod",
-    source: "modrinth",
+    source: source.value,
     query: query.value,
     tag: tag.value,
     index: sort.value,
@@ -418,7 +433,7 @@ async function loadProjectDetails(): Promise<void> {
   detailLoading.value = true;
   detailError.value = "";
   try {
-    const details = await props.mods.getProjectDetails("mod", project.id);
+    const details = await props.mods.getProjectDetails("mod", project.source, project.id);
     if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
       projectDetails.value = details;
     }
@@ -483,6 +498,7 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
   let completed = false;
   try {
     await props.mods.installToInstance({
+      source: project.source,
       resourceType: "mod",
       projectId: project.id,
       versionId: version.id,
@@ -490,7 +506,7 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
     });
     completed = true;
   } catch (error) {
-    console.error("Mod 安装失败", error);
+    toast.error({ title: "Mod 安装失败", description: errorMessage(error) });
   } finally {
     installPendingTarget.value = undefined;
     if (completed) closeInstallModal();
@@ -506,12 +522,13 @@ async function saveModAs(): Promise<void> {
   try {
     completed =
       (await props.mods.saveAs({
+        source: project.source,
         resourceType: "mod",
         projectId: project.id,
         versionId: version.id,
       })) !== undefined;
   } catch (error) {
-    console.error("Mod 另存为失败", error);
+    toast.error({ title: "Mod 另存为失败", description: errorMessage(error) });
   } finally {
     installPendingTarget.value = undefined;
     if (completed) closeInstallModal();
@@ -526,7 +543,11 @@ async function copyProjectName(): Promise<void> {
 async function copyProjectLink(): Promise<void> {
   const project = selectedProject.value;
   if (!project) return;
-  await copyDetailValue("link", `https://modrinth.com/mod/${encodeURIComponent(project.slug)}`);
+  const url =
+    project.source === "curseforge"
+      ? `https://www.curseforge.com/minecraft/mc-mods/${encodeURIComponent(project.slug)}`
+      : `https://modrinth.com/mod/${encodeURIComponent(project.slug)}`;
+  await copyDetailValue("link", url);
 }
 
 async function copyDetailValue(action: DetailCopyAction, value: string): Promise<void> {
@@ -669,6 +690,7 @@ function errorMessage(error: unknown): string {
 
 <template>
   <section class="server-mod-download-page" aria-label="Mod 下载">
+    <Cmz_Toast position="top-right" />
     <template v-if="selectedProject">
       <div class="mod-detail-page">
         <button class="mod-detail-back" type="button" @click="returnToProjectList">

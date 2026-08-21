@@ -221,7 +221,7 @@ async function loadFilters(): Promise<void> {
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    filters.value = await props.resources.getFilters(props.resourceType);
+    filters.value = await props.resources.getFilters(props.resourceType, "modrinth");
   } catch (error) {
     filtersError.value = errorMessage(error);
   } finally {
@@ -421,7 +421,11 @@ async function loadProjectDetails(): Promise<void> {
   detailLoading.value = true;
   detailError.value = "";
   try {
-    const details = await props.resources.getProjectDetails(props.resourceType, project.id);
+    const details = await props.resources.getProjectDetails(
+      props.resourceType,
+      "modrinth",
+      project.id,
+    );
     if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
       projectDetails.value = details;
     }
@@ -490,6 +494,7 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
   let completed = false;
   try {
     await props.resources.installToInstance({
+      source: "modrinth",
       resourceType: "datapack",
       projectId: project.id,
       versionId: version.id,
@@ -514,6 +519,7 @@ async function saveModAs(): Promise<void> {
   try {
     completed =
       (await props.resources.saveAs({
+        source: "modrinth",
         resourceType: "datapack",
         projectId: project.id,
         versionId: version.id,

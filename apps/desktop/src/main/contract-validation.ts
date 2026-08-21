@@ -29,6 +29,7 @@ import {
   type ServerModFilters,
   type ServerModDownloadResult,
   type ServerModProject,
+  type ServerModSource,
   type ServerModrinthResourceType,
   type ServerModProjectDetails,
   type ServerModSearchResult,
@@ -108,11 +109,12 @@ const serverModEnvironments = new Set<ServerModEnvironment>([
 ]);
 const serverModResourceTypes = new Set<ServerModrinthResourceType>(["mod", "modpack", "datapack"]);
 
-function isServerModIconUrl(value: unknown, projectId: unknown): value is string {
+function isServerModIconUrl(value: unknown, projectId: unknown, source: unknown): value is string {
   if (typeof value !== "string" || typeof projectId !== "string") return false;
   try {
     const url = new URL(value);
-    return (
+    if (
+      source === "modrinth" &&
       url.protocol === "https:" &&
       url.hostname === "cdn.modrinth.com" &&
       !url.username &&
@@ -121,6 +123,18 @@ function isServerModIconUrl(value: unknown, projectId: unknown): value is string
       !url.search &&
       !url.hash &&
       url.pathname.startsWith(`/data/${encodeURIComponent(projectId)}/`)
+    ) {
+      return true;
+    }
+    return (
+      source === "curseforge" &&
+      url.protocol === "https:" &&
+      (url.hostname === "media.forgecdn.net" || url.hostname === "mod.mcimirror.top") &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      !url.search &&
+      !url.hash
     );
   } catch {
     return false;
@@ -164,7 +178,7 @@ export function expectServerModFilters(value: unknown): ServerModFilters {
   }
   const filters = value as Record<string, unknown>;
   const sources = expectServerModFilterOptions(filters.sources, "sources", 1);
-  if (sources.length !== 1 || sources[0]?.id !== "modrinth") {
+  if (sources.length !== 1 || (sources[0]?.id !== "modrinth" && sources[0]?.id !== "curseforge")) {
     throw new Error("server mod source returned invalid sources");
   }
   return {
@@ -208,6 +222,7 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
   if (
     typeof details.resourceType !== "string" ||
     !serverModResourceTypes.has(details.resourceType as ServerModrinthResourceType) ||
+    (details.source !== "modrinth" && details.source !== "curseforge") ||
     typeof details.projectId !== "string" ||
     !details.projectId ||
     details.projectId.length > 64 ||
@@ -221,6 +236,7 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
   const seen = new Set<string>();
   return {
     resourceType: details.resourceType as ServerModrinthResourceType,
+    source: details.source as ServerModSource,
     projectId: details.projectId,
     body: details.body,
     versions: details.versions.map((version, index) => {
@@ -242,6 +258,7 @@ export function expectServerModDownloadResult(value: unknown): ServerModDownload
   const extension =
     result.resourceType === "datapack" ? ".zip" : result.resourceType === "mod" ? ".jar" : "";
   if (
+    (result.source !== "modrinth" && result.source !== "curseforge") ||
     !extension ||
     typeof result.projectId !== "string" ||
     !result.projectId ||
@@ -317,14 +334,15 @@ function expectServerModProject(value: unknown, index: number): ServerModProject
   if (
     typeof project.resourceType !== "string" ||
     !serverModResourceTypes.has(project.resourceType as ServerModrinthResourceType) ||
-    project.source !== "modrinth" ||
+    (project.source !== "modrinth" && project.source !== "curseforge") ||
     requiredStrings.some(
       (field) =>
         typeof project[field] !== "string" ||
         (field !== "description" && !project[field]) ||
         (project[field] as string).length > 1_000,
     ) ||
-    (project.iconUrl !== undefined && !isServerModIconUrl(project.iconUrl, project.id)) ||
+    (project.iconUrl !== undefined &&
+      !isServerModIconUrl(project.iconUrl, project.id, project.source)) ||
     Number.isNaN(Date.parse(project.dateModified as string)) ||
     !Number.isSafeInteger(project.downloads) ||
     (project.downloads as number) < 0 ||
@@ -337,7 +355,7 @@ function expectServerModProject(value: unknown, index: number): ServerModProject
   }
   return {
     resourceType: project.resourceType as ServerModrinthResourceType,
-    source: "modrinth",
+    source: project.source as ServerModSource,
     id: project.id as string,
     slug: project.slug as string,
     title: project.title as string,

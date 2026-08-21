@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path";
 import {
   serverDownloadConnectionLimits,
   type ServerInstanceSnapshot,
@@ -8,8 +9,7 @@ import {
 } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
-import { isAbsolute, resolve } from "node:path";
-import type { ModrinthServerModArtifact, ModrinthServerModCatalog } from "./modrinth-catalog";
+import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
 
 interface InstallRequest extends ServerModInstallRequest {
   readonly connections: number;
@@ -26,7 +26,7 @@ interface SaveRequest extends ServerModSaveAsRequest {
  */
 export class ServerModDownloadCoordinator {
   constructor(
-    private readonly catalog: ModrinthServerModCatalog,
+    private readonly catalog: ServerModCatalog,
     private readonly downloads: DownloadService,
     private readonly instances: ServerInstanceManagerService,
   ) {}
@@ -38,6 +38,7 @@ export class ServerModDownloadCoordinator {
 
     const artifact = await this.catalog.resolveVersionArtifact(
       request.resourceType,
+      request.source,
       request.projectId,
       request.versionId,
     );
@@ -59,6 +60,7 @@ export class ServerModDownloadCoordinator {
     const request = parseSaveRequest(value);
     const artifact = await this.catalog.resolveVersionArtifact(
       request.resourceType,
+      request.source,
       request.projectId,
       request.versionId,
     );
@@ -71,7 +73,7 @@ export class ServerModDownloadCoordinator {
   }
 
   private async startAndWait(
-    artifact: ModrinthServerModArtifact,
+    artifact: ServerModArtifact,
     destinationDirectory: string,
     connections: number,
     instanceId?: string,
@@ -95,7 +97,7 @@ export class ServerModDownloadCoordinator {
   }
 
   private async startAndWaitFromUrl(
-    artifact: ModrinthServerModArtifact,
+    artifact: ServerModArtifact,
     url: string,
     destinationDirectory: string,
     connections: number,
@@ -105,7 +107,8 @@ export class ServerModDownloadCoordinator {
       url,
       destinationPath: resolve(destinationDirectory, artifact.fileName),
       expectedBytes: artifact.size,
-      sha512: artifact.sha512,
+      ...(artifact.sha1 ? { sha1: artifact.sha1 } : {}),
+      ...(artifact.sha512 ? { sha512: artifact.sha512 } : {}),
       connections,
       metadata: {
         kind: `server-${artifact.resourceType}`,
@@ -129,7 +132,7 @@ export class ServerModDownloadCoordinator {
 }
 
 function assertCompatibleInstance(
-  artifact: ModrinthServerModArtifact,
+  artifact: ServerModArtifact,
   instance: ServerInstanceSnapshot,
 ): void {
   if (!instance.gameVersion || !artifact.gameVersions.includes(instance.gameVersion)) {
@@ -147,6 +150,7 @@ function assertCompatibleInstance(
 function parseInstallRequest(value: unknown): InstallRequest {
   const record = expectRecord(value, "server resource install request");
   return {
+    source: expectSource(record.source),
     resourceType: expectDownloadableResourceType(record.resourceType),
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
@@ -162,12 +166,20 @@ function parseSaveRequest(value: unknown): SaveRequest {
     throw new TypeError("server resource destination directory must be absolute");
   }
   return {
+    source: expectSource(record.source),
     resourceType: expectDownloadableResourceType(record.resourceType),
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     destinationDirectory: resolve(destinationDirectory),
     connections: expectConnections(record.connections),
   };
+}
+
+function expectSource(value: unknown): "modrinth" | "curseforge" {
+  if (value !== "modrinth" && value !== "curseforge") {
+    throw new TypeError("server resource source is invalid");
+  }
+  return value;
 }
 
 function expectDownloadableResourceType(value: unknown): "mod" | "datapack" {
@@ -219,12 +231,13 @@ function formatLoader(loader: ServerModLoader): string {
 }
 
 function resultOf(
-  artifact: ModrinthServerModArtifact,
+  artifact: ServerModArtifact,
   task: DownloadTaskSnapshot,
   destination: ServerModDownloadResult["destination"],
   instanceId?: string,
 ): ServerModDownloadResult {
   return {
+    source: artifact.source,
     resourceType: artifact.resourceType,
     projectId: artifact.projectId,
     versionId: artifact.versionId,

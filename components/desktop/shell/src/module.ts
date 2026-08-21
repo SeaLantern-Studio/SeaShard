@@ -22,6 +22,7 @@ import {
   expectServerModResourceType,
   expectServerModSaveAsRequest,
   expectServerModSearchRequest,
+  expectServerModSource,
   expectServerStartupDefaultsUpdate,
   expectString,
 } from "./validation";
@@ -505,12 +506,18 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
-        config.runtime.handle(desktopChannels.serverModFilters, async (event, resourceType) => {
-          if (!ownsWebContents(event.sender.id)) {
-            throw new Error("server resource filters request rejected");
-          }
-          return config.readServerModFilters(expectServerModResourceType(resourceType));
-        });
+        config.runtime.handle(
+          desktopChannels.serverModFilters,
+          async (event, resourceType, source) => {
+            if (!ownsWebContents(event.sender.id)) {
+              throw new Error("server resource filters request rejected");
+            }
+            return config.readServerModFilters(
+              expectServerModResourceType(resourceType),
+              expectServerModSource(source),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverModSearch, async (event, request) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("server resource search request rejected");
@@ -519,12 +526,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         });
         config.runtime.handle(
           desktopChannels.serverModProjectDetails,
-          async (event, resourceType, projectId) => {
+          async (event, resourceType, source, projectId) => {
             if (!ownsWebContents(event.sender.id)) {
               throw new Error("server resource project details request rejected");
             }
             return config.readServerModProjectDetails(
               expectServerModResourceType(resourceType),
+              expectServerModSource(source),
               expectServerModProjectId(projectId),
             );
           },

@@ -306,7 +306,7 @@ async function downloadSingle(
   headers: Headers,
   temporaryFile: FileHandle,
   probedBytes: number | undefined,
-  hashAlgorithm: "sha256" | "sha512" | undefined,
+  hashAlgorithm: "sha1" | "sha256" | "sha512" | undefined,
 ): Promise<string | undefined> {
   task.connections = 1;
   const response = await fetchImplementation(task.request.url, {
@@ -504,9 +504,10 @@ function parseStartRequest(
   }
   const destinationPath = normalize(rawDestinationPath);
   const expectedBytes = parseExpectedBytes(record.expectedBytes);
+  const sha1 = parseDigest(record.sha1, "sha1", 40);
   const sha256 = parseDigest(record.sha256, "sha256", 64);
   const sha512 = parseDigest(record.sha512, "sha512", 128);
-  if (sha256 && sha512) {
+  if ([sha1, sha256, sha512].filter(Boolean).length > 1) {
     throw new TypeError("download request must provide only one checksum");
   }
   const connections = parseConnections(record.connections, defaultConnections, maxConnections);
@@ -516,13 +517,13 @@ function parseStartRequest(
   if (metadata !== undefined && !isJsonValue(metadata)) {
     throw new TypeError("download metadata must be a JSON value");
   }
-
   return {
     url: url.href,
     destinationPath,
     connections,
     headers,
     ...(expectedBytes === undefined ? {} : { expectedBytes }),
+    ...(sha1 ? { sha1 } : {}),
     ...(sha256 ? { sha256 } : {}),
     ...(sha512 ? { sha512 } : {}),
     ...(metadata === undefined ? {} : { metadata }),
@@ -539,7 +540,7 @@ function parseExpectedBytes(value: unknown): number | undefined {
 
 function parseDigest(
   value: unknown,
-  field: "sha256" | "sha512",
+  field: "sha1" | "sha256" | "sha512",
   hexadecimalLength: number,
 ): string | undefined {
   if (value === undefined) return undefined;
@@ -664,17 +665,18 @@ async function publishVerifiedFile(temporaryPath: string, destinationPath: strin
   await rm(temporaryPath, { force: true }).catch(() => {});
 }
 
-async function hashFile(path: string, algorithm: "sha256" | "sha512"): Promise<string> {
+async function hashFile(path: string, algorithm: "sha1" | "sha256" | "sha512"): Promise<string> {
   const hash = createHash(algorithm);
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest("hex");
 }
 
 function requestChecksum(
-  request: Pick<StartDownloadRequest, "sha256" | "sha512">,
-): { algorithm: "sha256" | "sha512"; expected: string } | undefined {
+  request: Pick<StartDownloadRequest, "sha1" | "sha256" | "sha512">,
+): { algorithm: "sha1" | "sha256" | "sha512"; expected: string } | undefined {
   if (request.sha512) return { algorithm: "sha512", expected: request.sha512 };
   if (request.sha256) return { algorithm: "sha256", expected: request.sha256 };
+  if (request.sha1) return { algorithm: "sha1", expected: request.sha1 };
   return undefined;
 }
 

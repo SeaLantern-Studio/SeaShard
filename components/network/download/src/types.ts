@@ -14,6 +14,7 @@ export interface StartDownloadRequest {
   readonly destinationPath: string;
   readonly expectedBytes?: number;
   readonly sha256?: string;
+  readonly sha1?: string;
   readonly sha512?: string;
   /** 期望的并发连接数；远端不支持 Range 时自动退回单连接。 */
   readonly connections?: number;

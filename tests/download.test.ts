@@ -174,6 +174,34 @@ await test("shared downloader verifies Modrinth SHA-512 before publishing a file
   }
 });
 
+await test("shared downloader verifies CurseForge SHA-1 before publishing a file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-download-sha1-"));
+  const source = Buffer.from("verified curseforge mod bytes", "utf8");
+  const expectedSha1 = createHash("sha1").update(source).digest("hex");
+  const manager = new DownloadManager({
+    fetchProvider: () => async () =>
+      new Response(source, {
+        status: 200,
+        headers: { "content-length": String(source.byteLength) },
+      }),
+    createId: () => "task-sha1",
+  });
+  try {
+    const destinationPath = join(directory, "verified.jar");
+    const started = await manager.start({
+      url: "https://mod.mcimirror.top/files/7091/801/verified.jar",
+      destinationPath,
+      expectedBytes: source.byteLength,
+      sha1: expectedSha1,
+    });
+    assert.equal((await waitForFinished(manager, started.id)).state, "completed");
+    assert.deepEqual(await readFile(destinationPath), source);
+  } finally {
+    await manager.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test("shared downloader requires a full destination file path", async () => {
   const manager = new DownloadManager();
   try {

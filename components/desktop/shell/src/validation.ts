@@ -7,6 +7,7 @@ import {
   type ServerModInstallRequest,
   type ServerModSaveAsRequest,
   type ServerModSearchIndex,
+  type ServerModSource,
   type ServerModrinthResourceType,
   type ServerModSearchRequest,
   type ServerInstanceStartupSettings,
@@ -125,8 +126,9 @@ export function expectServerModSearchRequest(value: unknown): ServerModSearchReq
   const loader = expectServerModFilter(record.loader, "server resource loader");
   const offset = expectSafeInteger(record.offset, "server resource search offset");
   const limit = expectSafeInteger(record.limit, "server resource search limit");
-  if (record.source !== "modrinth") {
-    throw new TypeError("server resource source must be modrinth");
+  const source = expectServerModSource(record.source);
+  if (resourceType !== "mod" && source !== "modrinth") {
+    throw new TypeError("CurseForge only supports Mod resources");
   }
   if (resourceType === "datapack" && loader) {
     throw new TypeError("server datapack search must not specify a loader");
@@ -145,7 +147,7 @@ export function expectServerModSearchRequest(value: unknown): ServerModSearchReq
   }
   return {
     resourceType,
-    source: "modrinth",
+    source,
     query,
     tag,
     index: record.index as ServerModSearchIndex,
@@ -165,6 +167,13 @@ export function expectServerModResourceType(value: unknown): ServerModrinthResou
   }
   return value as ServerModrinthResourceType;
 }
+
+export function expectServerModSource(value: unknown): ServerModSource {
+  if (value !== "modrinth" && value !== "curseforge") {
+    throw new TypeError("server resource source is invalid");
+  }
+  return value;
+}
 export function expectServerModProjectId(value: unknown): string {
   const projectId = expectString(value, "server mod project ID").trim();
   if (!serverModProjectIdPattern.test(projectId)) {
@@ -172,10 +181,10 @@ export function expectServerModProjectId(value: unknown): string {
   }
   return projectId;
 }
-
 export function expectServerModSaveAsRequest(value: unknown): ServerModSaveAsRequest {
   const record = expectRecord(value, "server resource save-as request");
   return {
+    source: expectServerModSource(record.source),
     resourceType: expectDownloadableServerModResourceType(record.resourceType),
     projectId: expectServerModProjectId(record.projectId),
     versionId: expectServerModIdentity(record.versionId, "server resource version ID"),

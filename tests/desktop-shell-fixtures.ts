@@ -382,6 +382,7 @@ export const serverModSearchResult = {
 } satisfies ServerModSearchResult;
 export const serverModProjectDetails = {
   resourceType: "mod",
+  source: "modrinth",
   projectId: "server-mod-1",
   body: "Complete project description.\n\nSecond paragraph.",
   versions: [
@@ -583,13 +584,14 @@ export async function createDesktopShellHarness(
         serverModSearchRequests.push(request);
         return serverModSearchResult;
       },
-      readServerModProjectDetails: async (_resourceType, projectId) => {
+      readServerModProjectDetails: async (_resourceType, _source, projectId) => {
         serverModDetailProjectIds.push(projectId);
         return serverModProjectDetails;
       },
       installServerMod: async (request) => {
         installedServerMods.push(request);
         return {
+          source: request.source,
           resourceType: request.resourceType,
           projectId: request.projectId,
           versionId: request.versionId,
@@ -602,6 +604,7 @@ export async function createDesktopShellHarness(
       saveServerMod: async (request) => {
         savedServerMods.push(request);
         return {
+          source: request.source,
           resourceType: request.resourceType,
           projectId: request.projectId,
           versionId: request.versionId,

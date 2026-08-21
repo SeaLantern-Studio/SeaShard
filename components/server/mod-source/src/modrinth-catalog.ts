@@ -1,3 +1,4 @@
+import type { ServerModCatalogImplementation } from "./catalog-types";
 import {
   serverModSearchLimits,
   type ServerModEnvironment,
@@ -5,13 +6,14 @@ import {
   type ServerModFilters,
   type ServerModProject,
   type ServerModProjectDetails,
-  type ServerModrinthResourceType,
   type ServerModSearchIndex,
   type ServerModSearchRequest,
   type ServerModSearchResult,
+  type ServerModrinthResourceType,
   type ServerModVersion,
 } from "@seashard/contracts";
 
+import type { ServerModArtifact } from "./catalog-types";
 export const defaultModrinthApiBaseUrl = "https://api.modrinth.com/v2/";
 /** MCIM 只作为官方 Modrinth API 失败后的备用元数据源。 */
 export const defaultMcimModrinthApiBaseUrl = "https://mod.mcimirror.top/modrinth/v2/";
@@ -106,19 +108,7 @@ export interface ModrinthServerModCatalogOptions {
   readonly fallbackFileBaseUrl?: string;
 }
 
-/** Host 内部下载投影；URL、大小和 SHA-512 不跨 Renderer 边界。 */
-export interface ModrinthServerModArtifact {
-  readonly resourceType: "mod" | "datapack";
-  readonly projectId: string;
-  readonly versionId: string;
-  readonly fileName: string;
-  readonly url: string;
-  readonly fallbackUrl?: string;
-  readonly sha512: string;
-  readonly size: number;
-  readonly gameVersions: readonly string[];
-  readonly loaders: readonly string[];
-}
+export type ModrinthServerModArtifact = ServerModArtifact;
 
 /**
  * Modrinth 服务端资源目录。
@@ -126,7 +116,7 @@ export interface ModrinthServerModArtifact {
  * Client 只能传入结构化筛选项；Facet 语句和目标 URL 均在 Host 内构造。筛选元数据按资源类型
  * 和进程缓存，翻页只请求当前 20 条结果，避免滚动时重复拉取整份目录。
  */
-export class ModrinthServerModCatalog {
+export class ModrinthServerModCatalog implements ServerModCatalogImplementation {
   private readonly fetchProvider: () => typeof globalThis.fetch;
   private readonly userAgent: string;
   private readonly baseUrl: URL;
@@ -590,6 +580,7 @@ function parseProjectDetails(
   }
   return {
     resourceType,
+    source: "modrinth",
     projectId,
     body: expectBoundedString(project.body, "Modrinth project body", 200_000, true),
     versions: versions
@@ -699,6 +690,7 @@ function parseVersionArtifact(
   }
   const url = expectModFileUrl(file.url, projectId, fileName);
   return {
+    source: "modrinth",
     resourceType,
     projectId,
     versionId,
@@ -711,7 +703,6 @@ function parseVersionArtifact(
     loaders,
   };
 }
-
 function matchesDetailResourceType(
   project: Record<string, unknown>,
   resourceType: ServerModrinthResourceType,
