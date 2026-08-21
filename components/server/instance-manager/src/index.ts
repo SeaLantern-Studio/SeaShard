@@ -55,8 +55,16 @@ export function createServerInstanceManagerModule(
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listWorldStorage: async (instanceId) =>
           asJsonValue(await manager.listWorldStorage(instanceId)),
+        listWorldBackups: async (instanceId, worldId) =>
+          asJsonValue(await manager.listWorldBackups(instanceId, worldId)),
         createWorldBackup: async (instanceId, worldId) =>
           asJsonValue(await manager.createWorldBackup(instanceId, worldId)),
+        restoreWorldBackup: async (instanceId, worldId, fileName) =>
+          asJsonValue(await manager.restoreWorldBackup(instanceId, worldId, fileName)),
+        deleteWorldBackup: async (instanceId, worldId, fileName) => {
+          await manager.deleteWorldBackup(instanceId, worldId, fileName);
+          return null;
+        },
         switchWorld: async (instanceId, worldId) =>
           asJsonValue(await manager.switchWorld(instanceId, worldId)),
         setStartupSettings: async (instanceId, settings) =>

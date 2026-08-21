@@ -35,6 +35,10 @@ export const desktopChannels = {
   serverInstancesList: "seashard.server-instances.list",
   serverInstancesWorlds: "seashard.server-instances.worlds",
   serverInstancesSwitchWorld: "seashard.server-instances.switch-world",
+  serverInstancesWorldBackups: "seashard.server-instances.world-backups",
+  serverInstancesCreateWorldBackup: "seashard.server-instances.create-world-backup",
+  serverInstancesRestoreWorldBackup: "seashard.server-instances.restore-world-backup",
+  serverInstancesDeleteWorldBackup: "seashard.server-instances.delete-world-backup",
   serverInstancesSetStartupSettings: "seashard.server-instances.set-startup-settings",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
   serverInstancesDelete: "seashard.server-instances.delete",
@@ -476,7 +480,19 @@ export interface ServerWorldSave {
   name: string;
   dimension: ServerWorldDimension;
   current: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   iconDataUrl?: string;
+}
+
+/** 一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。 */
+export interface ServerWorldBackupSnapshot {
+  instanceId: string;
+  worldId: string;
+  worldDirectoryName: string;
+  fileName: string;
+  createdAt: string;
+  sizeBytes: number;
 }
 
 export interface ServerWorldDimensionGroup {
@@ -499,6 +515,17 @@ export interface ServerWorldStorageSnapshot {
 export interface ServerInstanceWorldService {
   listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
+  listWorldBackups(
+    instanceId: string,
+    worldId: string,
+  ): Promise<readonly ServerWorldBackupSnapshot[]>;
+  createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>;
+  restoreWorldBackup(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+  ): Promise<ServerWorldStorageSnapshot>;
+  deleteWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<void>;
 }
 
 /** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */

@@ -101,6 +101,15 @@ function instanceService(
     createWorldBackup: async () => {
       throw new Error("not implemented in fixture");
     },
+    listWorldBackups: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    restoreWorldBackup: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    deleteWorldBackup: async () => {
+      throw new Error("not implemented in fixture");
+    },
     switchWorld: async () => {
       throw new Error("not implemented in fixture");
     },

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { unzipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { test } from "node:test";
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
-import { createWorldBackup } from "../components/server/instance-manager/src/world-backup.ts";
+import {
+  createWorldBackup,
+  deleteWorldBackup,
+  listWorldBackups,
+  restoreWorldBackup,
+} from "../components/server/instance-manager/src/world-backup.ts";
 
 await test("world backup writes a timestamped zip under the instance UUID", async () => {
   const root = await mkdtemp(join(process.cwd(), ".tmp-world-backup-"));
@@ -54,6 +59,54 @@ await test("split world backup preserves each dimension directory", async () => 
     const archive = unzipSync(await readFile(archivePath));
     assert.equal(new TextDecoder().decode(archive["world/level.dat"]), "overworld");
     assert.equal(new TextDecoder().decode(archive["world_nether/level.dat"]), "nether");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("world backups can be listed, restored, and deleted safely", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".tmp-world-backup-lifecycle-"));
+  try {
+    await writeWorld(root, "world", { "level.dat": "old-level", "marker.txt": "old" });
+    const current = instance(root, "fabric");
+    const backup = await createWorldBackup(current, "world", {
+      now: () => "2026-08-21T14:30:05",
+    });
+    await writeFile(join(root, "world", "level.dat"), "new-level");
+
+    const listed = await listWorldBackups(current, "world");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.fileName, backup.fileName);
+
+    await restoreWorldBackup(current, "world", backup.fileName);
+    assert.equal(await readFile(join(root, "world", "level.dat"), "utf8"), "old-level");
+    await deleteWorldBackup(current, "world", backup.fileName);
+    assert.deepEqual(await listWorldBackups(current, "world"), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("world restore rejects archive traversal paths", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".tmp-world-backup-traversal-"));
+  try {
+    await writeWorld(root, "world", { "level.dat": "original" });
+    const current = instance(root, "fabric");
+    const backup = await createWorldBackup(current, "world", {
+      now: () => "2026-08-21T14:30:05",
+    });
+    await writeFile(
+      join(root, `backups-${current.id}`, "world", backup.fileName),
+      zipSync({
+        "../outside.txt": new TextEncoder().encode("escape"),
+        "level.dat": new TextEncoder().encode("bad"),
+      }),
+    );
+    await assert.rejects(
+      () => restoreWorldBackup(current, "world", backup.fileName),
+      /路径不安全/u,
+    );
+    assert.equal(await readFile(join(root, "world", "level.dat"), "utf8"), "original");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

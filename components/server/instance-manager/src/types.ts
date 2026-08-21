@@ -5,30 +5,21 @@ import type {
   ServerInstanceContentCounts,
   ServerInstanceStartupSettings,
   ServerModLoader,
+  ServerWorldBackupSnapshot,
   ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
-
 export {
   serverInstanceManagerContract,
   type ServerInstanceSnapshot,
   type ServerInstanceSource,
   type ServerInstanceStorageMode,
+  type ServerWorldBackupSnapshot,
 } from "@seashard/contracts";
 
 /** Host 侧创建托管实例时补入设置组件保存的下载并发数。 */
 export interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {
   connections: number;
 }
-/** 一次世界备份的结果；只在 Host 实例管理组件内部传递，不暴露给 Renderer 合同。 */
-export interface ServerWorldBackupSnapshot {
-  readonly instanceId: string;
-  readonly worldId: string;
-  readonly worldDirectoryName: string;
-  readonly fileName: string;
-  readonly createdAt: string;
-  readonly sizeBytes: number;
-}
-
 /** 实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。 */
 export interface ServerInstanceManagerService {
   /** 下载服务端核心；校验成功后写入双 JSON，并在 SQLite 登记 seashard.json 路径。 */
@@ -44,12 +35,25 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerInstanceSnapshot>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
+  /** 切换 server.properties 中的 level-name，并返回最新存档投影。 */
+  switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   /** 列出实例下的原生世界、下载世界或分维度世界。 */
   listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  /** 列出指定世界已有的备份文件。 */
+  listWorldBackups(
+    instanceId: string,
+    worldId: string,
+  ): Promise<readonly ServerWorldBackupSnapshot[]>;
   /** 创建指定逻辑世界的 ZIP 备份；调用方负责保证服务端已停机。 */
   createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>;
-  /** 修改实例 server.properties 的 level-name；Desktop Shell 负责运行态停机门禁。 */
-  switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
+  /** 恢复指定备份；调用方负责保证服务端已停机。 */
+  restoreWorldBackup(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+  ): Promise<ServerWorldStorageSnapshot>;
+  /** 删除指定备份文件，不允许操作备份根目录之外的路径。 */
+  deleteWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<void>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */
   recordStartedAt(instanceId: string, startedAt: string): Promise<void>;
   /** 服务器进程退出后，将本次运行区间累加到实例总运行时长。 */

@@ -15,13 +15,14 @@ import {
   type ServerConfigurationDocument,
   type ServerConfigurationFile,
   type ServerCoreArtifact,
+  type ServerCoreType,
   type ServerCoreDownloadTaskSnapshot,
   type ServerCoreManagedDownloadResult,
   type ServerInstanceContentCounts,
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
+  type ServerWorldBackupSnapshot,
   type ServerWorldStorageSnapshot,
-  type ServerCoreType,
   type ServerRuntimeSnapshot,
   type ServerLaunchCommandPreview,
   type ServerSettingsSnapshot,
@@ -660,6 +661,8 @@ function expectServerWorldSave(value: unknown, index: number | string) {
     !save.name ||
     !["overworld", "nether", "end"].includes(String(save.dimension)) ||
     typeof save.current !== "boolean" ||
+    (save.createdAt !== undefined && !isIsoTimestamp(save.createdAt)) ||
+    (save.updatedAt !== undefined && !isIsoTimestamp(save.updatedAt)) ||
     (save.iconDataUrl !== undefined &&
       (typeof save.iconDataUrl !== "string" ||
         !save.iconDataUrl.startsWith("data:image/png;base64,")))
@@ -672,8 +675,53 @@ function expectServerWorldSave(value: unknown, index: number | string) {
     name: save.name,
     dimension: save.dimension as "overworld" | "nether" | "end",
     current: save.current,
+    ...(typeof save.createdAt === "string" ? { createdAt: save.createdAt } : {}),
+    ...(typeof save.updatedAt === "string" ? { updatedAt: save.updatedAt } : {}),
     ...(save.iconDataUrl ? { iconDataUrl: save.iconDataUrl } : {}),
   };
+}
+
+export function expectServerWorldBackup(value: unknown): ServerWorldBackupSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid world backup");
+  }
+  const backup = value as Record<string, unknown>;
+  if (
+    typeof backup.instanceId !== "string" ||
+    !backup.instanceId ||
+    !isSafeRelativeWorldId(backup.worldId) ||
+    typeof backup.worldDirectoryName !== "string" ||
+    !backup.worldDirectoryName ||
+    /[\\/]/u.test(backup.worldDirectoryName) ||
+    typeof backup.fileName !== "string" ||
+    !backup.fileName.toLowerCase().endsWith(".zip") ||
+    /[\\/]/u.test(backup.fileName) ||
+    typeof backup.createdAt !== "string" ||
+    !isIsoTimestamp(backup.createdAt) ||
+    !Number.isSafeInteger(backup.sizeBytes) ||
+    (backup.sizeBytes as number) < 0
+  ) {
+    throw new Error("server instance manager returned invalid world backup");
+  }
+  return {
+    instanceId: backup.instanceId,
+    worldId: backup.worldId,
+    worldDirectoryName: backup.worldDirectoryName,
+    fileName: backup.fileName,
+    createdAt: backup.createdAt,
+    sizeBytes: backup.sizeBytes as number,
+  };
+}
+
+export function expectServerWorldBackups(value: unknown): ServerWorldBackupSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid world backups");
+  }
+  return value.map(expectServerWorldBackup);
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
 function isSafeRelativeWorldId(value: unknown): value is string {

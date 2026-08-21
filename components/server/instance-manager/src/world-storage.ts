@@ -97,6 +97,7 @@ export interface WorldStorageDirectory {
   readonly id: string;
   readonly groupId: string;
   readonly absolutePath: string;
+  readonly storageRoot: string;
 }
 
 /** 按存档投影解析真实世界目录；split 模式会一次返回同一逻辑世界的全部维度。 */
@@ -111,12 +112,12 @@ export async function resolveWorldStorageDirectories(
   if (unified) {
     const world = worlds.find((candidate) => candidate.id === worldId);
     if (!world) throw new Error("目标存档不存在或不属于当前服务器实例。");
-    return [{ ...world, groupId: world.id }];
+    return [{ ...world, groupId: world.id, storageRoot: rootPath }];
   }
 
   const targets = worlds.filter((world) => splitWorldGroupId(world.id) === worldId);
   if (targets.length === 0) throw new Error("目标存档不存在或不属于当前服务器实例。");
-  return targets.map((world) => ({ ...world, groupId: worldId }));
+  return targets.map((world) => ({ ...world, groupId: worldId, storageRoot: rootPath }));
 }
 
 /** 只允许切换扫描结果中的目录，并通过 server.properties 的 level-name 完成切换。 */
@@ -204,12 +205,14 @@ async function createSave(
   dimension: ServerWorldDimension = "overworld",
 ): Promise<ServerWorldSave> {
   const metadata = await readWorldMetadata(world.absolutePath, basename(world.id));
+  const timestamps = await readWorldTimestamps(world.absolutePath);
   return {
     id: world.id,
     groupId,
     name: metadata.name,
     dimension,
     current,
+    ...timestamps,
     ...(metadata.iconDataUrl ? { iconDataUrl: metadata.iconDataUrl } : {}),
   };
 }
@@ -234,6 +237,20 @@ async function readWorldMetadata(worldPath: string, fallbackName: string): Promi
     // icon.png 是可选文件。
   }
   return { name };
+}
+
+async function readWorldTimestamps(
+  worldPath: string,
+): Promise<{ createdAt: string; updatedAt: string } | undefined> {
+  try {
+    const details = await stat(worldPath);
+    return {
+      createdAt: details.birthtime.toISOString(),
+      updatedAt: details.mtime.toISOString(),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function readLevelNameFromNbt(source: Uint8Array): string | undefined {

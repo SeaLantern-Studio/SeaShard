@@ -40,13 +40,15 @@ import {
   expectServerModFilters,
   expectServerModDownloadResult,
   expectServerInstanceContentCounts,
+  expectServerWorldBackups,
+  expectServerWorldBackup,
   expectServerWorldStorageSnapshot,
   expectServerModProjectDetails,
   expectServerModSearchResult,
   expectServerInstances,
-  expectServerLaunchCommandPreview,
   expectServerRuntimeSnapshot,
   expectServerSettingsSnapshot,
+  expectServerLaunchCommandPreview,
 } from "./contract-validation";
 
 const serverConsoleLineListeners = new Set<(line: ServerConsoleLine) => void>();
@@ -87,6 +89,19 @@ export async function registerDesktopShellBridge(
       throw new Error("download service returned an invalid cancellation result");
     }
     return cancelled;
+  };
+  /** 备份属于磁盘破坏性操作，桥接层统一复核服务端必须已停机。 */
+  const ensureServerStoppedForWorldMutation = async (instanceId: string): Promise<void> => {
+    const snapshot = expectServerRuntimeSnapshot(
+      await kernel.callService(serverRuntimeContract, "get", [instanceId]),
+    );
+    if (
+      snapshot.state === "starting" ||
+      snapshot.state === "running" ||
+      snapshot.state === "stopping"
+    ) {
+      throw new Error("需要关停服务器之后才能操作存档备份。");
+    }
   };
   // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
   await kernel.registerBuiltIn({
@@ -243,6 +258,43 @@ export async function registerDesktopShellBridge(
                   instanceId,
                 ]),
               ),
+            listServerWorldBackups: async (instanceId, worldId) =>
+              expectServerWorldBackups(
+                await kernel.callService(serverInstanceManagerContract, "listWorldBackups", [
+                  instanceId,
+                  worldId,
+                ]),
+              ),
+            createServerWorldBackup: async (instanceId, worldId) => {
+              await ensureServerStoppedForWorldMutation(instanceId);
+              return expectServerWorldBackup(
+                await kernel.callService(serverInstanceManagerContract, "createWorldBackup", [
+                  instanceId,
+                  worldId,
+                ]),
+              );
+            },
+            restoreServerWorldBackup: async (instanceId, worldId, fileName) => {
+              await ensureServerStoppedForWorldMutation(instanceId);
+              return expectServerWorldStorageSnapshot(
+                await kernel.callService(serverInstanceManagerContract, "restoreWorldBackup", [
+                  instanceId,
+                  worldId,
+                  fileName,
+                ]),
+              );
+            },
+            deleteServerWorldBackup: async (instanceId, worldId, fileName) => {
+              await ensureServerStoppedForWorldMutation(instanceId);
+              const result = await kernel.callService(
+                serverInstanceManagerContract,
+                "deleteWorldBackup",
+                [instanceId, worldId, fileName],
+              );
+              if (result !== null) {
+                throw new Error("server instance manager returned an invalid backup delete result");
+              }
+            },
             switchServerWorld: async (instanceId, worldId) =>
               expectServerWorldStorageSnapshot(
                 await kernel.callService(serverInstanceManagerContract, "switchWorld", [

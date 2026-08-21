@@ -315,6 +315,48 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           );
         });
         config.runtime.handle(
+          desktopChannels.serverInstancesWorldBackups,
+          (event, instanceId, worldId) => {
+            ownedWindow(event.sender.id);
+            return config.listServerWorldBackups(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesCreateWorldBackup,
+          (event, instanceId, worldId) => {
+            ownedWindow(event.sender.id);
+            return config.createServerWorldBackup(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesRestoreWorldBackup,
+          (event, instanceId, worldId, fileName) => {
+            ownedWindow(event.sender.id);
+            return config.restoreServerWorldBackup(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+              expectNonEmptyString(fileName, "server world backup file name"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesDeleteWorldBackup,
+          (event, instanceId, worldId, fileName) => {
+            ownedWindow(event.sender.id);
+            return config.deleteServerWorldBackup(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+              expectNonEmptyString(fileName, "server world backup file name"),
+            );
+          },
+        );
+        config.runtime.handle(
           desktopChannels.serverInstancesSwitchWorld,
           async (event, instanceId, worldId) => {
             ownedWindow(event.sender.id);
@@ -632,6 +674,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverInstancesSetStartupSettings);
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
+          config.runtime.removeHandler(desktopChannels.serverInstancesWorldBackups);
+          config.runtime.removeHandler(desktopChannels.serverInstancesCreateWorldBackup);
+          config.runtime.removeHandler(desktopChannels.serverInstancesRestoreWorldBackup);
+          config.runtime.removeHandler(desktopChannels.serverInstancesDeleteWorldBackup);
           config.runtime.removeHandler(desktopChannels.serverConfigurationList);
           config.runtime.removeHandler(desktopChannels.serverConfigurationRead);
           config.runtime.removeHandler(desktopChannels.serverConfigurationWrite);

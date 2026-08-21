@@ -325,6 +325,222 @@
   line-height: 1.55;
 }
 
+.world-save-heading-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.world-save-heading-main h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-search {
+  display: flex;
+  width: min(100%, 420px);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+  color: var(--sl-text-tertiary);
+}
+
+.world-save-search:focus-within {
+  border-color: color-mix(in srgb, var(--sl-primary) 55%, var(--sl-border-light));
+}
+
+.world-save-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+}
+
+.world-save-card {
+  align-items: stretch;
+  padding: 0;
+}
+
+.world-save-card-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 13px;
+  padding: 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-save-card-main:disabled {
+  cursor: wait;
+}
+
+.world-save-card-main:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sl-primary-bg) 30%, transparent);
+}
+
+.world-save-card > .world-save-current,
+.world-save-card > .world-save-info {
+  position: absolute;
+  z-index: 1;
+}
+
+.world-save-card > .world-save-current {
+  right: 42px;
+  bottom: 12px;
+}
+
+.world-save-info {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--sl-text-tertiary);
+  cursor: pointer;
+}
+
+.world-save-info:hover {
+  background: var(--sl-surface-secondary);
+  color: var(--sl-primary);
+}
+
+.world-save-card > .world-save-info {
+  top: 10px;
+  right: 10px;
+}
+
+.world-save-card-copy small {
+  overflow: hidden;
+  color: var(--sl-text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-dimension-row {
+  position: relative;
+  align-items: stretch;
+}
+
+.world-save-dimension-row .world-save-card-main {
+  padding: 6px 8px;
+}
+
+.world-save-dimension-row .world-save-info {
+  align-self: center;
+}
+
+.world-save-detail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sl-space-lg);
+}
+
+.world-save-detail-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+}
+
+.world-save-icon--large {
+  width: 68px;
+  height: 68px;
+  border-radius: var(--sl-radius-lg);
+}
+
+.world-save-backups {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sl-space-md);
+}
+
+.world-save-backup-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.world-save-backup-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+}
+
+.world-save-backup-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--sl-surface-secondary);
+  color: var(--sl-primary);
+}
+
+.world-save-backup-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.world-save-inline-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.world-save-inline-state--error {
+  color: var(--sl-error);
+}
+
+.world-save-empty--small {
+  min-height: 150px;
+}
+
+@media (max-width: 680px) {
+  .world-save-backup-row,
+  .world-save-detail-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .world-save-backup-actions {
+    width: 100%;
+    padding-left: 50px;
+  }
+}
+
 @media (max-width: 680px) {
   .world-save-heading {
     align-items: flex-start;

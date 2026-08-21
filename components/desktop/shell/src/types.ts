@@ -27,6 +27,7 @@ import type {
   ServerRuntimeClientService,
   ServerSettingsClientService,
   ServerStartupDefaultsUpdate,
+  ServerWorldBackupSnapshot,
   ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent } from "electron";
@@ -146,6 +147,24 @@ export interface DesktopShellConfig {
     instanceId: string,
   ): ReturnType<ServerInstanceClientService["contentCounts"]>;
   readServerWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  listServerWorldBackups(
+    instanceId: string,
+    worldId: string,
+  ): Promise<readonly ServerWorldBackupSnapshot[]>;
+  createServerWorldBackup(
+    instanceId: string,
+    worldId: string,
+  ): ReturnType<ServerInstanceClientService["createWorldBackup"]>;
+  restoreServerWorldBackup(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+  ): ReturnType<ServerInstanceClientService["restoreWorldBackup"]>;
+  deleteServerWorldBackup(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+  ): ReturnType<ServerInstanceClientService["deleteWorldBackup"]>;
   switchServerWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   writeServerInstanceStartupSettings(
     instanceId: string,

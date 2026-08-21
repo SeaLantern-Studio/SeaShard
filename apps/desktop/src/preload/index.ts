@@ -71,6 +71,24 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.serverInstancesContentCounts, instanceId),
     listWorldStorage: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesWorlds, instanceId),
+    listWorldBackups: (instanceId: string, worldId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesWorldBackups, instanceId, worldId),
+    createWorldBackup: (instanceId: string, worldId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesCreateWorldBackup, instanceId, worldId),
+    restoreWorldBackup: (instanceId: string, worldId: string, fileName: string) =>
+      ipcRenderer.invoke(
+        desktopChannels.serverInstancesRestoreWorldBackup,
+        instanceId,
+        worldId,
+        fileName,
+      ),
+    deleteWorldBackup: (instanceId: string, worldId: string, fileName: string) =>
+      ipcRenderer.invoke(
+        desktopChannels.serverInstancesDeleteWorldBackup,
+        instanceId,
+        worldId,
+        fileName,
+      ),
     switchWorld: (instanceId: string, worldId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesSwitchWorld, instanceId, worldId),
     setStartupSettings: (instanceId: string, settings: ServerInstanceStartupSettings) =>

@@ -18,7 +18,12 @@ import {
   writePortableInstanceManifests,
   writePortableSeaShardInstanceManifest,
 } from "./manifest";
-import { createWorldBackup } from "./world-backup";
+import {
+  createWorldBackup,
+  deleteWorldBackup,
+  listWorldBackups,
+  restoreWorldBackup,
+} from "./world-backup";
 import { listWorldStorage, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type { CreateManagedServerInstanceRequest, ServerWorldBackupSnapshot } from "./types";
@@ -260,6 +265,19 @@ export class ServerInstanceManager {
       if (this.worldSwitches.get(instanceId) === task) this.worldSwitches.delete(instanceId);
     }
   }
+  /** 串行访问同一实例的备份目录，避免读取、创建、恢复和删除互相竞态。 */
+  async listWorldBackups(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+  ): Promise<readonly ServerWorldBackupSnapshot[]> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return listWorldBackups(instance, worldIdValue);
+    });
+  }
+
   /** 串行创建同一实例的世界备份，避免与实例删除并发访问源目录。 */
   async createWorldBackup(
     instanceValue: unknown,
@@ -274,6 +292,35 @@ export class ServerInstanceManager {
         worldIdValue,
         this.options.now ? { now: this.options.now } : {},
       );
+    });
+  }
+
+  /** 恢复备份后重新扫描存档，返回替换后的最新投影。 */
+  async restoreWorldBackup(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+    fileNameValue: unknown,
+  ): Promise<ServerWorldStorageSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      await restoreWorldBackup(instance, worldIdValue, fileNameValue);
+      return listWorldStorage(instance);
+    });
+  }
+
+  /** 删除同一实例下指定世界的单个备份文件。 */
+  async deleteWorldBackup(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+    fileNameValue: unknown,
+  ): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    await this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      await deleteWorldBackup(instance, worldIdValue, fileNameValue);
     });
   }
 

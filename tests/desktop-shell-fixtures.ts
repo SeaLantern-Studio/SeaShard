@@ -672,6 +672,23 @@ export async function createDesktopShellHarness(
           saves: [],
           dimensions: [],
         }) satisfies ServerWorldStorageSnapshot,
+      listServerWorldBackups: async () => [],
+      createServerWorldBackup: async () => ({
+        instanceId: "instance-paper",
+        worldId: "world",
+        worldDirectoryName: "world",
+        fileName: "backup.zip",
+        createdAt: "2026-08-17T12:00:00.000Z",
+        sizeBytes: 0,
+      }),
+      restoreServerWorldBackup: async (instanceId) =>
+        ({
+          instanceId,
+          mode: "unified",
+          saves: [],
+          dimensions: [],
+        }) satisfies ServerWorldStorageSnapshot,
+      deleteServerWorldBackup: async () => {},
       switchServerWorld: async (instanceId) =>
         ({
           instanceId,
