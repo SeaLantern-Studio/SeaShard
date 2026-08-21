@@ -52,6 +52,7 @@ export function createServerInstanceManagerModule(
       });
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
+        list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listWorldStorage: async (instanceId) =>
           asJsonValue(await manager.listWorldStorage(instanceId)),
