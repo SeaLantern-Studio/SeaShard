@@ -201,7 +201,7 @@
 .world-save-group {
   overflow: hidden;
   border: 1px solid var(--sl-border-light);
-  border-radius: var(--sl-radius-lg);
+  border-radius: var(--sl-radius-sm);
   background: var(--sl-surface);
 }
 
