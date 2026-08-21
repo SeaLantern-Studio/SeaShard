@@ -402,28 +402,6 @@
   bottom: 12px;
 }
 
-.world-save-info {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--sl-text-tertiary);
-  cursor: pointer;
-}
-
-.world-save-info:hover {
-  background: var(--sl-surface-secondary);
-  color: var(--sl-primary);
-}
-
-.world-save-card > .world-save-info {
-  top: 10px;
-  right: 10px;
-}
-
 .world-save-card-copy small {
   overflow: hidden;
   color: var(--sl-text-tertiary);
@@ -682,12 +660,6 @@
   font-size: var(--sl-font-size-xs);
 }
 
-.world-save-info {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--sl-radius-md);
-}
-
 .world-save-card > .world-save-info {
   top: 50%;
   right: 14px;
@@ -696,23 +668,6 @@
 
 .world-save-dimension-row .world-save-card-main {
   padding: 5px 8px 5px 5px;
-}
-
-.world-save-dimension-row .world-save-info {
-  width: 36px;
-  height: 36px;
-}
-
-.world-save-info {
-  transition:
-    background-color var(--sl-transition-fast),
-    box-shadow var(--sl-transition-fast),
-    color var(--sl-transition-fast);
-}
-
-.world-save-info:hover {
-  background: var(--sl-surface);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--sl-text-primary) 16%, transparent);
 }
 
 .world-save-card > .world-save-current-label,

@@ -405,14 +405,16 @@ function errorMessage(cause: unknown): string {
               </span>
             </button>
             <span v-if="save.current" class="world-save-current-label">当前</span>
-            <button
-              type="button"
+            <Cmz_Button
+              variant="outline"
+              size="sm"
+              icon-only
               class="world-save-info"
               aria-label="查看存档详情"
               @click="openDetails(save.id, save.name)"
             >
               <Info :size="17" :stroke-width="1.8" />
-            </button>
+            </Cmz_Button>
           </article>
         </div>
       </div>
@@ -474,14 +476,16 @@ function errorMessage(cause: unknown): string {
                   </span>
                 </button>
                 <span v-if="group.current" class="world-save-current-label">当前</span>
-                <button
-                  type="button"
+                <Cmz_Button
+                  variant="outline"
+                  size="sm"
+                  icon-only
                   class="world-save-info"
                   aria-label="查看存档详情"
                   @click.stop="openDetails(group.id, group.name)"
                 >
                   <Info :size="17" :stroke-width="1.8" />
-                </button>
+                </Cmz_Button>
               </div>
             </div>
           </article>
