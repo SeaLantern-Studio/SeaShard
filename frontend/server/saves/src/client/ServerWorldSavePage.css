@@ -662,7 +662,7 @@
 }
 
 .world-save-card-main {
-  padding: 5px 14px;
+  padding: 5px 14px 5px 5px;
 }
 
 .world-save-card-copy {
@@ -695,10 +695,48 @@
 }
 
 .world-save-dimension-row .world-save-card-main {
-  padding: 5px 8px;
+  padding: 5px 8px 5px 5px;
 }
 
 .world-save-dimension-row .world-save-info {
   width: 36px;
   height: 36px;
+}
+
+.world-save-info {
+  transition:
+    background-color var(--sl-transition-fast),
+    box-shadow var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.world-save-info:hover {
+  background: var(--sl-surface);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--sl-text-primary) 16%, transparent);
+}
+
+.world-save-card > .world-save-current-label,
+.world-save-dimension-row > .world-save-current-label {
+  position: absolute;
+  top: 50%;
+  color: var(--sl-primary);
+  font-size: var(--sl-font-size-sm);
+  font-weight: 650;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.world-save-card > .world-save-current-label {
+  right: 58px;
+}
+
+.world-save-dimension-row > .world-save-current-label {
+  right: 52px;
+}
+
+.world-save-dimension-row > .world-save-info {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
 }
