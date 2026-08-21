@@ -9,7 +9,6 @@ import {
   type ServerModProjectDetails,
   type ServerModSearchIndex,
   type ServerModSearchResult,
-  type ServerModSource,
   type ServerModSourceClientService,
   type ServerModVersion,
 } from "@seashard/contracts";
@@ -39,12 +38,18 @@ import {
 } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  createServerModMixedSearchState,
   formatServerModDownloadCount,
   formatServerModRelativeTime,
   formatServerModVersionRange,
   groupServerModVersions,
+  mergeServerModFilters,
+  searchServerModMixedPage,
   serverModDisplayName,
   serverModDisplayTags,
+  serverModSourceFilterOptions,
+  type ServerModMixedSearchState,
+  type ServerModSearchSource,
 } from "./resource-presentation";
 const props = defineProps<{
   resources: ServerModSourceClientService;
@@ -53,10 +58,7 @@ const props = defineProps<{
 }>();
 
 const emptyFilters: ServerModFilters = {
-  sources: [
-    { id: "modrinth", label: "Modrinth" },
-    { id: "curseforge", label: "CurseForge" },
-  ],
+  sources: serverModSourceFilterOptions,
   tags: [],
   versions: [],
   loaders: [],
@@ -100,7 +102,7 @@ const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
 const filtersError = ref("");
 const query = ref("");
-const source = ref<ServerModSource>("modrinth");
+const source = ref<ServerModSearchSource>("modrinth");
 const tag = ref("");
 const sort = ref<ServerModSearchIndex>("downloads");
 const gameVersion = ref("");
@@ -116,6 +118,7 @@ const loadSentinel = ref<HTMLElement>();
 let observer: IntersectionObserver | undefined;
 let queryTimer: ReturnType<typeof setTimeout> | undefined;
 let searchGeneration = 0;
+let mixedSearchState: ServerModMixedSearchState = createServerModMixedSearchState();
 let filtersRequestId = 0;
 let relativeTimeTimer: ReturnType<typeof setInterval> | undefined;
 const relativeTimeNow = ref(Date.now());
@@ -235,15 +238,18 @@ async function loadFilters(): Promise<void> {
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    const next = await props.resources.getFilters(props.resourceType, requestedSource);
+    const next =
+      requestedSource === "all"
+        ? mergeServerModFilters(
+            await Promise.all(
+              (["modrinth", "curseforge"] as const).map((sourceId) =>
+                props.resources.getFilters(props.resourceType, sourceId),
+              ),
+            ),
+          )
+        : await props.resources.getFilters(props.resourceType, requestedSource);
     if (requestId !== filtersRequestId || requestedSource !== source.value) return;
-    filters.value = {
-      ...next,
-      sources: [
-        { id: "modrinth", label: "Modrinth" },
-        { id: "curseforge", label: "CurseForge" },
-      ],
-    };
+    filters.value = { ...next, sources: serverModSourceFilterOptions };
   } catch (error) {
     if (requestId === filtersRequestId && requestedSource === source.value) {
       filtersError.value = errorMessage(error);
@@ -264,12 +270,15 @@ function updateQuery(value: string | number): void {
     void resetSearch();
   }, 350);
 }
-
 function updateSource(value: string | number): void {
-  if ((value !== "modrinth" && value !== "curseforge") || source.value === value) {
+  if (
+    (value !== "all" && value !== "modrinth" && value !== "curseforge") ||
+    source.value === value
+  ) {
     return;
   }
   source.value = value;
+  mixedSearchState = createServerModMixedSearchState();
   tag.value = "";
   gameVersion.value = "";
   loader.value = "";
@@ -313,6 +322,7 @@ async function resetSearch(): Promise<void> {
     queryTimer = undefined;
   }
   const generation = ++searchGeneration;
+  mixedSearchState = createServerModMixedSearchState();
   projects.value = [];
   nextOffset.value = 0;
   total.value = 0;
@@ -342,10 +352,10 @@ async function loadNextPage(): Promise<void> {
   try {
     const result = await searchPage(nextOffset.value);
     if (generation !== searchGeneration) return;
-    const seen = new Set(projects.value.map((project) => project.id));
+    const seen = new Set(projects.value.map((project) => `${project.source}:${project.id}`));
     projects.value = [
       ...projects.value,
-      ...result.items.filter((project) => !seen.has(project.id)),
+      ...result.items.filter((project) => !seen.has(`${project.source}:${project.id}`)),
     ];
     total.value = result.total;
     nextOffset.value = result.offset + result.limit;
@@ -360,14 +370,25 @@ async function loadNextPage(): Promise<void> {
   }
 }
 function searchPage(offset: number): Promise<ServerModSearchResult> {
-  return props.resources.search({
+  const request = {
     resourceType: props.resourceType,
-    source: source.value,
     query: query.value,
     tag: tag.value,
     index: sort.value,
     gameVersion: gameVersion.value,
     loader: showLoaderFilter.value ? loader.value : "",
+  };
+  if (source.value === "all") {
+    return searchServerModMixedPage(
+      request,
+      mixedSearchState,
+      serverModSearchLimits.pageSize,
+      (searchRequest) => props.resources.search(searchRequest),
+    );
+  }
+  return props.resources.search({
+    ...request,
+    source: source.value,
     offset,
     limit: serverModSearchLimits.pageSize,
   });

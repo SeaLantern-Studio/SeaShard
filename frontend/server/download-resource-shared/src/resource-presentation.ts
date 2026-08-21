@@ -1,7 +1,11 @@
 import type {
   ServerInstanceSnapshot,
   ServerModFilterOption,
+  ServerModFilters,
   ServerModProject,
+  ServerModSearchRequest,
+  ServerModSearchResult,
+  ServerModSource,
   ServerModVersion,
 } from "@seashard/contracts";
 
@@ -274,4 +278,111 @@ function uniqueLabels(
     result.push(label);
   }
   return result;
+}
+
+export type ServerModSearchSource = ServerModSource | "all";
+
+export const serverModSourceFilterOptions: readonly ServerModFilterOption[] = [
+  { id: "all", label: "所有" },
+  { id: "modrinth", label: "Modrinth" },
+  { id: "curseforge", label: "CurseForge" },
+];
+
+/** 合并两个来源的筛选元数据；来源筛选本身始终保留“所有”。 */
+export function mergeServerModFilters(filters: readonly ServerModFilters[]): ServerModFilters {
+  return {
+    sources: serverModSourceFilterOptions,
+    tags: mergeFilterOptions(filters.map((item) => item.tags)),
+    versions: mergeFilterOptions(filters.map((item) => item.versions)),
+    loaders: mergeFilterOptions(filters.map((item) => item.loaders)),
+  };
+}
+
+function mergeFilterOptions(
+  optionGroups: readonly (readonly ServerModFilterOption[])[],
+): ServerModFilterOption[] {
+  const merged = new Map<string, ServerModFilterOption>();
+  for (const options of optionGroups) {
+    for (const option of options) {
+      if (!merged.has(option.id)) merged.set(option.id, option);
+    }
+  }
+  return [...merged.values()];
+}
+
+export interface ServerModMixedSearchState {
+  readonly offsets: Record<ServerModSource, number>;
+  readonly buffers: Record<ServerModSource, ServerModProject[]>;
+  readonly totals: Record<ServerModSource, number>;
+  readonly finished: Record<ServerModSource, boolean>;
+}
+
+export function createServerModMixedSearchState(): ServerModMixedSearchState {
+  return {
+    offsets: { modrinth: 0, curseforge: 0 },
+    buffers: { modrinth: [], curseforge: [] },
+    totals: { modrinth: 0, curseforge: 0 },
+    finished: { modrinth: false, curseforge: false },
+  };
+}
+
+/**
+ * 按来源轮流取数，保证“所有”筛选不会丢掉某一来源的分页结果。
+ * 每个来源独立维护游标和缓冲区，避免把两个来源的排序页简单拼接后丢失后半页。
+ */
+export async function searchServerModMixedPage(
+  request: Omit<ServerModSearchRequest, "source" | "offset" | "limit">,
+  state: ServerModMixedSearchState,
+  limit: number,
+  search: (request: ServerModSearchRequest) => Promise<ServerModSearchResult>,
+): Promise<ServerModSearchResult> {
+  const sources: readonly ServerModSource[] = ["modrinth", "curseforge"];
+  while (
+    sources.some((source) => !state.finished[source]) &&
+    sources.reduce((count, source) => count + state.buffers[source].length, 0) < limit
+  ) {
+    const results = await Promise.all(
+      sources
+        .filter((source) => !state.finished[source])
+        .map(async (source) => ({
+          source,
+          result: await search({
+            ...request,
+            source,
+            offset: state.offsets[source],
+            limit,
+          }),
+        })),
+    );
+    for (const { source, result } of results) {
+      state.buffers[source].push(...result.items);
+      state.offsets[source] += result.limit;
+      state.totals[source] = result.total;
+      state.finished[source] = result.items.length === 0 || state.offsets[source] >= result.total;
+    }
+  }
+
+  const items: ServerModProject[] = [];
+  const pageOffset =
+    state.offsets.modrinth +
+    state.offsets.curseforge -
+    state.buffers.modrinth.length -
+    state.buffers.curseforge.length;
+  while (items.length < limit) {
+    let consumed = false;
+    for (const source of sources) {
+      const item = state.buffers[source].shift();
+      if (!item) continue;
+      items.push(item);
+      consumed = true;
+      if (items.length >= limit) break;
+    }
+    if (!consumed) break;
+  }
+  return {
+    items,
+    offset: pageOffset,
+    limit: items.length,
+    total: state.totals.modrinth + state.totals.curseforge,
+  };
 }

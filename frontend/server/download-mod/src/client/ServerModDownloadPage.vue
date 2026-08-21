@@ -10,7 +10,6 @@ import {
   type ServerModSourceClientService,
   type ServerModSearchIndex,
   type ServerModSearchResult,
-  type ServerModSource,
   type ServerModVersion,
 } from "@seashard/contracts";
 import {
@@ -41,14 +40,22 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useToast } from "cmzya-modern-ui";
 import {
+  createServerModMixedSearchState,
+  mergeServerModFilters,
+  searchServerModMixedPage,
+  serverModSourceFilterOptions,
+  type ServerModMixedSearchState,
+  type ServerModSearchSource,
+} from "@seashard/server-download-resource-shared";
+import {
+  compatibleServerModInstances,
   formatServerModDownloadCount,
   formatServerModRelativeTime,
   formatServerModVersionRange,
   groupServerModVersions,
   serverModDisplayName,
-  serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
-  compatibleServerModInstances,
+  serverModMcEncyclopediaSearchUrl,
 } from "./mod-presentation";
 
 const props = defineProps<{
@@ -58,10 +65,7 @@ const props = defineProps<{
 const toast = useToast();
 
 const emptyFilters: ServerModFilters = {
-  sources: [
-    { id: "modrinth", label: "Modrinth" },
-    { id: "curseforge", label: "CurseForge" },
-  ],
+  sources: serverModSourceFilterOptions,
   tags: [],
   versions: [],
   loaders: [],
@@ -91,10 +95,10 @@ const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
 const filtersError = ref("");
 const query = ref("");
-const source = ref<ServerModSource>("modrinth");
+const source = ref<ServerModSearchSource>("modrinth");
+const gameVersion = ref("");
 const tag = ref("");
 const sort = ref<ServerModSearchIndex>("downloads");
-const gameVersion = ref("");
 const loader = ref("");
 const projects = ref<readonly ServerModProject[]>([]);
 const total = ref(0);
@@ -107,9 +111,11 @@ const loadSentinel = ref<HTMLElement>();
 let observer: IntersectionObserver | undefined;
 let queryTimer: ReturnType<typeof setTimeout> | undefined;
 let searchGeneration = 0;
+let filtersRequestId = 0;
 let relativeTimeTimer: ReturnType<typeof setInterval> | undefined;
 const relativeTimeNow = ref(Date.now());
 const selectedProject = ref<ServerModProject>();
+let mixedSearchState: ServerModMixedSearchState = createServerModMixedSearchState();
 const projectDetails = ref<ServerModProjectDetails>();
 const detailLoading = ref(false);
 const detailError = ref("");
@@ -211,6 +217,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  filtersRequestId += 1;
   searchGeneration += 1;
   if (queryTimer) clearTimeout(queryTimer);
   if (relativeTimeTimer) clearInterval(relativeTimeTimer);
@@ -219,23 +226,32 @@ onBeforeUnmount(() => {
   installInstancesRequestId += 1;
   observer?.disconnect();
 });
-
 async function loadFilters(): Promise<void> {
+  const requestId = ++filtersRequestId;
+  const requestedSource = source.value;
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    const next = await props.mods.getFilters("mod", source.value);
-    filters.value = {
-      ...next,
-      sources: [
-        { id: "modrinth", label: "Modrinth" },
-        { id: "curseforge", label: "CurseForge" },
-      ],
-    };
+    const next =
+      requestedSource === "all"
+        ? mergeServerModFilters(
+            await Promise.all(
+              (["modrinth", "curseforge"] as const).map((sourceId) =>
+                props.mods.getFilters("mod", sourceId),
+              ),
+            ),
+          )
+        : await props.mods.getFilters("mod", requestedSource);
+    if (requestId !== filtersRequestId || requestedSource !== source.value) return;
+    filters.value = { ...next, sources: serverModSourceFilterOptions };
   } catch (error) {
-    filtersError.value = errorMessage(error);
+    if (requestId === filtersRequestId && requestedSource === source.value) {
+      filtersError.value = errorMessage(error);
+    }
   } finally {
-    filtersLoading.value = false;
+    if (requestId === filtersRequestId && requestedSource === source.value) {
+      filtersLoading.value = false;
+    }
   }
 }
 
@@ -250,8 +266,14 @@ function updateQuery(value: string | number): void {
 }
 
 function updateSource(value: string | number): void {
-  if ((value !== "modrinth" && value !== "curseforge") || source.value === value) return;
+  if (
+    (value !== "all" && value !== "modrinth" && value !== "curseforge") ||
+    source.value === value
+  ) {
+    return;
+  }
   source.value = value;
+  mixedSearchState = createServerModMixedSearchState();
   void loadFilters();
   void resetSearch();
 }
@@ -292,6 +314,7 @@ async function resetSearch(): Promise<void> {
     queryTimer = undefined;
   }
   const generation = ++searchGeneration;
+  mixedSearchState = createServerModMixedSearchState();
   projects.value = [];
   nextOffset.value = 0;
   total.value = 0;
@@ -321,10 +344,10 @@ async function loadNextPage(): Promise<void> {
   try {
     const result = await searchPage(nextOffset.value);
     if (generation !== searchGeneration) return;
-    const seen = new Set(projects.value.map((project) => project.id));
+    const seen = new Set(projects.value.map((project) => `${project.source}:${project.id}`));
     projects.value = [
       ...projects.value,
-      ...result.items.filter((project) => !seen.has(project.id)),
+      ...result.items.filter((project) => !seen.has(`${project.source}:${project.id}`)),
     ];
     total.value = result.total;
     nextOffset.value = result.offset + result.limit;
@@ -340,14 +363,25 @@ async function loadNextPage(): Promise<void> {
 }
 
 function searchPage(offset: number): Promise<ServerModSearchResult> {
-  return props.mods.search({
-    resourceType: "mod",
-    source: source.value,
+  const request = {
+    resourceType: "mod" as const,
     query: query.value,
     tag: tag.value,
     index: sort.value,
     gameVersion: gameVersion.value,
     loader: loader.value,
+  };
+  if (source.value === "all") {
+    return searchServerModMixedPage(
+      request,
+      mixedSearchState,
+      serverModSearchLimits.pageSize,
+      (searchRequest) => props.mods.search(searchRequest),
+    );
+  }
+  return props.mods.search({
+    ...request,
+    source: source.value,
     offset,
     limit: serverModSearchLimits.pageSize,
   });

@@ -17,7 +17,11 @@ import {
   serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
 } from "../frontend/server/download-mod/src/client/mod-presentation.ts";
-import { groupServerModVersions as groupServerResourceVersions } from "../frontend/server/download-resource-shared/src/resource-presentation.ts";
+import {
+  createServerModMixedSearchState,
+  groupServerModVersions as groupServerResourceVersions,
+  searchServerModMixedPage,
+} from "../frontend/server/download-resource-shared/src/resource-presentation.ts";
 
 await test("mod display names append the stable English slug only for Chinese titles", () => {
   assert.deepEqual(serverModDisplayName({ title: "暮色森林", slug: "twilight-forest" }), {
@@ -188,6 +192,78 @@ await test("shared resource versions without loaders remain downloadable in a ge
     groups.map(({ id, loader, gameVersion }) => ({ id, loader, gameVersion })),
     [{ id: ":26.2", loader: "", gameVersion: "26.2" }],
   );
+});
+
+await test("mixed source search keeps both sources across pages", async () => {
+  const state = createServerModMixedSearchState();
+  const projects = {
+    modrinth: ["mr-1", "mr-2"],
+    curseforge: ["cf-1", "cf-2"],
+  } as const;
+  const requests: string[] = [];
+  const first = await searchServerModMixedPage(
+    {
+      resourceType: "mod",
+      query: "",
+      tag: "",
+      index: "downloads",
+      gameVersion: "",
+      loader: "",
+    },
+    state,
+    2,
+    async (request) => {
+      requests.push(`${request.source}:${request.offset}`);
+      const ids = projects[request.source];
+      const items = ids.slice(request.offset, request.offset + request.limit).map((id) => ({
+        resourceType: "mod" as const,
+        source: request.source,
+        id,
+        slug: id,
+        title: id,
+        description: "",
+        author: "",
+        downloads: 0,
+        follows: 0,
+        dateModified: "2026-08-18T12:00:00Z",
+        environment: ["server_only"] as const,
+        categories: [],
+        versions: ["1.21.1"],
+      }));
+      return {
+        items,
+        offset: request.offset,
+        limit: request.limit,
+        total: ids.length,
+      };
+    },
+  );
+  const second = await searchServerModMixedPage(
+    {
+      resourceType: "mod",
+      query: "",
+      tag: "",
+      index: "downloads",
+      gameVersion: "",
+      loader: "",
+    },
+    state,
+    2,
+    async () => {
+      throw new Error("second page should use buffered results");
+    },
+  );
+  assert.deepEqual(
+    first.items.map(({ id }) => id),
+    ["mr-1", "cf-1"],
+  );
+  assert.deepEqual(
+    second.items.map(({ id }) => id),
+    ["mr-2", "cf-2"],
+  );
+  assert.equal(first.total, 4);
+  assert.equal(second.offset, 2);
+  assert.deepEqual(requests, ["modrinth:0", "curseforge:0"]);
 });
 
 await test("server core types map to standard Mod loaders without treating plugin cores as Mod servers", () => {
