@@ -13,6 +13,7 @@ import { serverDownloadWorldUiManifest } from "@seashard/server-download-world-u
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverInstanceSettingsUiManifest } from "@seashard/server-instance-settings-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
+import { serverSavesUiManifest } from "@seashard/server-saves-ui";
 import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
 /** 注册只发布 Renderer Client Entry 的内置功能。 */
@@ -145,6 +146,21 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.server-overview.ui",
         entryId: "server-overview.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 存档页扫描并切换实例世界，只消费实例世界与运行态 Contract。
+  await kernel.registerBuiltIn({
+    manifest: serverSavesUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-saves.ui",
+        entryId: "server-saves.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,
