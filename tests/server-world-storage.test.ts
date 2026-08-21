@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -54,6 +54,8 @@ await test("world archive extraction rejects traversal entries before writing fi
 await test("world coordinator downloads and extracts without switching the active world", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-world-install-"));
   try {
+    await mkdir(join(root, "worlds"), { recursive: true });
+    await writeFile(join(root, "worlds", "keep.txt"), "other core data");
     const archive = zipSync({
       "Adventure/level.dat": new Uint8Array([7, 8, 9]),
       "Adventure/region/r.0.0.mca": new Uint8Array([10]),
@@ -120,7 +122,12 @@ await test("world coordinator downloads and extracts without switching the activ
         }) satisfies DownloadTaskSnapshot,
     } as unknown as DownloadService;
 
-    const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
+    const coordinator = new ServerModDownloadCoordinator(
+      catalog,
+      downloads,
+      instances,
+      () => "success",
+    );
     const result = await coordinator.installToInstance({
       source: "modrinth",
       resourceType: "world",
@@ -140,12 +147,8 @@ await test("world coordinator downloads and extracts without switching the activ
       ),
       false,
     );
-    const worldDirectories = await readdir(join(root, "worlds"));
-    assert.equal(worldDirectories.length, 1);
-    assert.deepEqual(
-      [...(await readFile(join(root, "worlds", worldDirectories[0]!, "level.dat")))],
-      [7, 8, 9],
-    );
+    assert.equal(await readFile(join(root, "worlds", "keep.txt"), "utf8"), "other core data");
+    assert.deepEqual([...(await readFile(join(root, "worlds-success", "level.dat")))], [7, 8, 9]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -154,7 +157,7 @@ await test("world coordinator downloads and extracts without switching the activ
 await test("world directory collision preserves the existing directory", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-world-collision-"));
   try {
-    const destination = join(root, "worlds", "world-collision");
+    const destination = join(root, "worlds-collision");
     await mkdir(destination, { recursive: true });
     await writeFile(join(destination, "keep.txt"), "existing");
     const archive = zipSync({ "Adventure/level.dat": new Uint8Array([1]) });

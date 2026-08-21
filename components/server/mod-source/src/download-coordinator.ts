@@ -10,7 +10,7 @@ import {
 } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rename, rm } from "node:fs/promises";
+import { mkdtemp, rename, rm } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
@@ -62,8 +62,7 @@ export class ServerModDownloadCoordinator {
     );
     return resultOf(artifact, task, "instance", instance.id);
   }
-
-  /** 下载并解压到实例托管的 worlds 目录，但不修改 server.properties 或当前世界。 */
+  /** 下载并解压到实例根目录下唯一的 worlds-UUID 目录，不修改当前世界。 */
   private async downloadWorldToInstance(
     artifact: ServerModArtifact,
     instance: ServerInstanceSnapshot,
@@ -71,13 +70,11 @@ export class ServerModDownloadCoordinator {
     if (!supportsUnifiedWorldStorage(instance.serverType)) {
       throw new Error("当前服务器核心不支持普通世界存档下载");
     }
-    const worldRoot = resolve(instance.rootPath, "worlds");
-    await mkdir(worldRoot, { recursive: true });
     const stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
     const archivePath = join(stagingRoot, "world.zip");
     const extractedRoot = join(stagingRoot, "extracted");
-    const worldId = `world-${this.worldIdFactory()}`;
-    const destinationRoot = resolve(worldRoot, worldId);
+    const worldId = `worlds-${this.worldIdFactory()}`;
+    const destinationRoot = resolve(instance.rootPath, worldId);
     let destinationCreated = false;
     try {
       const task = await this.startAndWait(artifact, stagingRoot, 8, instance.id, archivePath);
