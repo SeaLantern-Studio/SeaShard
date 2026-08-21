@@ -91,6 +91,7 @@ const gameVersion = ref("");
 const loader = ref("");
 const projects = ref<readonly ServerModProject[]>([]);
 const total = ref(0);
+const nextOffset = ref(0);
 const initialLoading = ref(true);
 const loadingMore = ref(false);
 const searchError = ref("");
@@ -128,7 +129,7 @@ const sourceOptions = computed(() => toSelectOptions(filters.value.sources));
 const tagOptions = computed(() => withAllOption("全部标签", filters.value.tags));
 const versionOptions = computed(() => withAllOption("全部版本", filters.value.versions));
 const loaderOptions = computed(() => withAllOption("全部加载器", filters.value.loaders));
-const hasMore = computed(() => projects.value.length < total.value);
+const hasMore = computed(() => nextOffset.value < total.value);
 const resultSummary = computed(() => {
   if (initialLoading.value) return "正在搜索服务端 Mod";
   if (searchError.value) return "搜索失败";
@@ -277,6 +278,7 @@ async function resetSearch(): Promise<void> {
   }
   const generation = ++searchGeneration;
   projects.value = [];
+  nextOffset.value = 0;
   total.value = 0;
   failedIconIds.value = new Set();
   searchError.value = "";
@@ -302,7 +304,7 @@ async function loadNextPage(): Promise<void> {
   const generation = searchGeneration;
   loadingMore.value = true;
   try {
-    const result = await searchPage(projects.value.length);
+    const result = await searchPage(nextOffset.value);
     if (generation !== searchGeneration) return;
     const seen = new Set(projects.value.map((project) => project.id));
     projects.value = [
@@ -310,6 +312,7 @@ async function loadNextPage(): Promise<void> {
       ...result.items.filter((project) => !seen.has(project.id)),
     ];
     total.value = result.total;
+    nextOffset.value = result.offset + result.limit;
   } catch (error) {
     if (generation === searchGeneration) searchError.value = errorMessage(error);
   } finally {
@@ -338,6 +341,7 @@ function searchPage(offset: number): Promise<ServerModSearchResult> {
 function applyFirstPage(result: ServerModSearchResult): void {
   projects.value = result.items;
   total.value = result.total;
+  nextOffset.value = result.offset + result.limit;
 }
 
 /** 首屏不足一页高时继续补一页；每次完成后才判断，始终保持单个在途请求。 */

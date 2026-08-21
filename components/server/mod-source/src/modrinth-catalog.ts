@@ -180,7 +180,7 @@ export class ModrinthServerModCatalog {
     url.searchParams.set("offset", String(request.offset));
     url.searchParams.set("limit", String(request.limit));
 
-    return parseSearchResult(await this.fetchJson(url), request.resourceType);
+    return parseSearchResult(await this.fetchJson(url), request.resourceType, request.offset);
   }
 
   async getProjectDetails(
@@ -384,21 +384,32 @@ function parseLoaders(
     return left.label.localeCompare(right.label, "en");
   });
 }
-
 function parseSearchResult(
   value: unknown,
   resourceType: ServerModrinthResourceType,
+  expectedOffset: number,
 ): ServerModSearchResult {
   const record = expectRecord(value, "Modrinth search result");
   const hits = expectArray(record.hits, "Modrinth search hits");
   const offset = expectNonNegativeInteger(record.offset, "Modrinth result offset");
   const limit = expectNonNegativeInteger(record.limit, "Modrinth result limit");
   const total = expectNonNegativeInteger(record.total_hits, "Modrinth result total");
-  if (limit > serverModSearchLimits.maximumPageSize || hits.length > limit) {
+  if (offset !== expectedOffset) {
+    throw new Error(`Modrinth search returned offset ${offset}, expected ${expectedOffset}`);
+  }
+  if (limit < 1 || limit > serverModSearchLimits.maximumPageSize || hits.length > limit) {
     throw new Error("Modrinth search returned an oversized page");
   }
+  const items = hits.flatMap((project, index) => {
+    try {
+      return [parseProject(project, index, resourceType)];
+    } catch {
+      // 上游单条项目数据偶尔不完整；跳过坏条目，不能让整页结果失效。
+      return [];
+    }
+  });
   return {
-    items: hits.map((project, index) => parseProject(project, index, resourceType)),
+    items,
     offset,
     limit,
     total,

@@ -24,3 +24,6 @@ release/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local advisor configuration
+WATCHDOG.yml

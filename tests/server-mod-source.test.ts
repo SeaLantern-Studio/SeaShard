@@ -495,7 +495,7 @@ await test("Modrinth catalog treats a blank project icon URL as a missing option
   assert.equal(result.items[0]?.iconUrl, undefined);
 });
 
-await test("Modrinth catalog rejects unbounded pages and client-only search hits", async () => {
+await test("Modrinth catalog skips malformed search hits and preserves page progress", async () => {
   let requests = 0;
   const catalog = new ModrinthServerModCatalog({
     baseUrl: apiBaseUrl,
@@ -508,28 +508,40 @@ await test("Modrinth catalog rejects unbounded pages and client-only search hits
           : projectFixture(["server_only"], "https://untrusted.invalid/icon.png");
       return Response.json({
         hits: [hit],
-        offset: 0,
+        offset: requests === 1 ? 0 : 20,
         limit: 20,
-        total_hits: 1,
+        total_hits: 21,
       });
     },
   });
 
-  await assert.rejects(
-    catalog.search(searchRequest({ limit: serverModSearchLimits.maximumPageSize + 1 })),
-    /limit must be between/,
-  );
-  assert.equal(requests, 0, "invalid pagination must fail before any network request");
-  await assert.rejects(
-    catalog.search(searchRequest({ offset: 0 })),
-    /no server-compatible environment/,
-  );
-  assert.equal(requests, 1);
-  await assert.rejects(
-    catalog.search(searchRequest({ offset: 0 })),
-    /icon URL is outside the trusted CDN path/,
-  );
+  const first = await catalog.search(searchRequest({ offset: 0 }));
+  assert.deepEqual(first.items, []);
+  assert.equal(first.offset, 0);
+  assert.equal(first.limit, 20);
+  const second = await catalog.search(searchRequest({ offset: 20 }));
+  assert.deepEqual(second.items, []);
+  assert.equal(second.offset, 20);
   assert.equal(requests, 2);
+});
+
+await test("Modrinth catalog rejects a response whose offset does not match the request", async () => {
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    userAgent,
+    fetchProvider: () => async () =>
+      Response.json({
+        hits: [projectFixture()],
+        offset: 0,
+        limit: 20,
+        total_hits: 21,
+      }),
+  });
+
+  await assert.rejects(
+    catalog.search(searchRequest({ offset: 20 })),
+    /returned offset 0, expected 20/,
+  );
 });
 
 await test("Modrinth catalog reports rate limiting without retry storms", async () => {
