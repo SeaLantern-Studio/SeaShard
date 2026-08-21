@@ -22,6 +22,7 @@ import {
   Server,
   Trash2,
 } from "lucide-vue-next";
+import minecraftDefaultServerIcon from "./assets/minecraft-default-server-icon.png";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
@@ -390,7 +391,7 @@ function errorMessage(cause: unknown): string {
             >
               <span class="world-save-icon">
                 <img v-if="save.iconDataUrl" :src="save.iconDataUrl" alt="" draggable="false" />
-                <Archive v-else :size="28" :stroke-width="1.5" />
+                <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
               </span>
               <span class="world-save-card-copy">
                 <strong>{{ save.name }}</strong>
@@ -403,6 +404,7 @@ function errorMessage(cause: unknown): string {
                 </span>
               </span>
             </button>
+            <span v-if="save.current" class="world-save-current-label">当前</span>
             <button
               type="button"
               class="world-save-info"
@@ -458,7 +460,7 @@ function errorMessage(cause: unknown): string {
                 >
                   <span class="world-save-icon world-save-icon--small">
                     <img v-if="save.iconDataUrl" :src="save.iconDataUrl" alt="" draggable="false" />
-                    <Archive v-else :size="21" :stroke-width="1.5" />
+                    <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
                   </span>
                   <span class="world-save-card-copy">
                     <strong>{{ dimensionLabel(save.dimension) }}</strong>
@@ -471,6 +473,7 @@ function errorMessage(cause: unknown): string {
                     </span>
                   </span>
                 </button>
+                <span v-if="group.current" class="world-save-current-label">当前</span>
                 <button
                   type="button"
                   class="world-save-info"
@@ -495,7 +498,7 @@ function errorMessage(cause: unknown): string {
             alt=""
             draggable="false"
           />
-          <Archive v-else :size="30" :stroke-width="1.5" />
+          <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
         </span>
         <div class="world-save-card-copy">
           <strong>{{ detailWorldName }}</strong>
