@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   serverModSearchLimits,
+  supportsUnifiedWorldStorage,
   type ServerInstanceClientService,
   type ServerInstanceSnapshot,
   type ServerModFilterOption,
@@ -11,6 +12,7 @@ import {
   type ServerModSearchResult,
   type ServerModSourceClientService,
   type ServerModVersion,
+  type ServerRuntimeClientService,
 } from "@seashard/contracts";
 import {
   Cmz_Button,
@@ -55,8 +57,10 @@ import {
 const props = defineProps<{
   resources: ServerModSourceClientService;
   instances?: ServerInstanceClientService;
+  runtime?: ServerRuntimeClientService;
   resourceType: "modpack" | "datapack" | "world";
 }>();
+const showLoaderFilter = computed(() => props.resourceType === "modpack");
 
 const emptyFilters: ServerModFilters = {
   sources: serverModSourceFilterOptions,
@@ -82,8 +86,11 @@ const resourcePathSegment = computed(() => {
 const resourceIcon = computed(() =>
   props.resourceType === "modpack" ? Package : props.resourceType === "world" ? Box : Archive,
 );
-const showLoaderFilter = computed(() => props.resourceType === "modpack");
-const canInstallToInstance = computed(() => props.resourceType === "datapack" && !!props.instances);
+const canInstallToInstance = computed(
+  () =>
+    (props.resourceType === "datapack" && !!props.instances) ||
+    (props.resourceType === "world" && !!props.instances && !!props.runtime),
+);
 const downloadEnabled = computed(() => true);
 const favoriteStorageKey = computed(() => `seashard.server-${props.resourceType}.favorites`);
 const detailVersionCollator = new Intl.Collator("en", {
@@ -518,7 +525,21 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
   try {
     const instances = await props.instances.list();
     if (requestId !== installInstancesRequestId) return;
-    compatibleInstances.value = compatibleServerResourceInstances(version, instances);
+    const candidates = compatibleServerResourceInstances(version, instances);
+    if (props.resourceType !== "world" || !props.runtime) {
+      compatibleInstances.value = candidates;
+    } else {
+      const runtime = props.runtime;
+      const states = await Promise.all(
+        candidates.map(async (instance) => ({
+          instance,
+          state: await runtime.get(instance.id),
+        })),
+      );
+      compatibleInstances.value = states
+        .filter(({ state }) => state.state === "stopped")
+        .map(({ instance }) => instance);
+    }
   } catch (error) {
     if (requestId === installInstancesRequestId) {
       installInstancesError.value = errorMessage(error);
@@ -552,7 +573,7 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
   try {
     await props.resources.installToInstance({
       source: project.source,
-      resourceType: "datapack",
+      resourceType: props.resourceType === "world" ? "world" : "datapack",
       projectId: project.id,
       versionId: version.id,
       instanceId: instance.id,
@@ -725,14 +746,15 @@ function formatRelativeTime(value: string): string {
   return formatServerModRelativeTime(value, relativeTimeNow.value);
 }
 
-/** 数据包只要求 Minecraft 版本精确匹配，不限制服务器核心或 Mod 加载器。 */
+/** 数据包只要求版本匹配；世界还要求核心采用单目录多维度布局。 */
 function compatibleServerResourceInstances(
   version: ServerModVersion,
   instances: readonly ServerInstanceSnapshot[],
 ): ServerInstanceSnapshot[] {
-  return instances.filter(
-    (instance) => !!instance.gameVersion && version.gameVersions.includes(instance.gameVersion),
-  );
+  return instances.filter((instance) => {
+    if (!instance.gameVersion || !version.gameVersions.includes(instance.gameVersion)) return false;
+    return props.resourceType !== "world" || supportsUnifiedWorldStorage(instance.serverType);
+  });
 }
 
 /** Markdown 链接只通过 Electron 的新窗口拦截器交给系统浏览器，避免替换当前 Renderer。 */

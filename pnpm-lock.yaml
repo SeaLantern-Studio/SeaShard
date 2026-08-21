@@ -313,6 +313,9 @@ importers:
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../instance-manager
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
 
   components/server/runtime:
     dependencies:

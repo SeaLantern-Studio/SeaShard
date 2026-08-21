@@ -1,17 +1,22 @@
-import { isAbsolute, resolve } from "node:path";
 import {
   serverDownloadConnectionLimits,
+  supportsUnifiedWorldStorage,
+  type ServerConfigurationService,
   type ServerInstanceSnapshot,
   type ServerModDownloadResult,
   type ServerModDownloadableResourceType,
   type ServerModInstallRequest,
   type ServerModLoader,
   type ServerModSaveAsRequest,
+  type ServerRuntimeService,
 } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, rename, rm } from "node:fs/promises";
+import { join, resolve, isAbsolute } from "node:path";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
-
+import { extractWorldArchive, setServerLevelName } from "./world-storage";
 interface InstallRequest extends ServerModInstallRequest {
   readonly connections: number;
 }
@@ -30,19 +35,23 @@ export class ServerModDownloadCoordinator {
     private readonly catalog: ServerModCatalog,
     private readonly downloads: DownloadService,
     private readonly instances: ServerInstanceManagerService,
+    private readonly runtime?: ServerRuntimeService,
+    private readonly configuration?: ServerConfigurationService,
   ) {}
 
   async installToInstance(value: unknown): Promise<ServerModDownloadResult> {
     const request = parseInstallRequest(value);
     const instance = (await this.instances.list()).find(({ id }) => id === request.instanceId);
     if (!instance) throw new Error(`找不到服务器实例：${request.instanceId}`);
-
     const artifact = await this.catalog.resolveVersionArtifact(
       request.resourceType,
       request.source,
       request.projectId,
       request.versionId,
     );
+    if (request.resourceType === "world") {
+      return this.installWorldToInstance(artifact, instance);
+    }
     assertCompatibleInstance(artifact, instance);
     const destinationDirectory =
       artifact.resourceType === "datapack"
@@ -55,6 +64,54 @@ export class ServerModDownloadCoordinator {
       instance.id,
     );
     return resultOf(artifact, task, "instance", instance.id);
+  }
+
+  /** 下载、校验并安装单目录多维度世界，同时更新实例的 level-name。 */
+  private async installWorldToInstance(
+    artifact: ServerModArtifact,
+    instance: ServerInstanceSnapshot,
+  ): Promise<ServerModDownloadResult> {
+    if (!supportsUnifiedWorldStorage(instance.serverType)) {
+      throw new Error("当前服务器核心不支持普通世界存档下载");
+    }
+    if (!this.runtime || !this.configuration) {
+      throw new Error("世界下载所需的服务器运行与配置服务不可用");
+    }
+    const runtime = await this.runtime.get(instance.id);
+    if (runtime.state !== "stopped") {
+      throw new Error("请先停止服务器，再下载并切换世界");
+    }
+    const configuration = await this.configuration.list(instance.id);
+    const serverFile = configuration.serverFiles.find(({ path }) => path === "server.properties");
+    if (!serverFile) throw new Error("服务器缺少 server.properties");
+    const document = await this.configuration.read(instance.id, serverFile.path);
+    const worldRoot = resolve(configuration.configurationRootPath, "worlds");
+    await mkdir(worldRoot, { recursive: true });
+    const stagingRoot = await mkdtemp(
+      resolve(configuration.configurationRootPath, ".seashard-world-"),
+    );
+    const archivePath = join(stagingRoot, "world.zip");
+    const extractedRoot = join(stagingRoot, "extracted");
+    const worldId = `world-${randomUUID()}`;
+    const destinationRoot = resolve(worldRoot, worldId);
+    try {
+      const task = await this.startAndWait(artifact, stagingRoot, 8, instance.id, archivePath);
+      await extractWorldArchive(archivePath, extractedRoot);
+      await rename(extractedRoot, destinationRoot);
+      const relativeWorldPath = `worlds/${worldId}`;
+      await this.configuration.write({
+        instanceId: instance.id,
+        path: document.path,
+        content: setServerLevelName(document.content, relativeWorldPath),
+        expectedRevision: document.revision,
+      });
+      return resultOf(artifact, task, "instance", instance.id);
+    } catch (error) {
+      await rm(destinationRoot, { recursive: true, force: true });
+      throw error;
+    } finally {
+      await rm(stagingRoot, { recursive: true, force: true });
+    }
   }
 
   async saveToDirectory(value: unknown): Promise<ServerModDownloadResult> {
@@ -78,6 +135,7 @@ export class ServerModDownloadCoordinator {
     destinationDirectory: string,
     connections: number,
     instanceId?: string,
+    destinationPath?: string,
   ): Promise<DownloadTaskSnapshot> {
     const urls = [artifact.url, artifact.fallbackUrl].filter((url): url is string => Boolean(url));
     let lastError: unknown;
@@ -89,6 +147,7 @@ export class ServerModDownloadCoordinator {
           destinationDirectory,
           connections,
           instanceId,
+          destinationPath,
         );
       } catch (error) {
         lastError = error;
@@ -103,10 +162,11 @@ export class ServerModDownloadCoordinator {
     destinationDirectory: string,
     connections: number,
     instanceId?: string,
+    destinationPath?: string,
   ): Promise<DownloadTaskSnapshot> {
     const task = await this.downloads.start({
       url,
-      destinationPath: resolve(destinationDirectory, artifact.fileName),
+      destinationPath: destinationPath ?? resolve(destinationDirectory, artifact.fileName),
       expectedBytes: artifact.size,
       ...(artifact.sha1 ? { sha1: artifact.sha1 } : {}),
       ...(artifact.sha512 ? { sha512: artifact.sha512 } : {}),
@@ -155,7 +215,9 @@ function parseInstallRequest(value: unknown): InstallRequest {
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     instanceId: expectIdentity(record.instanceId, "instance ID", 128),
-    connections: expectConnections(record.connections),
+    connections: expectConnections(
+      record.connections ?? serverDownloadConnectionLimits.defaultValue,
+    ),
   };
 }
 
@@ -182,9 +244,9 @@ function expectSource(value: unknown): "modrinth" | "curseforge" {
   return value;
 }
 
-function expectInstallableResourceType(value: unknown): "mod" | "datapack" {
-  if (value !== "mod" && value !== "datapack") {
-    throw new TypeError("server resource type must be mod or datapack");
+function expectInstallableResourceType(value: unknown): "mod" | "datapack" | "world" {
+  if (value !== "mod" && value !== "datapack" && value !== "world") {
+    throw new TypeError("server resource type must be mod, datapack, or world");
   }
   return value;
 }

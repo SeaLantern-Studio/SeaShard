@@ -5,6 +5,7 @@ import { createSSRApp, h } from "vue";
 import { renderToString } from "vue/server-renderer";
 import {
   serverModLoaderForCoreType,
+  supportsUnifiedWorldStorage,
   type ServerInstanceSnapshot,
 } from "../packages/contracts/src/index.ts";
 import {
@@ -281,6 +282,14 @@ await test("server core types map to standard Mod loaders without treating plugi
   assert.equal(serverModLoaderForCoreType("quilt"), "quilt");
   assert.equal(serverModLoaderForCoreType("paper"), null);
   assert.equal(serverModLoaderForCoreType("vanilla"), null);
+});
+await test("world downloads allow unified Java saves and reject plugin or proxy cores", () => {
+  assert.equal(supportsUnifiedWorldStorage("vanilla"), true);
+  assert.equal(supportsUnifiedWorldStorage("fabric"), true);
+  assert.equal(supportsUnifiedWorldStorage("forge"), true);
+  assert.equal(supportsUnifiedWorldStorage("paper"), false);
+  assert.equal(supportsUnifiedWorldStorage("spigot"), false);
+  assert.equal(supportsUnifiedWorldStorage("velocity"), false);
 });
 
 await test("compatible Mod targets require both the exact loader and Minecraft version", () => {

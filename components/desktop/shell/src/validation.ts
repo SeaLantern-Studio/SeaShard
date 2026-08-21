@@ -211,10 +211,10 @@ function expectDownloadableServerModResourceType(
   return expectServerModResourceType(value);
 }
 
-function expectInstallableServerModResourceType(value: unknown): "mod" | "datapack" {
+function expectInstallableServerModResourceType(value: unknown): "mod" | "datapack" | "world" {
   const resourceType = expectServerModResourceType(value);
-  if (resourceType !== "mod" && resourceType !== "datapack") {
-    throw new TypeError("server resource install type must be mod or datapack");
+  if (resourceType !== "mod" && resourceType !== "datapack" && resourceType !== "world") {
+    throw new TypeError("server resource install type must be mod, datapack, or world");
   }
   return resourceType;
 }

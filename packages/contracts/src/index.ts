@@ -314,7 +314,7 @@ export interface ServerModProjectDetails {
 /** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
 export interface ServerModInstallRequest {
   source: ServerModSource;
-  resourceType: "mod" | "datapack";
+  resourceType: "mod" | "datapack" | "world";
   projectId: string;
   versionId: string;
   instanceId: string;
@@ -517,6 +517,19 @@ export const serverRuntimeSupportedTypes = [
   "youer",
 ] as const;
 export type ServerRuntimeSupportedType = (typeof serverRuntimeSupportedTypes)[number];
+/** 只有采用 Vanilla 单目录多维度布局的 Java 核心才支持普通世界存档直装。 */
+const unifiedWorldServerTypes = new Set([
+  "vanilla",
+  "vanilla-snapshot",
+  "forge",
+  "fabric",
+  "quilt",
+  "neoforge",
+]);
+
+export function supportsUnifiedWorldStorage(value: unknown): boolean {
+  return typeof value === "string" && unifiedWorldServerTypes.has(value);
+}
 
 /** Renderer 与 Host 共享同一支持列表，避免页面和进程管理器各维护一份条件链。 */
 export function isServerRuntimeSupportedType(value: unknown): value is ServerRuntimeSupportedType {

@@ -993,7 +993,7 @@ await test("Datapacks install into any exact-version instance and non-installabl
       instanceId: "paper-instance",
       connections: 8,
     }),
-    /server resource type must be mod or datapack/u,
+    /server resource type must be mod, datapack, or world/u,
   );
   assert.equal(
     requests,

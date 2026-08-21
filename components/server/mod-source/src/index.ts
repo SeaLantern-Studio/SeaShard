@@ -1,12 +1,15 @@
 import {
+  serverConfigurationContract,
   serverInstanceManagerContract,
   serverModSourceContract,
+  serverRuntimeContract,
   type ServerModSearchRequest,
   type ServerModSource,
   type ServerModrinthResourceType,
 } from "@seashard/contracts";
 import { downloadContract, type DownloadService } from "@seashard/download";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import type { ServerConfigurationService, ServerRuntimeService } from "@seashard/contracts";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import {
   CurseForgeServerModCatalog,
@@ -31,7 +34,12 @@ export const serverModSourceManifest: PluginManifest = {
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
-      permissions: [downloadContract, serverInstanceManagerContract],
+      permissions: [
+        downloadContract,
+        serverInstanceManagerContract,
+        serverRuntimeContract,
+        serverConfigurationContract,
+      ],
     },
   ],
   compatibility: {
@@ -42,7 +50,12 @@ export const serverModSourceManifest: PluginManifest = {
 /** 创建独立多来源资源目录能力；网络响应在 Host 内校验后才投影给 Client。 */
 export function createServerModSourceModule(options: ServerModSourceModuleOptions): PluginModule {
   return {
-    inject: [downloadContract, serverInstanceManagerContract],
+    inject: [
+      downloadContract,
+      serverInstanceManagerContract,
+      serverRuntimeContract,
+      serverConfigurationContract,
+    ],
     provides: [serverModSourceContract],
     apply(ctx) {
       const modrinth = new ModrinthServerModCatalog(options);
@@ -54,7 +67,15 @@ export function createServerModSourceModule(options: ServerModSourceModuleOption
       const catalog = new ServerModSourceCatalog(modrinth, curseForge);
       const downloads = ctx.service<DownloadService>(downloadContract);
       const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
-      const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
+      const runtime = ctx.service<ServerRuntimeService>(serverRuntimeContract);
+      const configuration = ctx.service<ServerConfigurationService>(serverConfigurationContract);
+      const coordinator = new ServerModDownloadCoordinator(
+        catalog,
+        downloads,
+        instances,
+        runtime,
+        configuration,
+      );
       ctx.provide(serverModSourceContract, {
         getFilters: async (resourceType, source) =>
           asJsonValue(
@@ -94,4 +115,5 @@ export * from "./catalog-types";
 export * from "./curseforge-catalog";
 export * from "./source-catalog";
 export * from "./download-coordinator";
+export * from "./world-storage";
 export * from "./types";
