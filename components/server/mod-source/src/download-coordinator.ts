@@ -70,16 +70,29 @@ export class ServerModDownloadCoordinator {
     if (!supportsUnifiedWorldStorage(instance.serverType)) {
       throw new Error("当前服务器核心不支持普通世界存档下载");
     }
-    const outerWorldId = `worlds-${this.worldIdFactory()}`;
-    const innerWorldId = `worlds-${this.worldIdFactory()}`;
-    const containerRoot = resolve(instance.rootPath, outerWorldId);
-    const destinationRoot = resolve(containerRoot, innerWorldId);
+    const maximumContainerAttempts = 8;
+    let containerRoot: string | undefined;
+    let destinationRoot: string | undefined;
     let containerCreated = false;
     let destinationCreated = false;
     let stagingRoot: string | undefined;
     try {
-      await mkdir(containerRoot);
-      containerCreated = true;
+      for (let attempt = 0; attempt < maximumContainerAttempts; attempt += 1) {
+        const candidate = resolve(instance.rootPath, `worlds-${this.worldIdFactory()}`);
+        try {
+          await mkdir(candidate);
+          containerRoot = candidate;
+          containerCreated = true;
+          break;
+        } catch (error) {
+          if (!isAlreadyExistsError(error)) throw error;
+        }
+      }
+      if (!containerRoot) {
+        throw new Error("世界存档目录生成冲突次数过多");
+      }
+      const innerWorldId = `worlds-${this.worldIdFactory()}`;
+      destinationRoot = resolve(containerRoot, innerWorldId);
       stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
       const archivePath = join(stagingRoot, "world.zip");
       const extractedRoot = join(stagingRoot, "extracted");
@@ -89,10 +102,10 @@ export class ServerModDownloadCoordinator {
       destinationCreated = true;
       return resultOf(artifact, task, "instance", instance.id);
     } catch (error) {
-      if (destinationCreated) {
+      if (destinationCreated && destinationRoot) {
         await rm(destinationRoot, { recursive: true, force: true });
       }
-      if (containerCreated) {
+      if (containerCreated && containerRoot) {
         await rm(containerRoot, { recursive: true, force: true });
       }
       throw error;
@@ -285,6 +298,14 @@ function formatLoader(loader: ServerModLoader): string {
   return `${loader.charAt(0).toUpperCase()}${loader.slice(1)}`;
 }
 
+function isAlreadyExistsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "EEXIST"
+  );
+}
 function resultOf(
   artifact: ServerModArtifact,
   task: DownloadTaskSnapshot,

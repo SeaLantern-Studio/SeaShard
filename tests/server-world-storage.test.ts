@@ -154,7 +154,7 @@ await test("world coordinator downloads and extracts without switching the activ
   }
 });
 
-await test("world directory collision preserves the existing directory", async () => {
+await test("world outer directory collision retries with a new UUID", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-world-collision-"));
   try {
     const destination = join(root, "worlds-collision");
@@ -216,23 +216,32 @@ await test("world directory collision preserves the existing directory", async (
           finishedAt: "2026-08-20T00:00:01.000Z",
         }) satisfies DownloadTaskSnapshot,
     } as unknown as DownloadService;
+    const worldIds = ["collision", "outer-success", "inner-success"];
     const coordinator = new ServerModDownloadCoordinator(
       { resolveVersionArtifact: async () => artifact } as unknown as ServerModCatalog,
       downloads,
       { list: async () => [instance] } as unknown as ServerInstanceManagerService,
-      () => "collision",
+      () => worldIds.shift()!,
     );
 
-    await assert.rejects(
-      coordinator.installToInstance({
-        source: "modrinth",
-        resourceType: "world",
-        projectId: artifact.projectId,
-        versionId: artifact.versionId,
-        instanceId: instance.id,
-      }),
-    );
+    const result = await coordinator.installToInstance({
+      source: "modrinth",
+      resourceType: "world",
+      projectId: artifact.projectId,
+      versionId: artifact.versionId,
+      instanceId: instance.id,
+    });
+    assert.equal(result.destination, "instance");
+    assert.equal(result.instanceId, instance.id);
     assert.equal(await readFile(join(destination, "keep.txt"), "utf8"), "existing");
+    assert.deepEqual(
+      [
+        ...(await readFile(
+          join(root, "worlds-outer-success", "worlds-inner-success", "level.dat"),
+        )),
+      ],
+      [1],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
