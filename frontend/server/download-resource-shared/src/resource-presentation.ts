@@ -288,6 +288,11 @@ export const serverModSourceFilterOptions: readonly ServerModFilterOption[] = [
   { id: "curseforge", label: "CurseForge" },
 ];
 
+/** 将项目来源转换为列表项中显示的来源标签，保持真实来源用于后续详情与下载。 */
+export function serverModSourceLabel(source: ServerModSource): string {
+  return source === "modrinth" ? "Modrinth" : "CurseForge";
+}
+
 /** 合并两个来源的筛选元数据；来源筛选本身始终保留“所有”。 */
 export function mergeServerModFilters(filters: readonly ServerModFilters[]): ServerModFilters {
   return {

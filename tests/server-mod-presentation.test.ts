@@ -21,6 +21,7 @@ import {
   createServerModMixedSearchState,
   groupServerModVersions as groupServerResourceVersions,
   searchServerModMixedPage,
+  serverModSourceLabel,
 } from "../frontend/server/download-resource-shared/src/resource-presentation.ts";
 
 await test("mod display names append the stable English slug only for Chinese titles", () => {
@@ -77,16 +78,20 @@ await test("mod display tags keep loaders and libraries separate from content ca
         { id: "forge", label: "Forge" },
       ],
       [
-        { id: "library", label: "前置 / 库" },
+        { id: "library", label: "前置" },
         { id: "optimization", label: "性能优化" },
         { id: "utility", label: "实用工具" },
       ],
     ),
     {
-      categories: ["Fabric", "Forge", "前置 / 库"],
+      categories: ["Fabric", "Forge", "前置"],
       content: ["性能优化", "实用工具"],
     },
   );
+});
+await test("source labels expose the concrete catalog name", () => {
+  assert.equal(serverModSourceLabel("modrinth"), "Modrinth");
+  assert.equal(serverModSourceLabel("curseforge"), "CurseForge");
 });
 await test("mod download counts use at most four digits without wrapping the unit", () => {
   assert.equal(formatServerModDownloadCount(9_999), "9999");

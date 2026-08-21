@@ -266,6 +266,11 @@
   background: var(--sl-primary-bg);
   color: var(--sl-primary);
 }
+.mod-source-tag {
+  border: 1px solid color-mix(in srgb, var(--sl-text-tertiary) 26%, var(--sl-border-light));
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-secondary);
+}
 
 .mod-content-tag {
   background: var(--sl-bg-secondary);

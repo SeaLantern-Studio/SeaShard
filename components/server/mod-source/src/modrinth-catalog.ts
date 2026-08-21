@@ -71,7 +71,7 @@ const tagLabels: Readonly<Record<string, string>> = {
   equipment: "装备",
   food: "食物",
   "game-mechanics": "游戏机制",
-  library: "前置 / 库",
+  library: "前置",
   magic: "魔法",
   management: "管理",
   minigame: "小游戏",

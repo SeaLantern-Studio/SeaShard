@@ -44,6 +44,7 @@ import {
   mergeServerModFilters,
   searchServerModMixedPage,
   serverModSourceFilterOptions,
+  serverModSourceLabel,
   type ServerModMixedSearchState,
   type ServerModSearchSource,
 } from "@seashard/server-download-resource-shared";
@@ -1202,6 +1203,7 @@ function errorMessage(error: unknown): string {
             </div>
             <div class="mod-project-footer">
               <div class="mod-category-tags">
+                <span class="mod-source-tag">{{ serverModSourceLabel(project.source) }}</span>
                 <span
                   v-for="category in projectCategoryTags(project)"
                   :key="`category:${category}`"
