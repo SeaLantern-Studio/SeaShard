@@ -283,11 +283,11 @@ await test("server core types map to standard Mod loaders without treating plugi
   assert.equal(serverModLoaderForCoreType("paper"), null);
   assert.equal(serverModLoaderForCoreType("vanilla"), null);
 });
-await test("world downloads allow unified Java saves and reject plugin or proxy cores", () => {
+await test("world downloads allow unified Java saves and Paper conversion, but reject other cores", () => {
   assert.equal(supportsUnifiedWorldStorage("vanilla"), true);
   assert.equal(supportsUnifiedWorldStorage("fabric"), true);
   assert.equal(supportsUnifiedWorldStorage("forge"), true);
-  assert.equal(supportsUnifiedWorldStorage("paper"), false);
+  assert.equal(supportsUnifiedWorldStorage("paper"), true);
   assert.equal(supportsUnifiedWorldStorage("spigot"), false);
   assert.equal(supportsUnifiedWorldStorage("velocity"), false);
 });

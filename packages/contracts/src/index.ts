@@ -525,6 +525,7 @@ const unifiedWorldServerTypes = new Set([
   "fabric",
   "quilt",
   "neoforge",
+  "paper",
 ]);
 
 export function supportsUnifiedWorldStorage(value: unknown): boolean {
