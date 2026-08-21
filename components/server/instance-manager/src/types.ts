@@ -5,6 +5,7 @@ import type {
   ServerInstanceContentCounts,
   ServerInstanceStartupSettings,
   ServerModLoader,
+  ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 
 export {
@@ -34,6 +35,10 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerInstanceSnapshot>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
+  /** 列出实例下的原生世界、下载世界或分维度世界。 */
+  listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  /** 修改实例 server.properties 的 level-name；Desktop Shell 负责运行态停机门禁。 */
+  switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   /** 服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。 */
   recordStartedAt(instanceId: string, startedAt: string): Promise<void>;
   /** 服务器进程退出后，将本次运行区间累加到实例总运行时长。 */

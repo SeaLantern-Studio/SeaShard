@@ -308,6 +308,27 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(instanceId, "server instance id"),
           );
         });
+        config.runtime.handle(desktopChannels.serverInstancesWorlds, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.readServerWorldStorage(
+            expectNonEmptyString(instanceId, "server instance id"),
+          );
+        });
+        config.runtime.handle(
+          desktopChannels.serverInstancesSwitchWorld,
+          async (event, instanceId, worldId) => {
+            ownedWindow(event.sender.id);
+            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
+            const runtime = await config.readServerRuntime(safeInstanceId);
+            if (isActiveServerState(runtime.state)) {
+              throw new Error("需要关停服务器之后才能切换存档。");
+            }
+            return config.switchServerWorld(
+              safeInstanceId,
+              expectNonEmptyString(worldId, "server world id"),
+            );
+          },
+        );
         config.runtime.handle(
           desktopChannels.serverInstancesSetStartupSettings,
           (event, instanceId, value) => {
@@ -606,6 +627,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
           config.runtime.removeHandler(desktopChannels.serverInstancesContentCounts);
+          config.runtime.removeHandler(desktopChannels.serverInstancesWorlds);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSwitchWorld);
           config.runtime.removeHandler(desktopChannels.serverInstancesSetStartupSettings);
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
@@ -636,4 +659,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
       }, "desktop shell lifecycle");
     },
   };
+}
+
+function isActiveServerState(
+  state: "stopped" | "starting" | "running" | "stopping" | "failed",
+): boolean {
+  return state === "starting" || state === "running" || state === "stopping";
 }

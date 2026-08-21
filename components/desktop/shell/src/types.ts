@@ -27,6 +27,7 @@ import type {
   ServerRuntimeClientService,
   ServerSettingsClientService,
   ServerStartupDefaultsUpdate,
+  ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent } from "electron";
 
@@ -144,6 +145,8 @@ export interface DesktopShellConfig {
   readServerInstanceContentCounts(
     instanceId: string,
   ): ReturnType<ServerInstanceClientService["contentCounts"]>;
+  readServerWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  switchServerWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   writeServerInstanceStartupSettings(
     instanceId: string,
     settings: ServerInstanceStartupSettings,

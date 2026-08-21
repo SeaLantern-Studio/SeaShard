@@ -25,6 +25,7 @@ import {
   type ServerCoreType,
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
+  type ServerWorldStorageSnapshot,
   type ServerStartupDefaultsUpdate,
 } from "../packages/contracts/src/index.ts";
 import {
@@ -664,6 +665,20 @@ export async function createDesktopShellHarness(
       },
       listServerInstances: async () => currentServerInstances,
       readServerInstanceContentCounts: async () => serverInstanceContentCounts,
+      readServerWorldStorage: async (instanceId) =>
+        ({
+          instanceId,
+          mode: "unified",
+          saves: [],
+          dimensions: [],
+        }) satisfies ServerWorldStorageSnapshot,
+      switchServerWorld: async (instanceId) =>
+        ({
+          instanceId,
+          mode: "unified",
+          saves: [],
+          dimensions: [],
+        }) satisfies ServerWorldStorageSnapshot,
       writeServerInstanceStartupSettings: async (instanceId, settings) => {
         serverInstanceStartupWrites.push({ instanceId, settings });
         const instance = currentServerInstances.find((candidate) => candidate.id === instanceId);

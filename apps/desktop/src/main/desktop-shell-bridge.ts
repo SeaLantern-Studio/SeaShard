@@ -40,10 +40,11 @@ import {
   expectServerModFilters,
   expectServerModDownloadResult,
   expectServerInstanceContentCounts,
+  expectServerWorldStorageSnapshot,
   expectServerModProjectDetails,
   expectServerModSearchResult,
-  expectServerLaunchCommandPreview,
   expectServerInstances,
+  expectServerLaunchCommandPreview,
   expectServerRuntimeSnapshot,
   expectServerSettingsSnapshot,
 } from "./contract-validation";
@@ -234,6 +235,19 @@ export async function registerDesktopShellBridge(
               expectServerInstanceContentCounts(
                 await kernel.callService(serverInstanceManagerContract, "contentCounts", [
                   instanceId,
+                ]),
+              ),
+            readServerWorldStorage: async (instanceId) =>
+              expectServerWorldStorageSnapshot(
+                await kernel.callService(serverInstanceManagerContract, "listWorldStorage", [
+                  instanceId,
+                ]),
+              ),
+            switchServerWorld: async (instanceId, worldId) =>
+              expectServerWorldStorageSnapshot(
+                await kernel.callService(serverInstanceManagerContract, "switchWorld", [
+                  instanceId,
+                  worldId,
                 ]),
               ),
             writeServerInstanceStartupSettings: async (

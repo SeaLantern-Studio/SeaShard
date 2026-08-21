@@ -54,6 +54,10 @@ export function createServerInstanceManagerModule(
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
+        listWorldStorage: async (instanceId) =>
+          asJsonValue(await manager.listWorldStorage(instanceId)),
+        switchWorld: async (instanceId, worldId) =>
+          asJsonValue(await manager.switchWorld(instanceId, worldId)),
         setStartupSettings: async (instanceId, settings) =>
           asJsonValue(await manager.setStartupSettings(instanceId, settings)),
         recordStartedAt: async (instanceId, startedAt) => {

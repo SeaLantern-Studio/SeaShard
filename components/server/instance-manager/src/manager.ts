@@ -6,6 +6,7 @@ import {
   type ServerCoreManagedDownloadResult,
   type ServerInstanceContentCounts,
   type ServerInstanceSnapshot,
+  type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { ServerCoreSourceService } from "@seashard/server-core-source";
 import { randomUUID } from "node:crypto";
@@ -17,6 +18,7 @@ import {
   writePortableInstanceManifests,
   writePortableSeaShardInstanceManifest,
 } from "./manifest";
+import { listWorldStorage, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type { CreateManagedServerInstanceRequest } from "./types";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
@@ -45,6 +47,7 @@ export class ServerInstanceManager {
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
   private readonly deletions = new Map<string, Promise<void>>();
+  private readonly worldSwitches = new Map<string, Promise<ServerWorldStorageSnapshot>>();
   private readonly metadataUpdates = new Map<string, Promise<ServerInstanceSnapshot>>();
   private disposed = false;
   private iconBackfillTask: Promise<void> | undefined;
@@ -230,6 +233,28 @@ export class ServerInstanceManager {
       mods: rootMods + serverMods,
       plugins,
     };
+  }
+  /** 读取实例目录下的普通存档或分维度存档投影。 */
+  async listWorldStorage(value: unknown): Promise<ServerWorldStorageSnapshot> {
+    const instanceId = expectDirectoryName(value, "instance id");
+    const { instance } = await this.findIndexedInstance(instanceId);
+    return listWorldStorage(instance);
+  }
+
+  /** 串行修改当前实例的 level-name，避免两个切换请求互相覆盖。 */
+  async switchWorld(value: unknown, worldId: unknown): Promise<ServerWorldStorageSnapshot> {
+    const instanceId = expectDirectoryName(value, "instance id");
+    const previous = this.worldSwitches.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return switchWorldStorage(instance, worldId);
+    });
+    this.worldSwitches.set(instanceId, task);
+    try {
+      return await task;
+    } finally {
+      if (this.worldSwitches.get(instanceId) === task) this.worldSwitches.delete(instanceId);
+    }
   }
 
   /** 停机时取消尚未完成的托管下载，等待目录清理后再卸载依赖组件。 */

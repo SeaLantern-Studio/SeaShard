@@ -33,6 +33,8 @@ export const desktopChannels = {
   serverInstancesContentCounts: "seashard.server-instances.content-counts",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  serverInstancesWorlds: "seashard.server-instances.worlds",
+  serverInstancesSwitchWorld: "seashard.server-instances.switch-world",
   serverInstancesSetStartupSettings: "seashard.server-instances.set-startup-settings",
   serverInstancesOpenFolder: "seashard.server-instances.open-folder",
   serverInstancesDelete: "seashard.server-instances.delete",
@@ -464,13 +466,49 @@ export interface ServerInstanceSnapshot {
   startupSettings?: ServerInstanceStartupSettings;
 }
 
+export type ServerWorldStorageMode = "unified" | "split";
+export type ServerWorldDimension = "overworld" | "nether" | "end";
+
+/** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */
+export interface ServerWorldSave {
+  id: string;
+  groupId: string;
+  name: string;
+  dimension: ServerWorldDimension;
+  current: boolean;
+  iconDataUrl?: string;
+}
+
+export interface ServerWorldDimensionGroup {
+  id: string;
+  name: string;
+  current: boolean;
+  saves: readonly ServerWorldSave[];
+}
+
+/** Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。 */
+export interface ServerWorldStorageSnapshot {
+  instanceId: string;
+  mode: ServerWorldStorageMode;
+  currentId?: string;
+  saves: readonly ServerWorldSave[];
+  dimensions: readonly ServerWorldDimensionGroup[];
+}
+
+/** 当前实例中可发现的世界存档及其维度布局。 */
+export interface ServerInstanceWorldService {
+  listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
+}
+
+/** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */
 export interface ServerInstanceContentCounts {
   mods: number;
   plugins: number;
 }
 
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
-export interface ServerInstanceClientService {
+export interface ServerInstanceClientService extends ServerInstanceWorldService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;

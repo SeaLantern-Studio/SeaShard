@@ -20,9 +20,10 @@ import {
   type ServerInstanceContentCounts,
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
-  type ServerLaunchCommandPreview,
+  type ServerWorldStorageSnapshot,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
+  type ServerLaunchCommandPreview,
   type ServerSettingsSnapshot,
   type ServerModEnvironment,
   type ServerModFilterOption,
@@ -597,6 +598,93 @@ export function expectServerInstanceContentCounts(value: unknown): ServerInstanc
     throw new Error("server instance manager returned invalid content counts");
   }
   return { mods: mods as number, plugins: plugins as number };
+}
+export function expectServerWorldStorageSnapshot(value: unknown): ServerWorldStorageSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid world storage");
+  }
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.instanceId !== "string" ||
+    !snapshot.instanceId ||
+    !["unified", "split"].includes(String(snapshot.mode)) ||
+    (snapshot.currentId !== undefined && !isSafeRelativeWorldId(snapshot.currentId))
+  ) {
+    throw new Error("server instance manager returned invalid world storage");
+  }
+  if (!Array.isArray(snapshot.saves) || !Array.isArray(snapshot.dimensions)) {
+    throw new Error("server instance manager returned invalid world storage");
+  }
+  const saves = snapshot.saves.map((value, index) => expectServerWorldSave(value, index));
+  const dimensions = snapshot.dimensions.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`server instance manager returned invalid world dimension ${index}`);
+    }
+    const group = value as Record<string, unknown>;
+    if (
+      !isSafeRelativeWorldId(group.id) ||
+      typeof group.name !== "string" ||
+      !group.name ||
+      typeof group.current !== "boolean" ||
+      !Array.isArray(group.saves)
+    ) {
+      throw new Error(`server instance manager returned invalid world dimension ${index}`);
+    }
+    return {
+      id: group.id,
+      name: group.name,
+      current: group.current,
+      saves: group.saves.map((save, saveIndex) =>
+        expectServerWorldSave(save, `${index}.${saveIndex}`),
+      ),
+    };
+  });
+  return {
+    instanceId: snapshot.instanceId,
+    mode: snapshot.mode as ServerWorldStorageSnapshot["mode"],
+    ...(snapshot.currentId ? { currentId: snapshot.currentId } : {}),
+    saves,
+    dimensions,
+  };
+}
+
+function expectServerWorldSave(value: unknown, index: number | string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server instance manager returned invalid world save ${index}`);
+  }
+  const save = value as Record<string, unknown>;
+  if (
+    !isSafeRelativeWorldId(save.id) ||
+    !isSafeRelativeWorldId(save.groupId) ||
+    typeof save.name !== "string" ||
+    !save.name ||
+    !["overworld", "nether", "end"].includes(String(save.dimension)) ||
+    typeof save.current !== "boolean" ||
+    (save.iconDataUrl !== undefined &&
+      (typeof save.iconDataUrl !== "string" ||
+        !save.iconDataUrl.startsWith("data:image/png;base64,")))
+  ) {
+    throw new Error(`server instance manager returned invalid world save ${index}`);
+  }
+  return {
+    id: save.id,
+    groupId: save.groupId,
+    name: save.name,
+    dimension: save.dimension as "overworld" | "nether" | "end",
+    current: save.current,
+    ...(save.iconDataUrl ? { iconDataUrl: save.iconDataUrl } : {}),
+  };
+}
+
+function isSafeRelativeWorldId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    Boolean(value) &&
+    !value.includes("\\") &&
+    !value.includes("\0") &&
+    !value.startsWith("/") &&
+    !value.split("/").some((part) => !part || part === "." || part === "..")
+  );
 }
 
 const serverConfigurationKinds = new Set(["properties", "yaml", "json", "toml", "text"]);

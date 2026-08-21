@@ -95,6 +95,12 @@ function instanceService(
     },
     list: async () => instances,
     contentCounts: async () => ({ mods: 0, plugins: 0 }),
+    listWorldStorage: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    switchWorld: async () => {
+      throw new Error("not implemented in fixture");
+    },
     setStartupSettings: async () => {
       throw new Error("not implemented in fixture");
     },
