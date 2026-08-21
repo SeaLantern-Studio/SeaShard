@@ -33,6 +33,7 @@ export class ServerModDownloadCoordinator {
     private readonly catalog: ServerModCatalog,
     private readonly downloads: DownloadService,
     private readonly instances: ServerInstanceManagerService,
+    private readonly worldIdFactory: () => string = randomUUID,
   ) {}
 
   async installToInstance(value: unknown): Promise<ServerModDownloadResult> {
@@ -75,15 +76,19 @@ export class ServerModDownloadCoordinator {
     const stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
     const archivePath = join(stagingRoot, "world.zip");
     const extractedRoot = join(stagingRoot, "extracted");
-    const worldId = `world-${randomUUID()}`;
+    const worldId = `world-${this.worldIdFactory()}`;
     const destinationRoot = resolve(worldRoot, worldId);
+    let destinationCreated = false;
     try {
       const task = await this.startAndWait(artifact, stagingRoot, 8, instance.id, archivePath);
       await extractWorldArchive(archivePath, extractedRoot);
       await rename(extractedRoot, destinationRoot);
+      destinationCreated = true;
       return resultOf(artifact, task, "instance", instance.id);
     } catch (error) {
-      await rm(destinationRoot, { recursive: true, force: true });
+      if (destinationCreated) {
+        await rm(destinationRoot, { recursive: true, force: true });
+      }
       throw error;
     } finally {
       await rm(stagingRoot, { recursive: true, force: true });

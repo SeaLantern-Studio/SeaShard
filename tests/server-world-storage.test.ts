@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -146,6 +146,90 @@ await test("world coordinator downloads and extracts without switching the activ
       [...(await readFile(join(root, "worlds", worldDirectories[0]!, "level.dat")))],
       [7, 8, 9],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("world directory collision preserves the existing directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seashard-world-collision-"));
+  try {
+    const destination = join(root, "worlds", "world-collision");
+    await mkdir(destination, { recursive: true });
+    await writeFile(join(destination, "keep.txt"), "existing");
+    const archive = zipSync({ "Adventure/level.dat": new Uint8Array([1]) });
+    const instance: ServerInstanceSnapshot = {
+      id: "collision-instance",
+      name: "Collision",
+      rootPath: root,
+      coreJarPath: join(root, "server.jar"),
+      storageMode: "managed",
+      source: "downloaded",
+      modLoader: "fabric",
+      serverType: "fabric",
+      gameVersion: "1.21.1",
+      createdAt: "2026-08-20T00:00:00.000Z",
+      updatedAt: "2026-08-20T00:00:00.000Z",
+    };
+    const artifact: ServerModArtifact = {
+      source: "modrinth",
+      resourceType: "world",
+      projectId: "world-project",
+      versionId: "world-version",
+      fileName: "adventure.zip",
+      url: "https://cdn.example.test/adventure.zip",
+      size: archive.byteLength,
+      gameVersions: ["1.21.1"],
+      loaders: [],
+    };
+    let startRequest: StartDownloadRequest | undefined;
+    const downloads = {
+      start: async (request: StartDownloadRequest) => {
+        startRequest = request;
+        await writeFile(request.destinationPath, archive);
+        return {
+          id: "world-collision-task",
+          url: request.url,
+          destinationPath: request.destinationPath,
+          state: "queued",
+          downloadedBytes: 0,
+          totalBytes: archive.byteLength,
+          connections: request.connections ?? 0,
+          progress: 0,
+          createdAt: "2026-08-20T00:00:00.000Z",
+        } satisfies DownloadTaskSnapshot;
+      },
+      wait: async () =>
+        ({
+          id: "world-collision-task",
+          url: artifact.url,
+          destinationPath: startRequest?.destinationPath ?? "",
+          state: "completed",
+          downloadedBytes: archive.byteLength,
+          totalBytes: archive.byteLength,
+          connections: 8,
+          progress: 100,
+          createdAt: "2026-08-20T00:00:00.000Z",
+          finishedAt: "2026-08-20T00:00:01.000Z",
+        }) satisfies DownloadTaskSnapshot,
+    } as unknown as DownloadService;
+    const coordinator = new ServerModDownloadCoordinator(
+      { resolveVersionArtifact: async () => artifact } as unknown as ServerModCatalog,
+      downloads,
+      { list: async () => [instance] } as unknown as ServerInstanceManagerService,
+      () => "collision",
+    );
+
+    await assert.rejects(
+      coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "world",
+        projectId: artifact.projectId,
+        versionId: artifact.versionId,
+        instanceId: instance.id,
+      }),
+    );
+    assert.equal(await readFile(join(destination, "keep.txt"), "utf8"), "existing");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
