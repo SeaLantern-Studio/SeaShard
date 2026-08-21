@@ -28,7 +28,6 @@ export interface ServerModVersionGroup {
 const hanPattern = /\p{Script=Han}/u;
 const hourMilliseconds = 60 * 60 * 1_000;
 const dayMilliseconds = 24 * hourMilliseconds;
-const categoryTagIds = new Set(["library"]);
 const compactDownloadUnits = [
   { threshold: 1_000_000_000_000, suffix: "万亿" },
   { threshold: 100_000_000, suffix: "亿" },
@@ -66,22 +65,21 @@ export function serverModMcEncyclopediaSearchUrl(projectTitle: string): string {
   return url.href;
 }
 
-/** 按 Modrinth 元数据拆分加载器、类别与内容标签，前置库归入类别。 */
+/** 按 Modrinth 元数据拆分加载器与内容标签；前置库始终排在内容标签首位。 */
 export function serverModDisplayTags(
   categories: readonly string[],
   loaders: readonly ServerModFilterOption[],
   tags: readonly ServerModFilterOption[],
 ): ServerModDisplayTags {
   const loaderLabels = new Map(loaders.map(({ id, label }) => [id, label]));
-  const categoryLabels = new Map(
-    tags.filter(({ id }) => categoryTagIds.has(id)).map(({ id, label }) => [id, label]),
-  );
-  const contentLabels = new Map(
-    tags.filter(({ id }) => !categoryTagIds.has(id)).map(({ id, label }) => [id, label]),
-  );
+  const contentLabels = new Map(tags.map(({ id, label }) => [id, label]));
+  const contentCategories = [
+    ...categories.filter((category) => category === "library"),
+    ...categories.filter((category) => category !== "library"),
+  ];
   return {
-    categories: uniqueLabels(categories, new Map([...loaderLabels, ...categoryLabels])),
-    content: uniqueLabels(categories, contentLabels),
+    categories: uniqueLabels(categories, loaderLabels),
+    content: uniqueLabels(contentCategories, contentLabels),
   };
 }
 /**

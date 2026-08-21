@@ -69,23 +69,23 @@ await test("mod descriptions render Markdown while treating embedded HTML as tex
   assert.match(html, /<p>&lt;script&gt;.*&lt;\/script&gt;<\/p>/u);
 });
 
-await test("mod display tags keep loaders and libraries separate from content categories", () => {
+await test("mod display tags put libraries before content categories", () => {
   assert.deepEqual(
     serverModDisplayTags(
-      ["fabric", "forge", "library", "optimization", "utility", "unknown"],
+      ["fabric", "forge", "optimization", "library", "utility", "unknown"],
       [
         { id: "fabric", label: "Fabric" },
         { id: "forge", label: "Forge" },
       ],
       [
-        { id: "library", label: "前置" },
+        { id: "library", label: "前置 / 库" },
         { id: "optimization", label: "性能优化" },
         { id: "utility", label: "实用工具" },
       ],
     ),
     {
-      categories: ["Fabric", "Forge", "前置"],
-      content: ["性能优化", "实用工具"],
+      categories: ["Fabric", "Forge"],
+      content: ["前置 / 库", "性能优化", "实用工具"],
     },
   );
 });
