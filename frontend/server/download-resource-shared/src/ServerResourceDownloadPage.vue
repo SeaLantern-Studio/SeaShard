@@ -116,6 +116,7 @@ const loadSentinel = ref<HTMLElement>();
 let observer: IntersectionObserver | undefined;
 let queryTimer: ReturnType<typeof setTimeout> | undefined;
 let searchGeneration = 0;
+let filtersRequestId = 0;
 let relativeTimeTimer: ReturnType<typeof setInterval> | undefined;
 const relativeTimeNow = ref(Date.now());
 const selectedProject = ref<ServerModProject>();
@@ -219,6 +220,7 @@ watch(
 
 onBeforeUnmount(() => {
   searchGeneration += 1;
+  filtersRequestId += 1;
   if (queryTimer) clearTimeout(queryTimer);
   if (relativeTimeTimer) clearInterval(relativeTimeTimer);
   detailRequestId += 1;
@@ -228,10 +230,13 @@ onBeforeUnmount(() => {
 });
 
 async function loadFilters(): Promise<void> {
+  const requestId = ++filtersRequestId;
+  const requestedSource = source.value;
   filtersLoading.value = true;
   filtersError.value = "";
   try {
-    const next = await props.resources.getFilters(props.resourceType, source.value);
+    const next = await props.resources.getFilters(props.resourceType, requestedSource);
+    if (requestId !== filtersRequestId || requestedSource !== source.value) return;
     filters.value = {
       ...next,
       sources: [
@@ -240,9 +245,13 @@ async function loadFilters(): Promise<void> {
       ],
     };
   } catch (error) {
-    filtersError.value = errorMessage(error);
+    if (requestId === filtersRequestId && requestedSource === source.value) {
+      filtersError.value = errorMessage(error);
+    }
   } finally {
-    filtersLoading.value = false;
+    if (requestId === filtersRequestId && requestedSource === source.value) {
+      filtersLoading.value = false;
+    }
   }
 }
 
@@ -943,8 +952,10 @@ function errorMessage(error: unknown): string {
                 @click="toggleVersionGroup(group.id)"
               >
                 <strong>
-                  <template v-if="showLoaderFilter">{{ loaderLabel(group.loader) }} </template
-                  >{{ group.gameVersion }}
+                  <template v-if="showLoaderFilter || !group.loader"
+                    >{{ group.loader ? loaderLabel(group.loader) : "通用" }}
+                  </template>
+                  {{ group.gameVersion }}
                 </strong>
                 <span>{{ group.versions.length }} 个文件</span>
                 <ChevronDown :size="18" :stroke-width="1.8" aria-hidden="true" />

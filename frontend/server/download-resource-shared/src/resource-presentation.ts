@@ -109,7 +109,7 @@ function formatCompactDownloadDigits(value: number): string {
   return String(Math.round(value));
 }
 
-/** 将版本按“加载器 + Minecraft 版本”分类，详情页只处理筛选与折叠状态。 */
+/** 按加载器与 Minecraft 版本分类；没有加载器的地图/数据包归入“通用”组。 */
 export function groupServerModVersions(
   versions: readonly ServerModVersion[],
   gameVersionFilter = "",
@@ -119,7 +119,8 @@ export function groupServerModVersions(
   for (const version of versions) {
     if (gameVersionFilter && !version.gameVersions.includes(gameVersionFilter)) continue;
     if (loaderFilter && !version.loaders.includes(loaderFilter)) continue;
-    for (const loader of version.loaders) {
+    const versionLoaders = version.loaders.length > 0 ? version.loaders : [""];
+    for (const loader of versionLoaders) {
       if (loaderFilter && loader !== loaderFilter) continue;
       for (const gameVersion of version.gameVersions) {
         if (gameVersionFilter && gameVersion !== gameVersionFilter) continue;

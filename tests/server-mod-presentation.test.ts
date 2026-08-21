@@ -17,6 +17,7 @@ import {
   serverModMcEncyclopediaSearchUrl,
   serverModDisplayTags,
 } from "../frontend/server/download-mod/src/client/mod-presentation.ts";
+import { groupServerModVersions as groupServerResourceVersions } from "../frontend/server/download-resource-shared/src/resource-presentation.ts";
 
 await test("mod display names append the stable English slug only for Chinese titles", () => {
   assert.deepEqual(serverModDisplayName({ title: "暮色森林", slug: "twilight-forest" }), {
@@ -169,6 +170,23 @@ await test("mod versions group by loader and game version with newest files firs
   assert.deepEqual(
     groupServerModVersions(versions, "1.20.1", "forge").map(({ id }) => id),
     ["forge:1.20.1"],
+  );
+});
+
+await test("shared resource versions without loaders remain downloadable in a generic group", () => {
+  const groups = groupServerResourceVersions([
+    {
+      id: "world-1",
+      gameVersions: ["26.2"],
+      loaders: [],
+      fileName: "oneblock.zip",
+      downloads: 1_000,
+      datePublished: "2026-08-18T12:00:00Z",
+    },
+  ]);
+  assert.deepEqual(
+    groups.map(({ id, loader, gameVersion }) => ({ id, loader, gameVersion })),
+    [{ id: ":26.2", loader: "", gameVersion: "26.2" }],
   );
 });
 
