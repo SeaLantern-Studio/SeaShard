@@ -318,13 +318,15 @@ export interface ServerModProjectDetails {
   body: string;
   versions: readonly ServerModVersion[];
 }
-/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID，不提交 URL 或本地目标路径。 */
+/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。 */
 export interface ServerModInstallRequest {
   source: ServerModSource;
   resourceType: "mod" | "datapack" | "world";
   projectId: string;
   versionId: string;
   instanceId: string;
+  /** 仅数据包安装使用；Host 会再次确认它属于该实例且确实存在。 */
+  worldId?: string;
 }
 
 /** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */

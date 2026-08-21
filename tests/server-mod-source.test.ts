@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import {
   serverModSearchLimits,
@@ -16,6 +17,8 @@ import {
   ServerModDownloadCoordinator,
   ServerModSourceCatalog,
 } from "../components/server/mod-source/src/index.ts";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 const apiBaseUrl = "https://api.modrinth.test/v2/";
@@ -932,95 +935,126 @@ await test("Datapacks install into any exact-version instance and non-installabl
     ],
   });
 
-  const instanceRoot = resolve("test-fixtures/server-resource/paper-instance");
-  const matchingInstance: ServerInstanceSnapshot = {
-    id: "paper-instance",
-    name: "1.21.1-paper",
-    rootPath: instanceRoot,
-    coreJarPath: resolve(instanceRoot, "server.jar"),
-    storageMode: "managed",
-    source: "downloaded",
-    modLoader: null,
-    serverType: "paper",
-    gameVersion: "1.21.1",
-    createdAt: "2026-08-20T00:00:00.000Z",
-    updatedAt: "2026-08-20T00:00:00.000Z",
-  };
-  const mismatchedInstance: ServerInstanceSnapshot = {
-    ...matchingInstance,
-    id: "paper-instance-old",
-    name: "1.20.1-paper",
-    gameVersion: "1.20.1",
-  };
-  const downloads = new FakeDownloadService();
-  const coordinator = new ServerModDownloadCoordinator(
-    new ServerModSourceCatalog(catalog, catalog),
-    downloads,
-    instanceService([matchingInstance, mismatchedInstance]),
-  );
+  const instanceRoot = await mkdtemp(join(tmpdir(), "seashard-datapack-install-"));
+  try {
+    await mkdir(join(instanceRoot, "world"), { recursive: true });
+    await writeFile(join(instanceRoot, "world", "level.dat"), Uint8Array.of(1));
+    const matchingInstance: ServerInstanceSnapshot = {
+      id: "paper-instance",
+      name: "1.21.1-paper",
+      rootPath: instanceRoot,
+      coreJarPath: resolve(instanceRoot, "server.jar"),
+      storageMode: "managed",
+      source: "downloaded",
+      modLoader: null,
+      serverType: "paper",
+      gameVersion: "1.21.1",
+      createdAt: "2026-08-20T00:00:00.000Z",
+      updatedAt: "2026-08-20T00:00:00.000Z",
+    };
+    const mismatchedInstance: ServerInstanceSnapshot = {
+      ...matchingInstance,
+      id: "paper-instance-old",
+      name: "1.20.1-paper",
+      gameVersion: "1.20.1",
+    };
+    const downloads = new FakeDownloadService();
+    const coordinator = new ServerModDownloadCoordinator(
+      new ServerModSourceCatalog(catalog, catalog),
+      downloads,
+      instanceService([matchingInstance, mismatchedInstance]),
+    );
+    await assert.rejects(
+      coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "datapack",
+        projectId: "server-datapack-1",
+        versionId: "datapack-version-1",
+        instanceId: "paper-instance",
+        connections: 8,
+      }),
+      /数据包安装必须指定目标存档/u,
+    );
+    await assert.rejects(
+      coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "datapack",
+        projectId: "server-datapack-1",
+        versionId: "datapack-version-1",
+        instanceId: "paper-instance",
+        worldId: "missing-world",
+        connections: 8,
+      }),
+      /目标存档不存在/u,
+    );
 
-  assert.deepEqual(
-    await coordinator.installToInstance({
-      source: "modrinth",
-      resourceType: "datapack",
-      projectId: "server-datapack-1",
-      versionId: "datapack-version-1",
-      instanceId: "paper-instance",
-      connections: 8,
-    }),
-    {
-      source: "modrinth",
+    assert.deepEqual(
+      await coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "datapack",
+        projectId: "server-datapack-1",
+        versionId: "datapack-version-1",
+        instanceId: "paper-instance",
+        worldId: "world",
+        connections: 8,
+      }),
+      {
+        source: "modrinth",
+        resourceType: "datapack",
+        projectId: "server-datapack-1",
+        versionId: "datapack-version-1",
+        fileName,
+        destination: "instance",
+        instanceId: "paper-instance",
+        downloadedBytes: 2_048,
+      },
+    );
+    assert.equal(
+      downloads.requests[0]?.destinationPath,
+      resolve(instanceRoot, "world", "datapacks", fileName),
+    );
+    assert.deepEqual(downloads.requests[0]?.metadata, {
+      kind: "server-datapack",
+      userVisible: true,
       resourceType: "datapack",
       projectId: "server-datapack-1",
       versionId: "datapack-version-1",
       fileName,
-      destination: "instance",
       instanceId: "paper-instance",
-      downloadedBytes: 2_048,
-    },
-  );
-  assert.equal(
-    downloads.requests[0]?.destinationPath,
-    resolve(instanceRoot, "world", "datapacks", fileName),
-  );
-  assert.deepEqual(downloads.requests[0]?.metadata, {
-    kind: "server-datapack",
-    userVisible: true,
-    resourceType: "datapack",
-    projectId: "server-datapack-1",
-    versionId: "datapack-version-1",
-    fileName,
-    instanceId: "paper-instance",
-  });
+    });
 
-  await assert.rejects(
-    coordinator.installToInstance({
-      source: "modrinth",
-      resourceType: "datapack",
-      projectId: "server-datapack-1",
-      versionId: "datapack-version-1",
-      instanceId: "paper-instance-old",
-      connections: 8,
-    }),
-    /Minecraft 版本/u,
-  );
-  const requestsBeforeModpack = requests;
-  await assert.rejects(
-    coordinator.installToInstance({
-      source: "modrinth",
-      resourceType: "modpack",
-      projectId: "server-modpack-1",
-      versionId: "modpack-version-1",
-      instanceId: "paper-instance",
-      connections: 8,
-    }),
-    /server resource type must be mod, datapack, or world/u,
-  );
-  assert.equal(
-    requests,
-    requestsBeforeModpack,
-    "non-installable modpack requests must not reach Modrinth",
-  );
+    await assert.rejects(
+      coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "datapack",
+        projectId: "server-datapack-1",
+        versionId: "datapack-version-1",
+        instanceId: "paper-instance-old",
+        worldId: "world",
+        connections: 8,
+      }),
+      /Minecraft 版本/u,
+    );
+    const requestsBeforeModpack = requests;
+    await assert.rejects(
+      coordinator.installToInstance({
+        source: "modrinth",
+        resourceType: "modpack",
+        projectId: "server-modpack-1",
+        versionId: "modpack-version-1",
+        instanceId: "paper-instance",
+        connections: 8,
+      }),
+      /server resource type must be mod, datapack, or world/u,
+    );
+    assert.equal(
+      requests,
+      requestsBeforeModpack,
+      "non-installable modpack requests must not reach Modrinth",
+    );
+  } finally {
+    await rm(instanceRoot, { recursive: true, force: true });
+  }
 });
 
 await test("CurseForge MCIM catalog searches, reads details, and normalizes mirror downloads", async () => {

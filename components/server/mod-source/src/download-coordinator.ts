@@ -11,6 +11,7 @@ import {
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import {
   createShortRandomId,
+  resolveWorldStorageDirectories,
   type ServerInstanceManagerService,
 } from "@seashard/server-instance-manager";
 import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
@@ -54,7 +55,7 @@ export class ServerModDownloadCoordinator {
     assertCompatibleInstance(artifact, instance);
     const destinationDirectory =
       artifact.resourceType === "datapack"
-        ? resolve(instance.rootPath, "world", "datapacks")
+        ? await resolveDatapackDirectory(instance, request.worldId)
         : resolve(instance.rootPath, instance.serverType === "quilt" ? "server/mods" : "mods");
     const task = await this.startAndWait(
       artifact,
@@ -211,14 +212,35 @@ function assertCompatibleInstance(
     throw new Error(`该 Mod 版本不支持 ${formatLoader(instance.modLoader)} 实例 ${instance.name}`);
   }
 }
+async function resolveDatapackDirectory(
+  instance: ServerInstanceSnapshot,
+  worldId: string | undefined,
+): Promise<string> {
+  if (worldId === undefined) {
+    throw new TypeError("数据包安装必须指定目标存档");
+  }
+  const sources = await resolveWorldStorageDirectories(instance, worldId);
+  const overworld = sources.find(({ id, groupId }) => id === groupId) ?? sources[0];
+  if (!overworld) {
+    throw new Error("目标存档不存在或不属于当前服务器实例。");
+  }
+  // split 模式下数据包属于逻辑世界，固定写入它的主世界目录。
+  return resolve(overworld.absolutePath, "datapacks");
+}
 function parseInstallRequest(value: unknown): InstallRequest {
   const record = expectRecord(value, "server resource install request");
+  const resourceType = expectInstallableResourceType(record.resourceType);
+  const worldId = record.worldId === undefined ? undefined : expectWorldId(record.worldId);
+  if (resourceType === "datapack" && worldId === undefined) {
+    throw new TypeError("数据包安装必须指定目标存档");
+  }
   return {
     source: expectSource(record.source),
-    resourceType: expectInstallableResourceType(record.resourceType),
+    resourceType,
     projectId: expectIdentity(record.projectId, "project ID"),
     versionId: expectIdentity(record.versionId, "version ID"),
     instanceId: expectIdentity(record.instanceId, "instance ID", 128),
+    ...(worldId === undefined ? {} : { worldId }),
     connections: expectConnections(
       record.connections ?? serverDownloadConnectionLimits.defaultValue,
     ),
@@ -282,6 +304,21 @@ function expectIdentity(value: unknown, label: string, maximumLength = 64): stri
     throw new TypeError(`server mod ${label} is invalid`);
   }
   return identity;
+}
+
+function expectWorldId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 1_024 ||
+    value.includes("\\") ||
+    value.includes("\0") ||
+    value.startsWith("/") ||
+    value.split("/").some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new TypeError("server world ID is invalid");
+  }
+  return value;
 }
 
 function expectConnections(value: unknown): number {

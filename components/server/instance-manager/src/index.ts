@@ -99,6 +99,7 @@ function asJsonValue(value: unknown): JsonValue {
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";
+export * from "./world-storage";
 export * from "./manifest";
 export * from "./startup-settings";
 export * from "./registry";

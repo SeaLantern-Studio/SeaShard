@@ -12,7 +12,9 @@ import {
   type ServerModSearchResult,
   type ServerModSourceClientService,
   type ServerModVersion,
+  type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
+import minecraftDefaultServerIcon from "./assets/minecraft-default-server-icon.png";
 import {
   Cmz_Button,
   Cmz_Input,
@@ -103,6 +105,12 @@ const detailMarkdownFeatures = {
 
 type DetailCopyAction = "name" | "link";
 type DetailCopyState = "idle" | "success" | "error";
+interface DatapackWorldTarget {
+  readonly id: string;
+  readonly name: string;
+  readonly current: boolean;
+  readonly iconDataUrl?: string;
+}
 
 const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
@@ -149,6 +157,12 @@ const compatibleInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const installInstancesLoading = ref(false);
 const installInstancesError = ref("");
 const installPendingTarget = ref<string>();
+const datapackWorldModalOpen = ref(false);
+const datapackTargetInstance = ref<ServerInstanceSnapshot>();
+const datapackWorldTargets = ref<readonly DatapackWorldTarget[]>([]);
+const datapackWorldsByInstance = ref<ReadonlyMap<string, readonly DatapackWorldTarget[]>>(
+  new Map(),
+);
 const installActionError = ref("");
 let installInstancesRequestId = 0;
 
@@ -511,20 +525,42 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
   const requestId = ++installInstancesRequestId;
   installVersion.value = version;
   compatibleInstances.value = [];
+  installInstancesLoading.value = false;
   installInstancesError.value = "";
   installActionError.value = "";
   installPendingTarget.value = undefined;
+  datapackWorldModalOpen.value = false;
+  datapackTargetInstance.value = undefined;
+  datapackWorldTargets.value = [];
+  datapackWorldsByInstance.value = new Map();
   installModalOpen.value = true;
-  if (!canInstallToInstance.value || !props.instances) {
-    installInstancesLoading.value = false;
-    return;
-  }
+  if (!canInstallToInstance.value || !props.instances) return;
+
   installInstancesLoading.value = true;
   try {
     const instances = await props.instances.list();
     if (requestId !== installInstancesRequestId) return;
     const candidates = compatibleServerResourceInstances(version, instances);
-    compatibleInstances.value = candidates;
+    if (props.resourceType !== "datapack") {
+      compatibleInstances.value = candidates;
+      return;
+    }
+
+    const candidatesWithWorlds = await Promise.all(
+      candidates.map(async (instance) => ({
+        instance,
+        worlds: datapackWorldTargetsFromStorage(
+          await props.instances!.listWorldStorage(instance.id),
+        ),
+      })),
+    );
+    if (requestId !== installInstancesRequestId) return;
+    datapackWorldsByInstance.value = new Map(
+      candidatesWithWorlds.map(({ instance, worlds }) => [instance.id, worlds]),
+    );
+    compatibleInstances.value = candidatesWithWorlds
+      .filter(({ worlds }) => worlds.length > 0)
+      .map(({ instance }) => instance);
   } catch (error) {
     if (requestId === installInstancesRequestId) {
       installInstancesError.value = errorMessage(error);
@@ -538,8 +574,12 @@ function closeInstallModal(): void {
   if (installPendingTarget.value) return;
   installInstancesRequestId += 1;
   installModalOpen.value = false;
+  datapackWorldModalOpen.value = false;
   installVersion.value = undefined;
   compatibleInstances.value = [];
+  datapackTargetInstance.value = undefined;
+  datapackWorldTargets.value = [];
+  datapackWorldsByInstance.value = new Map();
   installInstancesError.value = "";
   installActionError.value = "";
 }
@@ -548,11 +588,62 @@ function updateInstallModalVisible(visible: boolean): void {
   if (!visible) closeInstallModal();
 }
 
-async function installModToInstance(instance: ServerInstanceSnapshot): Promise<void> {
+function selectInstallInstance(instance: ServerInstanceSnapshot): void {
+  if (props.resourceType !== "datapack") {
+    void installResourceToInstance(instance);
+    return;
+  }
+  const worlds = datapackWorldsByInstance.value.get(instance.id) ?? [];
+  if (worlds.length === 0) {
+    installActionError.value = "当前实例没有可用存档";
+    return;
+  }
+  installActionError.value = "";
+  datapackTargetInstance.value = instance;
+  datapackWorldTargets.value = worlds;
+  installModalOpen.value = false;
+  datapackWorldModalOpen.value = true;
+}
+
+function backToInstallInstances(): void {
+  if (installPendingTarget.value) return;
+  datapackWorldModalOpen.value = false;
+  datapackTargetInstance.value = undefined;
+  datapackWorldTargets.value = [];
+  installActionError.value = "";
+  installModalOpen.value = true;
+}
+
+function closeDatapackWorldModal(): void {
+  if (installPendingTarget.value) return;
+  closeInstallModal();
+}
+
+function updateDatapackWorldModalVisible(visible: boolean): void {
+  if (!visible) closeDatapackWorldModal();
+}
+
+function datapackPendingTarget(instanceId: string, worldId: string): string {
+  return `datapack:${instanceId}:${worldId}`;
+}
+
+async function installDatapackToWorld(target: DatapackWorldTarget): Promise<void> {
+  const instance = datapackTargetInstance.value;
+  if (!instance) return;
+  await installResourceToInstance(instance, target.id);
+}
+
+async function installResourceToInstance(
+  instance: ServerInstanceSnapshot,
+  worldId?: string,
+): Promise<void> {
   const project = selectedProject.value;
   const version = installVersion.value;
   if (!canInstallToInstance.value || !project || !version || installPendingTarget.value) return;
-  installPendingTarget.value = instance.id;
+  if (props.resourceType === "datapack" && worldId === undefined) return;
+  const pendingTarget =
+    props.resourceType === "datapack" ? datapackPendingTarget(instance.id, worldId!) : instance.id;
+  installPendingTarget.value = pendingTarget;
   installActionError.value = "";
   let completed = false;
   try {
@@ -562,13 +653,17 @@ async function installModToInstance(instance: ServerInstanceSnapshot): Promise<v
       projectId: project.id,
       versionId: version.id,
       instanceId: instance.id,
+      ...(props.resourceType === "datapack" ? { worldId } : {}),
     });
     completed = true;
   } catch (error) {
     installActionError.value = errorMessage(error);
   } finally {
     installPendingTarget.value = undefined;
-    if (completed) closeInstallModal();
+    if (completed) {
+      if (props.resourceType === "datapack") closeDatapackWorldModal();
+      else closeInstallModal();
+    }
   }
 }
 
@@ -731,7 +826,32 @@ function formatRelativeTime(value: string): string {
   return formatServerModRelativeTime(value, relativeTimeNow.value);
 }
 
-/** 数据包只要求版本匹配；世界还要求核心采用单目录多维度布局。 */
+/** 把统一世界与分维度世界折叠成数据包可选择的逻辑存档。 */
+function datapackWorldTargetsFromStorage(
+  storage: ServerWorldStorageSnapshot,
+): DatapackWorldTarget[] {
+  if (storage.mode === "unified") {
+    return storage.saves.map(({ id, name, current, iconDataUrl }) => ({
+      id,
+      name,
+      current,
+      ...(iconDataUrl ? { iconDataUrl } : {}),
+    }));
+  }
+  return storage.dimensions
+    .filter(({ saves }) => saves.length > 0)
+    .map((group) => {
+      const overworld = group.saves.find(({ dimension }) => dimension === "overworld");
+      return {
+        id: group.id,
+        name: group.name,
+        current: group.current,
+        ...(overworld?.iconDataUrl ? { iconDataUrl: overworld.iconDataUrl } : {}),
+      };
+    });
+}
+
+/** 数据包要求精确版本匹配和已有存档；世界还要求核心采用单目录多维度布局。 */
 function compatibleServerResourceInstances(
   version: ServerModVersion,
   instances: readonly ServerInstanceSnapshot[],
@@ -1068,32 +1188,29 @@ function errorMessage(error: unknown): string {
               </div>
             </div>
 
-            <template
-              v-if="
-                canInstallToInstance &&
-                (installInstancesLoading ||
-                  !!installInstancesError ||
-                  compatibleInstances.length > 0)
-              "
-            >
+            <template v-if="canInstallToInstance">
               <h3>下载到</h3>
               <div class="mod-install-instance-list" aria-label="兼容的服务器实例">
                 <div v-if="installInstancesLoading" class="mod-install-state" role="status">
                   <span class="mod-loading-spinner" />
-                  正在读取服务器实例
+                  {{
+                    props.resourceType === "datapack"
+                      ? "正在读取服务器实例与存档"
+                      : "正在读取服务器实例"
+                  }}
                 </div>
                 <div v-else-if="installInstancesError" class="mod-install-state error" role="alert">
                   <span>{{ installInstancesError }}</span>
                   <button type="button" @click="openInstallModal(installVersion)">重新加载</button>
                 </div>
-                <template v-else>
+                <template v-else-if="compatibleInstances.length > 0">
                   <button
                     v-for="instance in compatibleInstances"
                     :key="instance.id"
                     class="mod-install-instance"
                     type="button"
                     :disabled="!!installPendingTarget"
-                    @click="installModToInstance(instance)"
+                    @click="selectInstallInstance(instance)"
                   >
                     <span class="mod-install-instance-icon">
                       <img
@@ -1115,6 +1232,13 @@ function errorMessage(error: unknown): string {
                     />
                   </button>
                 </template>
+                <div v-else class="mod-install-state" role="status">
+                  {{
+                    props.resourceType === "datapack"
+                      ? "没有同时满足版本和已有存档条件的服务器实例"
+                      : "没有兼容的服务器实例"
+                  }}
+                </div>
               </div>
 
               <div class="mod-install-separator"><span>或</span></div>
@@ -1132,6 +1256,100 @@ function errorMessage(error: unknown): string {
               <Download :size="16" :stroke-width="1.8" aria-hidden="true" />
               另存为
             </Cmz_Button>
+          </div>
+        </Cmz_Modal>
+        <Cmz_Modal
+          v-if="downloadEnabled"
+          :visible="datapackWorldModalOpen && !!installVersion && !!datapackTargetInstance"
+          title="数据包下载到存档"
+          width="520px"
+          :close-on-overlay="!installPendingTarget"
+          @close="closeDatapackWorldModal"
+          @update:visible="updateDatapackWorldModalVisible"
+        >
+          <div v-if="installVersion && datapackTargetInstance" class="mod-install-modal">
+            <div class="mod-install-file">
+              <span class="mod-project-icon mod-version-icon">
+                <img
+                  v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
+                  :src="selectedProject.iconUrl"
+                  alt=""
+                  draggable="false"
+                  referrerpolicy="no-referrer"
+                />
+                <component
+                  :is="resourceIcon"
+                  v-else
+                  :size="16"
+                  :stroke-width="1.7"
+                  aria-hidden="true"
+                />
+              </span>
+              <div>
+                <span>准备下载</span>
+                <strong>{{ installVersion.fileName }}</strong>
+              </div>
+            </div>
+
+            <div class="mod-install-target-context">
+              <span class="mod-install-instance-icon">
+                <img
+                  v-if="datapackTargetInstance.iconUrl"
+                  :src="datapackTargetInstance.iconUrl"
+                  alt=""
+                  draggable="false"
+                />
+                <span v-else>{{ datapackTargetInstance.name.charAt(0).toUpperCase() }}</span>
+              </span>
+              <div class="mod-install-instance-copy">
+                <strong>{{ datapackTargetInstance.name }}</strong>
+                <span>{{ datapackTargetInstance.gameVersion }}</span>
+              </div>
+            </div>
+
+            <h3>选择存档</h3>
+            <div class="mod-install-instance-list" aria-label="可用存档">
+              <button
+                v-for="world in datapackWorldTargets"
+                :key="world.id"
+                class="mod-install-instance"
+                type="button"
+                :disabled="!!installPendingTarget"
+                @click="installDatapackToWorld(world)"
+              >
+                <span class="mod-install-instance-icon">
+                  <img v-if="world.iconDataUrl" :src="world.iconDataUrl" alt="" draggable="false" />
+                  <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
+                </span>
+                <span class="mod-install-instance-copy">
+                  <strong>{{ world.name }}</strong>
+                  <span>{{ world.current ? "当前存档" : "存档" }}</span>
+                </span>
+                <span
+                  v-if="
+                    installPendingTarget ===
+                    datapackPendingTarget(datapackTargetInstance.id, world.id)
+                  "
+                  class="mod-loading-spinner"
+                  aria-label="正在下载"
+                />
+              </button>
+              <div v-if="datapackWorldTargets.length === 0" class="mod-install-state" role="status">
+                当前实例没有可用存档
+              </div>
+            </div>
+
+            <div v-if="installActionError" class="mod-install-feedback error" role="alert">
+              {{ installActionError }}
+            </div>
+            <button
+              class="mod-install-back"
+              type="button"
+              :disabled="!!installPendingTarget"
+              @click="backToInstallInstances"
+            >
+              返回服务器实例
+            </button>
           </div>
         </Cmz_Modal>
       </div>

@@ -196,12 +196,18 @@ export function expectServerModSaveAsRequest(value: unknown): ServerModSaveAsReq
 
 export function expectServerModInstallRequest(value: unknown): ServerModInstallRequest {
   const record = expectRecord(value, "server resource install request");
+  const resourceType = expectInstallableServerModResourceType(record.resourceType);
+  const worldId = record.worldId === undefined ? undefined : expectServerWorldId(record.worldId);
+  if (resourceType === "datapack" && worldId === undefined) {
+    throw new TypeError("server datapack install requires a target world");
+  }
   return {
     source: expectServerModSource(record.source),
-    resourceType: expectInstallableServerModResourceType(record.resourceType),
+    resourceType,
     projectId: expectServerModProjectId(record.projectId),
     versionId: expectServerModIdentity(record.versionId, "server resource version ID"),
     instanceId: expectServerModIdentity(record.instanceId, "server instance ID", 128),
+    ...(worldId === undefined ? {} : { worldId }),
   };
 }
 
@@ -240,6 +246,18 @@ function expectServerModIdentity(value: unknown, label: string, maximumLength = 
     throw new TypeError(`${label} is invalid`);
   }
   return identity;
+}
+function expectServerWorldId(value: unknown): string {
+  const worldId = expectString(value, "server world ID");
+  if (
+    worldId.length > 1_024 ||
+    worldId.includes("\\") ||
+    worldId.startsWith("/") ||
+    worldId.split("/").some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new TypeError("server world ID is invalid");
+  }
+  return worldId;
 }
 
 export function expectServerConfigurationWriteRequest(
