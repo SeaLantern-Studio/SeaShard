@@ -560,3 +560,83 @@
     padding-left: 14px;
   }
 }
+
+.world-save-list-toolbar {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.world-save-list-toolbar .world-save-search {
+  width: auto;
+  min-width: 0;
+  flex: 1;
+  min-height: 40px;
+}
+
+.world-save-add-button {
+  min-width: 88px;
+  height: 40px;
+  flex: 0 0 auto;
+}
+
+.world-save-grid {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.world-save-card {
+  width: 100%;
+  min-height: 94px;
+}
+
+.world-save-card-copy {
+  gap: 7px;
+}
+
+.world-save-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 16px;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-meta > span,
+.world-save-meta > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-meta > span {
+  flex: 0 1 260px;
+}
+
+.world-save-meta > small {
+  flex: 0 1 auto;
+  color: var(--sl-text-tertiary);
+  font-size: 11px;
+}
+
+.world-save-dimension-row {
+  width: 100%;
+}
+
+@media (max-width: 680px) {
+  .world-save-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .world-save-meta > span,
+  .world-save-meta > small {
+    max-width: 100%;
+  }
+}

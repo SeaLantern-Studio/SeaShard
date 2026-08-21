@@ -17,11 +17,10 @@ import {
   ChevronDown,
   Info,
   Plus,
-  RefreshCw,
+  RotateCcw,
   Search,
   Server,
   Trash2,
-  RotateCcw,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
@@ -36,7 +35,6 @@ const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const storage = ref<ServerWorldStorageSnapshot>();
 const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
 const loading = ref(true);
-const refreshing = ref(false);
 const error = ref<string>();
 const searchQuery = ref("");
 const expandedGroups = ref<Set<string>>(new Set());
@@ -125,7 +123,6 @@ async function loadStorage(): Promise<void> {
     return;
   }
   const currentRequestId = ++requestId;
-  refreshing.value = true;
   error.value = undefined;
   try {
     const result = await props.instances.listWorldStorage(instanceId);
@@ -139,8 +136,6 @@ async function loadStorage(): Promise<void> {
     }
   } catch (cause) {
     if (currentRequestId === requestId) error.value = errorMessage(cause);
-  } finally {
-    if (currentRequestId === requestId) refreshing.value = false;
   }
 }
 
@@ -307,13 +302,6 @@ function dimensionLabel(dimension: ServerWorldSave["dimension"]): string {
   return "主世界";
 }
 
-function runtimeStateLabel(state: ServerRuntimeSnapshot["state"] | undefined): string {
-  if (state === "starting") return "正在启动";
-  if (state === "running") return "运行中";
-  if (state === "stopping") return "正在停止";
-  return "已停止";
-}
-
 function formatDate(value: string | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -335,51 +323,32 @@ function errorMessage(cause: unknown): string {
 </script>
 
 <template>
-  <section class="server-world-save-page" aria-labelledby="server-world-save-title">
-    <header class="world-save-heading">
+  <section class="server-world-save-page" aria-label="存档">
+    <header v-if="viewMode === 'detail'" class="world-save-heading">
       <div class="world-save-heading-main">
-        <Cmz_Button
-          v-if="viewMode === 'detail'"
-          variant="ghost"
-          size="sm"
-          icon-only
-          aria-label="返回存档列表"
-          @click="goBack"
-        >
+        <Cmz_Button variant="ghost" size="sm" icon-only aria-label="返回存档列表" @click="goBack">
           <ArrowLeft :size="18" :stroke-width="1.8" />
         </Cmz_Button>
-        <h1 id="server-world-save-title">{{ viewMode === "detail" ? detailWorldName : "存档" }}</h1>
-      </div>
-      <div class="world-save-toolbar">
-        <span v-if="selectedInstance" class="world-save-instance">
-          <Server :size="15" :stroke-width="1.8" />
-          {{ selectedInstance.name }}
-        </span>
-        <span v-if="runtimeSnapshot" class="world-save-runtime" :class="{ active: activeRuntime }">
-          {{ runtimeStateLabel(runtimeSnapshot.state) }}
-        </span>
-        <Cmz_Button
-          v-if="viewMode === 'list'"
-          variant="outline"
-          size="sm"
-          :disabled="!selectedInstance"
-          @click="toast.info({ title: '添加存档功能尚未开放' })"
-        >
-          <Plus :size="16" :stroke-width="1.8" />
-          添加
-        </Cmz_Button>
-        <Cmz_Button
-          variant="ghost"
-          size="sm"
-          icon-only
-          aria-label="刷新存档列表"
-          :loading="refreshing"
-          @click="loadStorage"
-        >
-          <RefreshCw :size="16" :stroke-width="1.8" />
-        </Cmz_Button>
+        <h1 id="server-world-save-title">{{ detailWorldName }}</h1>
       </div>
     </header>
+
+    <div v-if="viewMode === 'list'" class="world-save-list-toolbar">
+      <div class="world-save-search">
+        <Search :size="17" :stroke-width="1.8" />
+        <input v-model="searchQuery" type="search" placeholder="搜索存档" aria-label="搜索存档" />
+      </div>
+      <Cmz_Button
+        variant="outline"
+        size="sm"
+        class="world-save-add-button"
+        :disabled="!selectedInstance"
+        @click="toast.info({ title: '添加存档功能尚未开放' })"
+      >
+        <Plus :size="16" :stroke-width="1.8" />
+        添加
+      </Cmz_Button>
+    </div>
 
     <div v-if="loading" class="world-save-state" role="status">
       <Cmz_Spinner size="lg" />
@@ -397,10 +366,6 @@ function errorMessage(cause: unknown): string {
     </div>
 
     <template v-else-if="viewMode === 'list'">
-      <div class="world-save-search">
-        <Search :size="17" :stroke-width="1.8" />
-        <input v-model="searchQuery" type="search" placeholder="搜索存档" aria-label="搜索存档" />
-      </div>
       <div v-if="storage?.mode === 'unified'" class="world-save-content">
         <div class="world-save-section-heading">
           <h2>普通存档</h2>
@@ -429,11 +394,13 @@ function errorMessage(cause: unknown): string {
               </span>
               <span class="world-save-card-copy">
                 <strong>{{ save.name }}</strong>
-                <span>{{ save.id }}</span>
-                <small
-                  >创建 {{ formatDate(save.createdAt) }}　更新
-                  {{ formatDate(save.updatedAt) }}</small
-                >
+                <span class="world-save-meta">
+                  <span>{{ save.id }}</span>
+                  <small
+                    >创建 {{ formatDate(save.createdAt) }}　更新
+                    {{ formatDate(save.updatedAt) }}</small
+                  >
+                </span>
               </span>
             </button>
             <span v-if="save.current" class="world-save-current">当前存档</span>
@@ -495,14 +462,16 @@ function errorMessage(cause: unknown): string {
                     <img v-if="save.iconDataUrl" :src="save.iconDataUrl" alt="" draggable="false" />
                     <Archive v-else :size="21" :stroke-width="1.5" />
                   </span>
-                  <span class="world-save-card-copy"
-                    ><strong>{{ dimensionLabel(save.dimension) }}</strong
-                    ><span>{{ save.name }}</span
-                    ><small
-                      >创建 {{ formatDate(save.createdAt) }}　更新
-                      {{ formatDate(save.updatedAt) }}</small
-                    ></span
-                  >
+                  <span class="world-save-card-copy">
+                    <strong>{{ dimensionLabel(save.dimension) }}</strong>
+                    <span class="world-save-meta">
+                      <span>{{ save.id }}</span>
+                      <small
+                        >创建 {{ formatDate(save.createdAt) }}　更新
+                        {{ formatDate(save.updatedAt) }}</small
+                      >
+                    </span>
+                  </span>
                 </button>
                 <span v-if="group.current" class="world-save-dimension-current">当前</span>
                 <button
