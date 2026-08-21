@@ -146,7 +146,7 @@ await test("world coordinator downloads and extracts without switching the activ
     );
     assert.equal(await readFile(join(root, "worlds", "keep.txt"), "utf8"), "other core data");
     assert.deepEqual(
-      [...(await readFile(join(root, "worlds-outer", "worlds-inner", "level.dat")))],
+      [...(await readFile(join(root, "worlds-outer", "world-inner", "level.dat")))],
       [7, 8, 9],
     );
   } finally {
@@ -154,7 +154,7 @@ await test("world coordinator downloads and extracts without switching the activ
   }
 });
 
-await test("world outer directory collision retries with a new UUID", async () => {
+await test("world outer directory collision retries with a new short ID", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-world-collision-"));
   try {
     const destination = join(root, "worlds-collision");
@@ -235,11 +235,7 @@ await test("world outer directory collision retries with a new UUID", async () =
     assert.equal(result.instanceId, instance.id);
     assert.equal(await readFile(join(destination, "keep.txt"), "utf8"), "existing");
     assert.deepEqual(
-      [
-        ...(await readFile(
-          join(root, "worlds-outer-success", "worlds-inner-success", "level.dat"),
-        )),
-      ],
+      [...(await readFile(join(root, "worlds-outer-success", "world-inner-success", "level.dat")))],
       [1],
     );
   } finally {

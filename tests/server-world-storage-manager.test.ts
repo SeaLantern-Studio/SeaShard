@@ -16,23 +16,23 @@ await test("world storage lists native and downloaded worlds with level metadata
   try {
     await writeFile(
       join(root, "server.properties"),
-      "# keep this\nlevel-name=worlds-outer/worlds-inner\n",
+      "# keep this\nlevel-name=worlds-outer/world-inner\n",
     );
     await createWorld(root, "world", "Native World");
-    await createWorld(root, "worlds-outer/worlds-inner", "Downloaded World", true);
+    await createWorld(root, "worlds-outer/world-inner", "Downloaded World", true);
 
     const snapshot = await listWorldStorage(instance(root, "fabric"));
     assert.equal(snapshot.mode, "unified");
-    assert.equal(snapshot.currentId, "worlds-outer/worlds-inner");
+    assert.equal(snapshot.currentId, "worlds-outer/world-inner");
     assert.deepEqual(
       snapshot.saves.map(({ id, name, current }) => ({ id, name, current })),
       [
-        { id: "worlds-outer/worlds-inner", name: "Downloaded World", current: true },
+        { id: "worlds-outer/world-inner", name: "Downloaded World", current: true },
         { id: "world", name: "Native World", current: false },
       ],
     );
     assert.match(
-      snapshot.saves.find(({ id }) => id === "worlds-outer/worlds-inner")?.iconDataUrl ?? "",
+      snapshot.saves.find(({ id }) => id === "worlds-outer/world-inner")?.iconDataUrl ?? "",
       /^data:image\/png;base64,/u,
     );
 
@@ -100,8 +100,8 @@ function instance(rootPath: string, serverType: string): ServerInstanceSnapshot 
     name: serverType,
     rootPath,
     coreJarPath: join(rootPath, "server.jar"),
-    storageMode: "managed",
     source: "downloaded",
+    storageMode: "managed",
     modLoader: null,
     serverType,
     gameVersion: "1.21.1",

@@ -453,6 +453,8 @@ export interface ServerInstanceSnapshot {
   rootPath: string;
   coreJarPath: string;
   iconPath?: string;
+  /** 备份根目录的随机六位标识；创建实例时生成并写入 seashard.json。 */
+  backupDirectoryId?: string;
   storageMode: ServerInstanceStorageMode;
   source: ServerInstanceSource;
   /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */

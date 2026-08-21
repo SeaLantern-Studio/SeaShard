@@ -9,10 +9,12 @@ import {
   type ServerModSaveAsRequest,
 } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
-import { randomUUID } from "node:crypto";
+import {
+  createShortRandomId,
+  type ServerInstanceManagerService,
+} from "@seashard/server-instance-manager";
 import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
-import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
 import { extractWorldArchive } from "./world-storage";
 interface InstallRequest extends ServerModInstallRequest {
@@ -33,7 +35,7 @@ export class ServerModDownloadCoordinator {
     private readonly catalog: ServerModCatalog,
     private readonly downloads: DownloadService,
     private readonly instances: ServerInstanceManagerService,
-    private readonly worldIdFactory: () => string = randomUUID,
+    private readonly worldIdFactory: () => string = createShortRandomId,
   ) {}
 
   async installToInstance(value: unknown): Promise<ServerModDownloadResult> {
@@ -62,7 +64,7 @@ export class ServerModDownloadCoordinator {
     );
     return resultOf(artifact, task, "instance", instance.id);
   }
-  /** 下载并解压到实例根目录下的 worlds-UUID/worlds-UUID 目录，不修改当前世界。 */
+  /** 下载并解压到实例根目录下的 worlds-六位标识/world-六位标识 目录，不修改当前世界。 */
   private async downloadWorldToInstance(
     artifact: ServerModArtifact,
     instance: ServerInstanceSnapshot,
@@ -91,7 +93,7 @@ export class ServerModDownloadCoordinator {
       if (!containerRoot) {
         throw new Error("世界存档目录生成冲突次数过多");
       }
-      const innerWorldId = `worlds-${this.worldIdFactory()}`;
+      const innerWorldId = `world-${this.worldIdFactory()}`;
       destinationRoot = resolve(containerRoot, innerWorldId);
       stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
       const archivePath = join(stagingRoot, "world.zip");

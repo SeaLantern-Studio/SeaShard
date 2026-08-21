@@ -15,6 +15,7 @@ import type {
 import {
   ServerInstanceManager,
   SQLiteServerInstanceRegistry,
+  createShortRandomId,
   portableInstanceMetadataDirectoryName,
   portableSeaShardInstanceFileName,
   portableServerInformationFileName,
@@ -33,6 +34,12 @@ const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", imp
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
 const iconBytes = Buffer.from("server-core-icon");
+
+await test("short directory IDs use six lowercase alphanumeric characters", () => {
+  for (let index = 0; index < 32; index += 1) {
+    assert.match(createShortRandomId(), /^[a-z0-9]{6}$/u);
+  }
+});
 
 /**
  * 预发布阶段曾把完整实例实体写进旧命名空间；其迁移摘要可能已落盘。
@@ -258,6 +265,8 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(seaShardManifest.id, instance.id);
       assert.equal(seaShardManifest.name, instance.name);
       assert.equal(seaShardManifest.icon, "icon.png");
+      assert.equal(seaShardManifest.backupDirectoryId, undefined);
+      assert.equal(instance.backupDirectoryId, undefined);
       assert.equal("gameVersion" in seaShardManifest, false);
       assert.equal(serverInformation.schemaVersion, 1);
       assert.equal(serverInformation.modLoader, "fabric");
@@ -327,7 +336,7 @@ await test("managed downloads persist unique instances and split portable manife
         "utf8",
       ),
     ) as PortableSeaShardInstanceManifest;
-    assert.match(customIconManifest.icon ?? "", /^icon-[a-f0-9-]+\.png$/u);
+    assert.match(customIconManifest.icon ?? "", /^icon-[a-z0-9]{6}\.png$/u);
     let persistedInstances = await manager.list();
     persistedInstances = persistedInstances.map((instance) =>
       instance.id === customIconInstance.id ? customIconInstance : instance,
@@ -403,8 +412,8 @@ await test("split portable JSON remains authoritative after path registration", 
       name: "original-name",
       rootPath,
       coreJarPath,
-      storageMode: "managed",
       source: "downloaded",
+      storageMode: "managed",
       modLoader: null,
       serverType: "paper",
       gameVersion: "1.21.1",
@@ -526,8 +535,8 @@ await test("existing managed instances inherit their server type icon on first r
       name: "1.21.1-arclight-fabric",
       rootPath,
       coreJarPath,
-      storageMode: "managed",
       source: "downloaded",
+      storageMode: "managed",
       modLoader: "fabric",
       serverType: request.serverType,
       gameVersion: request.gameVersion,

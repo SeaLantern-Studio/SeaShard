@@ -91,6 +91,7 @@ export interface PortableSeaShardInstanceManifest {
   storageMode: "managed" | "external";
   source: "downloaded" | "imported";
   icon?: string;
+  backupDirectoryId?: string;
   startupSettings?: ServerInstanceStartupSettings;
   lastStartedAt?: string;
   totalRuntimeMs?: number;

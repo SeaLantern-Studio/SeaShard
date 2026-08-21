@@ -27,6 +27,7 @@ import {
 import { listWorldStorage, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type { CreateManagedServerInstanceRequest, ServerWorldBackupSnapshot } from "./types";
+import { createShortRandomId } from "./directory-naming";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
 
 interface PendingManagedInstance {
@@ -115,7 +116,10 @@ export class ServerInstanceManager {
     const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       const metadataDirectory = resolve(instance.rootPath, portableInstanceMetadataDirectoryName);
-      const iconPath = resolve(metadataDirectory, `icon-${randomUUID()}.${icon.extension}`);
+      const iconPath = resolve(
+        metadataDirectory,
+        `icon-${createShortRandomId()}.${icon.extension}`,
+      );
       await mkdir(metadataDirectory, { recursive: true });
       await writeFile(iconPath, icon.bytes);
       const updated = {

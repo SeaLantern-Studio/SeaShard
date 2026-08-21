@@ -37,7 +37,7 @@ export function createPortableServerInformationManifest(
   };
 }
 
-/** 生成 SeaShard 私有实例数据；图标必须留在中立元数据目录中。 */
+/** 生成 SeaShard 私有实例数据；图标和备份目录标识必须留在中立元数据目录中。 */
 export function createPortableSeaShardInstanceManifest(
   instance: ServerInstanceSnapshot,
 ): PortableSeaShardInstanceManifest {
@@ -52,6 +52,14 @@ export function createPortableSeaShardInstanceManifest(
     storageMode: instance.storageMode,
     source: instance.source,
     ...(icon ? { icon } : {}),
+    ...(instance.backupDirectoryId
+      ? {
+          backupDirectoryId: expectString(
+            instance.backupDirectoryId,
+            "seashard.json backupDirectoryId",
+          ),
+        }
+      : {}),
     ...(instance.startupSettings ? { startupSettings: instance.startupSettings } : {}),
     ...(instance.lastStartedAt ? { lastStartedAt: instance.lastStartedAt } : {}),
     ...(instance.totalRuntimeMs === undefined ? {} : { totalRuntimeMs: instance.totalRuntimeMs }),
@@ -124,6 +132,10 @@ export async function readPortableInstanceManifests(
     "external",
   ]);
   const source = expectEnum(seaShard.source, "seashard.json source", ["downloaded", "imported"]);
+  const backupDirectoryId =
+    seaShard.backupDirectoryId === undefined || seaShard.backupDirectoryId === null
+      ? undefined
+      : expectString(seaShard.backupDirectoryId, "seashard.json backupDirectoryId");
   const icon =
     seaShard.icon === undefined
       ? undefined
@@ -168,6 +180,7 @@ export async function readPortableInstanceManifests(
     rootPath,
     coreJarPath: resolve(rootPath, corePath),
     ...(icon ? { iconPath: resolve(metadataDirectory, icon) } : {}),
+    ...(backupDirectoryId ? { backupDirectoryId } : {}),
     storageMode,
     source,
     modLoader,
