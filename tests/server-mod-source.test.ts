@@ -525,6 +525,52 @@ await test("Modrinth catalog skips malformed search hits and preserves page prog
   assert.equal(requests, 2);
 });
 
+await test("Modrinth datapacks normalize missing or unknown environments", async () => {
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    userAgent,
+    fetchProvider: () => async () => {
+      const missingEnvironment = {
+        ...projectFixture([]),
+        project_id: "datapack-missing-environment",
+        project_type: "mod",
+        all_project_types: ["mod", "datapack"],
+        icon_url: "",
+      } as Record<string, unknown>;
+      delete missingEnvironment.environment;
+      return Response.json({
+        hits: [
+          missingEnvironment,
+          {
+            ...projectFixture(["legacy_environment"]),
+            project_id: "datapack-unknown-environment",
+            project_type: "mod",
+            all_project_types: ["mod", "datapack"],
+            icon_url: "",
+          },
+        ],
+        offset: 0,
+        limit: 20,
+        total_hits: 2,
+      });
+    },
+  });
+
+  const result = await catalog.search(
+    searchRequest({
+      resourceType: "datapack",
+      query: "",
+      tag: "",
+      loader: "",
+      offset: 0,
+    }),
+  );
+  assert.deepEqual(
+    result.items.map((project) => project.environment),
+    [["server_only"], ["server_only"]],
+  );
+});
+
 await test("Modrinth catalog rejects a response whose offset does not match the request", async () => {
   const catalog = new ModrinthServerModCatalog({
     baseUrl: apiBaseUrl,

@@ -425,11 +425,11 @@ function parseProject(
   if (!matchesSearchResourceType(record, resourceType)) {
     throw new Error(`Modrinth project ${index} does not match ${resourceType}`);
   }
-  const environment = parseStringArray(
+  const environment = parseProjectEnvironment(
     record.environment,
     `Modrinth project ${index} environment`,
-    16,
-  ).filter((item): item is ServerModEnvironment => knownEnvironmentSet.has(item));
+    resourceType,
+  );
   if (resourceType === "mod" && !environment.some((item) => serverEnvironmentSet.has(item))) {
     throw new Error(`Modrinth project ${index} has no server-compatible environment`);
   }
@@ -475,6 +475,20 @@ function matchesSearchResourceType(
     project.project_type === "datapack" ||
     (Array.isArray(project.all_project_types) && project.all_project_types.includes("datapack"))
   );
+}
+
+function parseProjectEnvironment(
+  value: unknown,
+  label: string,
+  resourceType: ServerModrinthResourceType,
+): ServerModEnvironment[] {
+  // Datapack 的运行位置天然是服务端；Modrinth 部分数据包项目没有可用 environment。
+  // 统一投影为 server_only，避免合法数据包在 IPC 合约校验处被误判为坏项目。
+  if (resourceType === "datapack" && value === undefined) return ["server_only"];
+  const environment = parseStringArray(value, label, 16).filter(
+    (item): item is ServerModEnvironment => knownEnvironmentSet.has(item),
+  );
+  return resourceType === "datapack" && environment.length === 0 ? ["server_only"] : environment;
 }
 function parseProjectDetails(
   projectValue: unknown,
