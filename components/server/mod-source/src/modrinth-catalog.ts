@@ -13,6 +13,10 @@ import {
 } from "@seashard/contracts";
 
 export const defaultModrinthApiBaseUrl = "https://api.modrinth.com/v2/";
+/** MCIM 只作为官方 Modrinth API 失败后的备用元数据源。 */
+export const defaultMcimModrinthApiBaseUrl = "https://mod.mcimirror.top/modrinth/v2/";
+/** MCIM 文件 CDN 与 Modrinth CDN 使用相同的路径结构。 */
+export const defaultMcimModrinthFileBaseUrl = "https://mod.mcimirror.top/";
 
 const serverEnvironments = [
   "client_and_server",
@@ -98,6 +102,8 @@ export interface ModrinthServerModCatalogOptions {
   readonly fetchProvider?: () => typeof globalThis.fetch;
   readonly userAgent: string;
   readonly baseUrl?: string;
+  readonly fallbackBaseUrl?: string;
+  readonly fallbackFileBaseUrl?: string;
 }
 
 /** Host 内部下载投影；URL、大小和 SHA-512 不跨 Renderer 边界。 */
@@ -107,6 +113,7 @@ export interface ModrinthServerModArtifact {
   readonly versionId: string;
   readonly fileName: string;
   readonly url: string;
+  readonly fallbackUrl?: string;
   readonly sha512: string;
   readonly size: number;
   readonly gameVersions: readonly string[];
@@ -123,6 +130,8 @@ export class ModrinthServerModCatalog {
   private readonly fetchProvider: () => typeof globalThis.fetch;
   private readonly userAgent: string;
   private readonly baseUrl: URL;
+  private readonly fallbackBaseUrl?: URL;
+  private readonly fallbackFileBaseUrl?: URL;
   private readonly filtersPromises = new Map<
     ServerModrinthResourceType,
     Promise<ServerModFilters>
@@ -133,13 +142,16 @@ export class ModrinthServerModCatalog {
     if (!this.userAgent || this.userAgent.length > 256) {
       throw new TypeError("Modrinth User-Agent must be a non-empty string up to 256 characters");
     }
-    this.baseUrl = new URL(options.baseUrl ?? defaultModrinthApiBaseUrl);
-    if (this.baseUrl.protocol !== "https:") {
-      throw new TypeError("Modrinth API base URL must use HTTPS");
-    }
-    this.baseUrl.pathname = `${this.baseUrl.pathname.replace(/\/+$/u, "")}/`;
-    this.baseUrl.search = "";
-    this.baseUrl.hash = "";
+    this.baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? defaultModrinthApiBaseUrl,
+      "Modrinth API base URL",
+    );
+    this.fallbackBaseUrl = options.fallbackBaseUrl
+      ? normalizeBaseUrl(options.fallbackBaseUrl, "Modrinth fallback API base URL")
+      : undefined;
+    this.fallbackFileBaseUrl = options.fallbackFileBaseUrl
+      ? normalizeBaseUrl(options.fallbackFileBaseUrl, "Modrinth fallback file base URL")
+      : undefined;
   }
 
   async getFilters(resourceTypeValue: unknown): Promise<ServerModFilters> {
@@ -173,14 +185,18 @@ export class ModrinthServerModCatalog {
     if (request.gameVersion) facets.push([`versions:${request.gameVersion}`]);
     if (request.loader) facets.push([`categories:${request.loader}`]);
 
-    const url = this.endpoint("search");
-    if (request.query) url.searchParams.set("query", request.query);
-    url.searchParams.set("facets", JSON.stringify(facets));
-    url.searchParams.set("index", request.index);
-    url.searchParams.set("offset", String(request.offset));
-    url.searchParams.set("limit", String(request.limit));
-
-    return parseSearchResult(await this.fetchJson(url), request.resourceType, request.offset);
+    return this.fetchFromSources(
+      (baseUrl) => {
+        const url = this.endpoint("search", baseUrl);
+        if (request.query) url.searchParams.set("query", request.query);
+        url.searchParams.set("facets", JSON.stringify(facets));
+        url.searchParams.set("index", request.index);
+        url.searchParams.set("offset", String(request.offset));
+        url.searchParams.set("limit", String(request.limit));
+        return url;
+      },
+      (value) => parseSearchResult(value, request.resourceType, request.offset),
+    );
   }
 
   async getProjectDetails(
@@ -190,13 +206,17 @@ export class ModrinthServerModCatalog {
     const resourceType = expectResourceType(resourceTypeValue);
     const projectId = expectProjectId(projectValue);
     const projectPath = `project/${encodeURIComponent(projectId)}`;
-    const versionsUrl = this.endpoint(`${projectPath}/version`);
-    versionsUrl.searchParams.set("include_changelog", "false");
-    const [project, versions] = await Promise.all([
-      this.fetchJson(this.endpoint(projectPath)),
-      this.fetchJson(versionsUrl),
-    ]);
-    return parseProjectDetails(project, versions, projectId, resourceType);
+    return this.fetchGroupFromSources(
+      async (baseUrl) => {
+        const versionsUrl = this.endpoint(`${projectPath}/version`, baseUrl);
+        versionsUrl.searchParams.set("include_changelog", "false");
+        return Promise.all([
+          this.fetchJson(this.endpoint(projectPath, baseUrl)),
+          this.fetchJson(versionsUrl),
+        ]);
+      },
+      ([project, versions]) => parseProjectDetails(project, versions, projectId, resourceType),
+    );
   }
 
   /** 按稳定版本 ID 重新读取下载元数据，避免信任 Renderer 缓存的 URL 或哈希。 */
@@ -208,18 +228,38 @@ export class ModrinthServerModCatalog {
     const resourceType = expectDownloadableResourceType(resourceTypeValue);
     const projectId = expectProjectId(projectValue);
     const versionId = expectVersionId(versionValue);
-    const [project, version] = await Promise.all([
-      this.fetchJson(this.endpoint(`project/${encodeURIComponent(projectId)}`)),
-      this.fetchJson(this.endpoint(`version/${encodeURIComponent(versionId)}`)),
-    ]);
-    return parseVersionArtifact(project, version, resourceType, projectId, versionId);
+    return this.fetchGroupFromSources(
+      (baseUrl) =>
+        Promise.all([
+          this.fetchJson(this.endpoint(`project/${encodeURIComponent(projectId)}`, baseUrl)),
+          this.fetchJson(this.endpoint(`version/${encodeURIComponent(versionId)}`, baseUrl)),
+        ]),
+      ([project, version]) =>
+        parseVersionArtifact(
+          project,
+          version,
+          resourceType,
+          projectId,
+          versionId,
+          this.fallbackFileBaseUrl,
+        ),
+    );
   }
 
   private async loadFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters> {
     const [categories, versions, loaders] = await Promise.all([
-      this.fetchJson(this.endpoint("tag/category")),
-      this.fetchJson(this.endpoint("tag/game_version")),
-      this.fetchJson(this.endpoint("tag/loader")),
+      this.fetchFromSources(
+        (baseUrl) => this.endpoint("tag/category", baseUrl),
+        (value) => value,
+      ),
+      this.fetchFromSources(
+        (baseUrl) => this.endpoint("tag/game_version", baseUrl),
+        (value) => value,
+      ),
+      this.fetchFromSources(
+        (baseUrl) => this.endpoint("tag/loader", baseUrl),
+        (value) => value,
+      ),
     ]);
     return {
       sources: [{ id: "modrinth", label: "Modrinth" }],
@@ -229,8 +269,42 @@ export class ModrinthServerModCatalog {
     };
   }
 
-  private endpoint(path: string): URL {
-    return new URL(path, this.baseUrl);
+  private endpoint(path: string, baseUrl = this.baseUrl): URL {
+    return new URL(path, baseUrl);
+  }
+
+  private async fetchFromSources<T>(
+    createUrl: (baseUrl: URL) => URL,
+    parse: (value: unknown) => T,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (const baseUrl of this.sourceUrls()) {
+      try {
+        return parse(await this.fetchJson(createUrl(baseUrl)));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Modrinth source request failed");
+  }
+
+  private sourceUrls(): readonly URL[] {
+    return this.fallbackBaseUrl ? [this.baseUrl, this.fallbackBaseUrl] : [this.baseUrl];
+  }
+
+  private async fetchGroupFromSources<TValue, T>(
+    fetchGroup: (baseUrl: URL) => Promise<TValue>,
+    parse: (value: TValue) => T,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (const baseUrl of this.sourceUrls()) {
+      try {
+        return parse(await fetchGroup(baseUrl));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Modrinth source request failed");
   }
 
   private async fetchJson(url: URL): Promise<unknown> {
@@ -253,6 +327,15 @@ export class ModrinthServerModCatalog {
       throw new Error("Modrinth 返回了无效的 JSON 数据");
     }
   }
+}
+
+function normalizeBaseUrl(value: string, label: string): URL {
+  const url = new URL(value);
+  if (url.protocol !== "https:") throw new TypeError(`${label} must use HTTPS`);
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
+  url.search = "";
+  url.hash = "";
+  return url;
 }
 
 function expectSearchRequest(value: unknown): ServerModSearchRequest {
@@ -570,6 +653,7 @@ function parseVersionArtifact(
   resourceType: "mod" | "datapack",
   projectId: string,
   versionId: string,
+  fallbackFileBaseUrl?: URL,
 ): ModrinthServerModArtifact {
   const project = expectRecord(projectValue, "Modrinth download project");
   if (project.id !== projectId || !matchesDetailResourceType(project, resourceType)) {
@@ -613,12 +697,14 @@ function parseVersionArtifact(
   if (!/^[a-f0-9]{128}$/u.test(sha512)) {
     throw new Error("Modrinth download SHA-512 is invalid");
   }
+  const url = expectModFileUrl(file.url, projectId, fileName);
   return {
     resourceType,
     projectId,
     versionId,
     fileName,
-    url: expectModFileUrl(file.url, projectId, fileName),
+    url,
+    ...(fallbackFileBaseUrl ? { fallbackUrl: toFallbackModFileUrl(url, fallbackFileBaseUrl) } : {}),
     sha512,
     size: expectNonNegativeInteger(file.size, "Modrinth download file size"),
     gameVersions,
@@ -694,6 +780,11 @@ function expectModFileUrl(value: unknown, projectId: string, fileName: string): 
   return url.href;
 }
 
+function toFallbackModFileUrl(source: string, fallbackBaseUrl: URL): string | undefined {
+  const sourceUrl = new URL(source);
+  if (sourceUrl.hostname !== "cdn.modrinth.com") return undefined;
+  return new URL(sourceUrl.pathname.slice(1), fallbackBaseUrl).href;
+}
 function expectArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
   return value;

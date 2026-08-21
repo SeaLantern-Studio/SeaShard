@@ -26,8 +26,8 @@ function requestUrl(input: string | URL | Request): URL {
 
 class FakeDownloadService implements DownloadService {
   readonly requests: StartDownloadRequest[] = [];
+  readonly failedUrls = new Set<string>();
   private readonly tasks = new Map<string, DownloadTaskSnapshot>();
-
   async start(request: StartDownloadRequest): Promise<DownloadTaskSnapshot> {
     this.requests.push(request);
     const id = `mod-task-${this.requests.length}`;
@@ -54,6 +54,16 @@ class FakeDownloadService implements DownloadService {
   async wait(taskId: string): Promise<DownloadTaskSnapshot | null> {
     const task = this.tasks.get(taskId);
     if (!task) return null;
+    if (this.failedUrls.has(task.url)) {
+      const failed: DownloadTaskSnapshot = {
+        ...task,
+        state: "failed",
+        error: "fixture download failure",
+        finishedAt: "2026-08-20T00:00:01.000Z",
+      };
+      this.tasks.set(taskId, failed);
+      return failed;
+    }
     const completed: DownloadTaskSnapshot = {
       ...task,
       state: "completed",
@@ -237,6 +247,59 @@ await test("Modrinth search builds fixed server facets and returns a bounded saf
     limit: 20,
     total: 41,
   });
+});
+
+await test("MCIM fallback switches project detail groups without mixing sources", async () => {
+  const officialBaseUrl = new URL(apiBaseUrl).origin;
+  const fallbackBaseUrl = "https://mcim.modrinth.test/modrinth/v2/";
+  const requests: URL[] = [];
+  const project = {
+    id: "server-mod-1",
+    project_type: "mod",
+    body: "MCIM project",
+  };
+  const versions = [
+    {
+      id: "version-fabric-1",
+      project_id: "server-mod-1",
+      game_versions: ["1.21.1"],
+      loaders: ["fabric"],
+      downloads: 10,
+      date_published: "2026-08-17T11:00:00Z",
+      files: [{ filename: "server-tools.jar", primary: true }],
+    },
+  ];
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    fallbackBaseUrl,
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      requests.push(url);
+      if (url.origin === officialBaseUrl && url.pathname.endsWith("/version")) {
+        return new Response("official version unavailable", { status: 503 });
+      }
+      if (url.origin === officialBaseUrl) {
+        return Response.json({ ...project, body: "official project" });
+      }
+      if (url.origin === "https://mcim.modrinth.test") {
+        return url.pathname.endsWith("/version") ? Response.json(versions) : Response.json(project);
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+
+  const result = await catalog.getProjectDetails("mod", "server-mod-1");
+  assert.equal(result.body, "MCIM project");
+  assert.deepEqual(
+    requests.map((url) => `${url.origin}${url.pathname}`),
+    [
+      "https://api.modrinth.test/v2/project/server-mod-1",
+      "https://api.modrinth.test/v2/project/server-mod-1/version",
+      "https://mcim.modrinth.test/modrinth/v2/project/server-mod-1",
+      "https://mcim.modrinth.test/modrinth/v2/project/server-mod-1/version",
+    ],
+  );
 });
 await test("Modrinth project details expose the full body and primary version files", async () => {
   const requests: URL[] = [];
@@ -473,6 +536,78 @@ await test("Modrinth artifact resolution rejects unsupported projects and untrus
   await assert.rejects(
     catalog.resolveVersionArtifact("mod", "server-mod-1", "version-fabric-1"),
     /outside the trusted CDN path/,
+  );
+});
+
+await test("MCIM file fallback preserves checksum and destination after failure", async () => {
+  const fileName = "server-tools-fabric-1.21.1.jar";
+  const sha512 = "c".repeat(128);
+  const officialUrl = `https://cdn.modrinth.com/data/server-mod-1/versions/version-fabric-1/${fileName}`;
+  const fallbackUrl = `https://mcim.modrinth.test/data/server-mod-1/versions/version-fabric-1/${fileName}`;
+  const catalog = new ModrinthServerModCatalog({
+    baseUrl: apiBaseUrl,
+    fallbackFileBaseUrl: "https://mcim.modrinth.test/",
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      return url.pathname.endsWith("/project/server-mod-1")
+        ? Response.json({
+            id: "server-mod-1",
+            project_type: "mod",
+            server_side: "required",
+          })
+        : Response.json({
+            id: "version-fabric-1",
+            project_id: "server-mod-1",
+            game_versions: ["1.21.1"],
+            loaders: ["fabric"],
+            files: [
+              {
+                filename: fileName,
+                primary: true,
+                size: 2_048,
+                hashes: { sha512, sha1: "d".repeat(40) },
+                url: officialUrl,
+              },
+            ],
+          });
+    },
+  });
+  const artifact = await catalog.resolveVersionArtifact("mod", "server-mod-1", "version-fabric-1");
+  assert.equal(artifact.fallbackUrl, fallbackUrl);
+
+  const downloads = new FakeDownloadService();
+  downloads.failedUrls.add(officialUrl);
+  const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instanceService([]));
+  const destinationDirectory = resolve("test-fixtures/server-mod/fallback-exports");
+  await coordinator.saveToDirectory({
+    resourceType: "mod",
+    projectId: "server-mod-1",
+    versionId: "version-fabric-1",
+    destinationDirectory,
+    connections: 8,
+  });
+  assert.deepEqual(
+    downloads.requests.map(({ url, destinationPath, expectedBytes: bytes, sha512: hash }) => ({
+      url,
+      destinationPath,
+      bytes,
+      hash,
+    })),
+    [
+      {
+        url: officialUrl,
+        destinationPath: resolve(destinationDirectory, fileName),
+        bytes: 2_048,
+        hash: sha512,
+      },
+      {
+        url: fallbackUrl,
+        destinationPath: resolve(destinationDirectory, fileName),
+        bytes: 2_048,
+        hash: sha512,
+      },
+    ],
   );
 });
 

@@ -76,8 +76,33 @@ export class ServerModDownloadCoordinator {
     connections: number,
     instanceId?: string,
   ): Promise<DownloadTaskSnapshot> {
+    const urls = [artifact.url, artifact.fallbackUrl].filter((url): url is string => Boolean(url));
+    let lastError: unknown;
+    for (const url of urls) {
+      try {
+        return await this.startAndWaitFromUrl(
+          artifact,
+          url,
+          destinationDirectory,
+          connections,
+          instanceId,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("服务器资源下载失败");
+  }
+
+  private async startAndWaitFromUrl(
+    artifact: ModrinthServerModArtifact,
+    url: string,
+    destinationDirectory: string,
+    connections: number,
+    instanceId?: string,
+  ): Promise<DownloadTaskSnapshot> {
     const task = await this.downloads.start({
-      url: artifact.url,
+      url,
       destinationPath: resolve(destinationDirectory, artifact.fileName),
       expectedBytes: artifact.size,
       sha512: artifact.sha512,

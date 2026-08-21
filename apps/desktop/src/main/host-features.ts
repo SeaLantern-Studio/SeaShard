@@ -13,7 +13,12 @@ import {
   createServerCoreSourceModule,
   serverCoreSourceManifest,
 } from "@seashard/server-core-source";
-import { createServerModSourceModule, serverModSourceManifest } from "@seashard/server-mod-source";
+import {
+  createServerModSourceModule,
+  defaultMcimModrinthApiBaseUrl,
+  defaultMcimModrinthFileBaseUrl,
+  serverModSourceManifest,
+} from "@seashard/server-mod-source";
 import {
   createServerConfigurationModule,
   serverConfigurationManifest,
@@ -147,7 +152,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       },
     ],
   });
-  // Modrinth 目录独立于服务器核心源；只发布受控的服务端 Mod 搜索与筛选能力。
+  // 官方 Modrinth 失败时切换 MCIM；文件下载失败时由协调器再尝试 MCIM CDN。
   await kernel.registerBuiltIn({
     manifest: serverModSourceManifest,
     loaders: {
@@ -156,6 +161,8 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
           createServerModSourceModule({
             fetchProvider: downloadFetchProvider,
             userAgent: `SeaShard/${seaShardVersion}`,
+            fallbackBaseUrl: defaultMcimModrinthApiBaseUrl,
+            fallbackFileBaseUrl: defaultMcimModrinthFileBaseUrl,
           }),
       },
     },
