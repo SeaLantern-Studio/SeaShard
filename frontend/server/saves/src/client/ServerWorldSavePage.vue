@@ -405,16 +405,17 @@ function errorMessage(cause: unknown): string {
               </span>
             </button>
             <span v-if="save.current" class="world-save-current-label">当前</span>
-            <Cmz_Button
-              variant="outline"
-              size="sm"
-              icon-only
-              class="world-save-info"
-              aria-label="查看存档详情"
-              @click="openDetails(save.id, save.name)"
-            >
-              <Info :size="17" :stroke-width="1.8" />
-            </Cmz_Button>
+            <span class="world-save-info">
+              <Cmz_Button
+                variant="outline"
+                size="sm"
+                icon-only
+                aria-label="查看存档详情"
+                @click="openDetails(save.id, save.name)"
+              >
+                <Info :size="17" :stroke-width="1.8" />
+              </Cmz_Button>
+            </span>
           </article>
         </div>
       </div>
@@ -476,16 +477,17 @@ function errorMessage(cause: unknown): string {
                   </span>
                 </button>
                 <span v-if="group.current" class="world-save-current-label">当前</span>
-                <Cmz_Button
-                  variant="outline"
-                  size="sm"
-                  icon-only
-                  class="world-save-info"
-                  aria-label="查看存档详情"
-                  @click.stop="openDetails(group.id, group.name)"
-                >
-                  <Info :size="17" :stroke-width="1.8" />
-                </Cmz_Button>
+                <span class="world-save-info">
+                  <Cmz_Button
+                    variant="outline"
+                    size="sm"
+                    icon-only
+                    aria-label="查看存档详情"
+                    @click.stop="openDetails(group.id, group.name)"
+                  >
+                    <Info :size="17" :stroke-width="1.8" />
+                  </Cmz_Button>
+                </span>
               </div>
             </div>
           </article>
