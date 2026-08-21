@@ -640,3 +640,65 @@
     max-width: 100%;
   }
 }
+
+/* 存档列表按资源列表密度收紧；状态由当前边框表达，不再占用第三行。 */
+.world-save-list-toolbar .world-save-search {
+  height: 32px;
+  min-height: 32px;
+  padding: 4px 12px;
+}
+
+.world-save-add-button {
+  height: 32px;
+  min-height: 32px;
+}
+
+.world-save-grid {
+  gap: 5px;
+}
+
+.world-save-card {
+  min-height: 0;
+}
+
+.world-save-card-main {
+  padding: 5px 14px;
+}
+
+.world-save-card-copy {
+  gap: 4px;
+}
+
+.world-save-card-copy strong {
+  font-size: var(--sl-font-size-md);
+}
+
+.world-save-meta {
+  gap: 14px;
+  font-size: var(--sl-font-size-sm);
+}
+
+.world-save-meta > small {
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-info {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--sl-radius-md);
+}
+
+.world-save-card > .world-save-info {
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+}
+
+.world-save-dimension-row .world-save-card-main {
+  padding: 5px 8px;
+}
+
+.world-save-dimension-row .world-save-info {
+  width: 36px;
+  height: 36px;
+}

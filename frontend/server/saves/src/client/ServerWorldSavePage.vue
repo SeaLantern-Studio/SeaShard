@@ -403,7 +403,6 @@ function errorMessage(cause: unknown): string {
                 </span>
               </span>
             </button>
-            <span v-if="save.current" class="world-save-current">当前存档</span>
             <button
               type="button"
               class="world-save-info"
@@ -442,7 +441,6 @@ function errorMessage(cause: unknown): string {
                 ><strong>{{ group.name }}</strong
                 ><span>{{ group.saves.length }} 个维度</span></span
               >
-              <span v-if="group.current" class="world-save-current">当前存档</span>
               <ChevronDown
                 class="world-save-chevron"
                 :class="{ expanded: isExpanded(group.id) }"
@@ -473,7 +471,6 @@ function errorMessage(cause: unknown): string {
                     </span>
                   </span>
                 </button>
-                <span v-if="group.current" class="world-save-dimension-current">当前</span>
                 <button
                   type="button"
                   class="world-save-info"
