@@ -1,14 +1,12 @@
 import {
   serverDownloadConnectionLimits,
   supportsUnifiedWorldStorage,
-  type ServerConfigurationService,
   type ServerInstanceSnapshot,
   type ServerModDownloadResult,
   type ServerModDownloadableResourceType,
   type ServerModInstallRequest,
   type ServerModLoader,
   type ServerModSaveAsRequest,
-  type ServerRuntimeService,
 } from "@seashard/contracts";
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import { randomUUID } from "node:crypto";
@@ -16,7 +14,7 @@ import { mkdtemp, mkdir, rename, rm } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
-import { extractWorldArchive, setServerLevelName } from "./world-storage";
+import { extractWorldArchive } from "./world-storage";
 interface InstallRequest extends ServerModInstallRequest {
   readonly connections: number;
 }
@@ -35,8 +33,6 @@ export class ServerModDownloadCoordinator {
     private readonly catalog: ServerModCatalog,
     private readonly downloads: DownloadService,
     private readonly instances: ServerInstanceManagerService,
-    private readonly runtime?: ServerRuntimeService,
-    private readonly configuration?: ServerConfigurationService,
   ) {}
 
   async installToInstance(value: unknown): Promise<ServerModDownloadResult> {
@@ -50,7 +46,7 @@ export class ServerModDownloadCoordinator {
       request.versionId,
     );
     if (request.resourceType === "world") {
-      return this.installWorldToInstance(artifact, instance);
+      return this.downloadWorldToInstance(artifact, instance);
     }
     assertCompatibleInstance(artifact, instance);
     const destinationDirectory =
@@ -66,30 +62,17 @@ export class ServerModDownloadCoordinator {
     return resultOf(artifact, task, "instance", instance.id);
   }
 
-  /** 下载、校验并安装单目录多维度世界，同时更新实例的 level-name。 */
-  private async installWorldToInstance(
+  /** 下载并解压到实例托管的 worlds 目录，但不修改 server.properties 或当前世界。 */
+  private async downloadWorldToInstance(
     artifact: ServerModArtifact,
     instance: ServerInstanceSnapshot,
   ): Promise<ServerModDownloadResult> {
     if (!supportsUnifiedWorldStorage(instance.serverType)) {
       throw new Error("当前服务器核心不支持普通世界存档下载");
     }
-    if (!this.runtime || !this.configuration) {
-      throw new Error("世界下载所需的服务器运行与配置服务不可用");
-    }
-    const runtime = await this.runtime.get(instance.id);
-    if (runtime.state !== "stopped") {
-      throw new Error("请先停止服务器，再下载并切换世界");
-    }
-    const configuration = await this.configuration.list(instance.id);
-    const serverFile = configuration.serverFiles.find(({ path }) => path === "server.properties");
-    if (!serverFile) throw new Error("服务器缺少 server.properties");
-    const document = await this.configuration.read(instance.id, serverFile.path);
-    const worldRoot = resolve(configuration.configurationRootPath, "worlds");
+    const worldRoot = resolve(instance.rootPath, "worlds");
     await mkdir(worldRoot, { recursive: true });
-    const stagingRoot = await mkdtemp(
-      resolve(configuration.configurationRootPath, ".seashard-world-"),
-    );
+    const stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
     const archivePath = join(stagingRoot, "world.zip");
     const extractedRoot = join(stagingRoot, "extracted");
     const worldId = `world-${randomUUID()}`;
@@ -98,13 +81,6 @@ export class ServerModDownloadCoordinator {
       const task = await this.startAndWait(artifact, stagingRoot, 8, instance.id, archivePath);
       await extractWorldArchive(archivePath, extractedRoot);
       await rename(extractedRoot, destinationRoot);
-      const relativeWorldPath = `worlds/${worldId}`;
-      await this.configuration.write({
-        instanceId: instance.id,
-        path: document.path,
-        content: setServerLevelName(document.content, relativeWorldPath),
-        expectedRevision: document.revision,
-      });
       return resultOf(artifact, task, "instance", instance.id);
     } catch (error) {
       await rm(destinationRoot, { recursive: true, force: true });

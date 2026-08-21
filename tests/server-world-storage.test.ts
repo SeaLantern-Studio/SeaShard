@@ -4,21 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { zipSync } from "fflate";
-import {
-  extractWorldArchive,
-  setServerLevelName,
-} from "../components/server/mod-source/src/world-storage.ts";
+import { extractWorldArchive } from "../components/server/mod-source/src/world-storage.ts";
 import { ServerModDownloadCoordinator } from "../components/server/mod-source/src/download-coordinator.ts";
 import type {
   ServerModArtifact,
   ServerModCatalog,
 } from "../components/server/mod-source/src/catalog-types.ts";
-import type {
-  ServerConfigurationService,
-  ServerConfigurationWriteRequest,
-  ServerInstanceSnapshot,
-  ServerRuntimeService,
-} from "../packages/contracts/src/index.ts";
+import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
 import type {
   DownloadService,
   DownloadTaskSnapshot,
@@ -59,23 +51,9 @@ await test("world archive extraction rejects traversal entries before writing fi
   }
 });
 
-await test("server.properties world path replacement preserves existing newline style", () => {
-  assert.equal(
-    setServerLevelName(
-      "motd=SeaShard\r\nlevel-name=old-world\r\nenforce-whitelist=true\r\n",
-      "worlds/new-world",
-    ),
-    "motd=SeaShard\r\nlevel-name=worlds/new-world\r\nenforce-whitelist=true\r\n",
-  );
-  assert.equal(
-    setServerLevelName("motd=SeaShard\n", "worlds/new-world"),
-    "motd=SeaShard\nlevel-name=worlds/new-world\n",
-  );
-});
-await test("world coordinator installs an archive and switches server.properties", async () => {
+await test("world coordinator downloads and extracts without switching the active world", async () => {
   const root = await mkdtemp(join(tmpdir(), "seashard-world-install-"));
   try {
-    const configurationRootPath = join(root, "server");
     const archive = zipSync({
       "Adventure/level.dat": new Uint8Array([7, 8, 9]),
       "Adventure/region/r.0.0.mca": new Uint8Array([10]),
@@ -110,47 +88,6 @@ await test("world coordinator installs an archive and switches server.properties
     const instances = {
       list: async () => [instance],
     } as unknown as ServerInstanceManagerService;
-    const runtime = {
-      get: async () => ({ instanceId: instance.id, state: "stopped" as const }),
-    } as unknown as ServerRuntimeService;
-    const serverFile = {
-      path: "server.properties",
-      name: "server.properties",
-      kind: "properties" as const,
-      scope: "server" as const,
-    };
-    const document = {
-      ...serverFile,
-      instanceId: instance.id,
-      content: "motd=SeaShard\nlevel-name=old-world\n",
-      revision: "revision-1",
-      encoding: "utf-8" as const,
-      modifiedAt: "2026-08-20T00:00:00.000Z",
-    };
-    let written:
-      | {
-          instanceId: string;
-          path: string;
-          content: string;
-          expectedRevision: string;
-        }
-      | undefined;
-    const configuration = {
-      list: async () => ({
-        instanceId: instance.id,
-        serverType: "fabric",
-        configurationRootPath,
-        pluginSupported: false,
-        serverFiles: [serverFile],
-        otherFiles: [],
-        plugins: [],
-      }),
-      read: async () => document,
-      write: async (request: ServerConfigurationWriteRequest) => {
-        written = request;
-        return { ...document, content: request.content };
-      },
-    } as unknown as ServerConfigurationService;
     let startRequest: StartDownloadRequest | undefined;
     const downloads = {
       start: async (request: StartDownloadRequest) => {
@@ -183,13 +120,7 @@ await test("world coordinator installs an archive and switches server.properties
         }) satisfies DownloadTaskSnapshot,
     } as unknown as DownloadService;
 
-    const coordinator = new ServerModDownloadCoordinator(
-      catalog,
-      downloads,
-      instances,
-      runtime,
-      configuration,
-    );
+    const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
     const result = await coordinator.installToInstance({
       source: "modrinth",
       resourceType: "world",
@@ -203,19 +134,16 @@ await test("world coordinator installs an archive and switches server.properties
     assert.equal(result.downloadedBytes, archive.byteLength);
     assert.equal(startRequest?.connections, 8);
     assert.equal(
-      (startRequest?.metadata as unknown as { resourceType?: string } | undefined)?.resourceType,
-      "world",
+      await access(join(root, "server.properties")).then(
+        () => true,
+        () => false,
+      ),
+      false,
     );
-    assert.ok(written);
-    assert.match(written.content, /^level-name=worlds\/world-[^\\n]+/mu);
-    const worldDirectories = await readdir(join(configurationRootPath, "worlds"));
+    const worldDirectories = await readdir(join(root, "worlds"));
     assert.equal(worldDirectories.length, 1);
     assert.deepEqual(
-      [
-        ...(await readFile(
-          join(configurationRootPath, "worlds", worldDirectories[0]!, "level.dat"),
-        )),
-      ],
+      [...(await readFile(join(root, "worlds", worldDirectories[0]!, "level.dat")))],
       [7, 8, 9],
     );
   } finally {

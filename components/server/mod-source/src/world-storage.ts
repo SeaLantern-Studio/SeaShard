@@ -52,27 +52,6 @@ export async function extractWorldArchive(archivePath: string, stagingRoot: stri
   }
 }
 
-/** 保留 server.properties 原有换行与其他字段，只更新世界目录指针。 */
-export function setServerLevelName(content: string, relativeWorldPath: string): string {
-  const normalizedPath = relativeWorldPath.replaceAll("\\", "/").trim();
-  if (!normalizedPath || normalizedPath.includes("\0") || normalizedPath.startsWith("/")) {
-    throw new TypeError("世界目录路径无效");
-  }
-  const newline = content.includes("\r\n") ? "\r\n" : "\n";
-  const hasTrailingNewline = content.length > 0 && /\r\n|\n|\r/u.test(content.slice(-2));
-  const lines = content.length === 0 ? [] : content.split(/\r\n|\n|\r/u);
-  if (hasTrailingNewline) lines.pop();
-  let replaced = false;
-  const next = lines.map((line) => {
-    if (!/^level-name\s*=/u.test(line)) return line;
-    replaced = true;
-    return `level-name=${normalizedPath}`;
-  });
-  if (!replaced) next.push(`level-name=${normalizedPath}`);
-  if (hasTrailingNewline) next.push("");
-  return next.join(newline);
-}
-
 function chooseWorldRoot(levelRoots: readonly string[]): string {
   const uniqueRoots = [...new Set(levelRoots)];
   if (uniqueRoots.includes("")) return "";

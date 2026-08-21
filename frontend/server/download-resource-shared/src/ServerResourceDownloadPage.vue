@@ -12,7 +12,6 @@ import {
   type ServerModSearchResult,
   type ServerModSourceClientService,
   type ServerModVersion,
-  type ServerRuntimeClientService,
 } from "@seashard/contracts";
 import {
   Cmz_Button,
@@ -57,7 +56,6 @@ import {
 const props = defineProps<{
   resources: ServerModSourceClientService;
   instances?: ServerInstanceClientService;
-  runtime?: ServerRuntimeClientService;
   resourceType: "modpack" | "datapack" | "world";
 }>();
 const showLoaderFilter = computed(() => props.resourceType === "modpack");
@@ -89,7 +87,7 @@ const resourceIcon = computed(() =>
 const canInstallToInstance = computed(
   () =>
     (props.resourceType === "datapack" && !!props.instances) ||
-    (props.resourceType === "world" && !!props.instances && !!props.runtime),
+    (props.resourceType === "world" && !!props.instances),
 );
 const downloadEnabled = computed(() => true);
 const favoriteStorageKey = computed(() => `seashard.server-${props.resourceType}.favorites`);
@@ -526,20 +524,7 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
     const instances = await props.instances.list();
     if (requestId !== installInstancesRequestId) return;
     const candidates = compatibleServerResourceInstances(version, instances);
-    if (props.resourceType !== "world" || !props.runtime) {
-      compatibleInstances.value = candidates;
-    } else {
-      const runtime = props.runtime;
-      const states = await Promise.all(
-        candidates.map(async (instance) => ({
-          instance,
-          state: await runtime.get(instance.id),
-        })),
-      );
-      compatibleInstances.value = states
-        .filter(({ state }) => state.state === "stopped")
-        .map(({ instance }) => instance);
-    }
+    compatibleInstances.value = candidates;
   } catch (error) {
     if (requestId === installInstancesRequestId) {
       installInstancesError.value = errorMessage(error);
@@ -1126,7 +1111,7 @@ function errorMessage(error: unknown): string {
                     <span
                       v-if="installPendingTarget === instance.id"
                       class="mod-loading-spinner"
-                      aria-label="正在安装"
+                      aria-label="正在下载"
                     />
                   </button>
                 </template>
