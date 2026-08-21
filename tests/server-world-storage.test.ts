@@ -121,12 +121,9 @@ await test("world coordinator downloads and extracts without switching the activ
           finishedAt: "2026-08-20T00:00:01.000Z",
         }) satisfies DownloadTaskSnapshot,
     } as unknown as DownloadService;
-
-    const coordinator = new ServerModDownloadCoordinator(
-      catalog,
-      downloads,
-      instances,
-      () => "success",
+    const worldIds = ["outer", "inner"];
+    const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances, () =>
+      worldIds.shift()!,
     );
     const result = await coordinator.installToInstance({
       source: "modrinth",
@@ -148,7 +145,10 @@ await test("world coordinator downloads and extracts without switching the activ
       false,
     );
     assert.equal(await readFile(join(root, "worlds", "keep.txt"), "utf8"), "other core data");
-    assert.deepEqual([...(await readFile(join(root, "worlds-success", "level.dat")))], [7, 8, 9]);
+    assert.deepEqual(
+      [...(await readFile(join(root, "worlds-outer", "worlds-inner", "level.dat")))],
+      [7, 8, 9],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
