@@ -125,7 +125,7 @@
   gap: 10px;
   padding: 6px 11px;
   border: 1px solid var(--sl-border-light);
-  border-radius: var(--sl-radius-sm);
+  border-radius: var(--sl-radius-md);
   background: color-mix(in srgb, var(--sl-surface) 88%, var(--sl-bg-secondary));
   color: inherit;
   font: inherit;
