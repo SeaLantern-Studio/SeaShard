@@ -1,0 +1,28 @@
+.mod-detail-filter-grid {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 18px;
+  margin: 1px 0 0;
+}
+
+.mod-detail-filter-grid.single-filter {
+  grid-template-columns: minmax(260px, 1fr);
+}
+
+.mod-detail-filter-grid .mod-filter-field {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+}
+
+.mod-detail-filter-grid .mod-filter-field > span {
+  font-size: inherit;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .mod-detail-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+}

@@ -1,0 +1,219 @@
+.mod-detail-action:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
+
+.mod-detail-summary {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--sl-surface) 90%, var(--sl-bg-secondary));
+}
+
+.mod-detail-summary-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 64px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 14px;
+}
+
+.mod-detail-icon {
+  width: 64px;
+  height: 64px;
+  flex-basis: 64px;
+  border-radius: 14px;
+}
+
+.mod-detail-project-copy {
+  min-width: 0;
+}
+
+.mod-detail-title-line {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.mod-detail-title-line > strong {
+  overflow: visible;
+  max-width: none;
+  font-size: 1.18rem;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.mod-detail-title-line .mod-project-original-name {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.mod-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.mod-detail-tags span {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.mod-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 9px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.76rem;
+}
+
+.mod-detail-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mod-detail-downloads {
+  width: 64px;
+  min-width: 64px;
+}
+
+.mod-detail-description-block {
+  margin-top: 17px;
+}
+
+.mod-detail-description {
+  max-height: 6.88em;
+  overflow: hidden;
+  margin: 0;
+  color: var(--sl-text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.mod-detail-description :deep(.cmz-md) {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.mod-detail-description :deep(.cmz-md > :first-child) {
+  margin-top: 0;
+}
+
+.mod-detail-description :deep(.cmz-md > :last-child) {
+  margin-bottom: 0;
+}
+
+.mod-detail-description :deep(a) {
+  color: var(--sl-primary);
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+
+.mod-detail-description-block.expanded .mod-detail-description {
+  max-height: none;
+  overflow: visible;
+}
+
+.mod-detail-description-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 3px 1px;
+  border: 0;
+  background: transparent;
+  color: var(--sl-primary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mod-detail-description-toggle > svg {
+  transition: transform var(--sl-transition-fast);
+}
+
+.mod-detail-description-block.expanded .mod-detail-description-toggle > svg {
+  transform: rotate(180deg);
+}
+
+.mod-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 17px;
+}
+
+.mod-detail-action {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 8px;
+  background: var(--sl-surface);
+  color: var(--sl-text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.mod-detail-action:hover,
+.mod-detail-action.active {
+  border-color: color-mix(in srgb, var(--sl-primary) 30%, var(--sl-border));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+}
+
+.mod-detail-action.copy-success {
+  border-color: color-mix(in srgb, var(--sl-success) 34%, var(--sl-border));
+  background: var(--sl-success-bg);
+  color: var(--sl-success);
+}
+
+.mod-detail-action.copy-error {
+  border-color: color-mix(in srgb, var(--sl-error) 34%, var(--sl-border));
+  background: var(--sl-error-bg);
+  color: var(--sl-error);
+}
+
+@media (max-width: 760px) {
+  .mod-detail-summary-main {
+    grid-template-columns: 56px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .mod-detail-icon {
+    width: 56px;
+    height: 56px;
+    flex-basis: 56px;
+  }
+
+  .mod-detail-downloads {
+    grid-column: 2;
+    width: auto;
+    min-width: 0;
+    grid-auto-flow: column;
+    justify-content: start;
+  }
+}

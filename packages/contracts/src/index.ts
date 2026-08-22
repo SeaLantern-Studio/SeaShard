@@ -255,12 +255,13 @@ export interface ServerModFilterOption {
   label: string;
 }
 
-/** Modrinth 可用于服务端资源检索的稳定筛选元数据。 */
+/** 单个服务端资源来源的筛选元数据；来源暂时不可用时保留可验证的提示。 */
 export interface ServerModFilters {
   sources: readonly ServerModFilterOption[];
   tags: readonly ServerModFilterOption[];
   versions: readonly ServerModFilterOption[];
   loaders: readonly ServerModFilterOption[];
+  unavailableReason?: string;
 }
 
 /** Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。 */
@@ -299,6 +300,7 @@ export interface ServerModSearchResult {
   offset: number;
   limit: number;
   total: number;
+  unavailableReason?: string;
 }
 /** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */
 export interface ServerModVersion {

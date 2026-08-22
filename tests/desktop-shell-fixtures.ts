@@ -512,6 +512,7 @@ export const updatedServerStartupSettings = {
 export async function createDesktopShellHarness(
   platform: NodeJS.Platform = "win32",
   smokeMode = false,
+  overrides: Partial<Pick<DesktopShellConfig, "readServerModFilters" | "searchServerMods">> = {},
 ) {
   const runtime = new FakeDesktopShellRuntime(platform);
   const failures: unknown[] = [];
@@ -580,11 +581,13 @@ export async function createDesktopShellHarness(
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>
         serverType === "paper" && gameVersion === "1.21.1" ? [paperArtifact] : [],
-      readServerModFilters: async () => serverModFilters,
-      searchServerMods: async (request) => {
-        serverModSearchRequests.push(request);
-        return serverModSearchResult;
-      },
+      readServerModFilters: overrides.readServerModFilters ?? (async () => serverModFilters),
+      searchServerMods:
+        overrides.searchServerMods ??
+        (async (request) => {
+          serverModSearchRequests.push(request);
+          return serverModSearchResult;
+        }),
       readServerModProjectDetails: async (_resourceType, _source, projectId) => {
         serverModDetailProjectIds.push(projectId);
         return serverModProjectDetails;

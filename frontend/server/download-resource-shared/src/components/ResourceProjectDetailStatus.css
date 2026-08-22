@@ -1,0 +1,9 @@
+.mod-detail-loading {
+  display: flex;
+  min-height: 86px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.8rem;
+}

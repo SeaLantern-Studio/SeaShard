@@ -7,6 +7,7 @@ import {
   serverModLoaderForCoreType,
   supportsUnifiedWorldStorage,
   type ServerInstanceSnapshot,
+  type ServerModFilters,
 } from "../packages/contracts/src/index.ts";
 import {
   compatibleServerModInstances,
@@ -21,7 +22,9 @@ import {
 import {
   createServerModMixedSearchState,
   groupServerModVersions as groupServerResourceVersions,
+  mergeAvailableServerModFilters,
   searchServerModMixedPage,
+  serverModProjectUrl,
   serverModSourceLabel,
 } from "../frontend/server/download-resource-shared/src/resource-presentation.ts";
 
@@ -93,6 +96,38 @@ await test("mod display tags put libraries before content categories", () => {
 await test("source labels expose the concrete catalog name", () => {
   assert.equal(serverModSourceLabel("modrinth"), "Modrinth");
   assert.equal(serverModSourceLabel("curseforge"), "CurseForge");
+});
+
+await test("project links keep the selected source and resource type", () => {
+  assert.equal(
+    serverModProjectUrl({ source: "curseforge", slug: "example-pack" }, "modpack"),
+    "https://www.curseforge.com/minecraft/modpacks/example-pack",
+  );
+  assert.equal(
+    serverModProjectUrl({ source: "curseforge", slug: "example-data-pack" }, "datapack"),
+    "https://www.curseforge.com/minecraft/data-packs/example-data-pack",
+  );
+  assert.equal(
+    serverModProjectUrl({ source: "modrinth", slug: "example-world" }, "world"),
+    "https://modrinth.com/world/example-world",
+  );
+});
+
+await test("partial source filter failures preserve available options", async () => {
+  const failed = new Error("CurseForge 请求失败（HTTP 502）");
+  const results = await Promise.allSettled([
+    Promise.resolve<ServerModFilters>({
+      sources: [],
+      tags: [{ id: "utility", label: "实用工具" }],
+      versions: [],
+      loaders: [{ id: "fabric", label: "Fabric" }],
+    }),
+    Promise.reject<ServerModFilters>(failed),
+  ]);
+  const filters = mergeAvailableServerModFilters(results);
+  assert.deepEqual(filters.tags, [{ id: "utility", label: "实用工具" }]);
+  assert.deepEqual(filters.loaders, [{ id: "fabric", label: "Fabric" }]);
+  assert.throws(() => mergeAvailableServerModFilters([results[1]!]), /HTTP 502/u);
 });
 await test("mod download counts use at most four digits without wrapping the unit", () => {
   assert.equal(formatServerModDownloadCount(9_999), "9999");
@@ -263,13 +298,65 @@ await test("mixed source search keeps both sources across pages", async () => {
     first.items.map(({ id }) => id),
     ["mr-1", "cf-1"],
   );
+  assert.equal(first.offset, 0);
+  assert.equal(first.limit, 2);
   assert.deepEqual(
     second.items.map(({ id }) => id),
     ["mr-2", "cf-2"],
   );
   assert.equal(first.total, 4);
+  assert.equal(second.limit, 2);
   assert.equal(second.offset, 2);
   assert.deepEqual(requests, ["modrinth:0", "curseforge:0"]);
+});
+
+await test("mixed source search keeps Modrinth when CurseForge is unavailable", async () => {
+  const state = createServerModMixedSearchState();
+  const result = await searchServerModMixedPage(
+    {
+      resourceType: "mod",
+      query: "",
+      tag: "",
+      index: "downloads",
+      gameVersion: "",
+      loader: "",
+    },
+    state,
+    2,
+    async (request) => {
+      if (request.source === "curseforge") {
+        throw new Error("CurseForge 请求失败（HTTP 502）");
+      }
+      return {
+        items: [
+          {
+            resourceType: "mod" as const,
+            source: "modrinth" as const,
+            id: "mr-1",
+            slug: "mr-1",
+            title: "Modrinth project",
+            description: "",
+            author: "",
+            downloads: 0,
+            follows: 0,
+            dateModified: "2026-08-18T00:00:00Z",
+            environment: ["server_only"] as const,
+            categories: [],
+            versions: ["1.21.1"],
+          },
+        ],
+        offset: request.offset,
+        limit: 1,
+        total: 1,
+      };
+    },
+  );
+  assert.deepEqual(
+    result.items.map(({ id }) => id),
+    ["mr-1"],
+  );
+  assert.equal(result.total, 1);
+  assert.equal(state.finished.curseforge, true);
 });
 
 await test("server core types map to standard Mod loaders without treating plugin cores as Mod servers", () => {

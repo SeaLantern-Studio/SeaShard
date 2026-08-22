@@ -45,6 +45,15 @@ const nonVersionLabels = new Set([
   "rift",
 ]);
 
+const curseForgeUnavailableReason = "CurseForge 暂时不可用，请稍后重试";
+
+class CurseForgeTransientError extends Error {
+  constructor() {
+    super(curseForgeUnavailableReason);
+    this.name = "CurseForgeTransientError";
+  }
+}
+
 export interface CurseForgeServerModCatalogOptions {
   readonly fetchProvider?: () => typeof globalThis.fetch;
   readonly userAgent: string;
@@ -74,7 +83,13 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   async getFilters(resourceType: ServerModrinthResourceType): Promise<ServerModFilters> {
     const cached = this.filtersPromises.get(resourceType);
     if (cached) return cached;
-    const request = this.loadFilters(resourceType);
+    const request = this.loadFilters(resourceType).catch((error) => {
+      if (!(error instanceof CurseForgeTransientError)) throw error;
+      if (this.filtersPromises.get(resourceType) === request) {
+        this.filtersPromises.delete(resourceType);
+      }
+      return unavailableFilters();
+    });
     this.filtersPromises.set(resourceType, request);
     void request.catch(() => {
       if (this.filtersPromises.get(resourceType) === request)
@@ -100,12 +115,17 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
     const sort = sortFor(request.index);
     url.searchParams.set("sortField", sort.field);
     url.searchParams.set("sortOrder", sort.order);
-    return parseSearchResult(
-      await this.fetchJson(url),
-      request.resourceType,
-      request.offset,
-      request.limit,
-    );
+    try {
+      return parseSearchResult(
+        await this.fetchJson(url),
+        request.resourceType,
+        request.offset,
+        request.limit,
+      );
+    } catch (error) {
+      if (!(error instanceof CurseForgeTransientError)) throw error;
+      return unavailableSearchResult(request);
+    }
   }
 
   async getProjectDetails(
@@ -186,10 +206,16 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   }
 
   private async fetchJson(url: URL): Promise<unknown> {
-    const response = await this.fetchProvider()(url, {
-      method: "GET",
-      headers: { Accept: "application/json", "User-Agent": this.userAgent },
-    });
+    let response: Response;
+    try {
+      response = await this.fetchProvider()(url, {
+        method: "GET",
+        headers: { Accept: "application/json", "User-Agent": this.userAgent },
+      });
+    } catch {
+      throw new CurseForgeTransientError();
+    }
+    if (response.status >= 500) throw new CurseForgeTransientError();
     if (response.status === 429) throw new Error("CurseForge 请求频率已达上限，请稍后重试");
     if (!response.ok) throw new Error(`CurseForge 请求失败（HTTP ${response.status}）`);
     try {
@@ -200,6 +226,25 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
   }
 }
 
+function unavailableFilters(): ServerModFilters {
+  return {
+    sources: [{ id: "curseforge", label: "CurseForge" }],
+    tags: [],
+    versions: [],
+    loaders: [],
+    unavailableReason: curseForgeUnavailableReason,
+  };
+}
+
+function unavailableSearchResult(request: ServerModSearchRequest): ServerModSearchResult {
+  return {
+    items: [],
+    offset: request.offset,
+    limit: 0,
+    total: 0,
+    unavailableReason: curseForgeUnavailableReason,
+  };
+}
 function classIdFor(resourceType: ServerModrinthResourceType): number {
   return curseForgeMinecraftClassIds[resourceType];
 }

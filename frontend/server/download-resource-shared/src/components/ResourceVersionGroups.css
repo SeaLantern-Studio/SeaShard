@@ -1,0 +1,137 @@
+.mod-version-group-trigger:focus-visible,
+.mod-version-item:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
+
+.mod-version-groups {
+  display: grid;
+  gap: 8px;
+}
+
+.mod-version-group {
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--sl-surface) 90%, var(--sl-bg-secondary));
+}
+
+.mod-version-group-trigger {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border: 0;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--sl-transition-fast);
+}
+
+.mod-version-group-trigger:hover {
+  background: var(--sl-bg-secondary);
+}
+
+.mod-version-group-trigger > strong {
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-version-group-trigger > span {
+  color: var(--sl-text-tertiary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mod-version-group-trigger > svg {
+  color: var(--sl-text-tertiary);
+  transition: transform var(--sl-transition-fast);
+}
+
+.mod-version-group.expanded .mod-version-group-trigger > svg {
+  transform: rotate(180deg);
+}
+
+.mod-version-items {
+  border-top: 1px solid var(--sl-border-light);
+}
+
+.mod-version-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 30px minmax(0, 1fr) minmax(76px, auto) 92px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 13px;
+  border: 0;
+  background: transparent;
+  color: var(--sl-text-tertiary);
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--sl-transition-fast);
+}
+
+.mod-version-item + .mod-version-item {
+  border-top: 1px solid color-mix(in srgb, var(--sl-border-light) 68%, transparent);
+}
+
+.mod-version-item:hover {
+  background: var(--sl-bg-secondary);
+}
+
+.mod-version-item:disabled {
+  cursor: not-allowed;
+}
+
+.mod-version-item:disabled:hover {
+  background: transparent;
+}
+
+.mod-version-item > strong {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--sl-text-primary);
+  font-size: 0.8rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-version-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.mod-version-meta:last-child {
+  width: 100%;
+  justify-self: stretch;
+}
+
+@media (max-width: 760px) {
+  .mod-version-item {
+    grid-template-columns: 30px minmax(0, 1fr) 92px;
+    gap: 6px 12px;
+  }
+
+  .mod-version-item > strong {
+    grid-column: 2 / -1;
+  }
+
+  .mod-version-meta:last-child {
+    grid-column: 3;
+    justify-self: stretch;
+  }
+}

@@ -179,6 +179,14 @@ function expectServerModFilterOptions(
   });
 }
 
+function expectOptionalServerModUnavailableReason(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value || value.length > 256) {
+    throw new Error("server mod source returned invalid unavailable reason");
+  }
+  return value;
+}
+
 export function expectServerModFilters(value: unknown): ServerModFilters {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("server mod source returned invalid filters");
@@ -188,11 +196,13 @@ export function expectServerModFilters(value: unknown): ServerModFilters {
   if (sources.length !== 1 || (sources[0]?.id !== "modrinth" && sources[0]?.id !== "curseforge")) {
     throw new Error("server mod source returned invalid sources");
   }
+  const unavailableReason = expectOptionalServerModUnavailableReason(filters.unavailableReason);
   return {
     sources,
     tags: expectServerModFilterOptions(filters.tags, "tags", 128),
     versions: expectServerModFilterOptions(filters.versions, "versions", 1_024),
     loaders: expectServerModFilterOptions(filters.loaders, "loaders", 64),
+    ...(unavailableReason ? { unavailableReason } : {}),
   };
 }
 
@@ -214,11 +224,13 @@ export function expectServerModSearchResult(value: unknown): ServerModSearchResu
   ) {
     throw new Error("server mod source returned an invalid search result");
   }
+  const unavailableReason = expectOptionalServerModUnavailableReason(result.unavailableReason);
   return {
     items: result.items.map(expectServerModProject),
     offset: result.offset as number,
     limit: result.limit as number,
     total: result.total as number,
+    ...(unavailableReason ? { unavailableReason } : {}),
   };
 }
 export function expectServerModProjectDetails(value: unknown): ServerModProjectDetails {

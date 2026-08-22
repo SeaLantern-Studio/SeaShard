@@ -1,0 +1,213 @@
+.mod-project-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 48px minmax(0, 1fr) 50px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 11px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: color-mix(in srgb, var(--sl-surface) 88%, var(--sl-bg-secondary));
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast),
+    box-shadow var(--sl-transition-fast);
+}
+
+.mod-project-row:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .mod-project-row:not(.mod-project-row-loading):hover {
+    border-color: color-mix(in srgb, var(--sl-primary) 20%, var(--sl-border));
+    background: var(--sl-surface);
+    box-shadow: var(--sl-shadow-sm);
+  }
+}
+
+.mod-project-copy {
+  min-width: 0;
+}
+
+.mod-project-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mod-project-title-line > strong {
+  overflow: hidden;
+  max-width: min(100%, 440px);
+  color: var(--sl-text-primary);
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-project-name-separator {
+  color: var(--sl-border);
+  font-size: 0.82rem;
+}
+
+.mod-project-original-name {
+  overflow: hidden;
+  color: var(--sl-text-tertiary);
+  font-size: 0.82rem;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-project-description-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 3px;
+}
+
+.mod-project-description-line > p {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--sl-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-content-tags,
+.mod-category-tags {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.mod-content-tags {
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.mod-category-tags {
+  gap: 3px;
+  overflow: hidden;
+}
+
+.mod-content-tags span,
+.mod-category-tags span {
+  display: inline-flex;
+  min-height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 2px 5px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mod-category-tag {
+  border: 1px solid color-mix(in srgb, var(--sl-primary) 22%, var(--sl-border-light));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+}
+
+.mod-source-tag {
+  border: 1px solid color-mix(in srgb, var(--sl-text-tertiary) 26%, var(--sl-border-light));
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-secondary);
+}
+
+.mod-content-tag {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-secondary);
+}
+
+.mod-project-footer {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(110px, 1fr) minmax(310px, 1.35fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.mod-project-meta {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
+  align-items: center;
+  column-gap: 8px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.75rem;
+}
+
+.mod-project-meta > span {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.mod-project-meta > span > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mod-project-meta svg {
+  flex: 0 0 auto;
+}
+
+.mod-project-downloads {
+  display: grid;
+  width: 50px;
+  min-width: 50px;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  padding: 2px 0;
+  color: var(--sl-text-tertiary);
+  text-align: center;
+}
+
+.mod-project-downloads > strong {
+  color: var(--sl-text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .mod-project-row {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .mod-project-footer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .mod-project-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .mod-project-downloads {
+    grid-column: 2;
+    justify-self: start;
+    padding: 0;
+  }
+}

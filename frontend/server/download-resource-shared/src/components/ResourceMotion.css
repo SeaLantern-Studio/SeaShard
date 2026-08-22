@@ -1,0 +1,17 @@
+@media (prefers-reduced-motion: reduce) {
+  .mod-project-row,
+  .mod-project-icon-placeholder,
+  .mod-project-copy-placeholder i,
+  .mod-loading-spinner,
+  .mod-detail-back,
+  .mod-detail-action,
+  .mod-detail-description-toggle,
+  .mod-detail-description-toggle > svg,
+  .mod-version-group-trigger,
+  .mod-version-group-trigger > svg,
+  .mod-version-item,
+  .mod-install-instance {
+    transition: none;
+    animation: none;
+  }
+}

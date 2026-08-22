@@ -1,0 +1,57 @@
+.mod-project-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 11px;
+}
+
+.mod-project-icon {
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--sl-border-light);
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-tertiary);
+}
+
+.mod-project-icon > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.mod-version-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: 7px;
+}
+
+.mod-loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--sl-border);
+  border-top-color: var(--sl-primary);
+  border-radius: 50%;
+  animation: server-resource-mod-loading-spin 700ms linear infinite;
+}
+
+:global([data-theme="dark"]) .mod-project-icon {
+  border-color: var(--sl-border);
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-secondary);
+}
+
+@keyframes server-resource-mod-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .mod-version-icon {
+    grid-row: 1 / 3;
+    align-self: start;
+  }
+}

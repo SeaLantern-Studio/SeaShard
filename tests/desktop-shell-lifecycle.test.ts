@@ -315,6 +315,32 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.deepEqual(harness.failures, []);
 });
 
+await test("desktop shell fulfills unavailable server source responses", async () => {
+  const unavailableReason = "CurseForge 暂时不可用，请稍后重试";
+  const fallbackFilters = { ...serverModFilters, unavailableReason };
+  const fallbackSearch = {
+    ...serverModSearchResult,
+    items: [],
+    limit: 0,
+    total: 0,
+    unavailableReason,
+  };
+  const harness = await createDesktopShellHarness("win32", false, {
+    readServerModFilters: async () => fallbackFilters,
+    searchServerMods: async () => fallbackSearch,
+  });
+  await harness.shell.service.openPrimary();
+  assert.deepEqual(
+    await harness.runtime.invoke(desktopChannels.serverModFilters, 1, "mod", "curseforge"),
+    fallbackFilters,
+  );
+  assert.deepEqual(
+    await harness.runtime.invoke(desktopChannels.serverModSearch, 1, serverModSearchRequest),
+    fallbackSearch,
+  );
+  await harness.shell.dispose();
+});
+
 await test("desktop shell keeps macOS alive after the last window closes", async () => {
   const harness = await createDesktopShellHarness("darwin", true);
   harness.runtime.emit("window-all-closed");

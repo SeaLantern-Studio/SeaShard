@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   serverModSearchLimits,
-  supportsUnifiedWorldStorage,
   type ServerInstanceClientService,
   type ServerInstanceSnapshot,
   type ServerModFilterOption,
@@ -12,46 +11,37 @@ import {
   type ServerModSearchResult,
   type ServerModSourceClientService,
   type ServerModVersion,
-  type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import minecraftDefaultServerIcon from "./assets/minecraft-default-server-icon.png";
-import {
-  Cmz_Button,
-  Cmz_Input,
-  Cmz_Markdown,
-  Cmz_Modal,
-  Cmz_Select,
-  type SelectOption,
-} from "cmzya-modern-ui";
-import {
-  ArrowLeft,
-  Box,
-  Check,
-  ChevronDown,
-  Clock3,
-  Copy,
-  Download,
-  Heart,
-  Link2,
-  Archive,
-  Package,
-  Search,
-  UserRound,
-  X,
-} from "lucide-vue-next";
+import type { SelectOption } from "cmzya-modern-ui";
+import DatapackWorldModal from "./components/DatapackWorldModal.vue";
+import ResourceDetailLayout from "./components/ResourceDetailLayout.vue";
+import ResourceFilterBar from "./components/ResourceFilterBar.vue";
+import ResourceInstallModal from "./components/ResourceInstallModal.vue";
+import ResourceProjectDetailHeader from "./components/ResourceProjectDetailHeader.vue";
+import ResourceProjectDetailStatus from "./components/ResourceProjectDetailStatus.vue";
+import ResourceProjectResults from "./components/ResourceProjectResults.vue";
+import ResourceVersionFilters from "./components/ResourceVersionFilters.vue";
+import ResourceVersionGroups from "./components/ResourceVersionGroups.vue";
+import { Archive, Box, Package } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  compatibleServerResourceInstances,
   createServerModMixedSearchState,
+  datapackPendingTarget,
+  datapackWorldTargetsFromStorage,
   formatServerModDownloadCount,
   formatServerModRelativeTime,
   formatServerModVersionRange,
   groupServerModVersions,
-  mergeServerModFilters,
+  mergeAvailableServerModFilters,
   searchServerModMixedPage,
   serverModDisplayName,
   serverModDisplayTags,
   serverModSourceFilterOptions,
   serverModSourceLabel,
+  serverModProjectUrl,
+  type DatapackWorldTarget,
   type ServerModMixedSearchState,
   type ServerModSearchSource,
 } from "./resource-presentation";
@@ -78,11 +68,6 @@ const sortOptions: SelectOption[] = [
 const resourceLabel = computed(() =>
   props.resourceType === "modpack" ? "整合包" : props.resourceType === "world" ? "世界" : "数据包",
 );
-const resourcePathSegment = computed(() => {
-  if (props.resourceType === "modpack") return "modpack";
-  if (props.resourceType === "world") return "world";
-  return "datapack";
-});
 const resourceIcon = computed(() =>
   props.resourceType === "modpack" ? Package : props.resourceType === "world" ? Box : Archive,
 );
@@ -97,24 +82,13 @@ const detailVersionCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
 });
-const detailMarkdownFeatures = {
-  alert: false,
-  linkCard: false,
-  container: false,
-} as const;
-
 type DetailCopyAction = "name" | "link";
 type DetailCopyState = "idle" | "success" | "error";
-interface DatapackWorldTarget {
-  readonly id: string;
-  readonly name: string;
-  readonly current: boolean;
-  readonly iconDataUrl?: string;
-}
 
 const filters = ref<ServerModFilters>(emptyFilters);
 const filtersLoading = ref(true);
 const filtersError = ref("");
+const filtersWarning = ref("");
 const query = ref("");
 const source = ref<ServerModSearchSource>("all");
 const tag = ref("");
@@ -127,9 +101,8 @@ const total = ref(0);
 const initialLoading = ref(true);
 const loadingMore = ref(false);
 const searchError = ref("");
+const searchWarning = ref("");
 const failedIconIds = ref<ReadonlySet<string>>(new Set());
-const loadSentinel = ref<HTMLElement>();
-let observer: IntersectionObserver | undefined;
 let queryTimer: ReturnType<typeof setTimeout> | undefined;
 let searchGeneration = 0;
 let mixedSearchState: ServerModMixedSearchState = createServerModMixedSearchState();
@@ -212,13 +185,6 @@ const selectedProjectIsFavorite = computed(
 );
 
 onMounted(() => {
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) void loadNextPage();
-    },
-    { rootMargin: "240px 0px" },
-  );
-  if (loadSentinel.value) observer.observe(loadSentinel.value);
   relativeTimeTimer = setInterval(() => {
     relativeTimeNow.value = Date.now();
   }, 60_000);
@@ -227,10 +193,6 @@ onMounted(() => {
   favoriteProjectIds.value = readFavoriteProjectIds();
 });
 
-watch(loadSentinel, (next, previous) => {
-  if (previous) observer?.unobserve(previous);
-  if (next) observer?.observe(next);
-});
 watch(
   detailVersionGroups,
   (groups) => {
@@ -249,7 +211,6 @@ onBeforeUnmount(() => {
   detailRequestId += 1;
   resetCopyActions();
   installInstancesRequestId += 1;
-  observer?.disconnect();
 });
 
 async function loadFilters(): Promise<void> {
@@ -257,11 +218,12 @@ async function loadFilters(): Promise<void> {
   const requestedSource = source.value;
   filtersLoading.value = true;
   filtersError.value = "";
+  filtersWarning.value = "";
   try {
     const next =
       requestedSource === "all"
-        ? mergeServerModFilters(
-            await Promise.all(
+        ? mergeAvailableServerModFilters(
+            await Promise.allSettled(
               (["modrinth", "curseforge"] as const).map((sourceId) =>
                 props.resources.getFilters(props.resourceType, sourceId),
               ),
@@ -270,8 +232,10 @@ async function loadFilters(): Promise<void> {
         : await props.resources.getFilters(props.resourceType, requestedSource);
     if (requestId !== filtersRequestId || requestedSource !== source.value) return;
     filters.value = { ...next, sources: serverModSourceFilterOptions };
+    filtersWarning.value = next.unavailableReason ?? "";
   } catch (error) {
     if (requestId === filtersRequestId && requestedSource === source.value) {
+      filtersWarning.value = "";
       filtersError.value = errorMessage(error);
     }
   } finally {
@@ -348,6 +312,7 @@ async function resetSearch(): Promise<void> {
   total.value = 0;
   failedIconIds.value = new Set();
   searchError.value = "";
+  searchWarning.value = "";
   initialLoading.value = true;
   loadingMore.value = false;
   try {
@@ -360,7 +325,6 @@ async function resetSearch(): Promise<void> {
     if (generation === searchGeneration) {
       initialLoading.value = false;
       await nextTick();
-      maybeFillViewport();
     }
   }
 }
@@ -379,15 +343,20 @@ async function loadNextPage(): Promise<void> {
     ];
     total.value = result.total;
     nextOffset.value = result.offset + result.limit;
+    if (result.unavailableReason) searchWarning.value = result.unavailableReason;
   } catch (error) {
     if (generation === searchGeneration) searchError.value = errorMessage(error);
   } finally {
     if (generation === searchGeneration) {
       loadingMore.value = false;
       await nextTick();
-      maybeFillViewport();
     }
   }
+}
+
+function retryNextPage(): void {
+  searchError.value = "";
+  void loadNextPage();
 }
 function searchPage(offset: number): Promise<ServerModSearchResult> {
   const request = {
@@ -417,14 +386,10 @@ function applyFirstPage(result: ServerModSearchResult): void {
   projects.value = result.items;
   total.value = result.total;
   nextOffset.value = result.offset + result.limit;
+  searchWarning.value = result.unavailableReason ?? "";
 }
 
 /** 首屏不足一页高时继续补一页；每次完成后才判断，始终保持单个在途请求。 */
-function maybeFillViewport(): void {
-  const sentinel = loadSentinel.value;
-  if (!sentinel || !hasMore.value || initialLoading.value || loadingMore.value) return;
-  if (sentinel.getBoundingClientRect().top <= window.innerHeight + 240) void loadNextPage();
-}
 
 function toSelectOptions(options: readonly ServerModFilterOption[]): SelectOption[] {
   return options.map(({ id, label }) => ({ label, value: id }));
@@ -483,7 +448,6 @@ function returnToProjectList(): void {
   detailLoader.value = "";
   expandedVersionGroupId.value = undefined;
   detailDescriptionExpanded.value = false;
-  void nextTick().then(maybeFillViewport);
 }
 
 async function loadProjectDetails(): Promise<void> {
@@ -540,7 +504,7 @@ async function openInstallModal(version: ServerModVersion): Promise<void> {
   try {
     const instances = await props.instances.list();
     if (requestId !== installInstancesRequestId) return;
-    const candidates = compatibleServerResourceInstances(version, instances);
+    const candidates = compatibleServerResourceInstances(version, instances, props.resourceType);
     if (props.resourceType !== "datapack") {
       compatibleInstances.value = candidates;
       return;
@@ -623,10 +587,6 @@ function updateDatapackWorldModalVisible(visible: boolean): void {
   if (!visible) closeDatapackWorldModal();
 }
 
-function datapackPendingTarget(instanceId: string, worldId: string): string {
-  return `datapack:${instanceId}:${worldId}`;
-}
-
 async function installDatapackToWorld(target: DatapackWorldTarget): Promise<void> {
   const instance = datapackTargetInstance.value;
   if (!instance) return;
@@ -698,10 +658,7 @@ async function copyProjectName(): Promise<void> {
 async function copyProjectLink(): Promise<void> {
   const project = selectedProject.value;
   if (!project) return;
-  await copyDetailValue(
-    "link",
-    `https://modrinth.com/${resourcePathSegment.value}/${encodeURIComponent(project.slug)}`,
-  );
+  await copyDetailValue("link", serverModProjectUrl(project, props.resourceType));
 }
 
 async function copyDetailValue(action: DetailCopyAction, value: string): Promise<void> {
@@ -826,53 +783,6 @@ function formatRelativeTime(value: string): string {
   return formatServerModRelativeTime(value, relativeTimeNow.value);
 }
 
-/** 把统一世界与分维度世界折叠成数据包可选择的逻辑存档。 */
-function datapackWorldTargetsFromStorage(
-  storage: ServerWorldStorageSnapshot,
-): DatapackWorldTarget[] {
-  if (storage.mode === "unified") {
-    return storage.saves.map(({ id, name, current, iconDataUrl }) => ({
-      id,
-      name,
-      current,
-      ...(iconDataUrl ? { iconDataUrl } : {}),
-    }));
-  }
-  return storage.dimensions
-    .filter(({ saves }) => saves.length > 0)
-    .map((group) => {
-      const overworld = group.saves.find(({ dimension }) => dimension === "overworld");
-      return {
-        id: group.id,
-        name: group.name,
-        current: group.current,
-        ...(overworld?.iconDataUrl ? { iconDataUrl: overworld.iconDataUrl } : {}),
-      };
-    });
-}
-
-/** 数据包要求精确版本匹配和已有存档；世界还要求核心采用单目录多维度布局。 */
-function compatibleServerResourceInstances(
-  version: ServerModVersion,
-  instances: readonly ServerInstanceSnapshot[],
-): ServerInstanceSnapshot[] {
-  return instances.filter((instance) => {
-    if (!instance.gameVersion || !version.gameVersions.includes(instance.gameVersion)) return false;
-    return props.resourceType !== "world" || supportsUnifiedWorldStorage(instance.serverType);
-  });
-}
-
-/** Markdown 链接只通过 Electron 的新窗口拦截器交给系统浏览器，避免替换当前 Renderer。 */
-function openDetailMarkdownLink(event: MouseEvent): void {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const link = target.closest("a[href]");
-  if (!(link instanceof HTMLAnchorElement)) return;
-
-  event.preventDefault();
-  window.open(link.href, "_blank", "noopener,noreferrer");
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -881,670 +791,162 @@ function errorMessage(error: unknown): string {
 <template>
   <section class="server-mod-download-page" :aria-label="`${resourceLabel}下载`">
     <template v-if="selectedProject">
-      <div class="mod-detail-page">
-        <button class="mod-detail-back" type="button" @click="returnToProjectList">
-          <ArrowLeft :size="18" :stroke-width="1.9" aria-hidden="true" />
-          返回{{ resourceLabel }}列表
-        </button>
+      <ResourceDetailLayout :resource-label="resourceLabel" @back="returnToProjectList">
+        <ResourceProjectDetailHeader
+          :resource-label="resourceLabel"
+          :project="selectedProject"
+          :primary-name="primaryProjectName(selectedProject)"
+          :original-name="originalProjectName(selectedProject)"
+          :category-tags="projectCategoryTags(selectedProject)"
+          :content-tags="projectContentTags(selectedProject)"
+          :version-range="versionRange(selectedProject)"
+          :relative-time="formatRelativeTime(selectedProject.dateModified)"
+          :download-count="formatServerModDownloadCount(selectedProject.downloads)"
+          :description="detailDescription"
+          :description-expanded="detailDescriptionExpanded"
+          :selected-is-favorite="selectedProjectIsFavorite"
+          :copy-name-state="copyActionStates.name"
+          :copy-link-state="copyActionStates.link"
+          :copy-name-label="copyActionLabel('name', '复制名称')"
+          :copy-link-label="copyActionLabel('link', '复制链接')"
+          :resource-icon="resourceIcon"
+          :icon-failed="projectIconFailed(selectedProject)"
+          @icon-error="markProjectIconFailed"
+          @toggle-description="detailDescriptionExpanded = !detailDescriptionExpanded"
+          @copy-name="copyProjectName"
+          @copy-link="copyProjectLink"
+          @toggle-favorite="toggleFavorite"
+        />
 
-        <section class="mod-detail-summary" :aria-label="`${resourceLabel}项目信息`">
-          <div class="mod-detail-summary-main">
-            <span class="mod-project-icon mod-detail-icon">
-              <img
-                v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
-                :src="selectedProject.iconUrl"
-                alt=""
-                draggable="false"
-                referrerpolicy="no-referrer"
-                @error="markProjectIconFailed(selectedProject.id)"
-              />
-              <component
-                :is="resourceIcon"
-                v-else
-                :size="28"
-                :stroke-width="1.7"
-                aria-hidden="true"
-              />
-            </span>
-            <div class="mod-detail-project-copy">
-              <div class="mod-project-title-line mod-detail-title-line">
-                <strong>{{ primaryProjectName(selectedProject) }}</strong>
-                <template v-if="originalProjectName(selectedProject)">
-                  <span class="mod-project-name-separator" aria-hidden="true">|</span>
-                  <span class="mod-project-original-name">{{
-                    originalProjectName(selectedProject)
-                  }}</span>
-                </template>
-              </div>
-              <div class="mod-detail-tags">
-                <span
-                  v-for="category in projectCategoryTags(selectedProject)"
-                  :key="`detail-category:${category}`"
-                  class="mod-category-tag"
-                >
-                  {{ category }}
-                </span>
-                <span
-                  v-for="contentTag in projectContentTags(selectedProject)"
-                  :key="`detail-content:${contentTag}`"
-                  class="mod-content-tag"
-                >
-                  {{ contentTag }}
-                </span>
-              </div>
-              <div class="mod-detail-meta">
-                <span>
-                  <UserRound :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  {{ selectedProject.author }}
-                </span>
-                <span>
-                  <Box :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  {{ versionRange(selectedProject) }}
-                </span>
-                <span>
-                  <Clock3 :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  {{ formatRelativeTime(selectedProject.dateModified) }}
-                </span>
-              </div>
-            </div>
-            <div
-              class="mod-project-downloads mod-detail-downloads"
-              :aria-label="`${selectedProject.downloads} 次下载`"
-            >
-              <Download :size="18" :stroke-width="1.9" aria-hidden="true" />
-              <strong>{{ formatServerModDownloadCount(selectedProject.downloads) }}</strong>
-            </div>
-          </div>
+        <ResourceProjectDetailStatus
+          :loading="detailLoading"
+          :error="detailError"
+          @retry="loadProjectDetails"
+        />
+        <template v-if="!detailLoading && !detailError">
+          <ResourceVersionFilters
+            :resource-label="resourceLabel"
+            :show-loader-filter="showLoaderFilter"
+            :game-version="detailGameVersion"
+            :game-version-options="detailGameVersionOptions"
+            :loader="detailLoader"
+            :loader-options="detailLoaderOptions"
+            @update:game-version="updateDetailGameVersion"
+            @update:loader="updateDetailLoader"
+          />
 
-          <div
-            class="mod-detail-description-block"
-            :class="{ expanded: detailDescriptionExpanded }"
-          >
-            <div class="mod-detail-description" @click="openDetailMarkdownLink">
-              <Cmz_Markdown
-                :content="detailDescription"
-                variant="plain"
-                :code-highlight="false"
-                :features="detailMarkdownFeatures"
-              />
-            </div>
-            <button
-              class="mod-detail-description-toggle"
-              type="button"
-              :aria-expanded="detailDescriptionExpanded"
-              @click="detailDescriptionExpanded = !detailDescriptionExpanded"
-            >
-              {{ detailDescriptionExpanded ? "收起简介" : "展开简介" }}
-              <ChevronDown :size="15" :stroke-width="1.8" aria-hidden="true" />
-            </button>
-          </div>
-
-          <div class="mod-detail-actions" :aria-label="`${resourceLabel}项目操作`">
-            <button
-              class="mod-detail-action"
-              :class="`copy-${copyActionStates.name}`"
-              type="button"
-              aria-live="polite"
-              @click="copyProjectName"
-            >
-              <Check
-                v-if="copyActionStates.name === 'success'"
-                :size="15"
-                :stroke-width="2"
-                aria-hidden="true"
-              />
-              <X
-                v-else-if="copyActionStates.name === 'error'"
-                :size="15"
-                :stroke-width="2"
-                aria-hidden="true"
-              />
-              <Copy v-else :size="15" :stroke-width="1.8" aria-hidden="true" />
-              {{ copyActionLabel("name", "复制名称") }}
-            </button>
-            <button
-              class="mod-detail-action"
-              :class="`copy-${copyActionStates.link}`"
-              type="button"
-              aria-live="polite"
-              @click="copyProjectLink"
-            >
-              <Check
-                v-if="copyActionStates.link === 'success'"
-                :size="15"
-                :stroke-width="2"
-                aria-hidden="true"
-              />
-              <X
-                v-else-if="copyActionStates.link === 'error'"
-                :size="15"
-                :stroke-width="2"
-                aria-hidden="true"
-              />
-              <Link2 v-else :size="15" :stroke-width="1.8" aria-hidden="true" />
-              {{ copyActionLabel("link", "复制链接") }}
-            </button>
-            <button
-              class="mod-detail-action"
-              :class="{ active: selectedProjectIsFavorite }"
-              type="button"
-              :aria-pressed="selectedProjectIsFavorite"
-              @click="toggleFavorite"
-            >
-              <Heart
-                :size="15"
-                :stroke-width="1.8"
-                :fill="selectedProjectIsFavorite ? 'currentColor' : 'none'"
-                aria-hidden="true"
-              />
-              {{ selectedProjectIsFavorite ? "已收藏" : "收藏" }}
-            </button>
-          </div>
-        </section>
-
-        <div v-if="detailLoading" class="mod-detail-loading" role="status">
-          <span class="mod-loading-spinner" />
-          正在加载可下载版本
-        </div>
-        <div v-else-if="detailError" class="mod-result-state mod-detail-state" role="alert">
-          <strong>无法加载可下载版本</strong>
-          <span>{{ detailError }}</span>
-          <button type="button" @click="loadProjectDetails">重新加载</button>
-        </div>
-        <template v-else>
-          <div
-            class="mod-filter-grid mod-detail-filter-grid"
-            :class="{ 'single-filter': !showLoaderFilter }"
-            :aria-label="`${resourceLabel}版本筛选`"
-          >
-            <label class="mod-filter-field">
-              <span>版本</span>
-              <Cmz_Select
-                :model-value="detailGameVersion"
-                :options="detailGameVersionOptions"
-                :searchable="true"
-                placeholder="全部版本"
-                @update:model-value="updateDetailGameVersion"
-              />
-            </label>
-            <label v-if="showLoaderFilter" class="mod-filter-field">
-              <span>加载器</span>
-              <Cmz_Select
-                :model-value="detailLoader"
-                :options="detailLoaderOptions"
-                :searchable="true"
-                placeholder="全部加载器"
-                @update:model-value="updateDetailLoader"
-              />
-            </label>
-          </div>
-
-          <div v-if="detailVersionGroups.length === 0" class="mod-result-state mod-detail-state">
-            <strong>没有符合筛选条件的版本</strong>
-            <span>{{
-              showLoaderFilter
-                ? "尝试选择其他 Minecraft 版本或加载器。"
-                : "尝试选择其他 Minecraft 版本。"
-            }}</span>
-          </div>
-          <div v-else class="mod-version-groups">
-            <article
-              v-for="group in detailVersionGroups"
-              :key="group.id"
-              class="mod-version-group"
-              :class="{ expanded: expandedVersionGroupId === group.id }"
-            >
-              <button
-                class="mod-version-group-trigger"
-                type="button"
-                :aria-expanded="expandedVersionGroupId === group.id"
-                @click="toggleVersionGroup(group.id)"
-              >
-                <strong>
-                  <template v-if="showLoaderFilter && group.loader"
-                    >{{ loaderLabel(group.loader) }}
-                  </template>
-                  {{ group.gameVersion }}
-                </strong>
-                <span>{{ group.versions.length }} 个文件</span>
-                <ChevronDown :size="18" :stroke-width="1.8" aria-hidden="true" />
-              </button>
-              <div v-show="expandedVersionGroupId === group.id" class="mod-version-items">
-                <button
-                  v-for="version in group.versions"
-                  :key="version.id"
-                  class="mod-version-item"
-                  type="button"
-                  :disabled="!downloadEnabled"
-                  :aria-label="
-                    downloadEnabled
-                      ? `下载 ${version.fileName}`
-                      : `${version.fileName}，下载暂未开放`
-                  "
-                  @click="openInstallModal(version)"
-                >
-                  <span class="mod-project-icon mod-version-icon">
-                    <img
-                      v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
-                      :src="selectedProject.iconUrl"
-                      alt=""
-                      draggable="false"
-                      referrerpolicy="no-referrer"
-                      @error="markProjectIconFailed(selectedProject.id)"
-                    />
-                    <component
-                      :is="resourceIcon"
-                      v-else
-                      :size="16"
-                      :stroke-width="1.7"
-                      aria-hidden="true"
-                    />
-                  </span>
-                  <strong>{{ version.fileName }}</strong>
-                  <span class="mod-version-meta">
-                    <Download :size="14" :stroke-width="1.8" aria-hidden="true" />
-                    {{ formatServerModDownloadCount(version.downloads) }}
-                  </span>
-                  <span class="mod-version-meta">
-                    <Clock3 :size="14" :stroke-width="1.8" aria-hidden="true" />
-                    {{ formatRelativeTime(version.datePublished) }}
-                  </span>
-                </button>
-              </div>
-            </article>
-          </div>
+          <ResourceVersionGroups
+            :groups="detailVersionGroups"
+            :expanded-group-id="expandedVersionGroupId"
+            :show-loader-filter="showLoaderFilter"
+            :loader-label="loaderLabel"
+            :selected-project-icon-url="selectedProject.iconUrl"
+            :icon-failed="projectIconFailed(selectedProject)"
+            :resource-icon="resourceIcon"
+            :download-enabled="downloadEnabled"
+            :format-download-count="formatServerModDownloadCount"
+            :format-relative-time="formatRelativeTime"
+            @toggle-group="toggleVersionGroup"
+            @select-version="openInstallModal"
+            @icon-error="markProjectIconFailed(selectedProject.id)"
+          />
         </template>
 
-        <Cmz_Modal
+        <ResourceInstallModal
           v-if="downloadEnabled"
           :visible="installModalOpen && !!installVersion"
-          :title="`${resourceLabel}下载`"
-          width="520px"
-          :close-on-overlay="!installPendingTarget"
+          :resource-label="resourceLabel"
+          :resource-type="props.resourceType"
+          :version="installVersion"
+          :resource-icon="resourceIcon"
+          :project-icon-url="selectedProject.iconUrl"
+          :icon-failed="projectIconFailed(selectedProject)"
+          :can-install-to-instance="canInstallToInstance"
+          :instances="compatibleInstances"
+          :loading="installInstancesLoading"
+          :error="installInstancesError"
+          :pending-target="installPendingTarget"
+          :action-error="installActionError"
           @close="closeInstallModal"
           @update:visible="updateInstallModalVisible"
-        >
-          <div v-if="installVersion" class="mod-install-modal">
-            <div class="mod-install-file">
-              <span class="mod-project-icon mod-version-icon">
-                <img
-                  v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
-                  :src="selectedProject.iconUrl"
-                  alt=""
-                  draggable="false"
-                  referrerpolicy="no-referrer"
-                />
-                <component
-                  :is="resourceIcon"
-                  v-else
-                  :size="16"
-                  :stroke-width="1.7"
-                  aria-hidden="true"
-                />
-              </span>
-              <div>
-                <span>准备下载</span>
-                <strong>{{ installVersion.fileName }}</strong>
-              </div>
-            </div>
-
-            <template v-if="canInstallToInstance">
-              <h3>下载到</h3>
-              <div class="mod-install-instance-list" aria-label="兼容的服务器实例">
-                <div v-if="installInstancesLoading" class="mod-install-state" role="status">
-                  <span class="mod-loading-spinner" />
-                  {{
-                    props.resourceType === "datapack"
-                      ? "正在读取服务器实例与存档"
-                      : "正在读取服务器实例"
-                  }}
-                </div>
-                <div v-else-if="installInstancesError" class="mod-install-state error" role="alert">
-                  <span>{{ installInstancesError }}</span>
-                  <button type="button" @click="openInstallModal(installVersion)">重新加载</button>
-                </div>
-                <template v-else-if="compatibleInstances.length > 0">
-                  <button
-                    v-for="instance in compatibleInstances"
-                    :key="instance.id"
-                    class="mod-install-instance"
-                    type="button"
-                    :disabled="!!installPendingTarget"
-                    @click="selectInstallInstance(instance)"
-                  >
-                    <span class="mod-install-instance-icon">
-                      <img
-                        v-if="instance.iconUrl"
-                        :src="instance.iconUrl"
-                        alt=""
-                        draggable="false"
-                      />
-                      <span v-else>{{ instance.name.charAt(0).toUpperCase() }}</span>
-                    </span>
-                    <span class="mod-install-instance-copy">
-                      <strong>{{ instance.name }}</strong>
-                      <span>{{ instance.gameVersion }}</span>
-                    </span>
-                    <span
-                      v-if="installPendingTarget === instance.id"
-                      class="mod-loading-spinner"
-                      aria-label="正在下载"
-                    />
-                  </button>
-                </template>
-                <div v-else class="mod-install-state" role="status">
-                  {{
-                    props.resourceType === "datapack"
-                      ? "没有同时满足版本和已有存档条件的服务器实例"
-                      : "没有兼容的服务器实例"
-                  }}
-                </div>
-              </div>
-
-              <div class="mod-install-separator"><span>或</span></div>
-            </template>
-            <div v-if="installActionError" class="mod-install-feedback error" role="alert">
-              {{ installActionError }}
-            </div>
-            <Cmz_Button
-              class="mod-install-save-as"
-              variant="outline"
-              :loading="installPendingTarget === 'save-as'"
-              :disabled="!!installPendingTarget"
-              @click="saveModAs"
-            >
-              <Download :size="16" :stroke-width="1.8" aria-hidden="true" />
-              另存为
-            </Cmz_Button>
-          </div>
-        </Cmz_Modal>
-        <Cmz_Modal
+          @reload="installVersion && openInstallModal(installVersion)"
+          @select-instance="selectInstallInstance"
+          @save-as="saveModAs"
+        />
+        <DatapackWorldModal
           v-if="downloadEnabled"
           :visible="datapackWorldModalOpen && !!installVersion && !!datapackTargetInstance"
-          title="数据包下载到存档"
-          width="520px"
-          :close-on-overlay="!installPendingTarget"
+          :version="installVersion"
+          :target-instance="datapackTargetInstance"
+          :world-targets="datapackWorldTargets"
+          :resource-icon="resourceIcon"
+          :project-icon-url="selectedProject.iconUrl"
+          :icon-failed="projectIconFailed(selectedProject)"
+          :default-world-icon="minecraftDefaultServerIcon"
+          :pending-target="installPendingTarget"
+          :action-error="installActionError"
           @close="closeDatapackWorldModal"
           @update:visible="updateDatapackWorldModalVisible"
-        >
-          <div v-if="installVersion && datapackTargetInstance" class="mod-install-modal">
-            <div class="mod-install-file">
-              <span class="mod-project-icon mod-version-icon">
-                <img
-                  v-if="selectedProject.iconUrl && !projectIconFailed(selectedProject)"
-                  :src="selectedProject.iconUrl"
-                  alt=""
-                  draggable="false"
-                  referrerpolicy="no-referrer"
-                />
-                <component
-                  :is="resourceIcon"
-                  v-else
-                  :size="16"
-                  :stroke-width="1.7"
-                  aria-hidden="true"
-                />
-              </span>
-              <div>
-                <span>准备下载</span>
-                <strong>{{ installVersion.fileName }}</strong>
-              </div>
-            </div>
-
-            <div class="mod-install-target-context">
-              <span class="mod-install-instance-icon">
-                <img
-                  v-if="datapackTargetInstance.iconUrl"
-                  :src="datapackTargetInstance.iconUrl"
-                  alt=""
-                  draggable="false"
-                />
-                <span v-else>{{ datapackTargetInstance.name.charAt(0).toUpperCase() }}</span>
-              </span>
-              <div class="mod-install-instance-copy">
-                <strong>{{ datapackTargetInstance.name }}</strong>
-                <span>{{ datapackTargetInstance.gameVersion }}</span>
-              </div>
-            </div>
-
-            <h3>选择存档</h3>
-            <div class="mod-install-instance-list" aria-label="可用存档">
-              <button
-                v-for="world in datapackWorldTargets"
-                :key="world.id"
-                class="mod-install-instance"
-                type="button"
-                :disabled="!!installPendingTarget"
-                @click="installDatapackToWorld(world)"
-              >
-                <span class="mod-install-instance-icon">
-                  <img v-if="world.iconDataUrl" :src="world.iconDataUrl" alt="" draggable="false" />
-                  <img v-else :src="minecraftDefaultServerIcon" alt="" draggable="false" />
-                </span>
-                <span class="mod-install-instance-copy">
-                  <strong>{{ world.name }}</strong>
-                  <span>{{ world.current ? "当前存档" : "存档" }}</span>
-                </span>
-                <span
-                  v-if="
-                    installPendingTarget ===
-                    datapackPendingTarget(datapackTargetInstance.id, world.id)
-                  "
-                  class="mod-loading-spinner"
-                  aria-label="正在下载"
-                />
-              </button>
-              <div v-if="datapackWorldTargets.length === 0" class="mod-install-state" role="status">
-                当前实例没有可用存档
-              </div>
-            </div>
-
-            <div v-if="installActionError" class="mod-install-feedback error" role="alert">
-              {{ installActionError }}
-            </div>
-            <button
-              class="mod-install-back"
-              type="button"
-              :disabled="!!installPendingTarget"
-              @click="backToInstallInstances"
-            >
-              返回服务器实例
-            </button>
-          </div>
-        </Cmz_Modal>
-      </div>
+          @back="backToInstallInstances"
+          @select-world="installDatapackToWorld"
+        />
+      </ResourceDetailLayout>
     </template>
     <template v-else>
-      <div class="mod-search-field">
-        <Search class="mod-search-icon" :size="19" :stroke-width="1.9" aria-hidden="true" />
-        <Cmz_Input
-          class="mod-search-control"
-          :model-value="query"
-          :maxlength="serverModSearchLimits.maximumQueryLength"
-          :placeholder="`搜索${resourceLabel}名称或关键词`"
-          :aria-label="`搜索${resourceLabel}`"
-          @update:model-value="updateQuery"
-        />
-      </div>
+      <ResourceFilterBar
+        :resource-label="resourceLabel"
+        :query="query"
+        :maximum-query-length="serverModSearchLimits.maximumQueryLength"
+        :source="source"
+        :source-options="sourceOptions"
+        :tag="tag"
+        :tag-options="tagOptions"
+        :sort="sort"
+        :sort-options="sortOptions"
+        :game-version="gameVersion"
+        :version-options="versionOptions"
+        :loader="loader"
+        :loader-options="loaderOptions"
+        :show-loader-filter="showLoaderFilter"
+        :filters-loading="filtersLoading"
+        :filters-warning="filtersWarning"
+        :filters-error="filtersError"
+        @update:query="updateQuery"
+        @update:source="updateSource"
+        @update:tag="updateTag"
+        @update:sort="updateSort"
+        @update:game-version="updateGameVersion"
+        @update:loader="updateLoader"
+        @retry-filters="loadFilters"
+      />
 
-      <div
-        class="mod-filter-grid"
-        :class="{ 'without-loader': !showLoaderFilter }"
-        :aria-label="`${resourceLabel}搜索筛选`"
-      >
-        <label class="mod-filter-field">
-          <span>来源</span>
-          <Cmz_Select
-            :model-value="source"
-            :options="sourceOptions"
-            :disabled="filtersLoading"
-            @update:model-value="updateSource"
-          />
-        </label>
-        <label class="mod-filter-field">
-          <span>标签</span>
-          <Cmz_Select
-            :model-value="tag"
-            :options="tagOptions"
-            :disabled="filtersLoading"
-            :searchable="true"
-            placeholder="全部标签"
-            @update:model-value="updateTag"
-          />
-        </label>
-        <label class="mod-filter-field">
-          <span>排序</span>
-          <Cmz_Select :model-value="sort" :options="sortOptions" @update:model-value="updateSort" />
-        </label>
-        <label class="mod-filter-field">
-          <span>版本</span>
-          <Cmz_Select
-            :model-value="gameVersion"
-            :options="versionOptions"
-            :disabled="filtersLoading"
-            :searchable="true"
-            placeholder="全部版本"
-            @update:model-value="updateGameVersion"
-          />
-        </label>
-        <label v-if="showLoaderFilter" class="mod-filter-field">
-          <span>加载器</span>
-          <Cmz_Select
-            :model-value="loader"
-            :options="loaderOptions"
-            :disabled="filtersLoading"
-            :searchable="true"
-            placeholder="全部加载器"
-            @update:model-value="updateLoader"
-          />
-        </label>
-      </div>
-
-      <div v-if="filtersError" class="mod-inline-error" role="alert">
-        <span>筛选项加载失败：{{ filtersError }}</span>
-        <button type="button" @click="loadFilters">重试</button>
-      </div>
-
-      <div class="mod-results-heading">
-        <strong>{{ resultSummary }}</strong>
-        <span v-if="projects.length > 0"
-          >已加载 {{ projects.length.toLocaleString("zh-CN") }} 个</span
-        >
-      </div>
-
-      <div v-if="initialLoading" class="mod-project-list" :aria-label="`正在加载${resourceLabel}`">
-        <div v-for="index in 6" :key="index" class="mod-project-row mod-project-row-loading">
-          <span class="mod-project-icon-placeholder" />
-          <span class="mod-project-copy-placeholder">
-            <i />
-            <i />
-            <i />
-          </span>
-        </div>
-      </div>
-
-      <div v-else-if="searchError && projects.length === 0" class="mod-result-state" role="alert">
-        <strong>无法加载{{ resourceLabel }}</strong>
-        <span>{{ searchError }}</span>
-        <button type="button" @click="resetSearch">重新搜索</button>
-      </div>
-
-      <div v-else-if="projects.length === 0" class="mod-result-state">
-        <strong>没有找到符合条件的{{ resourceLabel }}</strong>
-        <span>尝试减少筛选条件或更换搜索关键词。</span>
-      </div>
-
-      <div v-else class="mod-project-list" aria-live="polite">
-        <button
-          v-for="project in projects"
-          :key="project.id"
-          type="button"
-          class="mod-project-row"
-          @click="openProject(project)"
-        >
-          <span class="mod-project-icon">
-            <img
-              v-if="project.iconUrl && !projectIconFailed(project)"
-              :src="project.iconUrl"
-              alt=""
-              draggable="false"
-              referrerpolicy="no-referrer"
-              @error="markProjectIconFailed(project.id)"
-            />
-            <component
-              :is="resourceIcon"
-              v-else
-              :size="24"
-              :stroke-width="1.7"
-              aria-hidden="true"
-            />
-          </span>
-          <div class="mod-project-copy">
-            <div class="mod-project-title-line">
-              <strong>{{ primaryProjectName(project) }}</strong>
-              <template v-if="originalProjectName(project)">
-                <span class="mod-project-name-separator" aria-hidden="true">|</span>
-                <span class="mod-project-original-name">{{ originalProjectName(project) }}</span>
-              </template>
-            </div>
-            <div class="mod-project-description-line">
-              <div v-if="projectContentTags(project).length > 0" class="mod-content-tags">
-                <span
-                  v-for="contentTag in projectContentTags(project)"
-                  :key="`content:${contentTag}`"
-                  class="mod-content-tag"
-                >
-                  {{ contentTag }}
-                </span>
-              </div>
-              <p>{{ project.description || "该项目暂未提供简介。" }}</p>
-            </div>
-            <div class="mod-project-footer">
-              <div class="mod-category-tags">
-                <span class="mod-source-tag">{{ serverModSourceLabel(project.source) }}</span>
-                <span
-                  v-for="category in projectCategoryTags(project)"
-                  :key="`category:${category}`"
-                  class="mod-category-tag"
-                >
-                  {{ category }}
-                </span>
-              </div>
-              <div class="mod-project-meta">
-                <span>
-                  <UserRound :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  <span>{{ project.author }}</span>
-                </span>
-                <span>
-                  <Box :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  <span>{{ versionRange(project) }}</span>
-                </span>
-                <span>
-                  <Clock3 :size="14" :stroke-width="1.8" aria-hidden="true" />
-                  <span>{{ formatRelativeTime(project.dateModified) }}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-          <div class="mod-project-downloads" :aria-label="`${project.downloads} 次下载`">
-            <Download :size="17" :stroke-width="1.9" aria-hidden="true" />
-            <strong>{{ formatServerModDownloadCount(project.downloads) }}</strong>
-          </div>
-        </button>
-
-        <div ref="loadSentinel" class="mod-load-sentinel" aria-hidden="true" />
-        <div v-if="loadingMore" class="mod-loading-more" role="status">
-          <span class="mod-loading-spinner" />
-          正在加载更多
-        </div>
-        <div v-else-if="searchError" class="mod-inline-error mod-load-error" role="alert">
-          <span>加载下一页失败：{{ searchError }}</span>
-          <button type="button" @click="loadNextPage">重试</button>
-        </div>
-        <p v-else-if="!hasMore" class="mod-list-end">已加载全部结果</p>
-      </div>
+      <ResourceProjectResults
+        :resource-label="resourceLabel"
+        :result-summary="resultSummary"
+        :projects="projects"
+        :initial-loading="initialLoading"
+        :loading-more="loadingMore"
+        :search-error="searchError"
+        :source-warning="searchWarning"
+        :has-more="hasMore"
+        :resource-icon="resourceIcon"
+        :primary-name="primaryProjectName"
+        :original-name="originalProjectName"
+        :content-tags="projectContentTags"
+        :category-tags="projectCategoryTags"
+        :source-label="serverModSourceLabel"
+        :version-range="versionRange"
+        :relative-time="formatRelativeTime"
+        :download-count="formatServerModDownloadCount"
+        :icon-failed="projectIconFailed"
+        @open-project="openProject"
+        @icon-error="markProjectIconFailed"
+        @retry-search="resetSearch"
+        @retry-next-page="retryNextPage"
+        @load-more="loadNextPage"
+      />
     </template>
   </section>
 </template>
 
-<style scoped src="./ServerResourceDownloadPage.css"></style>
+<style src="./ServerResourceDownloadPage.css"></style>

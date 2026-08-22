@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   serverModSearchLimits,
   type ServerInstanceSnapshot,
+  type ServerModSearchRequest,
 } from "../packages/contracts/src/index.ts";
 import type {
   DownloadService,
@@ -150,7 +151,7 @@ function projectFixture(
   };
 }
 
-function searchRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function searchRequest(overrides: Partial<ServerModSearchRequest> = {}): ServerModSearchRequest {
   return {
     resourceType: "mod",
     source: "modrinth",
@@ -1055,6 +1056,26 @@ await test("Datapacks install into any exact-version instance and non-installabl
   } finally {
     await rm(instanceRoot, { recursive: true, force: true });
   }
+});
+
+await test("CurseForge transient outages return fulfilled unavailable results", async () => {
+  const catalog = new CurseForgeServerModCatalog({
+    baseUrl: "https://mod.mcimirror.test/curseforge/v1/",
+    userAgent,
+    fetchProvider: () => async () => new Response(null, { status: 502 }),
+  });
+  const filters = await catalog.getFilters("mod");
+  assert.equal(filters.sources[0]?.id, "curseforge");
+  assert.equal(filters.unavailableReason, "CurseForge 暂时不可用，请稍后重试");
+
+  const search = await catalog.search(searchRequest({ source: "curseforge", tag: "", offset: 20 }));
+  assert.deepEqual(search, {
+    items: [],
+    offset: 20,
+    limit: 0,
+    total: 0,
+    unavailableReason: "CurseForge 暂时不可用，请稍后重试",
+  });
 });
 
 await test("CurseForge MCIM catalog searches, reads details, and normalizes mirror downloads", async () => {

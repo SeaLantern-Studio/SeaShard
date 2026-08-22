@@ -4,6 +4,7 @@ import {
 } from "../packages/contracts/src/index.ts";
 import {
   expectFileDownloadTasks,
+  expectServerModFilters,
   expectServerModSearchResult,
 } from "../apps/desktop/src/main/contract-validation.ts";
 import assert from "node:assert/strict";
@@ -17,6 +18,7 @@ import {
   serverInstances,
   serverInstanceStartupSettings,
   serverInstanceContentCounts,
+  serverModFilters,
   serverModSearchResult,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
@@ -303,4 +305,28 @@ await test("desktop shell accepts Modrinth optional-server modpack environments"
   });
 
   assert.deepEqual(result.items[0]?.environment, ["client_only_server_optional"]);
+});
+
+await test("desktop shell validates unavailable source results", () => {
+  const unavailableReason = "CurseForge 暂时不可用，请稍后重试";
+  assert.deepEqual(expectServerModFilters({ ...serverModFilters, unavailableReason }), {
+    ...serverModFilters,
+    unavailableReason,
+  });
+  assert.deepEqual(
+    expectServerModSearchResult({
+      ...serverModSearchResult,
+      items: [],
+      limit: 0,
+      total: 0,
+      unavailableReason,
+    }),
+    {
+      items: [],
+      offset: serverModSearchResult.offset,
+      limit: 0,
+      total: 0,
+      unavailableReason,
+    },
+  );
 });

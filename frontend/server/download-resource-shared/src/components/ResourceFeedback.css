@@ -1,0 +1,70 @@
+.mod-inline-error {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--sl-danger, #dc2626) 22%, var(--sl-border-light));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sl-danger, #dc2626) 7%, var(--sl-surface));
+  color: var(--sl-danger, #b91c1c);
+  font-size: 0.78rem;
+}
+
+.mod-inline-error button,
+.mod-result-state button {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mod-inline-error button:hover,
+.mod-result-state button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.mod-result-state {
+  display: grid;
+  min-height: 190px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 32px;
+  border: 1px dashed var(--sl-border);
+  border-radius: 14px;
+  color: var(--sl-text-tertiary);
+  text-align: center;
+}
+.mod-detail-state {
+  min-height: 150px;
+}
+
+.mod-result-state strong {
+  color: var(--sl-text-primary);
+  font-size: 0.95rem;
+}
+
+.mod-result-state span {
+  max-width: 520px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.mod-result-state button {
+  margin-top: 6px;
+  color: var(--sl-primary);
+}
+
+.mod-inline-error button:focus-visible,
+.mod-result-state button:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}

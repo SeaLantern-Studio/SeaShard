@@ -1,0 +1,33 @@
+.mod-detail-page {
+  display: grid;
+  gap: 16px;
+}
+
+.mod-detail-back {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sl-text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.mod-detail-back:hover {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.mod-detail-back:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
