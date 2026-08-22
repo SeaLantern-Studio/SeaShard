@@ -1,4 +1,5 @@
 import {
+  isServerModSource,
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   serverModSearchLimits,
@@ -172,7 +173,7 @@ export function expectServerModResourceType(value: unknown): ServerModrinthResou
 }
 
 export function expectServerModSource(value: unknown): ServerModSource {
-  if (value !== "modrinth" && value !== "curseforge") {
+  if (!isServerModSource(value)) {
     throw new TypeError("server resource source is invalid");
   }
   return value;

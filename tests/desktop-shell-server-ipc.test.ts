@@ -6,6 +6,8 @@ import {
   expectFileDownloadTasks,
   expectServerModFilters,
   expectServerModSearchResult,
+  expectServerWorldDatapack,
+  expectServerWorldStorageSnapshot,
 } from "../apps/desktop/src/main/contract-validation.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -329,4 +331,37 @@ await test("desktop shell validates unavailable source results", () => {
       unavailableReason,
     },
   );
+});
+
+await test("desktop shell preserves unknown resource origins in world projections", () => {
+  const resourceSource = {
+    source: "github",
+    id: "owner-repo",
+    iconUrl: "https://github.com/owner/repo/icon.png",
+  };
+  const storage = expectServerWorldStorageSnapshot({
+    instanceId: "instance-paper",
+    mode: "unified",
+    saves: [
+      {
+        id: "world",
+        groupId: "world",
+        name: "World",
+        dimension: "overworld",
+        current: false,
+        resourceSource,
+      },
+    ],
+    dimensions: [],
+  });
+  assert.deepEqual(storage.saves[0]?.resourceSource, resourceSource);
+  const datapack = expectServerWorldDatapack({
+    instanceId: "instance-paper",
+    worldId: "world",
+    fileName: "pack.zip",
+    kind: "archive",
+    updatedAt: "2026-08-21T00:00:00.000Z",
+    resourceSource,
+  });
+  assert.deepEqual(datapack.resourceSource, resourceSource);
 });

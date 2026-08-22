@@ -5,6 +5,8 @@ import type {
   ServerInstanceContentCounts,
   ServerInstanceStartupSettings,
   ServerModLoader,
+  ServerResourceSourceIndex,
+  ServerResourceSourceRecord,
   ServerWorldBackupSnapshot,
   ServerWorldDatapackSnapshot,
   ServerWorldStorageSnapshot,
@@ -37,6 +39,10 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerInstanceSnapshot>;
   /** 保存实例自定义图标并返回最新实例投影。 */
   setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceSnapshot>;
+  /** 确保实例拥有持久化的世界存储外层目录，并返回最新实例清单。 */
+  ensureWorldStorageDirectory(instanceId: string): Promise<ServerInstanceSnapshot>;
+  /** 记录已安装资源的来源信息；未知来源保留展示信息，只有已支持来源才允许跳转详情。 */
+  recordResourceSource(instanceId: string, record: ServerResourceSourceRecord): Promise<void>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
   /** 切换 server.properties 中的 level-name，并返回最新存档投影。 */
@@ -95,13 +101,15 @@ export interface PortableSeaShardInstanceManifest {
   schemaVersion: 1;
   id: string;
   name: string;
+  icon?: string;
   storageMode: "managed" | "external";
   source: "downloaded" | "imported";
-  icon?: string;
-  backupDirectoryId?: string;
+  worldStorageDirectoryName?: string;
+  backupDirectoryName?: string;
   startupSettings?: ServerInstanceStartupSettings;
   lastStartedAt?: string;
   totalRuntimeMs?: number;
+  resourceSources?: ServerResourceSourceIndex;
   createdAt: string;
   updatedAt: string;
 }

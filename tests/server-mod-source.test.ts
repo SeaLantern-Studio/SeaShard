@@ -5,6 +5,7 @@ import {
   serverModSearchLimits,
   type ServerInstanceSnapshot,
   type ServerModSearchRequest,
+  type ServerResourceSourceRecord,
 } from "../packages/contracts/src/index.ts";
 import type {
   DownloadService,
@@ -92,6 +93,7 @@ class FakeDownloadService implements DownloadService {
 
 function instanceService(
   instances: readonly ServerInstanceSnapshot[],
+  records: ServerResourceSourceRecord[] = [],
 ): ServerInstanceManagerService {
   return {
     createManaged: async () => {
@@ -123,6 +125,14 @@ function instanceService(
     },
     setIcon: async () => {
       throw new Error("not implemented in fixture");
+    },
+    ensureWorldStorageDirectory: async (instanceId) => {
+      const instance = instances.find(({ id }) => id === instanceId);
+      if (!instance) throw new Error(`instance ${instanceId} not found`);
+      return instance;
+    },
+    recordResourceSource: async (_instanceId, record) => {
+      records.push(record);
     },
     recordStartedAt: async () => {},
     recordRuntime: async () => {},
@@ -284,6 +294,18 @@ await test("MCIM fallback switches project detail groups without mixing sources"
   const project = {
     id: "server-mod-1",
     project_type: "mod",
+    slug: "server-tools",
+    title: "Server Tools",
+    description: "Utilities for dedicated servers.",
+    team: "SeaLantern",
+    downloads: 12_345,
+    followers: 678,
+    updated: "2026-08-17T10:00:00Z",
+    client_side: "required",
+    server_side: "required",
+    categories: ["forge", "utility"],
+    game_versions: ["1.20.1", "1.21.1"],
+    icon_url: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
     body: "MCIM project",
   };
   const versions = [
@@ -341,6 +363,18 @@ await test("Modrinth project details expose the full body and primary version fi
         return Response.json({
           id: "server-mod-1",
           project_type: "mod",
+          slug: "server-tools",
+          title: "Server Tools",
+          description: "Utilities for dedicated servers.",
+          team: "SeaLantern",
+          downloads: 12_345,
+          followers: 678,
+          updated: "2026-08-17T10:00:00Z",
+          client_side: "required",
+          server_side: "required",
+          categories: ["forge", "utility"],
+          game_versions: ["1.20.1", "1.21.1"],
+          icon_url: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
           body: "Complete project description.\n\nSecond paragraph.",
         });
       }
@@ -368,6 +402,22 @@ await test("Modrinth project details expose the full body and primary version fi
     resourceType: "mod",
     source: "modrinth",
     projectId: "server-mod-1",
+    project: {
+      resourceType: "mod",
+      source: "modrinth",
+      id: "server-mod-1",
+      slug: "server-tools",
+      title: "Server Tools",
+      iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+      description: "Utilities for dedicated servers.",
+      author: "SeaLantern",
+      downloads: 12_345,
+      follows: 678,
+      dateModified: "2026-08-17T10:00:00Z",
+      environment: ["client_and_server"],
+      categories: ["forge", "utility"],
+      versions: ["1.20.1", "1.21.1"],
+    },
     body: "Complete project description.\n\nSecond paragraph.",
     versions: [
       {
@@ -401,6 +451,7 @@ await test("Mod download coordinator installs only compatible versions and suppo
           id: "server-mod-1",
           project_type: "mod",
           server_side: "required",
+          icon_url: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
         });
       }
       if (url.pathname.endsWith("/version/version-fabric-1")) {
@@ -448,10 +499,11 @@ await test("Mod download coordinator installs only compatible versions and suppo
     serverType: "mohist",
   };
   const downloads = new FakeDownloadService();
+  const sourceRecords: ServerResourceSourceRecord[] = [];
   const coordinator = new ServerModDownloadCoordinator(
     new ServerModSourceCatalog(catalog, catalog),
     downloads,
-    instanceService([fabricInstance, forgeInstance]),
+    instanceService([fabricInstance, forgeInstance], sourceRecords),
   );
 
   assert.deepEqual(
@@ -474,6 +526,15 @@ await test("Mod download coordinator installs only compatible versions and suppo
       downloadedBytes: 1_024,
     },
   );
+  assert.deepEqual(sourceRecords, [
+    {
+      resourceType: "mod",
+      relativePath: "mods/server-tools-fabric-1.21.1.jar",
+      source: "modrinth",
+      id: "server-mod-1",
+      iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+    },
+  ]);
   assert.deepEqual(downloads.requests[0], {
     url: `https://cdn.modrinth.com/data/server-mod-1/versions/version-fabric-1/${fileName}`,
     destinationPath: resolve(fabricRoot, "mods", fileName),
@@ -875,6 +936,18 @@ await test("Datapacks install into any exact-version instance and non-installabl
           id: "server-datapack-1",
           project_type: "mod",
           loaders: ["datapack"],
+          slug: "server-datapack",
+          title: "Server Datapack",
+          description: "A dedicated-server datapack.",
+          team: "SeaLantern",
+          downloads: 123,
+          followers: 4,
+          updated: "2026-08-17T10:00:00Z",
+          client_side: "unknown",
+          server_side: "required",
+          categories: ["adventure"],
+          game_versions: ["1.21.1"],
+          icon_url: "https://cdn.modrinth.com/data/server-datapack-1/icon.webp",
           body: "A dedicated-server datapack.",
         });
       }
@@ -924,6 +997,22 @@ await test("Datapacks install into any exact-version instance and non-installabl
     resourceType: "datapack",
     source: "modrinth",
     projectId: "server-datapack-1",
+    project: {
+      resourceType: "datapack",
+      source: "modrinth",
+      id: "server-datapack-1",
+      slug: "server-datapack",
+      title: "Server Datapack",
+      iconUrl: "https://cdn.modrinth.com/data/server-datapack-1/icon.webp",
+      description: "A dedicated-server datapack.",
+      author: "SeaLantern",
+      downloads: 123,
+      follows: 4,
+      dateModified: "2026-08-17T10:00:00Z",
+      environment: ["server_only"],
+      categories: ["adventure"],
+      versions: ["1.21.1"],
+    },
     body: "A dedicated-server datapack.",
     versions: [
       {
@@ -961,10 +1050,11 @@ await test("Datapacks install into any exact-version instance and non-installabl
       gameVersion: "1.20.1",
     };
     const downloads = new FakeDownloadService();
+    const sourceRecords: ServerResourceSourceRecord[] = [];
     const coordinator = new ServerModDownloadCoordinator(
       new ServerModSourceCatalog(catalog, catalog),
       downloads,
-      instanceService([matchingInstance, mismatchedInstance]),
+      instanceService([matchingInstance, mismatchedInstance], sourceRecords),
     );
     await assert.rejects(
       coordinator.installToInstance({
@@ -1011,6 +1101,15 @@ await test("Datapacks install into any exact-version instance and non-installabl
         downloadedBytes: 2_048,
       },
     );
+    assert.deepEqual(sourceRecords, [
+      {
+        resourceType: "datapack",
+        relativePath: "world/datapacks/server-datapack-1.21.1.zip",
+        source: "modrinth",
+        id: "server-datapack-1",
+        iconUrl: "https://cdn.modrinth.com/data/server-datapack-1/icon.webp",
+      },
+    ]);
     assert.equal(
       downloads.requests[0]?.destinationPath,
       resolve(instanceRoot, "world", "datapacks", fileName),
@@ -1078,6 +1177,71 @@ await test("CurseForge transient outages return fulfilled unavailable results", 
     unavailableReason: "CurseForge 暂时不可用，请稍后重试",
   });
 });
+await test("CurseForge world 422034 keeps real details when its file list is transiently unavailable", async () => {
+  const requested: URL[] = [];
+  const embeddedFile = {
+    id: 8_480_262,
+    modId: 422_034,
+    fileName: "Voidblock.zip",
+    fileLength: 12_345,
+    downloadCount: 321,
+    fileDate: "2026-08-18T12:00:00Z",
+    gameVersions: ["26.2"],
+    sortableGameVersions: [],
+    hashes: [],
+  };
+  const catalog = new CurseForgeServerModCatalog({
+    baseUrl: "https://mod.mcimirror.test/curseforge/v1/",
+    userAgent,
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      requested.push(url);
+      if (url.pathname.endsWith("/mods/422034/files")) {
+        return new Response(null, { status: 502 });
+      }
+      if (url.pathname.endsWith("/mods/422034")) {
+        return Response.json({
+          data: {
+            id: 422_034,
+            slug: "voidblock-skyblock-reinterpretation",
+            name: "Voidblock - Skyblock",
+            summary: "A skyblock world for Minecraft.",
+            logo: { url: "https://media.forgecdn.net/avatars/422/034/voidblock.png" },
+            authors: [{ name: "LoweredgamesMC" }],
+            downloadCount: 2_126_809,
+            dateModified: "2026-08-18T12:00:00Z",
+            latestFilesIndexes: [{ gameVersion: "26.2" }],
+            latestFiles: [embeddedFile],
+            categories: [],
+          },
+        });
+      }
+      return new Response("missing", { status: 404 });
+    },
+  });
+
+  const details = await catalog.getProjectDetails("world", "422034");
+  assert.equal(details.project.resourceType, "world");
+  assert.equal(details.project.title, "Voidblock - Skyblock");
+  assert.equal(details.project.author, "LoweredgamesMC");
+  assert.equal(details.project.iconUrl, "https://media.forgecdn.net/avatars/422/034/voidblock.png");
+  assert.equal(details.project.downloads, 2_126_809);
+  assert.equal(details.body, "A skyblock world for Minecraft.");
+  assert.deepEqual(details.versions, [
+    {
+      id: "8480262",
+      gameVersions: ["26.2"],
+      loaders: [],
+      fileName: "Voidblock.zip",
+      downloads: 321,
+      datePublished: "2026-08-18T12:00:00Z",
+    },
+  ]);
+  assert.deepEqual(
+    requested.map((url) => url.pathname),
+    ["/curseforge/v1/mods/422034", "/curseforge/v1/mods/422034/files"],
+  );
+});
 
 await test("CurseForge MCIM catalog searches, reads details, and normalizes mirror downloads", async () => {
   const baseUrl = "https://mod.mcimirror.test/curseforge/v1/";
@@ -1134,7 +1298,15 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
       if (url.pathname.endsWith("/mods/123")) {
         return Response.json({
           id: 123,
+          slug: "server-tools",
+          name: "Server Tools",
           summary: "Utilities for dedicated servers.",
+          logo: { url: "https://media.forgecdn.net/mod/icon.png" },
+          authors: [{ name: "SeaLantern" }],
+          downloadCount: 12_345,
+          dateModified: "2026-08-17T10:00:00Z",
+          latestFilesIndexes: [{ gameVersion: "1.21.1" }],
+          categories: [{ name: "Utility" }],
           allowModDistribution: true,
           isAvailable: true,
         });
@@ -1179,6 +1351,7 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
     source: "curseforge",
     resourceType: "mod",
     projectId: "123",
+    iconUrl: "https://media.forgecdn.net/mod/icon.png",
     versionId: "456",
     fileName,
     url: `https://mod.mcimirror.top/files/7091/801/${fileName}`,
@@ -1223,7 +1396,15 @@ await test("CurseForge uses resource class IDs and supports pack/world archives"
         return Response.json({
           data: {
             id: 1606092,
+            slug: "resource-4471",
+            name: "Resource 4471",
             summary: "A modpack archive.",
+            logo: { url: "https://media.forgecdn.net/avatars/resource.png" },
+            authors: [{ name: "SeaLantern" }],
+            downloadCount: 12,
+            dateModified: "2026-08-18T12:00:00Z",
+            latestFilesIndexes: [{ gameVersion: "1.21.1" }],
+            categories: [],
             allowModDistribution: true,
             isAvailable: true,
           },

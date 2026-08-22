@@ -575,15 +575,73 @@ function parseProjectDetails(
   if (versions.length > 2_048) {
     throw new Error("Modrinth project returned too many versions");
   }
+  const parsedProject = parseModrinthDetailsProject(project, projectId, resourceType);
   return {
     resourceType,
     source: "modrinth",
     projectId,
+    project: parsedProject,
     body: expectBoundedString(project.body, "Modrinth project body", 200_000, true),
     versions: versions
       .map((value, index) => parseProjectVersion(value, index, projectId))
       .filter((version) => matchesResourceVersion(version, resourceType)),
   };
+}
+
+function parseModrinthDetailsProject(
+  project: Record<string, unknown>,
+  projectId: string,
+  resourceType: ServerModrinthResourceType,
+): ServerModProject {
+  const iconUrl = expectProjectIconUrl(project.icon_url, projectId, 0);
+  const dateModified = expectBoundedString(
+    project.updated,
+    "Modrinth project details modified date",
+    64,
+  );
+  if (Number.isNaN(Date.parse(dateModified))) {
+    throw new Error("Modrinth project details modified date is invalid");
+  }
+  const environment = parseDetailProjectEnvironment(project, resourceType);
+  return {
+    resourceType,
+    source: "modrinth",
+    id: projectId,
+    slug: expectBoundedString(project.slug, "Modrinth project details slug", 128),
+    title: expectBoundedString(project.title, "Modrinth project details title", 200),
+    ...(iconUrl ? { iconUrl } : {}),
+    description: expectBoundedString(
+      project.description,
+      "Modrinth project details description",
+      1_000,
+      true,
+    ),
+    author: expectBoundedString(project.team, "Modrinth project details team", 200),
+    downloads: expectNonNegativeInteger(project.downloads, "Modrinth project details downloads"),
+    follows: expectNonNegativeInteger(project.followers, "Modrinth project details followers"),
+    dateModified,
+    environment,
+    categories: parseStringArray(project.categories, "Modrinth project details categories", 64),
+    versions: parseStringArray(
+      project.game_versions,
+      "Modrinth project details game versions",
+      512,
+    ),
+  };
+}
+
+function parseDetailProjectEnvironment(
+  project: Record<string, unknown>,
+  resourceType: ServerModrinthResourceType,
+): ServerModEnvironment[] {
+  if (resourceType !== "mod") return ["server_only"];
+  const clientSide = String(project.client_side);
+  const serverSide = String(project.server_side);
+  if (serverSide === "required") {
+    return clientSide === "required" ? ["client_and_server"] : ["server_only_client_optional"];
+  }
+  if (clientSide === "required") return ["client_only_server_optional"];
+  return ["client_or_server"];
 }
 
 function parseProjectVersion(value: unknown, index: number, projectId: string): ServerModVersion {
@@ -653,6 +711,7 @@ function parseVersionArtifact(
   ) {
     throw new Error("Modrinth project is not compatible with dedicated servers");
   }
+  const iconUrl = expectProjectIconUrl(project.icon_url, projectId, 0);
 
   const version = expectRecord(versionValue, "Modrinth download version");
   if (version.id !== versionId || version.project_id !== projectId) {
@@ -690,6 +749,7 @@ function parseVersionArtifact(
     source: "modrinth",
     resourceType,
     projectId,
+    ...(iconUrl ? { iconUrl } : {}),
     versionId,
     fileName,
     url,

@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import type {
-  ServerWorldBackupSnapshot,
-  ServerWorldDatapackSnapshot,
-  ServerWorldSave,
+import {
+  isServerModSource,
+  type ServerResourceSourceMetadata,
+  type ServerWorldBackupSnapshot,
+  type ServerWorldDatapackSnapshot,
+  type ServerWorldSave,
 } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Spinner } from "cmzya-modern-ui";
-import { Archive, ArrowLeft, ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-vue-next";
+import {
+  Archive,
+  ArrowLeft,
+  ChevronDown,
+  ExternalLink,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-vue-next";
 import minecraftDefaultServerIcon from "../assets/minecraft-default-server-icon.png";
+import { ref } from "vue";
 import { formatWorldSaveDate, formatWorldSaveSize } from "../world-save-format";
 
 const props = defineProps<{
@@ -24,6 +35,7 @@ const props = defineProps<{
   backupLoadFailed: boolean;
   dataPackLoadFailed: boolean;
 }>();
+const failedDataPackIcons = ref<ReadonlySet<string>>(new Set());
 
 const emit = defineEmits<{
   back: [];
@@ -34,6 +46,10 @@ const emit = defineEmits<{
   "retry-data-packs": [];
   "restore-backup": [backup: ServerWorldBackupSnapshot];
   "delete-backup": [backup: ServerWorldBackupSnapshot];
+  "open-resource-source": [
+    resourceType: "world" | "datapack",
+    metadata: ServerResourceSourceMetadata,
+  ];
 }>();
 
 function goBack(): void {
@@ -66,6 +82,28 @@ function selectRestoreTarget(backup: ServerWorldBackupSnapshot): void {
 function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
   emit("delete-backup", backup);
 }
+function openResourceSource(
+  resourceType: "world" | "datapack",
+  metadata: ServerResourceSourceMetadata,
+): void {
+  emit("open-resource-source", resourceType, metadata);
+}
+
+function canOpenResourceSource(metadata: ServerResourceSourceMetadata): boolean {
+  return isServerModSource(metadata.source);
+}
+
+function dataPackIconKey(dataPack: ServerWorldDatapackSnapshot): string {
+  return `${dataPack.worldId}:${dataPack.fileName}`;
+}
+
+function dataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): boolean {
+  return failedDataPackIcons.value.has(dataPackIconKey(dataPack));
+}
+
+function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
+  failedDataPackIcons.value = new Set([...failedDataPackIcons.value, dataPackIconKey(dataPack)]);
+}
 </script>
 
 <template>
@@ -97,7 +135,17 @@ function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
           {{ formatWorldSaveDate(detailSave.updatedAt) }}</small
         >
       </div>
-      <span v-if="detailSave?.current" class="world-save-current">当前存档</span>
+      <div class="world-save-detail-actions">
+        <span v-if="detailSave?.current" class="world-save-current">当前存档</span>
+        <Cmz_Button
+          v-if="detailSave?.resourceSource && canOpenResourceSource(detailSave.resourceSource)"
+          variant="ghost"
+          size="sm"
+          @click="openResourceSource('world', detailSave.resourceSource)"
+        >
+          <ExternalLink :size="15" :stroke-width="1.8" />查看来源
+        </Cmz_Button>
+      </div>
     </div>
 
     <section class="world-save-backups" aria-label="存档资源">
@@ -238,7 +286,14 @@ function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
               class="world-save-backup-row"
             >
               <span class="world-save-icon world-save-icon--small">
-                <Archive :size="20" :stroke-width="1.6" aria-hidden="true" />
+                <img
+                  v-if="dataPack.resourceSource?.iconUrl && !dataPackIconFailed(dataPack)"
+                  :src="dataPack.resourceSource.iconUrl"
+                  alt=""
+                  draggable="false"
+                  @error="markDataPackIconFailed(dataPack)"
+                />
+                <Archive v-else :size="20" :stroke-width="1.6" aria-hidden="true" />
               </span>
               <span class="world-save-card-copy"
                 ><strong>{{ dataPack.fileName }}</strong
@@ -247,6 +302,18 @@ function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
                   {{ formatWorldSaveDate(dataPack.updatedAt) }}</span
                 ></span
               >
+              <div
+                v-if="dataPack.resourceSource && canOpenResourceSource(dataPack.resourceSource)"
+                class="world-save-row-actions"
+              >
+                <Cmz_Button
+                  variant="ghost"
+                  size="sm"
+                  @click="openResourceSource('datapack', dataPack.resourceSource)"
+                >
+                  <ExternalLink :size="15" :stroke-width="1.8" />查看来源
+                </Cmz_Button>
+              </div>
             </article>
           </div>
         </div>

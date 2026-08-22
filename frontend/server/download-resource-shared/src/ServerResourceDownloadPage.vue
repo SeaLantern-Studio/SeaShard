@@ -9,6 +9,7 @@ import {
   type ServerModProjectDetails,
   type ServerModSearchIndex,
   type ServerModSearchResult,
+  type ServerModSource,
   type ServerModSourceClientService,
   type ServerModVersion,
 } from "@seashard/contracts";
@@ -25,6 +26,7 @@ import ResourceVersionFilters from "./components/ResourceVersionFilters.vue";
 import ResourceVersionGroups from "./components/ResourceVersionGroups.vue";
 import { Archive, Box, Package } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
   compatibleServerResourceInstances,
   createServerModMixedSearchState,
@@ -50,6 +52,8 @@ const props = defineProps<{
   instances?: ServerInstanceClientService;
   resourceType: "modpack" | "datapack" | "world";
 }>();
+const route = useRoute();
+const router = useRouter();
 const showLoaderFilter = computed(() => props.resourceType === "modpack");
 
 const emptyFilters: ServerModFilters = {
@@ -189,7 +193,8 @@ onMounted(() => {
     relativeTimeNow.value = Date.now();
   }, 60_000);
   void loadFilters();
-  void resetSearch();
+  if (routeProjectTarget()) initialLoading.value = false;
+  else void resetSearch();
   favoriteProjectIds.value = readFavoriteProjectIds();
 });
 
@@ -199,6 +204,13 @@ watch(
     if (!groups.some(({ id }) => id === expandedVersionGroupId.value)) {
       expandedVersionGroupId.value = groups[0]?.id;
     }
+  },
+  { immediate: true },
+);
+watch(
+  () => [route.query.source, route.query.id],
+  () => {
+    void syncProjectRoute();
   },
   { immediate: true },
 );
@@ -426,6 +438,15 @@ function loaderLabel(id: string): string {
 }
 
 async function openProject(project: ServerModProject): Promise<void> {
+  const target = routeProjectTarget();
+  if (!target || target.source !== project.source || target.id !== project.id) {
+    await router.push({ query: { source: project.source, id: project.id } });
+    return;
+  }
+  await selectProject(project);
+}
+
+async function selectProject(project: ServerModProject): Promise<void> {
   selectedProject.value = project;
   projectDetails.value = undefined;
   detailGameVersion.value = "";
@@ -438,7 +459,94 @@ async function openProject(project: ServerModProject): Promise<void> {
   await loadProjectDetails();
 }
 
-function returnToProjectList(): void {
+async function syncProjectRoute(): Promise<void> {
+  const target = routeProjectTarget();
+  if (!target) {
+    if (selectedProject.value) {
+      clearProjectDetail();
+      void resetSearch();
+    }
+    return;
+  }
+  if (
+    selectedProject.value?.source === target.source &&
+    selectedProject.value.id === target.id &&
+    (detailLoading.value ||
+      (projectDetails.value?.project.source === target.source &&
+        projectDetails.value.project.id === target.id))
+  ) {
+    return;
+  }
+
+  const requestId = ++detailRequestId;
+  selectedProject.value = createRouteProject(target);
+  projectDetails.value = undefined;
+  detailGameVersion.value = "";
+  detailLoader.value = "";
+  detailError.value = "";
+  detailDescriptionExpanded.value = false;
+  resetCopyActions();
+  detailLoading.value = true;
+  await nextTick();
+  window.scrollTo({ top: 0 });
+  try {
+    const details = await props.resources.getProjectDetails(
+      props.resourceType,
+      target.source,
+      target.id,
+    );
+    if (
+      requestId === detailRequestId &&
+      routeProjectTarget()?.source === target.source &&
+      routeProjectTarget()?.id === target.id
+    ) {
+      selectedProject.value = details.project;
+      projectDetails.value = details;
+    }
+  } catch (error) {
+    if (requestId === detailRequestId) detailError.value = errorMessage(error);
+  } finally {
+    if (requestId === detailRequestId) detailLoading.value = false;
+  }
+}
+
+function routeProjectTarget(): { source: ServerModSource; id: string } | undefined {
+  const source = routeQueryValue(route.query.source);
+  const id = routeQueryValue(route.query.id);
+  if (
+    (source !== "modrinth" && source !== "curseforge") ||
+    !id ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(id)
+  ) {
+    return undefined;
+  }
+  return { source, id };
+}
+
+function routeQueryValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return Array.isArray(value) && typeof value[0] === "string" ? value[0] : undefined;
+}
+
+function createRouteProject(target: { source: ServerModSource; id: string }): ServerModProject {
+  return {
+    resourceType: props.resourceType,
+    source: target.source,
+    id: target.id,
+    slug: target.id,
+    title: target.id,
+    description: "",
+    author: serverModSourceLabel(target.source),
+    downloads: 0,
+    follows: 0,
+    dateModified: "1970-01-01T00:00:00.000Z",
+    environment: ["server_only"],
+    categories: [],
+    versions: [],
+  };
+}
+
+function clearProjectDetail(): void {
   detailRequestId += 1;
   selectedProject.value = undefined;
   projectDetails.value = undefined;
@@ -448,6 +556,15 @@ function returnToProjectList(): void {
   detailLoader.value = "";
   expandedVersionGroupId.value = undefined;
   detailDescriptionExpanded.value = false;
+}
+
+function returnToProjectList(): void {
+  clearProjectDetail();
+  if (routeProjectTarget()) {
+    void router.replace({ query: {} }).then(() => {
+      void resetSearch();
+    });
+  }
 }
 
 async function loadProjectDetails(): Promise<void> {
@@ -462,7 +579,12 @@ async function loadProjectDetails(): Promise<void> {
       project.source,
       project.id,
     );
-    if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
+    if (
+      requestId === detailRequestId &&
+      selectedProject.value?.source === project.source &&
+      selectedProject.value.id === project.id
+    ) {
+      selectedProject.value = details.project;
       projectDetails.value = details;
     }
   } catch (error) {

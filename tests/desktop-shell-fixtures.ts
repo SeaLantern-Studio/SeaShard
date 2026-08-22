@@ -385,6 +385,21 @@ export const serverModProjectDetails = {
   resourceType: "mod",
   source: "modrinth",
   projectId: "server-mod-1",
+  project: {
+    resourceType: "mod",
+    source: "modrinth",
+    id: "server-mod-1",
+    slug: "server-tools",
+    title: "Server Tools",
+    description: "Utilities for dedicated servers.",
+    author: "SeaLantern",
+    downloads: 12_345,
+    follows: 678,
+    dateModified: "2026-08-17T10:00:00Z",
+    environment: ["server_only"],
+    categories: ["fabric", "utility"],
+    versions: ["1.21.1"],
+  },
   body: "Complete project description.\n\nSecond paragraph.",
   versions: [
     {

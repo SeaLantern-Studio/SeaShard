@@ -133,10 +133,20 @@ export class CurseForgeServerModCatalog implements ServerModCatalogImplementatio
     projectValue: unknown,
   ): Promise<ServerModProjectDetails> {
     const projectId = expectCurseForgeId(projectValue, "CurseForge project ID");
-    const [modValue, filesValue] = await Promise.all([
-      this.fetchJson(this.endpoint(`mods/${projectId}`)),
-      this.fetchJson(this.endpoint(`mods/${projectId}/files?pageSize=50&index=0`)),
-    ]);
+    // 先读取项目主体，再读取文件列表，避免两个请求同时命中镜像服务造成不必要的瞬时失败。
+    const modValue = await this.fetchJson(this.endpoint(`mods/${projectId}`));
+    let filesValue: unknown;
+    try {
+      filesValue = await this.fetchJson(
+        this.endpoint(`mods/${projectId}/files?pageSize=50&index=0`),
+      );
+    } catch (error) {
+      if (!(error instanceof CurseForgeTransientError)) throw error;
+      const mod = unwrapDataRecord(modValue, "CurseForge project details");
+      // 项目主体自带各版本的最新文件；文件列表接口短暂不可用时仍可打开真实详情。
+      if (!Array.isArray(mod.latestFiles)) throw error;
+      filesValue = mod.latestFiles;
+    }
     return parseProjectDetails(modValue, filesValue, String(projectId), resourceType);
   }
 
@@ -338,10 +348,12 @@ function parseProjectDetails(
   if (String(expectCurseForgeId(mod.id, "CurseForge project details ID")) !== projectId) {
     throw new Error("CurseForge project details do not match the request");
   }
+  const project = parseProject(mod, 0, resourceType);
   return {
     resourceType,
     source: "curseforge",
     projectId,
+    project,
     body: expectBoundedString(mod.summary ?? "", "CurseForge project summary", 200_000, true),
     versions: parseFilesResponse(filesValue).map((file, index) =>
       parseVersion(file, index, projectId, resourceType),
@@ -387,12 +399,18 @@ function parseArtifact(
   if (String(file.id) !== fileId || String(file.modId) !== projectId) {
     throw new Error("CurseForge file does not belong to the requested project");
   }
+  const logo =
+    mod.logo === null || mod.logo === undefined
+      ? undefined
+      : expectRecord(mod.logo, "CurseForge download project logo");
+  const iconUrl = expectCurseForgeIconUrl(logo?.url ?? logo?.thumbnailUrl, projectId);
   const downloadRecord = expectRecord(downloadValue, "CurseForge download URL response");
   const downloadUrl = expectHttpsUrl(downloadRecord.data, "CurseForge download URL");
   return {
     source: "curseforge",
     resourceType,
     projectId,
+    ...(iconUrl ? { iconUrl } : {}),
     versionId: fileId,
     fileName: expectResourceFileName(file.fileName, resourceType),
     url: toCurseForgeMirrorFileUrl(downloadUrl, String(file.fileName)),

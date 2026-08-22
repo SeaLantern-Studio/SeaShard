@@ -210,6 +210,10 @@ export interface ServerCoreSourceClientService {
 }
 
 export type ServerModSource = "modrinth" | "curseforge";
+/** 判断来源是否具备当前目录查询与详情跳转实现。 */
+export function isServerModSource(value: unknown): value is ServerModSource {
+  return value === "modrinth" || value === "curseforge";
+}
 export type ServerModrinthResourceType = "mod" | "modpack" | "datapack" | "world";
 export type ServerModDownloadableResourceType = ServerModrinthResourceType;
 export const serverModLoaders = ["fabric", "forge", "neoforge", "quilt"] as const;
@@ -318,9 +322,33 @@ export interface ServerModProjectDetails {
   resourceType: ServerModrinthResourceType;
   source: ServerModSource;
   projectId: string;
+  project: ServerModProject;
   body: string;
   versions: readonly ServerModVersion[];
 }
+export type ServerResourceSourceType = "mod" | "datapack" | "world";
+export type ServerResourceSource = string;
+
+/** 已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。 */
+export interface ServerResourceSourceMetadata {
+  source: ServerResourceSource;
+  id: string;
+  iconUrl?: string;
+}
+
+/** 实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。 */
+export interface ServerResourceSourceIndex {
+  mods?: Readonly<Record<string, ServerResourceSourceMetadata>>;
+  datapacks?: Readonly<Record<string, ServerResourceSourceMetadata>>;
+  worlds?: Readonly<Record<string, ServerResourceSourceMetadata>>;
+}
+
+/** Host 写入资源来源索引时使用的单条记录。 */
+export interface ServerResourceSourceRecord extends ServerResourceSourceMetadata {
+  resourceType: ServerResourceSourceType;
+  relativePath: string;
+}
+
 /** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。 */
 export interface ServerModInstallRequest {
   source: ServerModSource;
@@ -458,8 +486,10 @@ export interface ServerInstanceSnapshot {
   rootPath: string;
   coreJarPath: string;
   iconPath?: string;
-  /** 备份根目录的随机六位标识；创建实例时生成并写入 seashard.json。 */
-  backupDirectoryId?: string;
+  /** 世界下载外层目录的完整名称；例如 worlds-abc123。 */
+  worldStorageDirectoryName?: string;
+  /** 世界备份外层目录的完整名称；例如 backups-def456。 */
+  backupDirectoryName?: string;
   storageMode: ServerInstanceStorageMode;
   source: ServerInstanceSource;
   /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */
@@ -476,6 +506,8 @@ export interface ServerInstanceSnapshot {
   totalRuntimeMs?: number;
   /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */
   startupSettings?: ServerInstanceStartupSettings;
+  /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */
+  resourceSources?: ServerResourceSourceIndex;
 }
 
 export type ServerWorldStorageMode = "unified" | "split";
@@ -489,6 +521,7 @@ export interface ServerWorldSave {
   dimension: ServerWorldDimension;
   current: boolean;
   createdAt?: string;
+  resourceSource?: ServerResourceSourceMetadata;
   updatedAt?: string;
   iconDataUrl?: string;
 }
@@ -509,6 +542,7 @@ export type ServerWorldDatapackKind = "archive" | "directory";
 export interface ServerWorldDatapackSnapshot {
   instanceId: string;
   worldId: string;
+  resourceSource?: ServerResourceSourceMetadata;
   fileName: string;
   kind: ServerWorldDatapackKind;
   updatedAt: string;

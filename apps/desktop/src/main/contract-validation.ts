@@ -7,6 +7,7 @@ import {
   serverPortLimits,
   serverModSearchLimits,
   serverModLoaders,
+  isServerModSource,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
@@ -32,6 +33,7 @@ import {
   type ServerModFilters,
   type ServerModDownloadResult,
   type ServerModProject,
+  type ServerResourceSourceMetadata,
   type ServerModSource,
   type ServerModrinthResourceType,
   type ServerModProjectDetails,
@@ -116,6 +118,7 @@ const serverModResourceTypes = new Set<ServerModrinthResourceType>([
   "datapack",
   "world",
 ]);
+const serverResourceSourcePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 function isServerModIconUrl(value: unknown, projectId: unknown, source: unknown): value is string {
   if (typeof value !== "string" || typeof projectId !== "string") return false;
@@ -138,6 +141,28 @@ function isServerModIconUrl(value: unknown, projectId: unknown, source: unknown)
       source === "curseforge" &&
       url.protocol === "https:" &&
       (url.hostname === "media.forgecdn.net" || url.hostname === "mod.mcimirror.top") &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isServerResourceIconUrl(
+  value: unknown,
+  projectId: string,
+  source: string,
+): value is string {
+  if (isServerModSource(source)) return isServerModIconUrl(value, projectId, source);
+  if (typeof value !== "string" || !value) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
       !url.username &&
       !url.password &&
       !url.port &&
@@ -249,15 +274,25 @@ export function expectServerModProjectDetails(value: unknown): ServerModProjectD
     typeof details.body !== "string" ||
     details.body.length > 200_000 ||
     !Array.isArray(details.versions) ||
-    details.versions.length > 2_048
+    details.versions.length > 2_048 ||
+    !details.project
   ) {
     throw new Error("server resource source returned invalid project details");
+  }
+  const project = expectServerModProject(details.project, 0);
+  if (
+    project.resourceType !== details.resourceType ||
+    project.source !== details.source ||
+    project.id !== details.projectId
+  ) {
+    throw new Error("server resource source returned mismatched project details");
   }
   const seen = new Set<string>();
   return {
     resourceType: details.resourceType as ServerModrinthResourceType,
     source: details.source as ServerModSource,
     projectId: details.projectId,
+    project,
     body: details.body,
     versions: details.versions.map((version, index) => {
       const parsed = expectServerModVersion(version, index, details.projectId as string);
@@ -585,8 +620,11 @@ export function expectServerInstances(value: unknown): ServerInstanceSnapshot[] 
         ? undefined
         : expectServerInstanceStartupSettings(instance.startupSettings, index);
     const snapshot = instance as unknown as ServerInstanceSnapshot;
+    const snapshotWithoutResourceSources = Object.fromEntries(
+      Object.entries(snapshot).filter(([key]) => key !== "resourceSources"),
+    ) as Omit<ServerInstanceSnapshot, "resourceSources">;
     return {
-      ...snapshot,
+      ...snapshotWithoutResourceSources,
       ...(snapshot.iconPath
         ? {
             iconUrl: `${serverCoreIconScheme}://${serverInstanceIconHost}/${encodeURIComponent(snapshot.id)}`,
@@ -662,6 +700,34 @@ export function expectServerWorldStorageSnapshot(value: unknown): ServerWorldSto
   };
 }
 
+function isServerResourceSource(value: unknown): value is string {
+  return typeof value === "string" && serverResourceSourcePattern.test(value);
+}
+function parseOptionalServerResourceSourceMetadata(
+  value: unknown,
+): ServerResourceSourceMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const metadata = value as Record<string, unknown>;
+  const source = metadata.source;
+  const id = metadata.id;
+  if (
+    !isServerResourceSource(source) ||
+    typeof id !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,255}$/u.test(id)
+  ) {
+    return undefined;
+  }
+  const iconUrl =
+    metadata.iconUrl !== undefined && isServerResourceIconUrl(metadata.iconUrl, id, source)
+      ? metadata.iconUrl
+      : undefined;
+  return {
+    source,
+    id,
+    ...(iconUrl ? { iconUrl } : {}),
+  };
+}
+
 function expectServerWorldSave(value: unknown, index: number | string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`server instance manager returned invalid world save ${index}`);
@@ -682,6 +748,7 @@ function expectServerWorldSave(value: unknown, index: number | string) {
   ) {
     throw new Error(`server instance manager returned invalid world save ${index}`);
   }
+  const resourceSource = parseOptionalServerResourceSourceMetadata(save.resourceSource);
   return {
     id: save.id,
     groupId: save.groupId,
@@ -689,6 +756,7 @@ function expectServerWorldSave(value: unknown, index: number | string) {
     dimension: save.dimension as "overworld" | "nether" | "end",
     current: save.current,
     ...(typeof save.createdAt === "string" ? { createdAt: save.createdAt } : {}),
+    ...(resourceSource ? { resourceSource } : {}),
     ...(typeof save.updatedAt === "string" ? { updatedAt: save.updatedAt } : {}),
     ...(save.iconDataUrl ? { iconDataUrl: save.iconDataUrl } : {}),
   };
@@ -751,9 +819,11 @@ export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSn
   ) {
     throw new Error("server instance manager returned invalid world datapack");
   }
+  const resourceSource = parseOptionalServerResourceSourceMetadata(datapack.resourceSource);
   return {
     instanceId: datapack.instanceId,
     worldId: datapack.worldId,
+    ...(resourceSource ? { resourceSource } : {}),
     fileName: datapack.fileName,
     kind: datapack.kind as ServerWorldDatapackSnapshot["kind"],
     updatedAt: datapack.updatedAt,

@@ -22,6 +22,8 @@ export interface ServerModArtifact {
   readonly sha512?: string;
   readonly size: number;
   readonly gameVersions: readonly string[];
+  readonly iconUrl?: string;
+
   readonly loaders: readonly string[];
 }
 

@@ -12,12 +12,14 @@ import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import {
   createShortRandomId,
   resolveWorldDatapackDirectory,
+  resolveWorldStorageContainer,
+  resolveWorldStorageRoot,
   type ServerInstanceManagerService,
 } from "@seashard/server-instance-manager";
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
-import { join, resolve, isAbsolute } from "node:path";
-import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
+import { mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
+import { join, relative, resolve, isAbsolute } from "node:path";
 import { extractWorldArchive } from "./world-storage";
+import type { ServerModArtifact, ServerModCatalog } from "./catalog-types";
 interface InstallRequest extends ServerModInstallRequest {
   readonly connections: number;
 }
@@ -26,6 +28,7 @@ interface SaveRequest extends ServerModSaveAsRequest {
   readonly destinationDirectory: string;
   readonly connections: number;
 }
+const maximumWorldDirectoryAttempts = 8;
 
 /**
  * 把 Modrinth 身份解析、实例兼容校验和公共下载任务串成一次受控安装。
@@ -53,19 +56,49 @@ export class ServerModDownloadCoordinator {
       return this.downloadWorldToInstance(artifact, instance);
     }
     assertCompatibleInstance(artifact, instance);
+    const datapackDirectory =
+      request.resourceType === "datapack"
+        ? await resolveWorldDatapackDirectory(instance, request.worldId)
+        : undefined;
     const destinationDirectory =
-      artifact.resourceType === "datapack"
-        ? (await resolveWorldDatapackDirectory(instance, request.worldId)).absolutePath
-        : resolve(instance.rootPath, instance.serverType === "quilt" ? "server/mods" : "mods");
+      datapackDirectory?.absolutePath ??
+      resolve(instance.rootPath, instance.serverType === "quilt" ? "server/mods" : "mods");
+    const destinationPath = resolve(destinationDirectory, artifact.fileName);
     const task = await this.startAndWait(
       artifact,
       destinationDirectory,
       request.connections,
       instance.id,
+      destinationPath,
+    );
+    await this.recordInstalledResource(
+      instance,
+      request.resourceType,
+      artifact,
+      destinationPath,
+      datapackDirectory?.storageRoot,
     );
     return resultOf(artifact, task, "instance", instance.id);
   }
-  /** 下载并解压到实例根目录下的 worlds-六位标识/world-六位标识 目录，不修改当前世界。 */
+
+  /** 记录实际落盘相对路径；世界与数据包以统一世界根为索引基准。 */
+  private async recordInstalledResource(
+    instance: ServerInstanceSnapshot,
+    resourceType: "mod" | "datapack" | "world",
+    artifact: ServerModArtifact,
+    absolutePath: string,
+    relativeRootPath = instance.rootPath,
+  ): Promise<void> {
+    const relativePath = relative(relativeRootPath, absolutePath).replaceAll("\\", "/");
+    await this.instances.recordResourceSource(instance.id, {
+      resourceType,
+      relativePath,
+      source: artifact.source,
+      id: artifact.projectId,
+      ...(artifact.iconUrl ? { iconUrl: artifact.iconUrl } : {}),
+    });
+  }
+  /** 下载并解压到实例复用的 worlds-六位标识外层目录下，再创建 worlds-六位标识内层目录，不修改当前世界。 */
   private async downloadWorldToInstance(
     artifact: ServerModArtifact,
     instance: ServerInstanceSnapshot,
@@ -73,43 +106,45 @@ export class ServerModDownloadCoordinator {
     if (!supportsUnifiedWorldStorage(instance.serverType)) {
       throw new Error("当前服务器核心不支持普通世界存档下载");
     }
-    const maximumContainerAttempts = 8;
-    let containerRoot: string | undefined;
+    const preparedInstance = await this.instances.ensureWorldStorageDirectory(instance.id);
+    const worldRoot = await resolveWorldStorageRoot(preparedInstance);
+    const containerRoot = await resolveWorldStorageContainer(preparedInstance);
+    await mkdir(containerRoot, { recursive: true });
     let destinationRoot: string | undefined;
-    let containerCreated = false;
     let destinationCreated = false;
     let stagingRoot: string | undefined;
     try {
-      for (let attempt = 0; attempt < maximumContainerAttempts; attempt += 1) {
-        const candidate = resolve(instance.rootPath, `worlds-${this.worldIdFactory()}`);
-        try {
-          await mkdir(candidate);
-          containerRoot = candidate;
-          containerCreated = true;
-          break;
-        } catch (error) {
-          if (!isAlreadyExistsError(error)) throw error;
-        }
-      }
-      if (!containerRoot) {
-        throw new Error("世界存档目录生成冲突次数过多");
-      }
-      const innerWorldId = `world-${this.worldIdFactory()}`;
-      destinationRoot = resolve(containerRoot, innerWorldId);
-      stagingRoot = await mkdtemp(resolve(instance.rootPath, ".seashard-world-"));
+      const archivePathRoot = resolve(worldRoot, ".seashard-world-");
+      stagingRoot = await mkdtemp(archivePathRoot);
       const archivePath = join(stagingRoot, "world.zip");
       const extractedRoot = join(stagingRoot, "extracted");
       const task = await this.startAndWait(artifact, stagingRoot, 8, instance.id, archivePath);
       await extractWorldArchive(archivePath, extractedRoot);
-      await rename(extractedRoot, destinationRoot);
-      destinationCreated = true;
+
+      for (let attempt = 0; attempt < maximumWorldDirectoryAttempts; attempt += 1) {
+        const candidate = resolve(containerRoot, `worlds-${this.worldIdFactory()}`);
+        try {
+          await rename(extractedRoot, candidate);
+          destinationRoot = candidate;
+          destinationCreated = true;
+          break;
+        } catch (error) {
+          if (isAlreadyExistsError(error) || (await pathExists(candidate))) continue;
+          throw error;
+        }
+      }
+      if (!destinationRoot) throw new Error("世界存档目录生成冲突次数过多");
+      await this.recordInstalledResource(
+        preparedInstance,
+        "world",
+        artifact,
+        destinationRoot,
+        worldRoot,
+      );
       return resultOf(artifact, task, "instance", instance.id);
     } catch (error) {
       if (destinationCreated && destinationRoot) {
         await rm(destinationRoot, { recursive: true, force: true });
-      }
-      if (containerCreated && containerRoot) {
-        await rm(containerRoot, { recursive: true, force: true });
       }
       throw error;
     } finally {
@@ -328,6 +363,25 @@ function isAlreadyExistsError(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     (error as { code?: unknown }).code === "EEXIST"
+  );
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
   );
 }
 function resultOf(

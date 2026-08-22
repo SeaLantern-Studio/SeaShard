@@ -25,16 +25,21 @@ import {
   restoreWorldBackup,
 } from "./world-backup";
 import { listWorldDatapacks } from "./world-datapacks";
-import { listWorldStorage, switchWorldStorage } from "./world-storage";
+import { listWorldStorage, resolveWorldStorageRoot, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type {
   CreateManagedServerInstanceRequest,
   ServerWorldBackupSnapshot,
   ServerWorldDatapackSnapshot,
 } from "./types";
-import { createShortRandomId } from "./directory-naming";
+import {
+  createBackupDirectoryName,
+  createShortRandomId,
+  createWorldStorageDirectoryName,
+  expectWorldStorageDirectoryName,
+} from "./directory-naming";
+import { parseResourceSourceRecord, upsertResourceSource } from "./resource-source-index";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
-
 interface PendingManagedInstance {
   readonly id: string;
   readonly name: string;
@@ -42,6 +47,7 @@ interface PendingManagedInstance {
   readonly rootPath: string;
   readonly createdAt: string;
 }
+const maximumDirectoryAllocationAttempts = 8;
 
 export interface ServerInstanceManagerOptions {
   readonly managedRoot: string;
@@ -152,6 +158,66 @@ export class ServerInstanceManager {
       }
     }
   }
+  /** 确保实例复用已持久化的世界存储外层目录；首次使用时分配并写入 seashard.json。 */
+  async ensureWorldStorageDirectory(value: unknown): Promise<ServerInstanceSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(value, "instance id");
+    const previous = this.metadataUpdates.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      const worldRoot = await resolveWorldStorageRoot(instance);
+      await mkdir(worldRoot, { recursive: true });
+      if (instance.worldStorageDirectoryName) {
+        await mkdir(
+          resolve(worldRoot, expectWorldStorageDirectoryName(instance.worldStorageDirectoryName)),
+          { recursive: true },
+        );
+        return instance;
+      }
+
+      for (let attempt = 0; attempt < maximumDirectoryAllocationAttempts; attempt += 1) {
+        const directoryName = createWorldStorageDirectoryName();
+        const directoryPath = resolve(worldRoot, directoryName);
+        try {
+          await mkdir(directoryPath);
+        } catch (error) {
+          if (isAlreadyExistsError(error)) continue;
+          throw error;
+        }
+        const updated = {
+          ...instance,
+          worldStorageDirectoryName: directoryName,
+          updatedAt: this.options.now?.() ?? new Date().toISOString(),
+        };
+        try {
+          await writePortableSeaShardInstanceManifest(updated);
+          return updated;
+        } catch (error) {
+          await rm(directoryPath, { recursive: true, force: true });
+          throw error;
+        }
+      }
+      throw new Error("世界存储外层目录生成冲突次数过多");
+    });
+    this.metadataUpdates.set(instanceId, task);
+    try {
+      return await task;
+    } finally {
+      if (this.metadataUpdates.get(instanceId) === task) this.metadataUpdates.delete(instanceId);
+    }
+  }
+  /** 记录已完成安装资源的来源；与其他实例私有字段更新共用串行清单队列。 */
+  async recordResourceSource(instanceValue: unknown, recordValue: unknown): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const record = parseResourceSourceRecord(recordValue);
+    await this.updatePrivateManifest(instanceId, (instance) => ({
+      ...instance,
+      resourceSources: upsertResourceSource(instance.resourceSources, record),
+      updatedAt: this.options.now?.() ?? new Date().toISOString(),
+    }));
+  }
+
   /** 只更新 SeaShard 私有清单；服务端核心与 Minecraft 版本等事实保持不变。 */
   async recordStartedAt(instanceValue: unknown, startedAtValue: unknown): Promise<void> {
     if (this.disposed) throw new Error("server instance manager is stopped");
@@ -347,7 +413,7 @@ export class ServerInstanceManager {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
     return this.runInstanceOperation(instanceId, async () => {
-      const { instance } = await this.findIndexedInstance(instanceId);
+      const instance = await this.ensureBackupDirectory(instanceId);
       return createWorldBackup(
         instance,
         worldIdValue,
@@ -396,6 +462,19 @@ export class ServerInstanceManager {
     await Promise.allSettled(this.deletions.values());
     await Promise.allSettled(this.instanceOperations.values());
     await Promise.allSettled(this.metadataUpdates.values());
+  }
+
+  /** 确保实例复用已持久化的备份外层目录；首次使用时分配并写入 seashard.json。 */
+  private async ensureBackupDirectory(instanceId: string): Promise<ServerInstanceSnapshot> {
+    return this.updatePrivateManifest(instanceId, (instance) =>
+      instance.backupDirectoryName
+        ? instance
+        : {
+            ...instance,
+            backupDirectoryName: createBackupDirectoryName(),
+            updatedAt: this.options.now?.() ?? new Date().toISOString(),
+          },
+    );
   }
 
   /** 同一实例的私有清单更新必须串行，后一项始终基于前一项的落盘结果。 */
@@ -759,6 +838,15 @@ function hasImageSignature(mimeType: string, bytes: Buffer): boolean {
     bytes.length >= 6 &&
     (bytes.subarray(0, 6).toString("ascii") === "GIF87a" ||
       bytes.subarray(0, 6).toString("ascii") === "GIF89a")
+  );
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    Reflect.get(error, "code") === "EEXIST"
   );
 }
 

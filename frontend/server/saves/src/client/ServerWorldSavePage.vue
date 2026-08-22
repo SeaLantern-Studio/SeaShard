@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import {
+  isServerModSource,
   type ServerInstanceClientService,
   type ServerInstanceSnapshot,
+  type ServerResourceSourceMetadata,
   type ServerRuntimeClientService,
   type ServerRuntimeSnapshot,
   type ServerWorldBackupSnapshot,
@@ -11,6 +13,7 @@ import {
 import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 import { Cmz_Button, Cmz_Modal, useToast } from "cmzya-modern-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import ServerWorldSaveDetail from "./components/ServerWorldSaveDetail.vue";
 import ServerWorldSaveList from "./components/ServerWorldSaveList.vue";
 
@@ -21,6 +24,7 @@ const props = defineProps<{
 }>();
 
 const toast = useToast();
+const router = useRouter();
 const registeredInstances = ref<readonly ServerInstanceSnapshot[]>([]);
 const storage = ref<ServerWorldStorageSnapshot>();
 const runtimeSnapshot = ref<ServerRuntimeSnapshot>();
@@ -195,6 +199,16 @@ function goBack(): void {
   backupLoadFailed.value = false;
   dataPackLoadFailed.value = false;
 }
+function openResourceSource(
+  resourceType: "world" | "datapack",
+  metadata: ServerResourceSourceMetadata,
+): void {
+  if (!isServerModSource(metadata.source)) return;
+  void router.push({
+    path: resourceType === "world" ? "/server/download/world" : "/server/download/datapack",
+    query: { source: metadata.source, id: metadata.id },
+  });
+}
 async function loadBackups(worldId = detailWorldId.value): Promise<void> {
   const instanceId = selectedInstanceId.value;
   if (!instanceId || !worldId) return;
@@ -330,6 +344,7 @@ function errorMessage(cause: unknown): string {
       @retry-data-packs="loadDataPacks"
       @restore-backup="setRestoreTarget"
       @delete-backup="setDeleteTarget"
+      @open-resource-source="openResourceSource"
     />
     <ServerWorldSaveList
       v-else

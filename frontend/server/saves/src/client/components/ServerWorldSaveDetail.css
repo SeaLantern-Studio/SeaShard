@@ -41,6 +41,13 @@
   border-radius: var(--sl-radius-lg);
   background: var(--sl-surface);
 }
+.world-save-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
 
 .world-save-detail-header .world-save-card-copy small {
   font-size: var(--sl-font-size-xs);
@@ -170,6 +177,11 @@
   flex: 0 0 auto;
   gap: 4px;
 }
+.world-save-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
 
 .world-save-inline-state {
   display: flex;
@@ -192,6 +204,10 @@
   }
 
   .world-save-backup-actions {
+    width: 100%;
+    padding-left: 50px;
+  }
+  .world-save-row-actions {
     width: 100%;
     padding-left: 50px;
   }

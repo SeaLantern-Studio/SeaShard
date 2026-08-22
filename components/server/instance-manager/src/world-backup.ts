@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import type { ServerInstanceSnapshot, ServerWorldBackupSnapshot } from "@seashard/contracts";
 import { supportsUnifiedWorldStorage } from "@seashard/contracts";
 import { resolveWorldStorageDirectories } from "./world-storage";
-import { createShortRandomId } from "./directory-naming";
+import { createBackupDirectoryName, expectBackupDirectoryName } from "./directory-naming";
 import { writePortableSeaShardInstanceManifest } from "./manifest";
 const maximumBackupNameAttempts = 100;
 const maximumRestoreEntries = 250_000;
@@ -26,7 +26,7 @@ export async function createWorldBackup(
 ): Promise<ServerWorldBackupSnapshot> {
   const sources = await resolveWorldStorageDirectories(instance, requestedWorldId);
   if (sources.length === 0) throw new Error("目标存档不存在或不属于当前服务器实例。");
-  const backupInstance = await ensureBackupDirectoryId(instance);
+  const backupInstance = await ensureBackupDirectory(instance);
 
   const createdAt = options.now?.() ?? new Date().toISOString();
   const timestamp = formatBackupTimestamp(createdAt);
@@ -67,7 +67,7 @@ export async function listWorldBackups(
 ): Promise<readonly ServerWorldBackupSnapshot[]> {
   const sources = await resolveWorldStorageDirectories(instance, requestedWorldId);
   if (sources.length === 0) return [];
-  if (!instance.backupDirectoryId) return [];
+  if (!instance.backupDirectoryName) return [];
   const worldDirectoryName = backupWorldDirectoryName(sources[0]!.groupId);
   const backupDirectory = resolveBackupDirectory(instance, worldDirectoryName);
   let entries;
@@ -357,13 +357,13 @@ async function replaceDirectoriesAtomically(
   );
 }
 
-async function ensureBackupDirectoryId(
+async function ensureBackupDirectory(
   instance: ServerInstanceSnapshot,
 ): Promise<ServerInstanceSnapshot> {
-  if (instance.backupDirectoryId) return instance;
+  if (instance.backupDirectoryName) return instance;
   const updated = {
     ...instance,
-    backupDirectoryId: createShortRandomId(),
+    backupDirectoryName: createBackupDirectoryName(),
   };
   await writePortableSeaShardInstanceManifest(updated);
   return updated;
@@ -375,25 +375,10 @@ function resolveBackupDirectory(
 ): string {
   return resolve(
     instance.rootPath,
-    `backups-${expectBackupDirectoryName(instance.backupDirectoryId)}`,
+    expectBackupDirectoryName(instance.backupDirectoryName),
     worldDirectoryName,
   );
 }
-
-function expectBackupDirectoryName(value: string | undefined): string {
-  if (
-    typeof value !== "string" ||
-    !value ||
-    value === "." ||
-    value === ".." ||
-    /[\\/]/u.test(value) ||
-    basename(value) !== value
-  ) {
-    throw new TypeError("备份目录标识必须是非空的单目录名。");
-  }
-  return value;
-}
-
 async function resolveExistingBackupPath(
   instance: ServerInstanceSnapshot,
   sources: readonly WorldBackupSource[],

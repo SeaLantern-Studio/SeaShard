@@ -9,6 +9,7 @@ import {
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gunzipSync, inflateSync } from "node:zlib";
 import { basename, join, resolve } from "node:path";
+import { expectWorldStorageDirectoryName } from "./directory-naming";
 
 const maximumWorldScanDepth = 4;
 const maximumWorldCount = 1_000;
@@ -40,14 +41,22 @@ interface WorldMetadata {
 export async function listWorldStorage(
   instance: ServerInstanceSnapshot,
 ): Promise<ServerWorldStorageSnapshot> {
-  const rootPath = await resolveWorldRoot(instance);
+  const rootPath = await resolveWorldStorageRoot(instance);
   const currentId = await readLevelNameFromProperties(rootPath);
   const unified = supportsUnifiedWorldStorage(instance.serverType);
   const worlds = await discoverWorlds(rootPath, unified);
 
   if (unified) {
     const saves = await Promise.all(
-      worlds.map(async (world) => createSave(world, currentId === world.id, world.id)),
+      worlds.map(async (world) =>
+        createSave(
+          world,
+          currentId === world.id,
+          world.id,
+          "overworld",
+          instance.resourceSources?.worlds?.[world.id],
+        ),
+      ),
     );
     saves.sort(compareSaves);
     return {
@@ -71,7 +80,13 @@ export async function listWorldStorage(
     [...groups.entries()].map(async ([groupId, groupWorlds]) => {
       const saves = await Promise.all(
         groupWorlds.map(async (world) =>
-          createSave(world, currentId === groupId, groupId, splitWorldDimension(world.id, groupId)),
+          createSave(
+            world,
+            currentId === groupId,
+            groupId,
+            splitWorldDimension(world.id, groupId),
+            instance.resourceSources?.worlds?.[groupId],
+          ),
         ),
       );
       saves.sort(compareDimensionSaves);
@@ -106,7 +121,7 @@ export async function resolveWorldStorageDirectories(
   requestedId: unknown,
 ): Promise<readonly WorldStorageDirectory[]> {
   const worldId = expectWorldId(requestedId);
-  const rootPath = await resolveWorldRoot(instance);
+  const rootPath = await resolveWorldStorageRoot(instance);
   const unified = supportsUnifiedWorldStorage(instance.serverType);
   const worlds = await discoverWorlds(rootPath, unified);
   if (unified) {
@@ -123,6 +138,7 @@ export async function resolveWorldStorageDirectories(
 export interface WorldDatapackDirectory {
   readonly worldId: string;
   readonly absolutePath: string;
+  readonly storageRoot: string;
 }
 
 /** 解析数据包实际写入目录；split 模式固定使用逻辑世界的主世界目录。 */
@@ -136,6 +152,7 @@ export async function resolveWorldDatapackDirectory(
   return {
     worldId: overworld.groupId,
     absolutePath: resolve(overworld.absolutePath, "datapacks"),
+    storageRoot: overworld.storageRoot,
   };
 }
 
@@ -152,24 +169,24 @@ export async function switchWorldStorage(
       : snapshot.dimensions.some((group) => group.id === worldId);
   if (!selectable) throw new Error("目标存档不存在或不属于当前服务器实例。");
 
-  const rootPath = await resolveWorldRoot(instance);
+  const rootPath = await resolveWorldStorageRoot(instance);
   const propertiesPath = resolve(rootPath, "server.properties");
   const source = await readFile(propertiesPath, "utf8");
   await writeFile(propertiesPath, upsertLevelName(source, worldId), "utf8");
   return listWorldStorage(instance);
 }
 
-async function resolveWorldRoot(instance: ServerInstanceSnapshot): Promise<string> {
+/** 返回核心实际使用的世界存储根目录；Quilt 始终把 server 作为工作目录。 */
+export async function resolveWorldStorageRoot(instance: ServerInstanceSnapshot): Promise<string> {
   const rootPath = resolve(instance.rootPath);
-  if (instance.serverType === "quilt") {
-    try {
-      const serverRoot = resolve(rootPath, "server");
-      if ((await stat(serverRoot)).isDirectory()) return serverRoot;
-    } catch {
-      // 缺失 server 子目录时回退到实例根目录，让空实例仍能显示空状态。
-    }
-  }
-  return rootPath;
+  return instance.serverType === "quilt" ? resolve(rootPath, "server") : rootPath;
+}
+/** 返回实例持久化的世界存储外层目录；首次下载前必须先完成目录分配。 */
+export async function resolveWorldStorageContainer(
+  instance: ServerInstanceSnapshot,
+): Promise<string> {
+  const rootPath = await resolveWorldStorageRoot(instance);
+  return resolve(rootPath, expectWorldStorageDirectoryName(instance.worldStorageDirectoryName));
 }
 
 async function discoverWorlds(rootPath: string, recursive: boolean): Promise<DiscoveredWorld[]> {
@@ -222,6 +239,7 @@ async function createSave(
   current: boolean,
   groupId: string,
   dimension: ServerWorldDimension = "overworld",
+  resourceSource?: ServerWorldSave["resourceSource"],
 ): Promise<ServerWorldSave> {
   const metadata = await readWorldMetadata(world.absolutePath, basename(world.id));
   const timestamps = await readWorldTimestamps(world.absolutePath);
@@ -232,6 +250,7 @@ async function createSave(
     dimension,
     current,
     ...timestamps,
+    ...(resourceSource ? { resourceSource } : {}),
     ...(metadata.iconDataUrl ? { iconDataUrl: metadata.iconDataUrl } : {}),
   };
 }

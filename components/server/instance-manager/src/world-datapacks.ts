@@ -1,6 +1,7 @@
 import type { ServerInstanceSnapshot, ServerWorldDatapackSnapshot } from "@seashard/contracts";
+import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { resolveWorldDatapackDirectory } from "./world-storage";
 
 const maximumWorldDatapackCount = 256;
@@ -29,7 +30,7 @@ export async function listWorldDatapacks(
     .slice(0, maximumWorldDatapackCount);
   const datapacks = await Promise.all(
     candidates.map((entry) =>
-      readDatapackEntry(instance, target.worldId, target.absolutePath, entry),
+      readDatapackEntry(instance, target.worldId, target.absolutePath, target.storageRoot, entry),
     ),
   );
   return datapacks
@@ -45,7 +46,8 @@ async function readDatapackEntry(
   instance: ServerInstanceSnapshot,
   worldId: string,
   datapackDirectory: string,
-  entry: import("node:fs").Dirent,
+  storageRoot: string,
+  entry: Dirent,
 ): Promise<ServerWorldDatapackSnapshot | undefined> {
   const entryPath = join(datapackDirectory, entry.name);
   let kind: ServerWorldDatapackSnapshot["kind"];
@@ -57,11 +59,13 @@ async function readDatapackEntry(
   } else {
     return undefined;
   }
-
   const details = await stat(entryPath);
+  const relativePath = relative(storageRoot, entryPath).replaceAll("\\", "/");
+  const resourceSource = instance.resourceSources?.datapacks?.[relativePath];
   return {
     instanceId: instance.id,
     worldId,
+    ...(resourceSource ? { resourceSource } : {}),
     fileName: entry.name,
     kind,
     updatedAt: details.mtime.toISOString(),

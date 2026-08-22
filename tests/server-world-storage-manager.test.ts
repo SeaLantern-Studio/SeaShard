@@ -17,24 +17,43 @@ await test("world storage lists native and downloaded worlds with level metadata
   try {
     await writeFile(
       join(root, "server.properties"),
-      "# keep this\nlevel-name=worlds-outer/world-inner\n",
+      "# keep this\nlevel-name=worlds-outer/worlds-inner\n",
     );
     await createWorld(root, "world", "Native World");
-    await createWorld(root, "worlds-outer/world-inner", "Downloaded World", true);
+    await createWorld(root, "worlds-outer/worlds-inner", "Downloaded World", true);
 
-    const snapshot = await listWorldStorage(instance(root, "fabric"));
+    const snapshot = await listWorldStorage({
+      ...instance(root, "fabric"),
+      resourceSources: {
+        worlds: {
+          "worlds-outer/worlds-inner": {
+            source: "modrinth",
+            id: "world-project",
+            iconUrl: "https://cdn.modrinth.com/data/world-project/icon.webp",
+          },
+        },
+      },
+    });
     assert.equal(snapshot.mode, "unified");
-    assert.equal(snapshot.currentId, "worlds-outer/world-inner");
+    assert.equal(snapshot.currentId, "worlds-outer/worlds-inner");
     assert.deepEqual(
       snapshot.saves.map(({ id, name, current }) => ({ id, name, current })),
       [
-        { id: "worlds-outer/world-inner", name: "Downloaded World", current: true },
+        { id: "worlds-outer/worlds-inner", name: "Downloaded World", current: true },
         { id: "world", name: "Native World", current: false },
       ],
     );
     assert.match(
-      snapshot.saves.find(({ id }) => id === "worlds-outer/world-inner")?.iconDataUrl ?? "",
+      snapshot.saves.find(({ id }) => id === "worlds-outer/worlds-inner")?.iconDataUrl ?? "",
       /^data:image\/png;base64,/u,
+    );
+    assert.deepEqual(
+      snapshot.saves.find(({ id }) => id === "worlds-outer/worlds-inner")?.resourceSource,
+      {
+        source: "modrinth",
+        id: "world-project",
+        iconUrl: "https://cdn.modrinth.com/data/world-project/icon.webp",
+      },
     );
 
     const switched = await switchWorldStorage(instance(root, "fabric"), "world");
@@ -87,7 +106,20 @@ await test("world datapacks lists archives and valid folders from the logical ov
     await mkdir(netherDatapacks, { recursive: true });
     await writeFile(join(netherDatapacks, "wrong.zip"), Uint8Array.of(4, 5, 6));
 
-    const datapacks = await listWorldDatapacks(instance(root, "bukkit"), "survival");
+    const datapacks = await listWorldDatapacks(
+      {
+        ...instance(root, "bukkit"),
+        resourceSources: {
+          datapacks: {
+            "survival/datapacks/remote.zip": {
+              source: "curseforge",
+              id: "123",
+            },
+          },
+        },
+      },
+      "survival",
+    );
     assert.deepEqual(
       datapacks
         .map(({ fileName, kind }) => ({ fileName, kind }))
@@ -98,6 +130,51 @@ await test("world datapacks lists archives and valid folders from the logical ov
       ],
     );
     assert.ok(datapacks.every(({ worldId }) => worldId === "survival"));
+    assert.deepEqual(datapacks.find(({ fileName }) => fileName === "remote.zip")?.resourceSource, {
+      source: "curseforge",
+      id: "123",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("Quilt world datapacks use the server working directory for source keys", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".tmp-quilt-world-datapacks-"));
+  try {
+    const serverRoot = join(root, "server");
+    await mkdir(serverRoot, { recursive: true });
+    await writeFile(
+      join(serverRoot, "server.properties"),
+      "level-name=worlds-a1b2c3/worlds-d4e5f6\n",
+    );
+    await createWorld(serverRoot, "worlds-a1b2c3/worlds-d4e5f6", "Quilt World");
+    const datapackDirectory = join(serverRoot, "worlds-a1b2c3", "worlds-d4e5f6", "datapacks");
+    await mkdir(datapackDirectory, { recursive: true });
+    await writeFile(join(datapackDirectory, "remote.zip"), Uint8Array.of(1, 2, 3));
+
+    const datapacks = await listWorldDatapacks(
+      {
+        ...instance(root, "quilt"),
+        resourceSources: {
+          datapacks: {
+            "worlds-a1b2c3/worlds-d4e5f6/datapacks/remote.zip": {
+              source: "modrinth",
+              id: "quilt-pack",
+            },
+          },
+        },
+      },
+      "worlds-a1b2c3/worlds-d4e5f6",
+    );
+    assert.deepEqual(
+      datapacks.map(({ fileName }) => fileName),
+      ["remote.zip"],
+    );
+    assert.deepEqual(datapacks[0]?.resourceSource, {
+      source: "modrinth",
+      id: "quilt-pack",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

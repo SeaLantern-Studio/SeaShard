@@ -23,7 +23,7 @@ await test("world backup writes a timestamped zip under the short instance direc
     });
     assert.equal(result.fileName, "2026-08-21_14-30-05.zip");
     assert.equal(result.worldDirectoryName, "world");
-    const archivePath = join(root, "backups-fabric1", result.worldDirectoryName, result.fileName);
+    const archivePath = join(root, "backups-fab001", result.worldDirectoryName, result.fileName);
     const archive = unzipSync(await readFile(archivePath));
     assert.deepEqual(Object.keys(archive).sort(), ["level.dat", "region/r.0.0.mca"]);
     assert.equal(new TextDecoder().decode(archive["level.dat"]), "level-data");
@@ -40,17 +40,17 @@ await test("first world backup allocates and persists its random directory ID", 
   const root = await mkdtemp(join(process.cwd(), ".tmp-world-backup-id-"));
   try {
     await writeWorld(root, "world", { "level.dat": "level-data" });
-    const current = { ...instance(root, "fabric"), backupDirectoryId: undefined };
+    const current = { ...instance(root, "fabric"), backupDirectoryName: undefined };
     const result = await createWorldBackup(current, "world", {
       now: () => "2026-08-21T14:30:05",
     });
     const manifest = JSON.parse(
       await readFile(join(root, ".server-info", "seashard.json"), "utf8"),
-    ) as { backupDirectoryId?: unknown };
-    assert.match(manifest.backupDirectoryId as string, /^[a-z0-9]{6}$/u);
+    ) as { backupDirectoryName?: unknown };
+    assert.match(manifest.backupDirectoryName as string, /^backups-[a-z0-9]{6}$/u);
     const archivePath = join(
       root,
-      `backups-${manifest.backupDirectoryId as string}`,
+      manifest.backupDirectoryName as string,
       result.worldDirectoryName,
       result.fileName,
     );
@@ -68,7 +68,7 @@ await test("split world backup preserves each dimension directory", async () => 
     const result = await createWorldBackup(instance(root, "velocity"), "world", {
       now: () => "2026-08-21T14:30:05",
     });
-    const archivePath = join(root, "backups-veloci", result.worldDirectoryName, result.fileName);
+    const archivePath = join(root, "backups-vel001", result.worldDirectoryName, result.fileName);
     const archive = unzipSync(await readFile(archivePath));
     assert.equal(new TextDecoder().decode(archive["world/level.dat"]), "overworld");
     assert.equal(new TextDecoder().decode(archive["world_nether/level.dat"]), "nether");
@@ -109,7 +109,7 @@ await test("world restore rejects archive traversal paths", async () => {
       now: () => "2026-08-21T14:30:05",
     });
     await writeFile(
-      join(root, "backups-fabric1", "world", backup.fileName),
+      join(root, "backups-fab001", "world", backup.fileName),
       zipSync({
         "../outside.txt": new TextEncoder().encode("escape"),
         "level.dat": new TextEncoder().encode("bad"),
@@ -143,7 +143,7 @@ function instance(rootPath: string, serverType: string): ServerInstanceSnapshot 
     name: serverType,
     rootPath,
     coreJarPath: join(rootPath, "server.jar"),
-    backupDirectoryId: serverType === "fabric" ? "fabric1" : "veloci",
+    backupDirectoryName: serverType === "fabric" ? "backups-fab001" : "backups-vel001",
     storageMode: "managed",
     source: "downloaded",
     modLoader: null,

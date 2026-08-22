@@ -4,6 +4,7 @@ import { Cmz_Markdown } from "cmzya-modern-ui";
 import { createSSRApp, h } from "vue";
 import { renderToString } from "vue/server-renderer";
 import {
+  isServerModSource,
   serverModLoaderForCoreType,
   supportsUnifiedWorldStorage,
   type ServerInstanceSnapshot,
@@ -98,6 +99,12 @@ await test("mod display tags put libraries before content categories", () => {
 await test("source labels expose the concrete catalog name", () => {
   assert.equal(serverModSourceLabel("modrinth"), "Modrinth");
   assert.equal(serverModSourceLabel("curseforge"), "CurseForge");
+});
+
+await test("only supported catalog sources are navigable", () => {
+  assert.equal(isServerModSource("modrinth"), true);
+  assert.equal(isServerModSource("curseforge"), true);
+  assert.equal(isServerModSource("github"), false);
 });
 
 await test("project links keep the selected source and resource type", () => {

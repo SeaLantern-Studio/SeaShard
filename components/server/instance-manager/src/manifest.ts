@@ -1,3 +1,4 @@
+import { expectBackupDirectoryName, expectWorldStorageDirectoryName } from "./directory-naming";
 import {
   serverModLoaderForCoreType,
   serverModLoaders,
@@ -9,6 +10,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { PortableSeaShardInstanceManifest, PortableServerInformationManifest } from "./types";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
+import { parseResourceSourceIndex } from "./resource-source-index";
 
 export const portableInstanceMetadataDirectoryName = ".server-info";
 export const portableServerInformationFileName = "server.json";
@@ -49,20 +51,23 @@ export function createPortableSeaShardInstanceManifest(
     schemaVersion: 1,
     id: instance.id,
     name: instance.name,
+    ...(icon ? { icon } : {}),
     storageMode: instance.storageMode,
     source: instance.source,
-    ...(icon ? { icon } : {}),
-    ...(instance.backupDirectoryId
+    ...(instance.worldStorageDirectoryName
       ? {
-          backupDirectoryId: expectString(
-            instance.backupDirectoryId,
-            "seashard.json backupDirectoryId",
+          worldStorageDirectoryName: expectWorldStorageDirectoryName(
+            instance.worldStorageDirectoryName,
           ),
         }
+      : {}),
+    ...(instance.backupDirectoryName
+      ? { backupDirectoryName: expectBackupDirectoryName(instance.backupDirectoryName) }
       : {}),
     ...(instance.startupSettings ? { startupSettings: instance.startupSettings } : {}),
     ...(instance.lastStartedAt ? { lastStartedAt: instance.lastStartedAt } : {}),
     ...(instance.totalRuntimeMs === undefined ? {} : { totalRuntimeMs: instance.totalRuntimeMs }),
+    ...(instance.resourceSources ? { resourceSources: instance.resourceSources } : {}),
     createdAt: instance.createdAt,
     updatedAt: instance.updatedAt,
   };
@@ -132,10 +137,14 @@ export async function readPortableInstanceManifests(
     "external",
   ]);
   const source = expectEnum(seaShard.source, "seashard.json source", ["downloaded", "imported"]);
-  const backupDirectoryId =
-    seaShard.backupDirectoryId === undefined || seaShard.backupDirectoryId === null
+  const worldStorageDirectoryName =
+    seaShard.worldStorageDirectoryName === undefined || seaShard.worldStorageDirectoryName === null
       ? undefined
-      : expectString(seaShard.backupDirectoryId, "seashard.json backupDirectoryId");
+      : expectWorldStorageDirectoryName(seaShard.worldStorageDirectoryName);
+  const backupDirectoryName =
+    seaShard.backupDirectoryName === undefined || seaShard.backupDirectoryName === null
+      ? undefined
+      : expectBackupDirectoryName(seaShard.backupDirectoryName);
   const icon =
     seaShard.icon === undefined
       ? undefined
@@ -165,6 +174,7 @@ export async function readPortableInstanceManifests(
           seaShard.startupSettings,
           "seashard.json startupSettings",
         );
+  const resourceSources = parseResourceSourceIndex(seaShard.resourceSources);
 
   // 旧清单首次读取时补写显式加载器字段；保留未知字段，避免破坏其他工具扩展的服务器信息。
   if (server.modLoader === undefined) {
@@ -180,7 +190,8 @@ export async function readPortableInstanceManifests(
     rootPath,
     coreJarPath: resolve(rootPath, corePath),
     ...(icon ? { iconPath: resolve(metadataDirectory, icon) } : {}),
-    ...(backupDirectoryId ? { backupDirectoryId } : {}),
+    ...(worldStorageDirectoryName ? { worldStorageDirectoryName } : {}),
+    ...(backupDirectoryName ? { backupDirectoryName } : {}),
     storageMode,
     source,
     modLoader,
@@ -193,6 +204,7 @@ export async function readPortableInstanceManifests(
     ...(artifactFileName ? { coreArtifactFileName: artifactFileName } : {}),
     ...(artifactSha256 ? { artifactSha256 } : {}),
     ...(startupSettings ? { startupSettings } : {}),
+    ...(resourceSources ? { resourceSources } : {}),
     ...(seaShard.lastStartedAt === undefined
       ? {}
       : {

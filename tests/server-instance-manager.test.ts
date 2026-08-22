@@ -20,6 +20,7 @@ import {
   portableSeaShardInstanceFileName,
   portableServerInformationFileName,
   serverInstanceDataCapsule,
+  parseResourceSourceIndex,
   writePortableInstanceManifests,
   type PortableSeaShardInstanceManifest,
   type PortableServerInformationManifest,
@@ -33,6 +34,49 @@ import test from "node:test";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
+await test("resource source index keeps valid unknown origins and ignores malformed records", () => {
+  const valid = {
+    source: "modrinth",
+    id: "server-mod-1",
+    iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+  };
+  const custom = {
+    source: "github",
+    id: "owner-repo",
+    iconUrl: "https://github.com/owner/repo/icon.png",
+  };
+  assert.deepEqual(
+    parseResourceSourceIndex({
+      mods: {
+        "mods/server-tools.jar": valid,
+        "mods/custom-source.jar": custom,
+        "../outside.jar": valid,
+        "mods/invalid-source.jar": { ...valid, source: "unknown source" },
+        "mods/untrusted-icon.jar": {
+          source: "modrinth",
+          id: "server-mod-2",
+          iconUrl: "https://example.invalid/icon.webp",
+        },
+      },
+    }),
+    {
+      mods: {
+        "mods/server-tools.jar": valid,
+        "mods/custom-source.jar": custom,
+        "mods/untrusted-icon.jar": {
+          source: "modrinth",
+          id: "server-mod-2",
+        },
+      },
+    },
+  );
+  assert.equal(
+    parseResourceSourceIndex({
+      mods: { "../outside.jar": valid },
+    }),
+    undefined,
+  );
+});
 const iconBytes = Buffer.from("server-core-icon");
 
 await test("short directory IDs use six lowercase alphanumeric characters", () => {
@@ -265,8 +309,10 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(seaShardManifest.id, instance.id);
       assert.equal(seaShardManifest.name, instance.name);
       assert.equal(seaShardManifest.icon, "icon.png");
-      assert.equal(seaShardManifest.backupDirectoryId, undefined);
-      assert.equal(instance.backupDirectoryId, undefined);
+      assert.equal(seaShardManifest.worldStorageDirectoryName, undefined);
+      assert.equal(seaShardManifest.backupDirectoryName, undefined);
+      assert.equal(instance.worldStorageDirectoryName, undefined);
+      assert.equal(instance.backupDirectoryName, undefined);
       assert.equal("gameVersion" in seaShardManifest, false);
       assert.equal(serverInformation.schemaVersion, 1);
       assert.equal(serverInformation.modLoader, "fabric");
@@ -277,6 +323,37 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(serverInformation.minecraft.version, request.gameVersion);
       assert.equal("name" in serverInformation, false);
     }
+    const managedInstance = instances.find(({ id }) => id === "instance-1")!;
+    const firstWorldInstance = await manager.ensureWorldStorageDirectory(managedInstance.id);
+    const secondWorldInstance = await manager.ensureWorldStorageDirectory(managedInstance.id);
+    assert.match(firstWorldInstance.worldStorageDirectoryName!, /^worlds-[a-z0-9]{6}$/u);
+    assert.equal(
+      secondWorldInstance.worldStorageDirectoryName,
+      firstWorldInstance.worldStorageDirectoryName,
+    );
+    assert.equal(
+      await access(
+        join(firstWorldInstance.rootPath, firstWorldInstance.worldStorageDirectoryName!),
+      ).then(
+        () => true,
+        () => false,
+      ),
+      true,
+    );
+    const persistedWorldManifest = JSON.parse(
+      await readFile(
+        join(
+          firstWorldInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.equal(
+      persistedWorldManifest.worldStorageDirectoryName,
+      firstWorldInstance.worldStorageDirectoryName,
+    );
 
     const countedInstance = instances[0]!;
     await Promise.all([
@@ -312,6 +389,36 @@ await test("managed downloads persist unique instances and split portable manife
       ),
     ) as PortableSeaShardInstanceManifest;
     assert.deepEqual(updatedManifest.startupSettings, instanceStartupSettings);
+    await manager.recordResourceSource(countedInstance.id, {
+      resourceType: "mod",
+      relativePath: "mods/fabric-api.jar",
+      source: "modrinth",
+      id: "server-mod-1",
+      iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+    });
+    const resourceManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.deepEqual(resourceManifest.resourceSources, {
+      mods: {
+        "mods/fabric-api.jar": {
+          source: "modrinth",
+          id: "server-mod-1",
+          iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+        },
+      },
+    });
+    assert.deepEqual(
+      (await manager.list()).find(({ id }) => id === countedInstance.id)?.resourceSources,
+      resourceManifest.resourceSources,
+    );
     await assert.rejects(
       manager.setStartupSettings(countedInstance.id, {
         ...instanceStartupSettings,

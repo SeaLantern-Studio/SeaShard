@@ -54,6 +54,8 @@ export function createServerInstanceManagerModule(
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
+        ensureWorldStorageDirectory: async (instanceId) =>
+          asJsonValue(await manager.ensureWorldStorageDirectory(instanceId)),
         listWorldStorage: async (instanceId) =>
           asJsonValue(await manager.listWorldStorage(instanceId)),
         listWorldDatapacks: async (instanceId, worldId) =>
@@ -74,6 +76,11 @@ export function createServerInstanceManagerModule(
           asJsonValue(await manager.setStartupSettings(instanceId, settings)),
         setIcon: async (instanceId, iconDataUrl) =>
           asJsonValue(await manager.setIcon(instanceId, iconDataUrl)),
+        recordResourceSource: async (instanceId, record) => {
+          await manager.recordResourceSource(instanceId, record);
+          return null;
+        },
+
         recordStartedAt: async (instanceId, startedAt) => {
           await manager.recordStartedAt(instanceId, startedAt);
           return null;
@@ -104,6 +111,7 @@ export * from "./world-backup";
 export * from "./world-storage";
 export * from "./world-datapacks";
 export * from "./manifest";
+export * from "./resource-source-index";
 export * from "./startup-settings";
 export * from "./registry";
 export * from "./types";
