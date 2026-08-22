@@ -11,6 +11,13 @@ import {
 } from "../components/server/instance-manager/src/world-storage.ts";
 
 const iconPng = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const animatedGif = Uint8Array.from([
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
+  0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00,
+  0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01,
+  0x00, 0x3b,
+]);
 
 await test("world storage lists native and downloaded worlds with level metadata", async () => {
   const root = await mkdtemp(join(process.cwd(), ".tmp-world-storage-"));
@@ -59,6 +66,31 @@ await test("world storage lists native and downloaded worlds with level metadata
     const switched = await switchWorldStorage(instance(root, "fabric"), "world");
     assert.equal(switched.currentId, "world");
     assert.match(await readFile(join(root, "server.properties"), "utf8"), /level-name=world/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+await test("world storage preserves GIF icon bytes and MIME type", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".tmp-world-gif-icons-"));
+  try {
+    await writeFile(join(root, "server.properties"), "level-name=worlds-gif-in-png\n");
+    await createWorld(root, "worlds-gif-in-png", "GIF in PNG");
+    await writeFile(join(root, "worlds-gif-in-png", "icon.png"), animatedGif);
+    await createWorld(root, "worlds-gif-file", "GIF file");
+    await writeFile(join(root, "worlds-gif-file", "icon.gif"), animatedGif);
+
+    const snapshot = await listWorldStorage(instance(root, "fabric"));
+    const expectedIconDataUrl = `data:image/gif;base64,${Buffer.from(animatedGif).toString("base64")}`;
+
+    assert.equal(
+      snapshot.saves.find(({ id }) => id === "worlds-gif-in-png")?.iconDataUrl,
+      expectedIconDataUrl,
+    );
+    assert.equal(
+      snapshot.saves.find(({ id }) => id === "worlds-gif-file")?.iconDataUrl,
+      expectedIconDataUrl,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

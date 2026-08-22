@@ -266,15 +266,30 @@ async function readWorldMetadata(worldPath: string, fallbackName: string): Promi
     // 不完整或尚未生成的世界仍然可以按目录显示。
   }
 
-  try {
-    const icon = await readFile(join(worldPath, "icon.png"));
-    if (icon.byteLength <= maximumIconBytes && isPng(icon)) {
-      return { name, iconDataUrl: `data:image/png;base64,${icon.toString("base64")}` };
+  const iconDataUrl = await readWorldIcon(worldPath);
+  return iconDataUrl ? { name, iconDataUrl } : { name };
+}
+
+/** 读取世界图标并保留真实媒体类型，兼容 icon.png 中的 GIF 以及独立的 icon.gif。 */
+async function readWorldIcon(worldPath: string): Promise<string | undefined> {
+  for (const fileName of ["icon.png", "icon.gif"] as const) {
+    try {
+      const icon = await readFile(join(worldPath, fileName));
+      if (icon.byteLength > maximumIconBytes) continue;
+      const mimeType = detectWorldIconMimeType(icon);
+      if (!mimeType) continue;
+      return `data:${mimeType};base64,${icon.toString("base64")}`;
+    } catch {
+      // 图标文件是可选的；当前候选文件不可读时继续检查另一个名称。
     }
-  } catch {
-    // icon.png 是可选文件。
   }
-  return { name };
+  return undefined;
+}
+
+function detectWorldIconMimeType(value: Uint8Array): "image/png" | "image/gif" | undefined {
+  if (isPng(value)) return "image/png";
+  if (isGif(value)) return "image/gif";
+  return undefined;
 }
 
 async function readWorldTimestamps(
@@ -480,5 +495,23 @@ function isPng(value: Uint8Array): boolean {
     value[5] === 0x0a &&
     value[6] === 0x1a &&
     value[7] === 0x0a
+  );
+}
+
+function isGif(value: Uint8Array): boolean {
+  return (
+    value.byteLength >= 6 &&
+    ((value[0] === 0x47 &&
+      value[1] === 0x49 &&
+      value[2] === 0x46 &&
+      value[3] === 0x38 &&
+      value[4] === 0x37 &&
+      value[5] === 0x61) ||
+      (value[0] === 0x47 &&
+        value[1] === 0x49 &&
+        value[2] === 0x46 &&
+        value[3] === 0x38 &&
+        value[4] === 0x39 &&
+        value[5] === 0x61))
   );
 }
