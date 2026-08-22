@@ -17,6 +17,7 @@ import type {
   ServerInstanceClientService,
   ServerInstanceSnapshot,
   ServerInstanceStartupSettings,
+  ServerInstalledModSnapshot,
   ServerModDownloadResult,
   ServerModInstallRequest,
   ServerModSaveAsRequest,
@@ -147,6 +148,16 @@ export interface DesktopShellConfig {
   readServerInstanceContentCounts(
     instanceId: string,
   ): ReturnType<ServerInstanceClientService["contentCounts"]>;
+  listServerMods(instanceId: string): Promise<readonly ServerInstalledModSnapshot[]>;
+  setServerModDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): ReturnType<ServerInstanceClientService["setModDisabled"]>;
+  deleteServerMod(
+    instanceId: string,
+    relativePath: string,
+  ): ReturnType<ServerInstanceClientService["deleteMod"]>;
   readServerWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
   listServerWorldDatapacks(
     instanceId: string,

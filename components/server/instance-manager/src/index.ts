@@ -54,6 +54,17 @@ export function createServerInstanceManagerModule(
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
+        listMods: async (instanceId) => asJsonValue(await manager.listMods(instanceId)),
+        setModDisabled: async (instanceId, relativePath, disabled) => {
+          if (typeof disabled !== "boolean") {
+            throw new TypeError("MOD 禁用状态必须是布尔值。");
+          }
+          return asJsonValue(await manager.setModDisabled(instanceId, relativePath, disabled));
+        },
+        deleteMod: async (instanceId, relativePath) => {
+          await manager.deleteMod(instanceId, relativePath);
+          return null;
+        },
         ensureWorldStorageDirectory: async (instanceId) =>
           asJsonValue(await manager.ensureWorldStorageDirectory(instanceId)),
         listWorldStorage: async (instanceId) =>
@@ -122,6 +133,8 @@ export * from "./directory-naming";
 export * from "./world-backup";
 export * from "./world-storage";
 export * from "./world-datapacks";
+export * from "./mod-files";
+export * from "./mod-metadata";
 export * from "./manifest";
 export * from "./resource-source-index";
 export * from "./startup-settings";

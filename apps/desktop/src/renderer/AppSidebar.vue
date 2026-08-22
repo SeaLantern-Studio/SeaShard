@@ -154,6 +154,7 @@ function serverItemForPath(path: string): InstanceItemId {
   if (path.startsWith("/server/configuration")) return "configuration";
   if (path.startsWith("/server/settings")) return "settings";
   if (path.startsWith("/server/saves")) return "saves";
+  if (path.startsWith("/server/mods")) return "mods";
   return "launch";
 }
 
@@ -174,6 +175,8 @@ function selectInstanceItem(id: InstanceItemId): void {
       navigate("/server/settings");
     } else if (id === "saves") {
       navigate("/server/saves");
+    } else if (id === "mods") {
+      navigate("/server/mods");
     } else if (route.path.startsWith("/server/")) {
       navigate("/");
     }

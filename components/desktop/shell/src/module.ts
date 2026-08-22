@@ -308,6 +308,44 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(instanceId, "server instance id"),
           );
         });
+        config.runtime.handle(desktopChannels.serverInstancesMods, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.listServerMods(expectNonEmptyString(instanceId, "server instance id"));
+        });
+        config.runtime.handle(
+          desktopChannels.serverInstancesSetModDisabled,
+          async (event, instanceId, relativePath, disabled) => {
+            ownedWindow(event.sender.id);
+            if (typeof disabled !== "boolean") {
+              throw new TypeError("server mod disabled must be a boolean");
+            }
+            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
+            const runtime = await config.readServerRuntime(safeInstanceId);
+            if (isActiveServerState(runtime.state)) {
+              throw new Error("需要关停服务器之后才能操作 MOD。");
+            }
+            return config.setServerModDisabled(
+              safeInstanceId,
+              expectNonEmptyString(relativePath, "server mod relative path"),
+              disabled,
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesDeleteMod,
+          async (event, instanceId, relativePath) => {
+            ownedWindow(event.sender.id);
+            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
+            const runtime = await config.readServerRuntime(safeInstanceId);
+            if (isActiveServerState(runtime.state)) {
+              throw new Error("需要关停服务器之后才能操作 MOD。");
+            }
+            return config.deleteServerMod(
+              safeInstanceId,
+              expectNonEmptyString(relativePath, "server mod relative path"),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverInstancesWorlds, (event, instanceId) => {
           ownedWindow(event.sender.id);
           return config.readServerWorldStorage(

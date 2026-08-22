@@ -7,9 +7,10 @@ import {
   type ServerModFilters,
   type ServerModProject,
   type ServerModProjectDetails,
-  type ServerModSourceClientService,
   type ServerModSearchIndex,
   type ServerModSearchResult,
+  type ServerModSource,
+  type ServerModSourceClientService,
   type ServerModVersion,
 } from "@seashard/contracts";
 import {
@@ -19,6 +20,7 @@ import {
   Cmz_Modal,
   Cmz_Select,
   Cmz_Toast,
+  useToast,
   type SelectOption,
 } from "cmzya-modern-ui";
 import {
@@ -38,7 +40,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useToast } from "cmzya-modern-ui";
+import { useRoute, useRouter } from "vue-router";
 import {
   createServerModMixedSearchState,
   mergeServerModFilters,
@@ -63,6 +65,8 @@ const props = defineProps<{
   mods: ServerModSourceClientService;
   instances: ServerInstanceClientService;
 }>();
+const route = useRoute();
+const router = useRouter();
 const toast = useToast();
 
 const emptyFilters: ServerModFilters = {
@@ -200,8 +204,13 @@ onMounted(() => {
   }, 60_000);
   void loadFilters();
   void resetSearch();
+  void syncProjectRoute();
   favoriteProjectIds.value = readFavoriteProjectIds();
 });
+watch(
+  () => [route.query.source, route.query.id],
+  () => void syncProjectRoute(),
+);
 
 watch(loadSentinel, (next, previous) => {
   if (previous) observer?.unobserve(previous);
@@ -436,6 +445,15 @@ function loaderLabel(id: string): string {
 }
 
 async function openProject(project: ServerModProject): Promise<void> {
+  const target = routeProjectTarget();
+  if (!target || target.source !== project.source || target.id !== project.id) {
+    await router.push({ query: { source: project.source, id: project.id } });
+    return;
+  }
+  await selectProject(project);
+}
+
+async function selectProject(project: ServerModProject): Promise<void> {
   selectedProject.value = project;
   projectDetails.value = undefined;
   detailGameVersion.value = "";
@@ -449,6 +467,15 @@ async function openProject(project: ServerModProject): Promise<void> {
 }
 
 function returnToProjectList(): void {
+  if (routeProjectTarget()) {
+    void router.replace({ query: {} });
+    return;
+  }
+  clearProjectDetail();
+  void nextTick().then(maybeFillViewport);
+}
+
+function clearProjectDetail(): void {
   detailRequestId += 1;
   selectedProject.value = undefined;
   projectDetails.value = undefined;
@@ -458,7 +485,89 @@ function returnToProjectList(): void {
   detailLoader.value = "";
   expandedVersionGroupId.value = undefined;
   detailDescriptionExpanded.value = false;
-  void nextTick().then(maybeFillViewport);
+}
+
+async function syncProjectRoute(): Promise<void> {
+  const target = routeProjectTarget();
+  if (!target) {
+    if (selectedProject.value) {
+      clearProjectDetail();
+      void resetSearch();
+    }
+    return;
+  }
+  if (
+    selectedProject.value?.source === target.source &&
+    selectedProject.value.id === target.id &&
+    (detailLoading.value ||
+      (projectDetails.value?.project.source === target.source &&
+        projectDetails.value.project.id === target.id))
+  ) {
+    return;
+  }
+
+  const requestId = ++detailRequestId;
+  selectedProject.value = createRouteProject(target);
+  projectDetails.value = undefined;
+  detailGameVersion.value = "";
+  detailLoader.value = "";
+  detailError.value = "";
+  detailDescriptionExpanded.value = false;
+  resetCopyActions();
+  detailLoading.value = true;
+  await nextTick();
+  window.scrollTo({ top: 0 });
+  try {
+    const details = await props.mods.getProjectDetails("mod", target.source, target.id);
+    if (
+      requestId === detailRequestId &&
+      routeProjectTarget()?.source === target.source &&
+      routeProjectTarget()?.id === target.id
+    ) {
+      selectedProject.value = details.project;
+      projectDetails.value = details;
+    }
+  } catch (error) {
+    if (requestId === detailRequestId) detailError.value = errorMessage(error);
+  } finally {
+    if (requestId === detailRequestId) detailLoading.value = false;
+  }
+}
+
+function routeProjectTarget(): { source: ServerModSource; id: string } | undefined {
+  const source = routeQueryValue(route.query.source);
+  const id = routeQueryValue(route.query.id);
+  if (
+    (source !== "modrinth" && source !== "curseforge") ||
+    !id ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(id)
+  ) {
+    return undefined;
+  }
+  return { source, id };
+}
+
+function routeQueryValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return Array.isArray(value) && typeof value[0] === "string" ? value[0] : undefined;
+}
+
+function createRouteProject(target: { source: ServerModSource; id: string }): ServerModProject {
+  return {
+    resourceType: "mod",
+    source: target.source,
+    id: target.id,
+    slug: target.id,
+    title: target.id,
+    description: "",
+    author: serverModSourceLabel(target.source),
+    downloads: 0,
+    follows: 0,
+    dateModified: "1970-01-01T00:00:00.000Z",
+    environment: ["server_only"],
+    categories: [],
+    versions: [],
+  };
 }
 
 async function loadProjectDetails(): Promise<void> {
@@ -469,7 +578,11 @@ async function loadProjectDetails(): Promise<void> {
   detailError.value = "";
   try {
     const details = await props.mods.getProjectDetails("mod", project.source, project.id);
-    if (requestId === detailRequestId && selectedProject.value?.id === project.id) {
+    if (
+      requestId === detailRequestId &&
+      selectedProject.value?.source === project.source &&
+      selectedProject.value.id === project.id
+    ) {
       projectDetails.value = details;
     }
   } catch (error) {

@@ -101,6 +101,13 @@ function instanceService(
     },
     list: async () => instances,
     contentCounts: async () => ({ mods: 0, plugins: 0 }),
+    listMods: async () => [],
+    setModDisabled: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    deleteMod: async () => {
+      throw new Error("not implemented in fixture");
+    },
     listWorldStorage: async () => {
       throw new Error("not implemented in fixture");
     },

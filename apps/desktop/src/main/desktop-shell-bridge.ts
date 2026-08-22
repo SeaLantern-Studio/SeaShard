@@ -40,11 +40,13 @@ import {
   expectServerModFilters,
   expectServerModDownloadResult,
   expectServerInstanceContentCounts,
+  expectServerInstalledMod,
+  expectServerInstalledMods,
   expectServerWorldBackups,
-  expectServerWorldDatapack,
-  expectServerWorldDatapacks,
   expectServerWorldBackup,
   expectServerWorldStorageSnapshot,
+  expectServerWorldDatapack,
+  expectServerWorldDatapacks,
   expectServerModProjectDetails,
   expectServerModSearchResult,
   expectServerInstances,
@@ -254,6 +256,27 @@ export async function registerDesktopShellBridge(
                   instanceId,
                 ]),
               ),
+            listServerMods: async (instanceId) =>
+              expectServerInstalledMods(
+                await kernel.callService(serverInstanceManagerContract, "listMods", [instanceId]),
+              ),
+            setServerModDisabled: async (instanceId, relativePath, disabled) => {
+              const result = await kernel.callService(
+                serverInstanceManagerContract,
+                "setModDisabled",
+                [instanceId, relativePath, disabled],
+              );
+              return expectServerInstalledMod(result, relativePath);
+            },
+            deleteServerMod: async (instanceId, relativePath) => {
+              const result = await kernel.callService(serverInstanceManagerContract, "deleteMod", [
+                instanceId,
+                relativePath,
+              ]);
+              if (result !== null) {
+                throw new Error("server instance manager returned an invalid mod delete result");
+              }
+            },
             readServerWorldStorage: async (instanceId) =>
               expectServerWorldStorageSnapshot(
                 await kernel.callService(serverInstanceManagerContract, "listWorldStorage", [

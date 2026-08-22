@@ -22,6 +22,7 @@ import {
   type ServerInstanceContentCounts,
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
+  type ServerInstalledModSnapshot,
   type ServerWorldBackupSnapshot,
   type ServerWorldDatapackSnapshot,
   type ServerWorldStorageSnapshot,
@@ -657,6 +658,77 @@ export function expectServerInstanceContentCounts(value: unknown): ServerInstanc
     throw new Error("server instance manager returned invalid content counts");
   }
   return { mods: mods as number, plugins: plugins as number };
+}
+export function expectServerInstalledMod(
+  value: unknown,
+  index: number | string,
+): ServerInstalledModSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`server instance manager returned invalid mod ${index}`);
+  }
+  const mod = value as Record<string, unknown>;
+  if (
+    typeof mod.instanceId !== "string" ||
+    !mod.instanceId ||
+    !isSafeRelativeModPath(mod.relativePath) ||
+    typeof mod.fileName !== "string" ||
+    !mod.fileName ||
+    /[\\/]/u.test(mod.fileName) ||
+    !/\.jar(?:\.disabled)?$/iu.test(mod.fileName) ||
+    !mod.relativePath.endsWith(`/${mod.fileName}`) ||
+    typeof mod.name !== "string" ||
+    !mod.name ||
+    mod.name.length > 256 ||
+    mod.name.includes("\0") ||
+    (mod.version !== undefined &&
+      (typeof mod.version !== "string" ||
+        mod.version.length > 256 ||
+        mod.version.includes("\0"))) ||
+    (mod.description !== undefined &&
+      (typeof mod.description !== "string" ||
+        mod.description.length > 2_000 ||
+        mod.description.includes("\0"))) ||
+    typeof mod.addedAt !== "string" ||
+    !isIsoTimestamp(mod.addedAt) ||
+    typeof mod.disabled !== "boolean" ||
+    (mod.iconDataUrl !== undefined &&
+      (typeof mod.iconDataUrl !== "string" ||
+        mod.iconDataUrl.length > 1_000_000 ||
+        !isServerImageDataUrl(mod.iconDataUrl)))
+  ) {
+    throw new Error(`server instance manager returned invalid mod ${index}`);
+  }
+  const resourceSource = parseOptionalServerResourceSourceMetadata(mod.resourceSource);
+  return {
+    instanceId: mod.instanceId,
+    relativePath: mod.relativePath,
+    fileName: mod.fileName,
+    name: mod.name,
+    ...(typeof mod.version === "string" && mod.version ? { version: mod.version } : {}),
+    ...(typeof mod.description === "string" && mod.description
+      ? { description: mod.description }
+      : {}),
+    ...(typeof mod.iconDataUrl === "string" ? { iconDataUrl: mod.iconDataUrl } : {}),
+    addedAt: mod.addedAt,
+    disabled: mod.disabled,
+    ...(resourceSource ? { resourceSource } : {}),
+  };
+}
+
+export function expectServerInstalledMods(value: unknown): ServerInstalledModSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid mods");
+  }
+  return value.map(expectServerInstalledMod);
+}
+
+function isSafeRelativeModPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:mods|server\/mods)\/[^/]+\.jar(?:\.disabled)?$/iu.test(value) &&
+    !value.includes("\\") &&
+    !value.includes("\0")
+  );
 }
 export function expectServerWorldStorageSnapshot(value: unknown): ServerWorldStorageSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

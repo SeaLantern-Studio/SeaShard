@@ -6,6 +6,7 @@ import {
   type ServerInstanceStartupSettings,
   type ServerCoreType,
 } from "../packages/contracts/src/index.ts";
+import { strToU8, zipSync } from "fflate";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
 import { defineDataCapsule } from "../packages/database/src/index.ts";
 import type {
@@ -387,8 +388,22 @@ await test("managed downloads persist unique instances and split portable manife
       mkdir(join(countedInstance.rootPath, "server", "mods"), { recursive: true }),
       mkdir(join(countedInstance.rootPath, "plugins"), { recursive: true }),
     ]);
+    const modArchive = zipSync({
+      "fabric.mod.json": strToU8(
+        JSON.stringify({
+          id: "server-tools",
+          name: "服务器工具",
+          version: "1.2.3",
+          description: "服务端工具简介",
+          icon: "assets/server-tools/icon.png",
+        }),
+      ),
+      "assets/server-tools/icon.png": Uint8Array.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+    });
     await Promise.all([
-      writeFile(join(countedInstance.rootPath, "mods", "fabric-api.jar"), ""),
+      writeFile(join(countedInstance.rootPath, "mods", "fabric-api.jar"), modArchive),
       writeFile(join(countedInstance.rootPath, "server", "mods", "quilted-fabric-api.JAR"), ""),
       writeFile(join(countedInstance.rootPath, "mods", "disabled.jar.disabled"), ""),
       writeFile(join(countedInstance.rootPath, "plugins", "luckperms.jar"), ""),
@@ -445,6 +460,92 @@ await test("managed downloads persist unique instances and split portable manife
       (await manager.list()).find(({ id }) => id === countedInstance.id)?.resourceSources,
       resourceManifest.resourceSources,
     );
+    const installedMod = (await manager.listMods(countedInstance.id)).find(
+      ({ relativePath }) => relativePath === "mods/fabric-api.jar",
+    );
+    assert.deepEqual(
+      installedMod && {
+        name: installedMod.name,
+        version: installedMod.version,
+        description: installedMod.description,
+        disabled: installedMod.disabled,
+        resourceSource: installedMod.resourceSource,
+      },
+      {
+        name: "服务器工具",
+        version: "1.2.3",
+        description: "服务端工具简介",
+        disabled: false,
+        resourceSource: {
+          source: "modrinth",
+          id: "server-mod-1",
+          iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+        },
+      },
+    );
+    assert.equal(
+      installedMod?.iconDataUrl,
+      `data:image/png;base64,${Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]).toString("base64")}`,
+    );
+    const disabledMod = await manager.setModDisabled(
+      countedInstance.id,
+      "mods/fabric-api.jar",
+      true,
+    );
+    assert.equal(disabledMod.relativePath, "mods/fabric-api.jar.disabled");
+    assert.equal(disabledMod.disabled, true);
+    assert.equal(
+      await access(join(countedInstance.rootPath, "mods", "fabric-api.jar.disabled")).then(
+        () => true,
+        () => false,
+      ),
+      true,
+    );
+    const disabledManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.deepEqual(disabledManifest.resourceSources?.mods, {
+      "mods/fabric-api.jar.disabled": {
+        source: "modrinth",
+        id: "server-mod-1",
+        iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+      },
+    });
+    const enabledMod = await manager.setModDisabled(
+      countedInstance.id,
+      "mods/fabric-api.jar.disabled",
+      false,
+    );
+    assert.equal(enabledMod.relativePath, "mods/fabric-api.jar");
+    assert.deepEqual(enabledMod.resourceSource, {
+      source: "modrinth",
+      id: "server-mod-1",
+      iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
+    });
+    await manager.deleteMod(countedInstance.id, "mods/fabric-api.jar");
+    await assert.rejects(access(join(countedInstance.rootPath, "mods", "fabric-api.jar")), {
+      code: "ENOENT",
+    });
+    const deletedManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.equal(deletedManifest.resourceSources, undefined);
     await assert.rejects(
       manager.setStartupSettings(countedInstance.id, {
         ...instanceStartupSettings,

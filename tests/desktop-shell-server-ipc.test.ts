@@ -160,6 +160,67 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   assert.deepEqual(harness.startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
   assert.deepEqual(
+    await runtime.invoke(desktopChannels.serverInstancesMods, 1, "instance-paper"),
+    [],
+  );
+  assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverInstancesSetModDisabled,
+      1,
+      "instance-paper",
+      "mods/example.jar",
+      true,
+    ),
+    {
+      instanceId: "instance-paper",
+      relativePath: "mods/example.jar",
+      fileName: "example.jar",
+      name: "Fixture Mod",
+      addedAt: "2026-08-17T12:00:00.000Z",
+      disabled: true,
+    },
+  );
+  assert.equal(
+    await runtime.invoke(
+      desktopChannels.serverInstancesDeleteMod,
+      1,
+      "instance-paper",
+      "mods/example.jar",
+    ),
+    undefined,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesSetModDisabled,
+      1,
+      "instance-paper",
+      "mods/example.jar",
+      "true",
+    ),
+    /must be a boolean/u,
+  );
+  await runtime.invoke(desktopChannels.serverRuntimeStart, 1, "instance-paper");
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesSetModDisabled,
+      1,
+      "instance-paper",
+      "mods/example.jar",
+      true,
+    ),
+    /关停服务器之后才能操作 MOD/u,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesDeleteMod,
+      1,
+      "instance-paper",
+      "mods/example.jar",
+    ),
+    /关停服务器之后才能操作 MOD/u,
+  );
+  await runtime.invoke(desktopChannels.serverRuntimeStop, 1, "instance-paper");
+  assert.deepEqual(
     await runtime.invoke(
       desktopChannels.serverInstancesSetWorldDatapackDisabled,
       1,

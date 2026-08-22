@@ -21,6 +21,7 @@ import {
   type ServerInstanceContentCounts,
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
+  type ServerInstalledModSnapshot,
   type ServerLaunchCommandPreview,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -683,6 +684,17 @@ export async function createDesktopShellHarness(
         return { instanceId: "instance-managed", task };
       },
       listServerInstances: async () => currentServerInstances,
+      listServerMods: async () => [],
+      setServerModDisabled: async (instanceId, relativePath, disabled) =>
+        ({
+          instanceId,
+          relativePath,
+          fileName: relativePath.split("/").at(-1) ?? "fixture.jar",
+          name: "Fixture Mod",
+          addedAt: "2026-08-17T12:00:00.000Z",
+          disabled,
+        }) satisfies ServerInstalledModSnapshot,
+      deleteServerMod: async () => {},
       readServerInstanceContentCounts: async () => serverInstanceContentCounts,
       readServerWorldStorage: async (instanceId) =>
         ({

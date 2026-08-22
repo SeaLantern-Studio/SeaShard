@@ -7,6 +7,7 @@ import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui
 import { serverConsoleUiManifest } from "@seashard/server-console-ui";
 import { serverDownloadDatapackUiManifest } from "@seashard/server-download-datapack-ui";
 import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
+import { serverModsUiManifest } from "@seashard/server-mods-ui";
 import { serverDownloadModpackUiManifest } from "@seashard/server-download-modpack-ui";
 import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
 import { serverDownloadWorldUiManifest } from "@seashard/server-download-world-ui";
@@ -161,6 +162,21 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.server-saves.ui",
         entryId: "server-saves.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 已安装 MOD 管理页独立发布；新增、来源跳转仍交给独立的 Mod 下载页。
+  await kernel.registerBuiltIn({
+    manifest: serverModsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.server-mods.ui",
+        entryId: "server-mods.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

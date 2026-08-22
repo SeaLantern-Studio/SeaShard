@@ -4,6 +4,7 @@ import type {
   ServerInstanceSnapshot,
   ServerInstanceContentCounts,
   ServerInstanceStartupSettings,
+  ServerInstalledModSnapshot,
   ServerModLoader,
   ServerResourceSourceIndex,
   ServerResourceSourceRecord,
@@ -16,6 +17,7 @@ export {
   type ServerInstanceSnapshot,
   type ServerInstanceSource,
   type ServerInstanceStorageMode,
+  type ServerInstalledModSnapshot,
   type ServerWorldBackupSnapshot,
   type ServerWorldDatapackSnapshot,
 } from "@seashard/contracts";
@@ -45,6 +47,16 @@ export interface ServerInstanceManagerService {
   recordResourceSource(instanceId: string, record: ServerResourceSourceRecord): Promise<void>;
   /** 统计实例标准 Mod 与插件目录中的 JAR 文件。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;
+  /** 列出实例标准 Mod 目录中的已安装 MOD，并读取 JAR 元数据。 */
+  listMods(instanceId: string): Promise<readonly ServerInstalledModSnapshot[]>;
+  /** 通过 .disabled 后缀切换 MOD 文件状态。 */
+  setModDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): Promise<ServerInstalledModSnapshot>;
+  /** 删除实例标准 Mod 目录中的单个 MOD。 */
+  deleteMod(instanceId: string, relativePath: string): Promise<void>;
   /** 切换 server.properties 中的 level-name，并返回最新存档投影。 */
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   /** 列出实例下的原生世界、下载世界或分维度世界。 */

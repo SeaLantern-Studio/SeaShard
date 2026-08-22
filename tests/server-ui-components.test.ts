@@ -10,6 +10,7 @@ import {
 import { serverConfigurationUiManifest } from "../frontend/server/configuration/src/index.ts";
 import { serverDownloadDatapackUiManifest } from "../frontend/server/download-datapack/src/index.ts";
 import { serverDownloadModUiManifest } from "../frontend/server/download-mod/src/index.ts";
+import { serverModsUiManifest } from "../frontend/server/mods/src/index.ts";
 import { serverDownloadModpackUiManifest } from "../frontend/server/download-modpack/src/index.ts";
 import { serverDownloadServerCoreUiManifest } from "../frontend/server/download-servercore/src/index.ts";
 import { serverDownloadWorldUiManifest } from "../frontend/server/download-world/src/index.ts";
@@ -32,6 +33,12 @@ const components = [
     pluginId: "seashard.server-download-mod-ui",
     entryId: "server-download-mod.client",
     permissions: [serverModSourceContract, serverInstanceManagerContract],
+  },
+  {
+    manifest: serverModsUiManifest,
+    pluginId: "seashard.server-mods-ui",
+    entryId: "server-mods.client",
+    permissions: [serverInstanceManagerContract, serverRuntimeContract],
   },
   {
     manifest: serverDownloadModpackUiManifest,

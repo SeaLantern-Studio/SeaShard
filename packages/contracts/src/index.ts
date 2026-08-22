@@ -33,6 +33,9 @@ export const desktopChannels = {
   serverInstancesContentCounts: "seashard.server-instances.content-counts",
   serverCoreDownloadStartManaged: "seashard.server-core-download.start-managed",
   serverInstancesList: "seashard.server-instances.list",
+  serverInstancesMods: "seashard.server-instances.mods",
+  serverInstancesSetModDisabled: "seashard.server-instances.set-mod-disabled",
+  serverInstancesDeleteMod: "seashard.server-instances.delete-mod",
   serverInstancesWorlds: "seashard.server-instances.worlds",
   serverInstancesSwitchWorld: "seashard.server-instances.switch-world",
   serverInstancesWorldBackups: "seashard.server-instances.world-backups",
@@ -556,6 +559,23 @@ export interface ServerWorldDatapackSnapshot {
   updatedAt: string;
 }
 
+/** 一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。 */
+export interface ServerInstalledModSnapshot {
+  instanceId: string;
+  relativePath: string;
+  fileName: string;
+  name: string;
+  version?: string;
+  /** 从 MOD 清单读取的简短介绍。 */
+  description?: string;
+  /** MOD JAR 内部图标的数据地址。 */
+  iconDataUrl?: string;
+  /** 文件首次落盘时间；手动复制的 MOD 使用文件系统创建时间。 */
+  addedAt: string;
+  disabled: boolean;
+  resourceSource?: ServerResourceSourceMetadata;
+}
+
 export interface ServerWorldDimensionGroup {
   id: string;
   name: string;
@@ -570,6 +590,17 @@ export interface ServerWorldStorageSnapshot {
   currentId?: string;
   saves: readonly ServerWorldSave[];
   dimensions: readonly ServerWorldDimensionGroup[];
+}
+
+/** Renderer 读取指定实例的已安装 MOD，并通过重命名切换启用状态。 */
+export interface ServerInstanceModService {
+  listMods(instanceId: string): Promise<readonly ServerInstalledModSnapshot[]>;
+  setModDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): Promise<ServerInstalledModSnapshot>;
+  deleteMod(instanceId: string, relativePath: string): Promise<void>;
 }
 
 /** 当前实例中可发现的世界存档及其维度布局。 */
@@ -607,7 +638,8 @@ export interface ServerInstanceContentCounts {
 }
 
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
-export interface ServerInstanceClientService extends ServerInstanceWorldService {
+export interface ServerInstanceClientService
+  extends ServerInstanceWorldService, ServerInstanceModService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;

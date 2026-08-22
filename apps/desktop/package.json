@@ -32,6 +32,7 @@
     "@seashard/server-instance-settings-ui": "workspace:*",
     "@seashard/server-launch-ui": "workspace:*",
     "@seashard/server-mod-source": "workspace:*",
+    "@seashard/server-mods-ui": "workspace:*",
     "@seashard/server-overview-ui": "workspace:*",
     "@seashard/server-runtime": "workspace:*",
     "@seashard/server-saves-ui": "workspace:*",

@@ -19,6 +19,9 @@ export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleL
   "seashard.server-download-mod-ui/server-download-mod.client": {
     load: () => import("@seashard/server-download-mod-ui/client"),
   },
+  "seashard.server-mods-ui/server-mods.client": {
+    load: () => import("@seashard/server-mods-ui/client"),
+  },
   "seashard.server-download-modpack-ui/server-download-modpack.client": {
     load: () => import("@seashard/server-download-modpack-ui/client"),
   },

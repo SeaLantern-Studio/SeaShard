@@ -29,6 +29,7 @@ import {
   listWorldDatapacks,
   setWorldDatapackDisabled,
 } from "./world-datapacks";
+import { deleteInstalledMod, listInstalledMods, setInstalledModDisabled } from "./mod-files";
 import { listWorldStorage, resolveWorldStorageRoot, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type {
@@ -364,6 +365,73 @@ export class ServerInstanceManager {
       mods: rootMods + serverMods,
       plugins,
     };
+  }
+  /** 列出实例标准 Mod 目录中的已安装 MOD；同一实例的文件操作共享串行队列。 */
+  async listMods(value: unknown) {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(value, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return listInstalledMods(instance);
+    });
+  }
+
+  /** 通过重命名 .disabled 后缀切换 MOD 状态，并同步来源索引路径。 */
+  async setModDisabled(instanceValue: unknown, relativePathValue: unknown, disabled: boolean) {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      const result = await setInstalledModDisabled(instance, relativePathValue, disabled);
+      await this.updatePrivateManifest(instanceId, (current) => {
+        const source =
+          current.resourceSources?.mods?.[result.previousRelativePath] ??
+          current.resourceSources?.mods?.[result.mod.relativePath];
+        let resourceSources = removeResourceSources(current.resourceSources, "mod", [
+          result.previousRelativePath,
+          result.mod.relativePath,
+        ]);
+        if (source) {
+          resourceSources = upsertResourceSource(resourceSources, {
+            resourceType: "mod",
+            relativePath: result.mod.relativePath,
+            ...source,
+          });
+        }
+        const updated = {
+          ...current,
+          updatedAt: this.options.now?.() ?? new Date().toISOString(),
+        };
+        if (resourceSources) updated.resourceSources = resourceSources;
+        else delete updated.resourceSources;
+        return updated;
+      });
+      return result.mod;
+    });
+  }
+
+  /** 删除 MOD 文件，并清理启用态与禁用态可能对应的来源索引。 */
+  async deleteMod(instanceValue: unknown, relativePathValue: unknown): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    await this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      const deleted = await deleteInstalledMod(instance, relativePathValue);
+      await this.updatePrivateManifest(instanceId, (current) => {
+        const resourceSources = removeResourceSources(
+          current.resourceSources,
+          "mod",
+          deleted.relativePaths,
+        );
+        const updated = {
+          ...current,
+          updatedAt: this.options.now?.() ?? new Date().toISOString(),
+        };
+        if (resourceSources) updated.resourceSources = resourceSources;
+        else delete updated.resourceSources;
+        return updated;
+      });
+    });
   }
   /** 读取实例目录下的普通存档或分维度存档投影。 */
   async listWorldStorage(value: unknown): Promise<ServerWorldStorageSnapshot> {
