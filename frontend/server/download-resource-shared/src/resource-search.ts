@@ -50,6 +50,7 @@ export interface ServerModMixedSearchState {
   readonly buffers: Record<ServerModSource, ServerModProject[]>;
   readonly totals: Record<ServerModSource, number>;
   readonly finished: Record<ServerModSource, boolean>;
+  consumedItems: number;
 }
 
 export function createServerModMixedSearchState(): ServerModMixedSearchState {
@@ -58,6 +59,7 @@ export function createServerModMixedSearchState(): ServerModMixedSearchState {
     buffers: { modrinth: [], curseforge: [] },
     totals: { modrinth: 0, curseforge: 0 },
     finished: { modrinth: false, curseforge: false },
+    consumedItems: 0,
   };
 }
 
@@ -116,12 +118,8 @@ export async function searchServerModMixedPage(
   }
 
   const items: ServerModProject[] = [];
-  // 记录消费当前页前的已取数据量；返回值必须对应本次即将展示的页起点。
-  const pageOffset =
-    state.offsets.modrinth +
-    state.offsets.curseforge -
-    state.buffers.modrinth.length -
-    state.buffers.curseforge.length;
+  // 上游 offset 记录的是数据源游标，可能包含未展示的空位；分页偏移只看已经消费的项目数。
+  const pageOffset = state.consumedItems;
   while (items.length < limit) {
     let consumed = false;
     for (const source of sources) {
@@ -133,6 +131,7 @@ export async function searchServerModMixedPage(
     }
     if (!consumed) break;
   }
+  state.consumedItems += items.length;
   return {
     items,
     offset: pageOffset,

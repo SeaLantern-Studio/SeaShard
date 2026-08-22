@@ -8,6 +8,8 @@ import {
   supportsUnifiedWorldStorage,
   type ServerInstanceSnapshot,
   type ServerModFilters,
+  type ServerModSearchRequest,
+  type ServerModSearchResult,
 } from "../packages/contracts/src/index.ts";
 import {
   compatibleServerModInstances,
@@ -308,6 +310,66 @@ await test("mixed source search keeps both sources across pages", async () => {
   assert.equal(second.limit, 2);
   assert.equal(second.offset, 2);
   assert.deepEqual(requests, ["modrinth:0", "curseforge:0"]);
+});
+
+await test("mixed source pagination counts displayed items after a short first page", async () => {
+  const state = createServerModMixedSearchState();
+  const projects = {
+    modrinth: ["mr-1"],
+    curseforge: Array.from({ length: 45 }, (_, index) => `cf-${index + 1}`),
+  };
+  const requests: string[] = [];
+  const requestBase = {
+    resourceType: "mod" as const,
+    query: "",
+    tag: "",
+    index: "downloads" as const,
+    gameVersion: "",
+    loader: "",
+  };
+  const search = async (request: ServerModSearchRequest): Promise<ServerModSearchResult> => {
+    requests.push(`${request.source}:${request.offset}`);
+    const ids = projects[request.source];
+    const items = ids.slice(request.offset, request.offset + request.limit).map((id) => ({
+      resourceType: "mod" as const,
+      source: request.source,
+      id,
+      slug: id,
+      title: id,
+      description: "",
+      author: "",
+      downloads: 0,
+      follows: 0,
+      dateModified: "2026-08-18T12:00:00Z",
+      environment: ["server_only"] as const,
+      categories: [],
+      versions: ["1.21.1"],
+    }));
+    return {
+      items,
+      offset: request.offset,
+      limit: request.limit,
+      total: ids.length,
+    };
+  };
+  const pages = [];
+  for (let page = 0; page < 3; page += 1) {
+    pages.push(await searchServerModMixedPage(requestBase, state, 20, search));
+  }
+
+  assert.deepEqual(
+    pages.map(({ offset }) => offset),
+    [0, 20, 40],
+  );
+  assert.deepEqual(
+    pages.map(({ limit }) => limit),
+    [20, 20, 6],
+  );
+  assert.deepEqual(
+    pages.flatMap(({ items }) => items.map(({ id }) => id)),
+    ["mr-1", ...Array.from({ length: 45 }, (_, index) => `cf-${index + 1}`)],
+  );
+  assert.deepEqual(requests, ["modrinth:0", "curseforge:0", "curseforge:20", "curseforge:40"]);
 });
 
 await test("mixed source search keeps Modrinth when CurseForge is unavailable", async () => {
