@@ -17,9 +17,9 @@ export const serverModSourceFilterOptions: readonly ServerModFilterOption[] = [
 
 /** 合并两个来源的筛选元数据；来源筛选本身始终保留“所有”。 */
 export function mergeServerModFilters(filters: readonly ServerModFilters[]): ServerModFilters {
-  const unavailableReason = filters.find(
-    ({ unavailableReason }) => unavailableReason,
-  )?.unavailableReason;
+  const unavailableReason = mergeUnavailableReasons(
+    filters.map(({ unavailableReason }) => unavailableReason),
+  );
   return {
     sources: serverModSourceFilterOptions,
     tags: mergeFilterOptions(filters.map((item) => item.tags)),
@@ -39,7 +39,16 @@ export function mergeAvailableServerModFilters(
   const available = results.flatMap((result) =>
     result.status === "fulfilled" ? [result.value] : [],
   );
-  if (available.length > 0) return mergeServerModFilters(available);
+  if (available.length > 0) {
+    const merged = mergeServerModFilters(available);
+    const rejectedReason = mergeUnavailableReasons(
+      results.flatMap((result) =>
+        result.status === "rejected" ? [sourceFailureMessage(result.reason)] : [],
+      ),
+    );
+    const unavailableReason = mergeUnavailableReasons([merged.unavailableReason, rejectedReason]);
+    return unavailableReason ? { ...merged, unavailableReason } : merged;
+  }
   const failure = results.find((result) => result.status === "rejected");
   if (failure?.status === "rejected") throwSourceFailure(failure.reason);
   throw new Error("没有可用的服务端资源来源");
@@ -160,6 +169,11 @@ function mergeFilterOptions(
     }
   }
   return [...merged.values()];
+}
+
+function mergeUnavailableReasons(reasons: readonly (string | undefined)[]): string | undefined {
+  const unique = [...new Set(reasons.filter((reason): reason is string => Boolean(reason)))];
+  return unique.length > 0 ? unique.join("；") : undefined;
 }
 
 function sourceFailureMessage(reason: unknown): string {

@@ -129,6 +129,7 @@ await test("partial source filter failures preserve available options", async ()
   const filters = mergeAvailableServerModFilters(results);
   assert.deepEqual(filters.tags, [{ id: "utility", label: "实用工具" }]);
   assert.deepEqual(filters.loaders, [{ id: "fabric", label: "Fabric" }]);
+  assert.equal(filters.unavailableReason, "CurseForge 请求失败（HTTP 502）");
   assert.throws(() => mergeAvailableServerModFilters([results[1]!]), /HTTP 502/u);
 });
 await test("mod download counts use at most four digits without wrapping the unit", () => {
