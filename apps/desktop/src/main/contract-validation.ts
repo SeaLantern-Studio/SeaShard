@@ -22,6 +22,7 @@ import {
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
   type ServerWorldBackupSnapshot,
+  type ServerWorldDatapackSnapshot,
   type ServerWorldStorageSnapshot,
   type ServerRuntimeSnapshot,
   type ServerLaunchCommandPreview,
@@ -730,6 +731,40 @@ export function expectServerWorldBackups(value: unknown): ServerWorldBackupSnaps
     throw new Error("server instance manager returned invalid world backups");
   }
   return value.map(expectServerWorldBackup);
+}
+
+export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid world datapack");
+  }
+  const datapack = value as Record<string, unknown>;
+  if (
+    typeof datapack.instanceId !== "string" ||
+    !datapack.instanceId ||
+    !isSafeRelativeWorldId(datapack.worldId) ||
+    typeof datapack.fileName !== "string" ||
+    !datapack.fileName ||
+    /[\\/]/u.test(datapack.fileName) ||
+    !["archive", "directory"].includes(String(datapack.kind)) ||
+    typeof datapack.updatedAt !== "string" ||
+    !isIsoTimestamp(datapack.updatedAt)
+  ) {
+    throw new Error("server instance manager returned invalid world datapack");
+  }
+  return {
+    instanceId: datapack.instanceId,
+    worldId: datapack.worldId,
+    fileName: datapack.fileName,
+    kind: datapack.kind as ServerWorldDatapackSnapshot["kind"],
+    updatedAt: datapack.updatedAt,
+  };
+}
+
+export function expectServerWorldDatapacks(value: unknown): ServerWorldDatapackSnapshot[] {
+  if (!Array.isArray(value)) {
+    throw new Error("server instance manager returned invalid world datapacks");
+  }
+  return value.map(expectServerWorldDatapack);
 }
 
 function isIsoTimestamp(value: unknown): value is string {

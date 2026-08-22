@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { ServerWorldBackupSnapshot, ServerWorldSave } from "@seashard/contracts";
+import type {
+  ServerWorldBackupSnapshot,
+  ServerWorldDatapackSnapshot,
+  ServerWorldSave,
+} from "@seashard/contracts";
 import { Cmz_Button, Cmz_Spinner } from "cmzya-modern-ui";
 import { Archive, ArrowLeft, ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-vue-next";
 import minecraftDefaultServerIcon from "../assets/minecraft-default-server-icon.png";
@@ -10,12 +14,15 @@ const props = defineProps<{
   detailWorldId?: string;
   detailSave?: ServerWorldSave;
   backups: readonly ServerWorldBackupSnapshot[];
+  dataPacks: readonly ServerWorldDatapackSnapshot[];
   backupsExpanded: boolean;
   dataPacksExpanded: boolean;
   backupLoading: boolean;
+  dataPackLoading: boolean;
   backupWorkingFile?: string;
   restoreTarget?: ServerWorldBackupSnapshot;
   backupLoadFailed: boolean;
+  dataPackLoadFailed: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +31,7 @@ const emit = defineEmits<{
   "toggle-data-packs": [];
   "create-backup": [];
   "retry-backups": [];
+  "retry-data-packs": [];
   "restore-backup": [backup: ServerWorldBackupSnapshot];
   "delete-backup": [backup: ServerWorldBackupSnapshot];
 }>();
@@ -46,6 +54,9 @@ function createBackup(): void {
 
 function retryBackups(): void {
   emit("retry-backups");
+}
+function retryDataPacks(): void {
+  emit("retry-data-packs");
 }
 
 function selectRestoreTarget(backup: ServerWorldBackupSnapshot): void {
@@ -186,6 +197,7 @@ function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
         <div class="world-save-collapsible-header">
           <div class="world-save-collapsible-heading">
             <strong id="world-save-datapacks-title">数据包</strong>
+            <span>{{ dataPacks.length }} 个数据包</span>
           </div>
           <button
             class="world-save-collapsible-trigger"
@@ -209,8 +221,33 @@ function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
           v-show="dataPacksExpanded"
           class="world-save-collapsible-items"
         >
-          <div class="world-save-empty world-save-empty--small">
+          <div v-if="dataPackLoading" class="world-save-inline-state">
+            <Cmz_Spinner size="sm" />正在读取数据包
+          </div>
+          <div v-else-if="dataPackLoadFailed" class="world-save-inline-state">
+            <Archive :size="18" :stroke-width="1.6" />
+            <Cmz_Button variant="outline" size="sm" @click="retryDataPacks">重试</Cmz_Button>
+          </div>
+          <div v-else-if="dataPacks.length === 0" class="world-save-empty world-save-empty--small">
             <Archive :size="28" :stroke-width="1.5" /><strong>暂无数据包</strong>
+          </div>
+          <div v-else class="world-save-backup-list">
+            <article
+              v-for="dataPack in dataPacks"
+              :key="dataPack.fileName"
+              class="world-save-backup-row"
+            >
+              <span class="world-save-icon world-save-icon--small">
+                <Archive :size="20" :stroke-width="1.6" aria-hidden="true" />
+              </span>
+              <span class="world-save-card-copy"
+                ><strong>{{ dataPack.fileName }}</strong
+                ><span
+                  >{{ dataPack.kind === "archive" ? "ZIP 数据包" : "文件夹数据包" }}　更新
+                  {{ formatWorldSaveDate(dataPack.updatedAt) }}</span
+                ></span
+              >
+            </article>
           </div>
         </div>
       </div>

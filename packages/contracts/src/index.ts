@@ -36,6 +36,7 @@ export const desktopChannels = {
   serverInstancesWorlds: "seashard.server-instances.worlds",
   serverInstancesSwitchWorld: "seashard.server-instances.switch-world",
   serverInstancesWorldBackups: "seashard.server-instances.world-backups",
+  serverInstancesWorldDatapacks: "seashard.server-instances.world-datapacks",
   serverInstancesCreateWorldBackup: "seashard.server-instances.create-world-backup",
   serverInstancesRestoreWorldBackup: "seashard.server-instances.restore-world-backup",
   serverInstancesDeleteWorldBackup: "seashard.server-instances.delete-world-backup",
@@ -502,6 +503,17 @@ export interface ServerWorldBackupSnapshot {
   sizeBytes: number;
 }
 
+export type ServerWorldDatapackKind = "archive" | "directory";
+
+/** 一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。 */
+export interface ServerWorldDatapackSnapshot {
+  instanceId: string;
+  worldId: string;
+  fileName: string;
+  kind: ServerWorldDatapackKind;
+  updatedAt: string;
+}
+
 export interface ServerWorldDimensionGroup {
   id: string;
   name: string;
@@ -521,6 +533,10 @@ export interface ServerWorldStorageSnapshot {
 /** 当前实例中可发现的世界存档及其维度布局。 */
 export interface ServerInstanceWorldService {
   listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  listWorldDatapacks(
+    instanceId: string,
+    worldId: string,
+  ): Promise<readonly ServerWorldDatapackSnapshot[]>;
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   listWorldBackups(
     instanceId: string,

@@ -6,6 +6,7 @@ import type {
   ServerInstanceStartupSettings,
   ServerModLoader,
   ServerWorldBackupSnapshot,
+  ServerWorldDatapackSnapshot,
   ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 export {
@@ -14,6 +15,7 @@ export {
   type ServerInstanceSource,
   type ServerInstanceStorageMode,
   type ServerWorldBackupSnapshot,
+  type ServerWorldDatapackSnapshot,
 } from "@seashard/contracts";
 
 /** Host 侧创建托管实例时补入设置组件保存的下载并发数。 */
@@ -41,6 +43,11 @@ export interface ServerInstanceManagerService {
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   /** 列出实例下的原生世界、下载世界或分维度世界。 */
   listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
+  /** 列出指定世界目录中已识别的数据包文件和文件夹。 */
+  listWorldDatapacks(
+    instanceId: string,
+    worldId: string,
+  ): Promise<readonly ServerWorldDatapackSnapshot[]>;
   /** 列出指定世界已有的备份文件。 */
   listWorldBackups(
     instanceId: string,

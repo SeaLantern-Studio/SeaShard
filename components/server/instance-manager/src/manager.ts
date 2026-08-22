@@ -24,9 +24,14 @@ import {
   listWorldBackups,
   restoreWorldBackup,
 } from "./world-backup";
+import { listWorldDatapacks } from "./world-datapacks";
 import { listWorldStorage, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
-import type { CreateManagedServerInstanceRequest, ServerWorldBackupSnapshot } from "./types";
+import type {
+  CreateManagedServerInstanceRequest,
+  ServerWorldBackupSnapshot,
+  ServerWorldDatapackSnapshot,
+} from "./types";
 import { createShortRandomId } from "./directory-naming";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
 
@@ -291,6 +296,19 @@ export class ServerInstanceManager {
     const instanceId = expectDirectoryName(value, "instance id");
     const { instance } = await this.findIndexedInstance(instanceId);
     return listWorldStorage(instance);
+  }
+
+  /** 读取指定世界目录中的数据包文件和带有 pack.mcmeta 的数据包文件夹。 */
+  async listWorldDatapacks(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+  ): Promise<readonly ServerWorldDatapackSnapshot[]> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return listWorldDatapacks(instance, worldIdValue);
+    });
   }
 
   /** 串行修改当前实例的 level-name，避免两个切换请求互相覆盖。 */

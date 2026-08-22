@@ -102,6 +102,7 @@ function instanceService(
     listWorldStorage: async () => {
       throw new Error("not implemented in fixture");
     },
+    listWorldDatapacks: async () => [],
     createWorldBackup: async () => {
       throw new Error("not implemented in fixture");
     },

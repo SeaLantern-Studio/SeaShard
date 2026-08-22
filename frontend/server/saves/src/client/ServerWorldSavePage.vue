@@ -5,6 +5,7 @@ import {
   type ServerRuntimeClientService,
   type ServerRuntimeSnapshot,
   type ServerWorldBackupSnapshot,
+  type ServerWorldDatapackSnapshot,
   type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
@@ -33,11 +34,14 @@ const viewMode = ref<"list" | "detail">("list");
 const detailWorldId = ref<string>();
 const detailWorldName = ref("");
 const backups = ref<readonly ServerWorldBackupSnapshot[]>([]);
+const dataPacks = ref<readonly ServerWorldDatapackSnapshot[]>([]);
 const backupsExpanded = ref(true);
 const dataPacksExpanded = ref(true);
 const backupLoading = ref(false);
+const dataPackLoading = ref(false);
 const backupWorkingFile = ref<string>();
 const backupLoadFailed = ref(false);
+const dataPackLoadFailed = ref(false);
 const restoreTarget = ref<ServerWorldBackupSnapshot>();
 const deleteTarget = ref<ServerWorldBackupSnapshot>();
 let requestId = 0;
@@ -108,7 +112,7 @@ async function loadStorage(): Promise<void> {
       expandedGroups.value = new Set(result.dimensions.slice(0, 1).map((group) => group.id));
     }
     if (viewMode.value === "detail" && detailWorldId.value) {
-      await loadBackups(detailWorldId.value);
+      await Promise.all([loadBackups(detailWorldId.value), loadDataPacks(detailWorldId.value)]);
     }
   } catch (cause) {
     if (currentRequestId === requestId) error.value = errorMessage(cause);
@@ -177,7 +181,11 @@ function openDetails(worldId: string, worldName: string): void {
   viewMode.value = "detail";
   backupsExpanded.value = true;
   dataPacksExpanded.value = true;
-  void loadBackups(worldId);
+  backups.value = [];
+  dataPacks.value = [];
+  backupLoadFailed.value = false;
+  dataPackLoadFailed.value = false;
+  void Promise.all([loadBackups(worldId), loadDataPacks(worldId)]);
 }
 
 function goBack(): void {
@@ -185,6 +193,7 @@ function goBack(): void {
   detailWorldId.value = undefined;
   detailWorldName.value = "";
   backupLoadFailed.value = false;
+  dataPackLoadFailed.value = false;
 }
 async function loadBackups(worldId = detailWorldId.value): Promise<void> {
   const instanceId = selectedInstanceId.value;
@@ -198,6 +207,23 @@ async function loadBackups(worldId = detailWorldId.value): Promise<void> {
     toast.error({ title: "读取备份失败", description: errorMessage(cause) });
   } finally {
     backupLoading.value = false;
+  }
+}
+async function loadDataPacks(worldId = detailWorldId.value): Promise<void> {
+  const instanceId = selectedInstanceId.value;
+  if (!instanceId || !worldId) return;
+  dataPackLoading.value = true;
+  dataPackLoadFailed.value = false;
+  try {
+    const result = await props.instances.listWorldDatapacks(instanceId, worldId);
+    if (instanceId !== selectedInstanceId.value || worldId !== detailWorldId.value) return;
+    dataPacks.value = result;
+  } catch (cause) {
+    if (instanceId !== selectedInstanceId.value || worldId !== detailWorldId.value) return;
+    dataPackLoadFailed.value = true;
+    toast.error({ title: "读取数据包失败", description: errorMessage(cause) });
+  } finally {
+    dataPackLoading.value = false;
   }
 }
 
@@ -287,17 +313,21 @@ function errorMessage(cause: unknown): string {
       :detail-world-id="detailWorldId"
       :detail-save="detailSave"
       :backups="backups"
+      :data-packs="dataPacks"
       :backups-expanded="backupsExpanded"
       :data-packs-expanded="dataPacksExpanded"
       :backup-loading="backupLoading"
+      :data-pack-loading="dataPackLoading"
       :backup-working-file="backupWorkingFile"
       :restore-target="restoreTarget"
       :backup-load-failed="backupLoadFailed"
+      :data-pack-load-failed="dataPackLoadFailed"
       @back="goBack"
       @toggle-backups="backupsExpanded = !backupsExpanded"
       @toggle-data-packs="dataPacksExpanded = !dataPacksExpanded"
       @create-backup="createBackup"
       @retry-backups="loadBackups"
+      @retry-data-packs="loadDataPacks"
       @restore-backup="setRestoreTarget"
       @delete-backup="setDeleteTarget"
     />

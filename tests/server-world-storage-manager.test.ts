@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
+import { listWorldDatapacks } from "../components/server/instance-manager/src/world-datapacks.ts";
 import {
   listWorldStorage,
   switchWorldStorage,
@@ -64,6 +65,39 @@ await test("split world storage groups dimensions and switches by world group", 
 
     const switched = await switchWorldStorage(instance(root, "bukkit"), "survival");
     assert.equal(switched.currentId, "survival");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+await test("world datapacks lists archives and valid folders from the logical overworld", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".tmp-world-datapacks-"));
+  try {
+    await writeFile(join(root, "server.properties"), "level-name=survival\n");
+    await createWorld(root, "survival", "Survival");
+    await createWorld(root, "survival_nether", "Survival Nether");
+
+    const datapackDirectory = join(root, "survival", "datapacks");
+    await mkdir(join(datapackDirectory, "local-pack"), { recursive: true });
+    await writeFile(join(datapackDirectory, "local-pack", "pack.mcmeta"), "{}");
+    await writeFile(join(datapackDirectory, "remote.zip"), Uint8Array.of(1, 2, 3));
+    await mkdir(join(datapackDirectory, "unrelated"), { recursive: true });
+    await writeFile(join(datapackDirectory, "unrelated", "readme.txt"), "ignore");
+
+    const netherDatapacks = join(root, "survival_nether", "datapacks");
+    await mkdir(netherDatapacks, { recursive: true });
+    await writeFile(join(netherDatapacks, "wrong.zip"), Uint8Array.of(4, 5, 6));
+
+    const datapacks = await listWorldDatapacks(instance(root, "bukkit"), "survival");
+    assert.deepEqual(
+      datapacks
+        .map(({ fileName, kind }) => ({ fileName, kind }))
+        .sort((left, right) => left.fileName.localeCompare(right.fileName)),
+      [
+        { fileName: "local-pack", kind: "directory" },
+        { fileName: "remote.zip", kind: "archive" },
+      ],
+    );
+    assert.ok(datapacks.every(({ worldId }) => worldId === "survival"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

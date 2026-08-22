@@ -41,6 +41,7 @@ import {
   expectServerModDownloadResult,
   expectServerInstanceContentCounts,
   expectServerWorldBackups,
+  expectServerWorldDatapacks,
   expectServerWorldBackup,
   expectServerWorldStorageSnapshot,
   expectServerModProjectDetails,
@@ -261,6 +262,13 @@ export async function registerDesktopShellBridge(
             listServerWorldBackups: async (instanceId, worldId) =>
               expectServerWorldBackups(
                 await kernel.callService(serverInstanceManagerContract, "listWorldBackups", [
+                  instanceId,
+                  worldId,
+                ]),
+              ),
+            listServerWorldDatapacks: async (instanceId, worldId) =>
+              expectServerWorldDatapacks(
+                await kernel.callService(serverInstanceManagerContract, "listWorldDatapacks", [
                   instanceId,
                   worldId,
                 ]),

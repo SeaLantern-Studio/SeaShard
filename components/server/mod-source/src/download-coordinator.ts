@@ -11,7 +11,7 @@ import {
 import type { DownloadService, DownloadTaskSnapshot } from "@seashard/download";
 import {
   createShortRandomId,
-  resolveWorldStorageDirectories,
+  resolveWorldDatapackDirectory,
   type ServerInstanceManagerService,
 } from "@seashard/server-instance-manager";
 import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
@@ -55,7 +55,7 @@ export class ServerModDownloadCoordinator {
     assertCompatibleInstance(artifact, instance);
     const destinationDirectory =
       artifact.resourceType === "datapack"
-        ? await resolveDatapackDirectory(instance, request.worldId)
+        ? (await resolveWorldDatapackDirectory(instance, request.worldId)).absolutePath
         : resolve(instance.rootPath, instance.serverType === "quilt" ? "server/mods" : "mods");
     const task = await this.startAndWait(
       artifact,
@@ -211,21 +211,6 @@ function assertCompatibleInstance(
   if (!artifact.loaders.includes(instance.modLoader)) {
     throw new Error(`该 Mod 版本不支持 ${formatLoader(instance.modLoader)} 实例 ${instance.name}`);
   }
-}
-async function resolveDatapackDirectory(
-  instance: ServerInstanceSnapshot,
-  worldId: string | undefined,
-): Promise<string> {
-  if (worldId === undefined) {
-    throw new TypeError("数据包安装必须指定目标存档");
-  }
-  const sources = await resolveWorldStorageDirectories(instance, worldId);
-  const overworld = sources.find(({ id, groupId }) => id === groupId) ?? sources[0];
-  if (!overworld) {
-    throw new Error("目标存档不存在或不属于当前服务器实例。");
-  }
-  // split 模式下数据包属于逻辑世界，固定写入它的主世界目录。
-  return resolve(overworld.absolutePath, "datapacks");
 }
 function parseInstallRequest(value: unknown): InstallRequest {
   const record = expectRecord(value, "server resource install request");

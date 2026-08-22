@@ -676,6 +676,7 @@ export async function createDesktopShellHarness(
           dimensions: [],
         }) satisfies ServerWorldStorageSnapshot,
       listServerWorldBackups: async () => [],
+      listServerWorldDatapacks: async () => [],
       createServerWorldBackup: async () => ({
         instanceId: "instance-paper",
         worldId: "world",

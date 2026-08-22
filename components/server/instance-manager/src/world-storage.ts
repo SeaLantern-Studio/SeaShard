@@ -120,6 +120,25 @@ export async function resolveWorldStorageDirectories(
   return targets.map((world) => ({ ...world, groupId: worldId, storageRoot: rootPath }));
 }
 
+export interface WorldDatapackDirectory {
+  readonly worldId: string;
+  readonly absolutePath: string;
+}
+
+/** 解析数据包实际写入目录；split 模式固定使用逻辑世界的主世界目录。 */
+export async function resolveWorldDatapackDirectory(
+  instance: ServerInstanceSnapshot,
+  requestedId: unknown,
+): Promise<WorldDatapackDirectory> {
+  const sources = await resolveWorldStorageDirectories(instance, requestedId);
+  const overworld = sources.find(({ id, groupId }) => id === groupId) ?? sources[0];
+  if (!overworld) throw new Error("目标存档不存在或不属于当前服务器实例。");
+  return {
+    worldId: overworld.groupId,
+    absolutePath: resolve(overworld.absolutePath, "datapacks"),
+  };
+}
+
 /** 只允许切换扫描结果中的目录，并通过 server.properties 的 level-name 完成切换。 */
 export async function switchWorldStorage(
   instance: ServerInstanceSnapshot,

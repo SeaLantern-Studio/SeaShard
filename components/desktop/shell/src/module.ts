@@ -315,6 +315,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           );
         });
         config.runtime.handle(
+          desktopChannels.serverInstancesWorldDatapacks,
+          (event, instanceId, worldId) => {
+            ownedWindow(event.sender.id);
+            return config.listServerWorldDatapacks(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+            );
+          },
+        );
+        config.runtime.handle(
           desktopChannels.serverInstancesWorldBackups,
           (event, instanceId, worldId) => {
             ownedWindow(event.sender.id);
@@ -686,6 +696,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverInstancesOpenFolder);
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverInstancesWorldBackups);
+          config.runtime.removeHandler(desktopChannels.serverInstancesWorldDatapacks);
           config.runtime.removeHandler(desktopChannels.serverInstancesCreateWorldBackup);
           config.runtime.removeHandler(desktopChannels.serverInstancesRestoreWorldBackup);
           config.runtime.removeHandler(desktopChannels.serverInstancesDeleteWorldBackup);

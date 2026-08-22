@@ -56,6 +56,8 @@ export function createServerInstanceManagerModule(
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listWorldStorage: async (instanceId) =>
           asJsonValue(await manager.listWorldStorage(instanceId)),
+        listWorldDatapacks: async (instanceId, worldId) =>
+          asJsonValue(await manager.listWorldDatapacks(instanceId, worldId)),
         listWorldBackups: async (instanceId, worldId) =>
           asJsonValue(await manager.listWorldBackups(instanceId, worldId)),
         createWorldBackup: async (instanceId, worldId) =>
@@ -100,6 +102,7 @@ export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";
 export * from "./world-storage";
+export * from "./world-datapacks";
 export * from "./manifest";
 export * from "./startup-settings";
 export * from "./registry";
