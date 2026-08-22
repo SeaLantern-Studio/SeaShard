@@ -11,7 +11,7 @@ import {
   type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
-import { Cmz_Button, Cmz_Modal, useToast } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Modal, Cmz_Toast, useToast } from "cmzya-modern-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import ServerWorldSaveDetail from "./components/ServerWorldSaveDetail.vue";
@@ -161,7 +161,6 @@ async function requestSwitch(worldId: string, worldName: string): Promise<void> 
   switchingId.value = worldId;
   try {
     storage.value = await props.instances.switchWorld(instanceId, worldId);
-    toast.success({ title: "存档已切换", description: `当前存档：${worldName}` });
   } catch (cause) {
     const message = errorMessage(cause);
     if (message.includes("关停服务器")) serverActiveWarning.value = true;
@@ -279,10 +278,6 @@ async function toggleDataPack(dataPack: ServerWorldDatapackSnapshot): Promise<vo
           right.updatedAt.localeCompare(left.updatedAt) ||
           left.fileName.localeCompare(right.fileName, "zh-CN"),
       );
-    toast.success({
-      title: updated.disabled ? "数据包已禁用" : "数据包已启用",
-      description: updated.fileName,
-    });
   } catch (cause) {
     handleDataPackError(cause, dataPack.disabled ? "启用数据包失败" : "禁用数据包失败");
   } finally {
@@ -307,7 +302,6 @@ async function deleteDataPack(): Promise<void> {
     await props.instances.deleteWorldDatapack(instanceId, worldId, target.fileName);
     if (instanceId !== selectedInstanceId.value || worldId !== detailWorldId.value) return;
     dataPacks.value = dataPacks.value.filter(({ fileName }) => fileName !== target.fileName);
-    toast.success({ title: "数据包已删除", description: target.fileName });
   } catch (cause) {
     handleDataPackError(cause, "删除数据包失败");
   } finally {
@@ -334,7 +328,6 @@ async function createBackup(): Promise<void> {
   try {
     await props.instances.createWorldBackup(instanceId, worldId);
     await loadBackups(worldId);
-    toast.success({ title: "备份已创建", description: detailWorldName.value });
   } catch (cause) {
     handleBackupError(cause, "创建备份失败");
   } finally {
@@ -357,7 +350,6 @@ async function restoreBackup(): Promise<void> {
   try {
     storage.value = await props.instances.restoreWorldBackup(instanceId, worldId, target.fileName);
     await loadBackups(worldId);
-    toast.success({ title: "存档已恢复", description: target.fileName });
   } catch (cause) {
     handleBackupError(cause, "恢复备份失败");
   } finally {
@@ -380,7 +372,6 @@ async function deleteBackup(): Promise<void> {
   try {
     await props.instances.deleteWorldBackup(instanceId, worldId, target.fileName);
     await loadBackups(worldId);
-    toast.success({ title: "备份已删除", description: target.fileName });
   } catch (cause) {
     handleBackupError(cause, "删除备份失败");
   } finally {
@@ -401,6 +392,7 @@ function errorMessage(cause: unknown): string {
 
 <template>
   <section class="server-world-save-page" aria-label="存档">
+    <Cmz_Toast position="top-right" />
     <ServerWorldSaveDetail
       v-if="viewMode === 'detail'"
       :detail-world-name="detailWorldName"
