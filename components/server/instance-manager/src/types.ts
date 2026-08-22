@@ -54,6 +54,14 @@ export interface ServerInstanceManagerService {
     instanceId: string,
     worldId: string,
   ): Promise<readonly ServerWorldDatapackSnapshot[]>;
+  setWorldDatapackDisabled(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+    disabled: boolean,
+  ): Promise<ServerWorldDatapackSnapshot>;
+  /** 删除指定世界数据包。 */
+  deleteWorldDatapack(instanceId: string, worldId: string, fileName: string): Promise<void>;
   /** 列出指定世界已有的备份文件。 */
   listWorldBackups(
     instanceId: string,

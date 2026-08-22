@@ -42,6 +42,33 @@ export function upsertResourceSource(
   };
 }
 
+/** 删除已移除资源对应的来源索引；不存在的路径保持索引不变。 */
+export function removeResourceSources(
+  index: ServerResourceSourceIndex | undefined,
+  resourceType: ServerResourceSourceType,
+  relativePaths: readonly string[],
+): ServerResourceSourceIndex | undefined {
+  if (!index) return undefined;
+  const section = resourceSourceSections[resourceType];
+  const table = index[section];
+  if (!table) return index;
+  const nextTable = { ...table };
+  let changed = false;
+  for (const relativePathValue of relativePaths) {
+    const relativePath = normalizeResourceSourcePath(relativePathValue);
+    if (!relativePath || !Object.prototype.hasOwnProperty.call(nextTable, relativePath)) continue;
+    delete nextTable[relativePath];
+    changed = true;
+  }
+  if (!changed) return index;
+  if (Object.keys(nextTable).length > 0) {
+    return { ...index, [section]: nextTable };
+  }
+  const nextIndex = { ...index };
+  delete nextIndex[section];
+  return Object.keys(nextIndex).length > 0 ? nextIndex : undefined;
+}
+
 /** 宽容读取 seashard.json 中的可选索引；坏记录只影响自身，不阻塞实例读取。 */
 export function parseResourceSourceIndex(value: unknown): ServerResourceSourceIndex | undefined {
   const record = asRecord(value);

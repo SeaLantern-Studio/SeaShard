@@ -180,9 +180,32 @@
   white-space: normal;
 }
 
+.world-save-card-copy .world-save-datapack-disabled-tag {
+  display: inline-flex;
+  min-height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: visible;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--sl-error) 32%, var(--sl-border-light));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sl-error) 10%, var(--sl-surface));
+  color: var(--sl-error);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .world-save-card-copy .world-save-datapack-name {
   min-width: 0;
   flex: 0 1 auto;
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-base);
+  font-weight: 680;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .world-save-card-copy .world-save-datapack-version-tag {
@@ -217,6 +240,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.world-save-card-copy .world-save-minecraft-segment {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: inherit;
+}
+
+.world-save-card-copy .world-save-minecraft-segment.is-bold {
+  font-weight: 700;
+}
+
+.world-save-card-copy .world-save-minecraft-segment.is-italic {
+  font-style: italic;
+}
+
+.world-save-card-copy .world-save-minecraft-segment.is-underlined {
+  text-decoration-line: underline;
+}
+
+.world-save-card-copy .world-save-minecraft-segment.is-strikethrough {
+  text-decoration-line: line-through;
+}
+
+.world-save-card-copy .world-save-minecraft-segment.is-underlined.is-strikethrough {
+  text-decoration-line: underline line-through;
 }
 
 .world-save-card-copy .world-save-datapack-updated {
@@ -232,11 +284,28 @@
 }
 .world-save-row-actions {
   display: flex;
-  width: 96px;
-  min-width: 96px;
-  flex: 0 0 96px;
+  width: 190px;
+  min-width: 190px;
+  flex: 0 0 190px;
+  align-items: center;
   justify-content: flex-end;
   gap: 4px;
+}
+.world-save-datapack-icon {
+  position: relative;
+}
+
+.world-save-datapack-disabled-icon {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 50%;
+  height: 50%;
+  place-items: center;
+  border-top-left-radius: 5px;
+  background: var(--sl-error);
+  color: #fff;
 }
 
 .world-save-inline-state {

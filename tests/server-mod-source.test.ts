@@ -105,6 +105,12 @@ function instanceService(
       throw new Error("not implemented in fixture");
     },
     listWorldDatapacks: async () => [],
+    setWorldDatapackDisabled: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    deleteWorldDatapack: async () => {
+      throw new Error("not implemented in fixture");
+    },
     createWorldBackup: async () => {
       throw new Error("not implemented in fixture");
     },

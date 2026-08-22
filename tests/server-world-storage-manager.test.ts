@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { strToU8, zipSync } from "fflate";
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
-import { listWorldDatapacks } from "../components/server/instance-manager/src/world-datapacks.ts";
+import {
+  deleteWorldDatapack,
+  listWorldDatapacks,
+  setWorldDatapackDisabled,
+} from "../components/server/instance-manager/src/world-datapacks.ts";
+import { readWorldDatapackDisabledNames } from "../components/server/instance-manager/src/world-datapack-config.ts";
 import {
   listWorldStorage,
   switchWorldStorage,
@@ -16,7 +21,6 @@ const animatedGif = Uint8Array.from([
   0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
   0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
   0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00,
-  0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01,
   0x00, 0x3b,
 ]);
 
@@ -150,31 +154,30 @@ await test("world datapacks lists archives and valid folders from the logical ov
     await mkdir(netherDatapacks, { recursive: true });
     await writeFile(join(netherDatapacks, "wrong.zip"), Uint8Array.of(4, 5, 6));
 
-    const datapacks = await listWorldDatapacks(
-      {
-        ...instance(root, "bukkit"),
-        resourceSources: {
-          datapacks: {
-            "survival/datapacks/remote.zip": {
-              source: "curseforge",
-              id: "123",
-              version: "2.0.0",
-              iconUrl: "https://media.forgecdn.net/files/123/456/icon.png",
-            },
+    const worldInstance = {
+      ...instance(root, "bukkit"),
+      resourceSources: {
+        datapacks: {
+          "survival/datapacks/remote.zip": {
+            source: "curseforge",
+            id: "123",
+            version: "2.0.0",
+            iconUrl: "https://media.forgecdn.net/files/123/456/icon.png",
           },
         },
       },
-      "survival",
-    );
+    } satisfies ServerInstanceSnapshot;
+    const datapacks = await listWorldDatapacks(worldInstance, "survival");
     assert.deepEqual(
       datapacks
-        .map(({ fileName, kind }) => ({ fileName, kind }))
+        .map(({ fileName, kind, disabled }) => ({ fileName, kind, disabled }))
         .sort((left, right) => left.fileName.localeCompare(right.fileName)),
       [
-        { fileName: "local-pack", kind: "directory" },
-        { fileName: "remote.zip", kind: "archive" },
+        { fileName: "local-pack", kind: "directory", disabled: false },
+        { fileName: "remote.zip", kind: "archive", disabled: false },
       ],
     );
+    assert.deepEqual([...(await readWorldDatapackDisabledNames(join(root, "survival")))], []);
     assert.equal(
       datapacks.find(({ fileName }) => fileName === "local-pack")?.description,
       "本地数据包介绍",
@@ -198,6 +201,65 @@ await test("world datapacks lists archives and valid folders from the logical ov
       version: "2.0.0",
       iconUrl: "https://media.forgecdn.net/files/123/456/icon.png",
     });
+
+    const disabledPack = await setWorldDatapackDisabled(
+      worldInstance,
+      "survival",
+      "remote.zip",
+      true,
+    );
+    assert.equal(disabledPack.fileName, "remote.zip");
+    assert.equal(disabledPack.disabled, true);
+    assert.deepEqual(
+      disabledPack.resourceSource,
+      datapacks.find(({ fileName }) => fileName === "remote.zip")?.resourceSource,
+    );
+    assert.deepEqual(
+      [...(await readWorldDatapackDisabledNames(join(root, "survival")))],
+      ["remote.zip"],
+    );
+    await assert.rejects(readFile(join(datapackDirectory, "remote.zip.disable")), /ENOENT/u);
+    assert.deepEqual(
+      (await listWorldDatapacks(worldInstance, "survival"))
+        .map(({ fileName, disabled }) => ({ fileName, disabled }))
+        .sort((left, right) => left.fileName.localeCompare(right.fileName)),
+      [
+        { fileName: "local-pack", disabled: false },
+        { fileName: "remote.zip", disabled: true },
+      ],
+    );
+
+    const enabledPack = await setWorldDatapackDisabled(
+      worldInstance,
+      "survival",
+      "remote.zip",
+      false,
+    );
+    assert.equal(enabledPack.fileName, "remote.zip");
+    assert.equal(enabledPack.disabled, false);
+    assert.deepEqual([...(await readWorldDatapackDisabledNames(join(root, "survival")))], []);
+    assert.equal(
+      (await listWorldStorage(worldInstance)).dimensions[0]?.saves.find(
+        ({ id }) => id === "survival",
+      )?.name,
+      "Survival",
+    );
+
+    const disabledFolder = await setWorldDatapackDisabled(
+      worldInstance,
+      "survival",
+      "local-pack",
+      true,
+    );
+    assert.equal(disabledFolder.fileName, "local-pack");
+    assert.equal(disabledFolder.disabled, true);
+    const deletedFolder = await deleteWorldDatapack(worldInstance, "survival", "local-pack");
+    assert.deepEqual(deletedFolder.relativePaths, ["survival/datapacks/local-pack"]);
+    await assert.rejects(readFile(join(datapackDirectory, "local-pack", "pack.mcmeta")), /ENOENT/u);
+    const deletedArchive = await deleteWorldDatapack(worldInstance, "survival", "remote.zip");
+    assert.deepEqual(deletedArchive.relativePaths, ["survival/datapacks/remote.zip"]);
+    await assert.rejects(readFile(join(datapackDirectory, "remote.zip")), /ENOENT/u);
+    assert.deepEqual(await listWorldDatapacks(worldInstance, "survival"), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -257,16 +319,42 @@ async function createWorld(
 }
 
 function createLevelDat(levelName: string): Uint8Array {
-  const bytes: number[] = [
-    10, 0, 0, 10, 0, 4, 68, 97, 116, 97, 8, 0, 9, 76, 101, 118, 101, 108, 78, 97, 109, 101,
-  ];
-  bytes.push(
-    (levelName.length >> 8) & 0xff,
-    levelName.length & 0xff,
-    ...new TextEncoder().encode(levelName),
-  );
-  bytes.push(0, 0);
+  const bytes: number[] = [10, 0, 0];
+  pushNamedCompound(bytes, "Data");
+  pushNamedString(bytes, "LevelName", levelName);
+  pushNamedCompound(bytes, "DataPacks");
+  pushNamedStringList(bytes, "Enabled", ["vanilla"]);
+  pushNamedStringList(bytes, "Disabled", []);
+  bytes.push(0, 0, 0);
   return Uint8Array.from(bytes);
+}
+
+function pushNamedCompound(bytes: number[], name: string): void {
+  bytes.push(10);
+  pushNbtString(bytes, name);
+}
+
+function pushNamedString(bytes: number[], name: string, value: string): void {
+  bytes.push(8);
+  pushNbtString(bytes, name);
+  pushNbtString(bytes, value);
+}
+
+function pushNamedStringList(bytes: number[], name: string, values: readonly string[]): void {
+  bytes.push(9);
+  pushNbtString(bytes, name);
+  bytes.push(8);
+  pushNbtInt32(bytes, values.length);
+  for (const value of values) pushNbtString(bytes, value);
+}
+
+function pushNbtString(bytes: number[], value: string): void {
+  const encoded = new TextEncoder().encode(value);
+  bytes.push((encoded.byteLength >> 8) & 0xff, encoded.byteLength & 0xff, ...encoded);
+}
+
+function pushNbtInt32(bytes: number[], value: number): void {
+  bytes.push((value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff);
 }
 
 function instance(rootPath: string, serverType: string): ServerInstanceSnapshot {

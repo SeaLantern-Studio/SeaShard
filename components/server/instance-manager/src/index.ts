@@ -60,6 +60,18 @@ export function createServerInstanceManagerModule(
           asJsonValue(await manager.listWorldStorage(instanceId)),
         listWorldDatapacks: async (instanceId, worldId) =>
           asJsonValue(await manager.listWorldDatapacks(instanceId, worldId)),
+        setWorldDatapackDisabled: async (instanceId, worldId, fileName, disabled) => {
+          if (typeof disabled !== "boolean") {
+            throw new TypeError("数据包禁用状态必须是布尔值。");
+          }
+          return asJsonValue(
+            await manager.setWorldDatapackDisabled(instanceId, worldId, fileName, disabled),
+          );
+        },
+        deleteWorldDatapack: async (instanceId, worldId, fileName) => {
+          await manager.deleteWorldDatapack(instanceId, worldId, fileName);
+          return null;
+        },
         listWorldBackups: async (instanceId, worldId) =>
           asJsonValue(await manager.listWorldBackups(instanceId, worldId)),
         createWorldBackup: async (instanceId, worldId) =>

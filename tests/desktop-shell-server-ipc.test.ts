@@ -160,6 +160,45 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   assert.deepEqual(harness.startedManagedDownloads, [{ ...saveAsRequest, connections: 4 }]);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverInstancesList, 1), serverInstances);
   assert.deepEqual(
+    await runtime.invoke(
+      desktopChannels.serverInstancesSetWorldDatapackDisabled,
+      1,
+      "instance-paper",
+      "world",
+      "pack.zip",
+      true,
+    ),
+    {
+      instanceId: "instance-paper",
+      worldId: "world",
+      fileName: "pack.zip",
+      kind: "archive",
+      disabled: true,
+      updatedAt: "2026-08-17T12:00:02.000Z",
+    },
+  );
+  assert.equal(
+    await runtime.invoke(
+      desktopChannels.serverInstancesDeleteWorldDatapack,
+      1,
+      "instance-paper",
+      "world",
+      "pack.zip",
+    ),
+    undefined,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesSetWorldDatapackDisabled,
+      1,
+      "instance-paper",
+      "world",
+      "pack.zip",
+      "true",
+    ),
+    /must be a boolean/u,
+  );
+  assert.deepEqual(
     await runtime.invoke(desktopChannels.serverInstancesContentCounts, 1, serverInstances[0]!.id),
     serverInstanceContentCounts,
   );
@@ -363,6 +402,7 @@ await test("desktop shell preserves unknown resource origins in world projection
     worldId: "world",
     fileName: "pack.zip",
     kind: "archive",
+    disabled: false,
     description: "服务端数据包",
     iconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
     updatedAt: "2026-08-21T00:00:00.000Z",

@@ -152,6 +152,17 @@ export interface DesktopShellConfig {
     instanceId: string,
     worldId: string,
   ): Promise<readonly ServerWorldDatapackSnapshot[]>;
+  setServerWorldDatapackDisabled(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+    disabled: boolean,
+  ): ReturnType<ServerInstanceClientService["setWorldDatapackDisabled"]>;
+  deleteServerWorldDatapack(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+  ): ReturnType<ServerInstanceClientService["deleteWorldDatapack"]>;
   listServerWorldBackups(
     instanceId: string,
     worldId: string,

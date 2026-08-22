@@ -37,6 +37,8 @@ export const desktopChannels = {
   serverInstancesSwitchWorld: "seashard.server-instances.switch-world",
   serverInstancesWorldBackups: "seashard.server-instances.world-backups",
   serverInstancesWorldDatapacks: "seashard.server-instances.world-datapacks",
+  serverInstancesSetWorldDatapackDisabled: "seashard.server-instances.set-world-datapack-disabled",
+  serverInstancesDeleteWorldDatapack: "seashard.server-instances.delete-world-datapack",
   serverInstancesCreateWorldBackup: "seashard.server-instances.create-world-backup",
   serverInstancesRestoreWorldBackup: "seashard.server-instances.restore-world-backup",
   serverInstancesDeleteWorldBackup: "seashard.server-instances.delete-world-backup",
@@ -546,6 +548,7 @@ export interface ServerWorldDatapackSnapshot {
   resourceSource?: ServerResourceSourceMetadata;
   fileName: string;
   kind: ServerWorldDatapackKind;
+  disabled: boolean;
   /** 从 pack.mcmeta 读取的简短介绍。 */
   description?: string;
   /** 数据包内部 pack.png 的数据地址。 */
@@ -576,6 +579,13 @@ export interface ServerInstanceWorldService {
     instanceId: string,
     worldId: string,
   ): Promise<readonly ServerWorldDatapackSnapshot[]>;
+  setWorldDatapackDisabled(
+    instanceId: string,
+    worldId: string,
+    fileName: string,
+    disabled: boolean,
+  ): Promise<ServerWorldDatapackSnapshot>;
+  deleteWorldDatapack(instanceId: string, worldId: string, fileName: string): Promise<void>;
   switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>;
   listWorldBackups(
     instanceId: string,

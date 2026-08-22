@@ -325,6 +325,32 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           },
         );
         config.runtime.handle(
+          desktopChannels.serverInstancesSetWorldDatapackDisabled,
+          (event, instanceId, worldId, fileName, disabled) => {
+            ownedWindow(event.sender.id);
+            if (typeof disabled !== "boolean") {
+              throw new TypeError("server datapack disabled must be a boolean");
+            }
+            return config.setServerWorldDatapackDisabled(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+              expectNonEmptyString(fileName, "server datapack file name"),
+              disabled,
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesDeleteWorldDatapack,
+          (event, instanceId, worldId, fileName) => {
+            ownedWindow(event.sender.id);
+            return config.deleteServerWorldDatapack(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(worldId, "server world id"),
+              expectNonEmptyString(fileName, "server datapack file name"),
+            );
+          },
+        );
+        config.runtime.handle(
           desktopChannels.serverInstancesWorldBackups,
           (event, instanceId, worldId) => {
             ownedWindow(event.sender.id);
@@ -697,6 +723,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverInstancesDelete);
           config.runtime.removeHandler(desktopChannels.serverInstancesWorldBackups);
           config.runtime.removeHandler(desktopChannels.serverInstancesWorldDatapacks);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSetWorldDatapackDisabled);
+          config.runtime.removeHandler(desktopChannels.serverInstancesDeleteWorldDatapack);
           config.runtime.removeHandler(desktopChannels.serverInstancesCreateWorldBackup);
           config.runtime.removeHandler(desktopChannels.serverInstancesRestoreWorldBackup);
           config.runtime.removeHandler(desktopChannels.serverInstancesDeleteWorldBackup);

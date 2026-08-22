@@ -10,6 +10,7 @@ import { Cmz_Button, Cmz_Spinner } from "cmzya-modern-ui";
 import {
   Archive,
   ArrowLeft,
+  Ban,
   ChevronDown,
   ExternalLink,
   Plus,
@@ -17,6 +18,7 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import minecraftDefaultServerIcon from "../assets/minecraft-default-server-icon.png";
+import { parseMinecraftFormattingCodes, type MinecraftTextSegment } from "../minecraft-text-format";
 import { ref } from "vue";
 import { formatWorldSaveDate, formatWorldSaveSize } from "../world-save-format";
 
@@ -31,6 +33,7 @@ const props = defineProps<{
   backupLoading: boolean;
   dataPackLoading: boolean;
   backupWorkingFile?: string;
+  dataPackWorkingFile?: string;
   restoreTarget?: ServerWorldBackupSnapshot;
   backupLoadFailed: boolean;
   dataPackLoadFailed: boolean;
@@ -46,6 +49,8 @@ const emit = defineEmits<{
   "retry-data-packs": [];
   "restore-backup": [backup: ServerWorldBackupSnapshot];
   "delete-backup": [backup: ServerWorldBackupSnapshot];
+  "toggle-data-pack": [dataPack: ServerWorldDatapackSnapshot];
+  "delete-data-pack": [dataPack: ServerWorldDatapackSnapshot];
   "open-resource-source": [
     resourceType: "world" | "datapack",
     metadata: ServerResourceSourceMetadata,
@@ -82,6 +87,13 @@ function selectRestoreTarget(backup: ServerWorldBackupSnapshot): void {
 function selectDeleteTarget(backup: ServerWorldBackupSnapshot): void {
   emit("delete-backup", backup);
 }
+function selectDeleteDataPack(dataPack: ServerWorldDatapackSnapshot): void {
+  emit("delete-data-pack", dataPack);
+}
+
+function toggleDataPack(dataPack: ServerWorldDatapackSnapshot): void {
+  emit("toggle-data-pack", dataPack);
+}
 function openResourceSource(
   resourceType: "world" | "datapack",
   metadata: ServerResourceSourceMetadata,
@@ -106,6 +118,11 @@ function dataPackIconUrl(dataPack: ServerWorldDatapackSnapshot): string | undefi
   return sourceIconUrl && !failedDataPackIcons.value.has(`${key}:source`)
     ? sourceIconUrl
     : undefined;
+}
+
+/** 将数据包简介中的 Minecraft 控制符转换为带样式的安全文本片段。 */
+function dataPackDescriptionSegments(value: string | undefined): readonly MinecraftTextSegment[] {
+  return value ? parseMinecraftFormattingCodes(value) : [];
 }
 
 function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
@@ -297,7 +314,7 @@ function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
               :key="dataPack.fileName"
               class="world-save-backup-row"
             >
-              <span class="world-save-icon world-save-icon--small">
+              <span class="world-save-icon world-save-icon--small world-save-datapack-icon">
                 <img
                   v-if="dataPackIconUrl(dataPack)"
                   :src="dataPackIconUrl(dataPack)"
@@ -306,9 +323,19 @@ function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
                   @error="markDataPackIconFailed(dataPack)"
                 />
                 <Archive v-else :size="20" :stroke-width="1.6" aria-hidden="true" />
+                <Ban
+                  v-if="dataPack.disabled"
+                  class="world-save-datapack-disabled-icon"
+                  :size="13"
+                  :stroke-width="2.2"
+                  aria-hidden="true"
+                />
               </span>
               <span class="world-save-card-copy">
                 <span class="world-save-datapack-name-row">
+                  <span v-if="dataPack.disabled" class="world-save-datapack-disabled-tag"
+                    >已禁用</span
+                  >
                   <strong class="world-save-datapack-name">{{ dataPack.fileName }}</strong>
                   <span
                     v-if="dataPack.resourceSource?.version"
@@ -322,7 +349,25 @@ function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
                     class="world-save-datapack-description"
                     :title="dataPack.description || '暂无数据包介绍'"
                   >
-                    {{ dataPack.description || "暂无数据包介绍" }}
+                    <template v-if="dataPack.description">
+                      <span
+                        v-for="(segment, index) in dataPackDescriptionSegments(
+                          dataPack.description,
+                        )"
+                        :key="`${dataPack.fileName}-description-${index}`"
+                        class="world-save-minecraft-segment"
+                        :class="{
+                          'is-bold': segment.bold,
+                          'is-italic': segment.italic,
+                          'is-underlined': segment.underlined,
+                          'is-strikethrough': segment.strikethrough,
+                          'is-obfuscated': segment.obfuscated,
+                        }"
+                        :style="segment.color ? { color: segment.color } : undefined"
+                        v-text="segment.text"
+                      />
+                    </template>
+                    <template v-else>暂无数据包介绍</template>
                   </span>
                   <span class="world-save-datapack-updated">
                     更新 {{ formatWorldSaveDate(dataPack.updatedAt) }}
@@ -337,6 +382,26 @@ function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
                   @click="openResourceSource('datapack', dataPack.resourceSource)"
                 >
                   <ExternalLink :size="15" :stroke-width="1.8" />查看来源
+                </Cmz_Button>
+                <Cmz_Button
+                  variant="outline"
+                  size="sm"
+                  :loading="dataPackWorkingFile === dataPack.fileName"
+                  :disabled="Boolean(dataPackWorkingFile)"
+                  @click="toggleDataPack(dataPack)"
+                >
+                  {{ dataPack.disabled ? "启用" : "禁用" }}
+                </Cmz_Button>
+                <Cmz_Button
+                  variant="ghost"
+                  size="sm"
+                  icon-only
+                  color="var(--sl-error)"
+                  aria-label="删除数据包"
+                  :disabled="Boolean(dataPackWorkingFile)"
+                  @click="selectDeleteDataPack(dataPack)"
+                >
+                  <Trash2 :size="15" :stroke-width="1.8" />
                 </Cmz_Button>
               </div>
             </article>

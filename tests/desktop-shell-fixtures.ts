@@ -26,6 +26,7 @@ import {
   type ServerRuntimeSnapshot,
   type ServerSettingsSnapshot,
   type ServerWorldStorageSnapshot,
+  type ServerWorldDatapackSnapshot,
   type ServerStartupDefaultsUpdate,
 } from "../packages/contracts/src/index.ts";
 import {
@@ -692,6 +693,16 @@ export async function createDesktopShellHarness(
         }) satisfies ServerWorldStorageSnapshot,
       listServerWorldBackups: async () => [],
       listServerWorldDatapacks: async () => [],
+      setServerWorldDatapackDisabled: async (instanceId, worldId, fileName, disabled) =>
+        ({
+          instanceId,
+          worldId,
+          fileName,
+          kind: "archive",
+          disabled,
+          updatedAt: "2026-08-17T12:00:02.000Z",
+        }) satisfies ServerWorldDatapackSnapshot,
+      deleteServerWorldDatapack: async () => {},
       createServerWorldBackup: async () => ({
         instanceId: "instance-paper",
         worldId: "world",

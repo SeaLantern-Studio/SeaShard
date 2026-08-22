@@ -828,6 +828,7 @@ export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSn
     !datapack.fileName ||
     /[\\/]/u.test(datapack.fileName) ||
     !["archive", "directory"].includes(String(datapack.kind)) ||
+    typeof datapack.disabled !== "boolean" ||
     (datapack.description !== undefined &&
       (typeof datapack.description !== "string" ||
         datapack.description.length > 2_000 ||
@@ -845,6 +846,7 @@ export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSn
     ...(resourceSource ? { resourceSource } : {}),
     fileName: datapack.fileName,
     kind: datapack.kind as ServerWorldDatapackSnapshot["kind"],
+    disabled: datapack.disabled,
     ...(typeof datapack.description === "string" && datapack.description
       ? { description: datapack.description }
       : {}),

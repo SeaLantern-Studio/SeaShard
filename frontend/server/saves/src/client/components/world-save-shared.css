@@ -52,7 +52,7 @@
 .world-save-card-copy strong {
   overflow: hidden;
   color: var(--sl-text-primary);
-  font-size: var(--sl-font-size-md);
+  font-size: var(--sl-font-size-base);
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;

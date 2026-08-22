@@ -44,10 +44,12 @@ const dataPacksExpanded = ref(true);
 const backupLoading = ref(false);
 const dataPackLoading = ref(false);
 const backupWorkingFile = ref<string>();
+const dataPackWorkingFile = ref<string>();
 const backupLoadFailed = ref(false);
 const dataPackLoadFailed = ref(false);
 const restoreTarget = ref<ServerWorldBackupSnapshot>();
 const deleteTarget = ref<ServerWorldBackupSnapshot>();
+const deleteDataPackTarget = ref<ServerWorldDatapackSnapshot>();
 let requestId = 0;
 let runtimeTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -80,6 +82,8 @@ watch(
   () => {
     viewMode.value = "list";
     detailWorldId.value = undefined;
+    deleteDataPackTarget.value = undefined;
+    dataPackWorkingFile.value = undefined;
     if (!loading.value) void loadStorage();
   },
 );
@@ -179,6 +183,10 @@ function setDeleteTarget(backup: ServerWorldBackupSnapshot): void {
   deleteTarget.value = backup;
 }
 
+function setDeleteDataPackTarget(dataPack: ServerWorldDatapackSnapshot): void {
+  deleteDataPackTarget.value = dataPack;
+}
+
 function openDetails(worldId: string, worldName: string): void {
   detailWorldId.value = worldId;
   detailWorldName.value = worldName;
@@ -189,6 +197,8 @@ function openDetails(worldId: string, worldName: string): void {
   dataPacks.value = [];
   backupLoadFailed.value = false;
   dataPackLoadFailed.value = false;
+  deleteDataPackTarget.value = undefined;
+  dataPackWorkingFile.value = undefined;
   void Promise.all([loadBackups(worldId), loadDataPacks(worldId)]);
 }
 
@@ -198,6 +208,8 @@ function goBack(): void {
   detailWorldName.value = "";
   backupLoadFailed.value = false;
   dataPackLoadFailed.value = false;
+  deleteDataPackTarget.value = undefined;
+  dataPackWorkingFile.value = undefined;
 }
 function openResourceSource(
   resourceType: "world" | "datapack",
@@ -239,6 +251,74 @@ async function loadDataPacks(worldId = detailWorldId.value): Promise<void> {
   } finally {
     dataPackLoading.value = false;
   }
+}
+
+/** 通过重命名数据包切换启用状态，完成后只更新当前详情列表。 */
+async function toggleDataPack(dataPack: ServerWorldDatapackSnapshot): Promise<void> {
+  const instanceId = selectedInstanceId.value;
+  const worldId = detailWorldId.value;
+  if (!instanceId || !worldId || dataPackWorkingFile.value) return;
+  await refreshRuntime();
+  if (activeRuntime.value) {
+    serverActiveWarning.value = true;
+    return;
+  }
+  dataPackWorkingFile.value = dataPack.fileName;
+  try {
+    const updated = await props.instances.setWorldDatapackDisabled(
+      instanceId,
+      worldId,
+      dataPack.fileName,
+      !dataPack.disabled,
+    );
+    if (instanceId !== selectedInstanceId.value || worldId !== detailWorldId.value) return;
+    dataPacks.value = dataPacks.value
+      .map((candidate) => (candidate.fileName === dataPack.fileName ? updated : candidate))
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          left.fileName.localeCompare(right.fileName, "zh-CN"),
+      );
+    toast.success({
+      title: updated.disabled ? "数据包已禁用" : "数据包已启用",
+      description: updated.fileName,
+    });
+  } catch (cause) {
+    handleDataPackError(cause, dataPack.disabled ? "启用数据包失败" : "禁用数据包失败");
+  } finally {
+    dataPackWorkingFile.value = undefined;
+  }
+}
+
+/** 删除确认框确认后，调用 Host 删除实际文件并从当前列表移除。 */
+async function deleteDataPack(): Promise<void> {
+  const target = deleteDataPackTarget.value;
+  const instanceId = selectedInstanceId.value;
+  const worldId = detailWorldId.value;
+  deleteDataPackTarget.value = undefined;
+  if (!target || !instanceId || !worldId || dataPackWorkingFile.value) return;
+  await refreshRuntime();
+  if (activeRuntime.value) {
+    serverActiveWarning.value = true;
+    return;
+  }
+  dataPackWorkingFile.value = target.fileName;
+  try {
+    await props.instances.deleteWorldDatapack(instanceId, worldId, target.fileName);
+    if (instanceId !== selectedInstanceId.value || worldId !== detailWorldId.value) return;
+    dataPacks.value = dataPacks.value.filter(({ fileName }) => fileName !== target.fileName);
+    toast.success({ title: "数据包已删除", description: target.fileName });
+  } catch (cause) {
+    handleDataPackError(cause, "删除数据包失败");
+  } finally {
+    dataPackWorkingFile.value = undefined;
+  }
+}
+
+function handleDataPackError(cause: unknown, title: string): void {
+  const message = errorMessage(cause);
+  if (message.includes("关停服务器")) serverActiveWarning.value = true;
+  else toast.error({ title, description: message });
 }
 
 async function createBackup(): Promise<void> {
@@ -333,6 +413,7 @@ function errorMessage(cause: unknown): string {
       :backup-loading="backupLoading"
       :data-pack-loading="dataPackLoading"
       :backup-working-file="backupWorkingFile"
+      :data-pack-working-file="dataPackWorkingFile"
       :restore-target="restoreTarget"
       :backup-load-failed="backupLoadFailed"
       :data-pack-load-failed="dataPackLoadFailed"
@@ -344,6 +425,8 @@ function errorMessage(cause: unknown): string {
       @retry-data-packs="loadDataPacks"
       @restore-backup="setRestoreTarget"
       @delete-backup="setDeleteTarget"
+      @toggle-data-pack="toggleDataPack"
+      @delete-data-pack="setDeleteDataPackTarget"
       @open-resource-source="openResourceSource"
     />
     <ServerWorldSaveList
@@ -393,6 +476,20 @@ function errorMessage(cause: unknown): string {
         ><Cmz_Button variant="ghost" @click="deleteTarget = undefined">取消</Cmz_Button
         ><Cmz_Button color="var(--sl-error)" @click="deleteBackup">删除</Cmz_Button></template
       >
+    </Cmz_Modal>
+    <Cmz_Modal
+      :visible="Boolean(deleteDataPackTarget)"
+      title="删除数据包"
+      width="440px"
+      @close="deleteDataPackTarget = undefined"
+    >
+      <div class="world-save-warning">
+        <strong>是否删除此数据包？此过程不可恢复</strong>
+      </div>
+      <template #footer>
+        <Cmz_Button variant="ghost" @click="deleteDataPackTarget = undefined">取消</Cmz_Button>
+        <Cmz_Button color="var(--sl-error)" @click="deleteDataPack">删除</Cmz_Button>
+      </template>
     </Cmz_Modal>
     <Cmz_Modal
       :visible="serverActiveWarning"

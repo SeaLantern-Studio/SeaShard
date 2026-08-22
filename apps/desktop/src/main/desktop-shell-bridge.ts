@@ -41,6 +41,7 @@ import {
   expectServerModDownloadResult,
   expectServerInstanceContentCounts,
   expectServerWorldBackups,
+  expectServerWorldDatapack,
   expectServerWorldDatapacks,
   expectServerWorldBackup,
   expectServerWorldStorageSnapshot,
@@ -273,6 +274,29 @@ export async function registerDesktopShellBridge(
                   worldId,
                 ]),
               ),
+            setServerWorldDatapackDisabled: async (instanceId, worldId, fileName, disabled) => {
+              await ensureServerStoppedForWorldMutation(instanceId);
+              return expectServerWorldDatapack(
+                await kernel.callService(
+                  serverInstanceManagerContract,
+                  "setWorldDatapackDisabled",
+                  [instanceId, worldId, fileName, disabled],
+                ),
+              );
+            },
+            deleteServerWorldDatapack: async (instanceId, worldId, fileName) => {
+              await ensureServerStoppedForWorldMutation(instanceId);
+              const result = await kernel.callService(
+                serverInstanceManagerContract,
+                "deleteWorldDatapack",
+                [instanceId, worldId, fileName],
+              );
+              if (result !== null) {
+                throw new Error(
+                  "server instance manager returned an invalid datapack delete result",
+                );
+              }
+            },
             createServerWorldBackup: async (instanceId, worldId) => {
               await ensureServerStoppedForWorldMutation(instanceId);
               return expectServerWorldBackup(

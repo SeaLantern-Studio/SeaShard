@@ -24,7 +24,11 @@ import {
   listWorldBackups,
   restoreWorldBackup,
 } from "./world-backup";
-import { listWorldDatapacks } from "./world-datapacks";
+import {
+  deleteWorldDatapack,
+  listWorldDatapacks,
+  setWorldDatapackDisabled,
+} from "./world-datapacks";
 import { listWorldStorage, resolveWorldStorageRoot, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type {
@@ -38,7 +42,11 @@ import {
   createWorldStorageDirectoryName,
   expectWorldStorageDirectoryName,
 } from "./directory-naming";
-import { parseResourceSourceRecord, upsertResourceSource } from "./resource-source-index";
+import {
+  parseResourceSourceRecord,
+  removeResourceSources,
+  upsertResourceSource,
+} from "./resource-source-index";
 import { parseServerInstanceStartupSettings } from "./startup-settings";
 interface PendingManagedInstance {
   readonly id: string;
@@ -374,6 +382,49 @@ export class ServerInstanceManager {
     return this.runInstanceOperation(instanceId, async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       return listWorldDatapacks(instance, worldIdValue);
+    });
+  }
+
+  /** 修改世界 level.dat 中的数据包原生启用列表；调用方负责保证服务端已停机。 */
+  async setWorldDatapackDisabled(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+    fileNameValue: unknown,
+    disabled: boolean,
+  ): Promise<ServerWorldDatapackSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return setWorldDatapackDisabled(instance, worldIdValue, fileNameValue, disabled);
+    });
+  }
+
+  /** 删除指定数据包，并清理实例来源索引中的对应记录。 */
+  async deleteWorldDatapack(
+    instanceValue: unknown,
+    worldIdValue: unknown,
+    fileNameValue: unknown,
+  ): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    await this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      const deleted = await deleteWorldDatapack(instance, worldIdValue, fileNameValue);
+      await this.updatePrivateManifest(instanceId, (current) => {
+        const resourceSources = removeResourceSources(
+          current.resourceSources,
+          "datapack",
+          deleted.relativePaths,
+        );
+        const updated = {
+          ...current,
+          updatedAt: this.options.now?.() ?? new Date().toISOString(),
+        };
+        if (resourceSources) updated.resourceSources = resourceSources;
+        else delete updated.resourceSources;
+        return updated;
+      });
     });
   }
 

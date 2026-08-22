@@ -21,6 +21,7 @@ import {
   portableServerInformationFileName,
   serverInstanceDataCapsule,
   parseResourceSourceIndex,
+  removeResourceSources,
   writePortableInstanceManifests,
   type PortableSeaShardInstanceManifest,
   type PortableServerInformationManifest,
@@ -77,6 +78,30 @@ await test("resource source index keeps valid unknown origins and ignores malfor
     }),
     undefined,
   );
+});
+await test("resource source index removes datapack paths after deletion", () => {
+  const metadata = { source: "modrinth", id: "pack-1" };
+  const remaining = removeResourceSources(
+    {
+      datapacks: {
+        "survival/datapacks/pack.zip": metadata,
+        "survival/datapacks/other.zip": metadata,
+      },
+      worlds: {
+        "worlds/world": { source: "curseforge", id: "world-1" },
+      },
+    },
+    "datapack",
+    ["survival/datapacks/pack.zip"],
+  );
+  assert.deepEqual(remaining, {
+    datapacks: {
+      "survival/datapacks/other.zip": metadata,
+    },
+    worlds: {
+      "worlds/world": { source: "curseforge", id: "world-1" },
+    },
+  });
 });
 const iconBytes = Buffer.from("server-core-icon");
 
