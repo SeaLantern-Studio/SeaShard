@@ -1,0 +1,198 @@
+.world-save-heading {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sl-space-md);
+}
+
+.world-save-heading h1 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-heading-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.world-save-detail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sl-space-lg);
+}
+
+.world-save-detail-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+}
+
+.world-save-detail-header .world-save-card-copy small {
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-backups {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sl-space-md);
+}
+
+.world-save-collapsible-group {
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+}
+
+.world-save-collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+}
+
+.world-save-collapsible-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.world-save-collapsible-heading > strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-lg);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-collapsible-heading > span {
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-xs);
+  white-space: nowrap;
+}
+
+.world-save-backup-add {
+  align-self: center;
+}
+
+.world-save-collapsible-trigger {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--sl-radius-md);
+  background: transparent;
+  color: var(--sl-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--sl-transition-fast);
+}
+
+.world-save-collapsible-trigger:hover {
+  background: var(--sl-surface-secondary);
+}
+
+.world-save-collapsible-trigger:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 2px;
+}
+
+.world-save-collapsible-chevron {
+  transition: transform 180ms ease;
+}
+
+.world-save-collapsible-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.world-save-collapsible-items {
+  border-top: 1px solid var(--sl-border-light);
+}
+
+.world-save-collapsible-items > .world-save-inline-state {
+  min-height: 72px;
+  justify-content: center;
+  padding: 14px;
+}
+
+.world-save-collapsible-items > .world-save-empty--small {
+  margin: 10px;
+}
+
+.world-save-backup-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.world-save-backup-row {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+}
+
+.world-save-backup-row + .world-save-backup-row {
+  border-top: 1px solid var(--sl-border-light);
+}
+
+.world-save-backup-row .world-save-card-copy {
+  gap: 2px;
+}
+
+.world-save-backup-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.world-save-inline-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
+}
+
+@media (max-width: 680px) {
+  .world-save-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .world-save-backup-row,
+  .world-save-detail-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .world-save-backup-actions {
+    width: 100%;
+    padding-left: 50px;
+  }
+}

@@ -1,0 +1,97 @@
+/* 列表与详情共同使用的视觉基础，两个子组件各自以局部样式引入。 */
+.world-save-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface-secondary);
+  color: var(--sl-primary);
+}
+
+.world-save-icon--small {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+}
+
+.world-save-icon--large {
+  width: 68px;
+  height: 68px;
+  border-radius: var(--sl-radius-lg);
+}
+
+.world-save-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.world-save-card-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.world-save-card-copy > span {
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-card-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-card-copy strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-md);
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-card-copy small {
+  overflow: hidden;
+  color: var(--sl-text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-current {
+  flex: 0 0 auto;
+  color: var(--sl-primary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.world-save-empty {
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed var(--sl-border-light);
+  border-radius: var(--sl-radius-lg);
+  color: var(--sl-text-secondary);
+}
+
+.world-save-empty strong {
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.world-save-empty--small {
+  min-height: 150px;
+}

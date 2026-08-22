@@ -1,0 +1,394 @@
+.world-save-list-toolbar {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.world-save-search {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  flex: 1;
+  min-height: 32px;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 12px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+  color: var(--sl-text-tertiary);
+}
+
+.world-save-search:focus-within {
+  border-color: color-mix(in srgb, var(--sl-primary) 55%, var(--sl-border-light));
+}
+
+.world-save-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--sl-text-primary);
+  font: inherit;
+}
+
+.world-save-add-button {
+  min-width: 88px;
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 auto;
+}
+
+.world-save-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sl-space-md);
+}
+
+.world-save-section-heading,
+.world-save-group-trigger,
+.world-save-dimension-row,
+.world-save-card {
+  display: flex;
+  align-items: center;
+}
+
+.world-save-section-heading {
+  justify-content: space-between;
+  gap: var(--sl-space-md);
+}
+
+.world-save-section-heading h2 {
+  margin: 0;
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-lg);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.world-save-section-heading > span,
+.world-save-group-copy > span {
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-grid {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.world-save-card {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  align-items: stretch;
+  gap: 13px;
+  padding: 0;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--cmz-transition-normal, 180ms ease);
+}
+
+.world-save-card:hover:not(:disabled),
+.world-save-card.current {
+  border-color: color-mix(in srgb, var(--sl-primary) 45%, var(--sl-border-light));
+  background: color-mix(in srgb, var(--sl-primary-bg) 56%, var(--sl-surface));
+}
+
+.world-save-card:hover:not(:disabled) {
+  transform: translateY(var(--cmz-card-hover-lift, -2px));
+}
+
+.world-save-card:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.world-save-card.current {
+  cursor: default;
+}
+
+.world-save-card-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 13px;
+  padding: 5px 14px 5px 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-save-card-main:disabled {
+  cursor: wait;
+}
+
+.world-save-card-main:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sl-primary-bg) 30%, transparent);
+}
+
+.world-save-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.world-save-meta > span,
+.world-save-meta > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-meta > span {
+  flex: 0 1 260px;
+}
+
+.world-save-meta > small {
+  flex: 0 1 auto;
+  color: var(--sl-text-tertiary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.world-save-current-label {
+  position: absolute;
+  top: 50%;
+  color: var(--sl-primary);
+  font-size: var(--sl-font-size-sm);
+  font-weight: 650;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.world-save-card > .world-save-current-label {
+  right: 58px;
+}
+
+.world-save-card > .world-save-info-anchor {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+}
+
+.world-save-groups {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.world-save-group {
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+}
+
+.world-save-group.current {
+  border-color: color-mix(in srgb, var(--sl-primary) 40%, var(--sl-border-light));
+}
+
+.world-save-group-trigger {
+  width: 100%;
+  min-height: 72px;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-save-group-trigger:hover {
+  background: var(--sl-surface-secondary);
+}
+
+.world-save-group-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 10px;
+  background: var(--sl-surface-secondary);
+  color: var(--sl-primary);
+}
+
+.world-save-group-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.world-save-group-copy strong {
+  overflow: hidden;
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-sm);
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-chevron {
+  flex: 0 0 auto;
+  color: var(--sl-text-tertiary);
+  transition: transform 180ms ease;
+}
+
+.world-save-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.world-save-dimension-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--sl-border-light);
+  padding: 4px 10px 8px 58px;
+}
+
+.world-save-dimension-row {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  align-items: stretch;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-save-dimension-row:hover:not(:disabled) {
+  background: var(--sl-surface-secondary);
+}
+
+.world-save-dimension-row:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.world-save-dimension-row .world-save-card-main {
+  padding: 5px 8px 5px 5px;
+}
+
+.world-save-dimension-row > .world-save-current-label {
+  right: 52px;
+}
+
+.world-save-dimension-row > .world-save-info-anchor {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+}
+
+.world-save-state {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--sl-text-secondary);
+}
+
+.world-save-state strong {
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.world-save-state span {
+  max-width: 560px;
+  font-size: var(--sl-font-size-xs);
+  text-align: center;
+}
+
+.world-save-state--error {
+  color: var(--sl-error);
+}
+
+.world-save-info-button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-sm);
+  background: color-mix(in srgb, var(--sl-surface) 92%, var(--sl-bg-secondary));
+  color: var(--sl-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--sl-transition-fast),
+    border-color var(--sl-transition-fast),
+    background-color var(--sl-transition-fast);
+}
+
+.world-save-info-button:hover {
+  border-color: color-mix(in srgb, var(--sl-primary) 28%, var(--sl-border));
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary-dark);
+}
+
+.world-save-info-button:active {
+  background: color-mix(in srgb, var(--sl-primary) 16%, var(--sl-surface));
+}
+
+@media (max-width: 680px) {
+  .world-save-list-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .world-save-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .world-save-dimension-list {
+    padding-left: 14px;
+  }
+
+  .world-save-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .world-save-meta > span,
+  .world-save-meta > small {
+    max-width: 100%;
+  }
+}
