@@ -95,6 +95,7 @@ export class ServerModDownloadCoordinator {
       relativePath,
       source: artifact.source,
       id: artifact.projectId,
+      ...(artifact.version ? { version: artifact.version } : {}),
       ...(artifact.iconUrl ? { iconUrl: artifact.iconUrl } : {}),
     });
   }

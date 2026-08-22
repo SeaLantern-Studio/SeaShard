@@ -9,6 +9,7 @@ import type {
 const maximumResourceSourceEntries = 4_096;
 const maximumResourceSourcePathLength = 2_048;
 const maximumResourceSourceIdLength = 256;
+const maximumResourceSourceVersionLength = 256;
 const maximumResourceSourceIconUrlLength = 2_048;
 const resourceSourceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,255}$/u;
 const resourceSourceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -29,6 +30,7 @@ export function upsertResourceSource(
   const metadata: ServerResourceSourceMetadata = {
     source: record.source,
     id: record.id,
+    ...(record.version ? { version: record.version } : {}),
     ...(record.iconUrl ? { iconUrl: record.iconUrl } : {}),
   };
   return {
@@ -97,7 +99,6 @@ export function normalizeResourceSourcePath(value: unknown): string | undefined 
   }
   return normalized;
 }
-
 function parseResourceSourceMetadata(value: unknown): ServerResourceSourceMetadata | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
@@ -111,10 +112,17 @@ function parseResourceSourceMetadata(value: unknown): ServerResourceSourceMetada
   ) {
     return undefined;
   }
+  const version =
+    typeof record.version === "string" &&
+    record.version.length <= maximumResourceSourceVersionLength &&
+    !record.version.includes("\0")
+      ? record.version
+      : undefined;
   const iconUrl = parseResourceSourceIconUrl(record.iconUrl, source, id);
   return {
     source,
     id,
+    ...(version ? { version } : {}),
     ...(iconUrl ? { iconUrl } : {}),
   };
 }

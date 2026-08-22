@@ -399,6 +399,10 @@ function parseArtifact(
   if (String(file.id) !== fileId || String(file.modId) !== projectId) {
     throw new Error("CurseForge file does not belong to the requested project");
   }
+  const versionLabel = parseOptionalVersionLabel(
+    file.displayName ?? file.versionName,
+    "CurseForge download version label",
+  );
   const logo =
     mod.logo === null || mod.logo === undefined
       ? undefined
@@ -412,6 +416,7 @@ function parseArtifact(
     projectId,
     ...(iconUrl ? { iconUrl } : {}),
     versionId: fileId,
+    ...(versionLabel ? { version: versionLabel } : {}),
     fileName: expectResourceFileName(file.fileName, resourceType),
     url: toCurseForgeMirrorFileUrl(downloadUrl, String(file.fileName)),
     ...(parseSha1(file.hashes) ? { sha1: parseSha1(file.hashes) } : {}),
@@ -588,6 +593,11 @@ function expectBoundedString(
     throw new Error(`${label} is invalid`);
   }
   return value;
+}
+
+function parseOptionalVersionLabel(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return expectBoundedString(value, label, 256);
 }
 
 function expectNonNegativeInteger(value: unknown, label: string): number {

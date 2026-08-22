@@ -717,6 +717,10 @@ function parseVersionArtifact(
   if (version.id !== versionId || version.project_id !== projectId) {
     throw new Error("Modrinth version does not belong to the requested project");
   }
+  const versionLabel = parseOptionalVersionLabel(
+    version.version_number ?? version.name,
+    "Modrinth download version label",
+  );
   const gameVersions = parseStringArray(
     version.game_versions,
     "Modrinth download game versions",
@@ -751,6 +755,7 @@ function parseVersionArtifact(
     projectId,
     ...(iconUrl ? { iconUrl } : {}),
     versionId,
+    ...(versionLabel ? { version: versionLabel } : {}),
     fileName,
     url,
     ...(fallbackFileBaseUrl ? { fallbackUrl: toFallbackModFileUrl(url, fallbackFileBaseUrl) } : {}),
@@ -874,6 +879,11 @@ function expectBoundedString(
     throw new Error(`${label} is invalid`);
   }
   return result;
+}
+
+function parseOptionalVersionLabel(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return expectBoundedString(value, label, 256);
 }
 
 function expectProjectIconUrl(

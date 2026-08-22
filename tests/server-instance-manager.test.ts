@@ -38,6 +38,7 @@ await test("resource source index keeps valid unknown origins and ignores malfor
   const valid = {
     source: "modrinth",
     id: "server-mod-1",
+    version: "1.2.3",
     iconUrl: "https://cdn.modrinth.com/data/server-mod-1/icon.webp",
   };
   const custom = {

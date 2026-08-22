@@ -97,12 +97,24 @@ function dataPackIconKey(dataPack: ServerWorldDatapackSnapshot): string {
   return `${dataPack.worldId}:${dataPack.fileName}`;
 }
 
-function dataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): boolean {
-  return failedDataPackIcons.value.has(dataPackIconKey(dataPack));
+function dataPackIconUrl(dataPack: ServerWorldDatapackSnapshot): string | undefined {
+  const key = dataPackIconKey(dataPack);
+  if (dataPack.iconDataUrl && !failedDataPackIcons.value.has(`${key}:pack`)) {
+    return dataPack.iconDataUrl;
+  }
+  const sourceIconUrl = dataPack.resourceSource?.iconUrl;
+  return sourceIconUrl && !failedDataPackIcons.value.has(`${key}:source`)
+    ? sourceIconUrl
+    : undefined;
 }
 
 function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
-  failedDataPackIcons.value = new Set([...failedDataPackIcons.value, dataPackIconKey(dataPack)]);
+  const key = dataPackIconKey(dataPack);
+  const failureKey =
+    dataPack.iconDataUrl && !failedDataPackIcons.value.has(`${key}:pack`)
+      ? `${key}:pack`
+      : `${key}:source`;
+  failedDataPackIcons.value = new Set([...failedDataPackIcons.value, failureKey]);
 }
 </script>
 
@@ -287,26 +299,39 @@ function markDataPackIconFailed(dataPack: ServerWorldDatapackSnapshot): void {
             >
               <span class="world-save-icon world-save-icon--small">
                 <img
-                  v-if="dataPack.resourceSource?.iconUrl && !dataPackIconFailed(dataPack)"
-                  :src="dataPack.resourceSource.iconUrl"
+                  v-if="dataPackIconUrl(dataPack)"
+                  :src="dataPackIconUrl(dataPack)"
                   alt=""
                   draggable="false"
                   @error="markDataPackIconFailed(dataPack)"
                 />
                 <Archive v-else :size="20" :stroke-width="1.6" aria-hidden="true" />
               </span>
-              <span class="world-save-card-copy"
-                ><strong>{{ dataPack.fileName }}</strong
-                ><span
-                  >{{ dataPack.kind === "archive" ? "ZIP 数据包" : "文件夹数据包" }}　更新
-                  {{ formatWorldSaveDate(dataPack.updatedAt) }}</span
-                ></span
-              >
-              <div
-                v-if="dataPack.resourceSource && canOpenResourceSource(dataPack.resourceSource)"
-                class="world-save-row-actions"
-              >
+              <span class="world-save-card-copy">
+                <span class="world-save-datapack-name-row">
+                  <strong class="world-save-datapack-name">{{ dataPack.fileName }}</strong>
+                  <span
+                    v-if="dataPack.resourceSource?.version"
+                    class="world-save-datapack-version-tag"
+                  >
+                    {{ dataPack.resourceSource.version }}
+                  </span>
+                </span>
+                <span class="world-save-datapack-meta">
+                  <span
+                    class="world-save-datapack-description"
+                    :title="dataPack.description || '暂无数据包介绍'"
+                  >
+                    {{ dataPack.description || "暂无数据包介绍" }}
+                  </span>
+                  <span class="world-save-datapack-updated">
+                    更新 {{ formatWorldSaveDate(dataPack.updatedAt) }}
+                  </span>
+                </span>
+              </span>
+              <div class="world-save-row-actions">
                 <Cmz_Button
+                  v-if="dataPack.resourceSource && canOpenResourceSource(dataPack.resourceSource)"
                   variant="ghost"
                   size="sm"
                   @click="openResourceSource('datapack', dataPack.resourceSource)"

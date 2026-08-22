@@ -14,6 +14,8 @@ export interface ServerModArtifact {
   readonly resourceType: ServerModDownloadableResourceType;
   readonly projectId: string;
   readonly versionId: string;
+  /** 来源发布版本的可读标签；上游没有提供时保持缺省。 */
+  readonly version?: string;
   readonly fileName: string;
   readonly url: string;
   readonly fallbackUrl?: string;

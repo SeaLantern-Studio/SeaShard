@@ -977,6 +977,7 @@ await test("Datapacks install into any exact-version instance and non-installabl
         return Response.json({
           id: "datapack-version-1",
           project_id: "server-datapack-1",
+          version_number: "1.4.0",
           game_versions: ["1.21.1"],
           loaders: ["datapack"],
           files: [
@@ -1107,6 +1108,7 @@ await test("Datapacks install into any exact-version instance and non-installabl
         relativePath: "world/datapacks/server-datapack-1.21.1.zip",
         source: "modrinth",
         id: "server-datapack-1",
+        version: "1.4.0",
         iconUrl: "https://cdn.modrinth.com/data/server-datapack-1/icon.webp",
       },
     ]);

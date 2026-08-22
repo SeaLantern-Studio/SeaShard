@@ -171,6 +171,59 @@
 .world-save-backup-row .world-save-card-copy {
   gap: 2px;
 }
+.world-save-card-copy .world-save-datapack-name-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: visible;
+  white-space: normal;
+}
+
+.world-save-card-copy .world-save-datapack-name {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.world-save-card-copy .world-save-datapack-version-tag {
+  display: inline-flex;
+  min-height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: visible;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--sl-primary) 22%, var(--sl-border-light));
+  border-radius: 6px;
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.world-save-card-copy .world-save-datapack-meta {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  overflow: visible;
+  white-space: normal;
+}
+
+.world-save-card-copy .world-save-datapack-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-save-card-copy .world-save-datapack-updated {
+  overflow: visible;
+  color: var(--sl-text-tertiary);
+  white-space: nowrap;
+}
 
 .world-save-backup-actions {
   display: flex;
@@ -179,7 +232,10 @@
 }
 .world-save-row-actions {
   display: flex;
-  flex: 0 0 auto;
+  width: 96px;
+  min-width: 96px;
+  flex: 0 0 96px;
+  justify-content: flex-end;
   gap: 4px;
 }
 
@@ -209,6 +265,8 @@
   }
   .world-save-row-actions {
     width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
     padding-left: 50px;
   }
 }

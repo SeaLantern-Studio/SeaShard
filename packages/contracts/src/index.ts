@@ -333,6 +333,8 @@ export type ServerResourceSource = string;
 export interface ServerResourceSourceMetadata {
   source: ServerResourceSource;
   id: string;
+  /** 来源发布版本的显示标签，例如 Modrinth 的 version_number。 */
+  version?: string;
   iconUrl?: string;
 }
 
@@ -512,6 +514,7 @@ export interface ServerInstanceSnapshot {
 
 export type ServerWorldStorageMode = "unified" | "split";
 export type ServerWorldDimension = "overworld" | "nether" | "end";
+export type ServerWorldDatapackKind = "archive" | "directory";
 
 /** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */
 export interface ServerWorldSave {
@@ -536,8 +539,6 @@ export interface ServerWorldBackupSnapshot {
   sizeBytes: number;
 }
 
-export type ServerWorldDatapackKind = "archive" | "directory";
-
 /** 一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。 */
 export interface ServerWorldDatapackSnapshot {
   instanceId: string;
@@ -545,6 +546,10 @@ export interface ServerWorldDatapackSnapshot {
   resourceSource?: ServerResourceSourceMetadata;
   fileName: string;
   kind: ServerWorldDatapackKind;
+  /** 从 pack.mcmeta 读取的简短介绍。 */
+  description?: string;
+  /** 数据包内部 pack.png 的数据地址。 */
+  iconDataUrl?: string;
   updatedAt: string;
 }
 

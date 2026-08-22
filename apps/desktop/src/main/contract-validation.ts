@@ -58,6 +58,13 @@ function isServerCoreIconUrl(value: unknown): value is string {
   }
 }
 
+function isServerImageDataUrl(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^data:image\/(?:png|gif|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/u.test(value)
+  );
+}
+
 export function expectServerCoreTypes(value: unknown): ServerCoreType[] {
   if (!Array.isArray(value)) {
     throw new Error("server core source returned invalid types");
@@ -713,10 +720,18 @@ function parseOptionalServerResourceSourceMetadata(
   if (
     !isServerResourceSource(source) ||
     typeof id !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,255}$/u.test(id)
+    !id ||
+    id.length > 256 ||
+    id.includes("\0")
   ) {
     return undefined;
   }
+  const version =
+    typeof metadata.version === "string" &&
+    metadata.version.length <= 256 &&
+    !metadata.version.includes("\0")
+      ? metadata.version
+      : undefined;
   const iconUrl =
     metadata.iconUrl !== undefined && isServerResourceIconUrl(metadata.iconUrl, id, source)
       ? metadata.iconUrl
@@ -724,6 +739,7 @@ function parseOptionalServerResourceSourceMetadata(
   return {
     source,
     id,
+    ...(version ? { version } : {}),
     ...(iconUrl ? { iconUrl } : {}),
   };
 }
@@ -742,9 +758,7 @@ function expectServerWorldSave(value: unknown, index: number | string) {
     typeof save.current !== "boolean" ||
     (save.createdAt !== undefined && !isIsoTimestamp(save.createdAt)) ||
     (save.updatedAt !== undefined && !isIsoTimestamp(save.updatedAt)) ||
-    (save.iconDataUrl !== undefined &&
-      (typeof save.iconDataUrl !== "string" ||
-        !save.iconDataUrl.startsWith("data:image/png;base64,")))
+    (save.iconDataUrl !== undefined && !isServerImageDataUrl(save.iconDataUrl))
   ) {
     throw new Error(`server instance manager returned invalid world save ${index}`);
   }
@@ -814,6 +828,11 @@ export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSn
     !datapack.fileName ||
     /[\\/]/u.test(datapack.fileName) ||
     !["archive", "directory"].includes(String(datapack.kind)) ||
+    (datapack.description !== undefined &&
+      (typeof datapack.description !== "string" ||
+        datapack.description.length > 2_000 ||
+        datapack.description.includes("\0"))) ||
+    (datapack.iconDataUrl !== undefined && !isServerImageDataUrl(datapack.iconDataUrl)) ||
     typeof datapack.updatedAt !== "string" ||
     !isIsoTimestamp(datapack.updatedAt)
   ) {
@@ -826,6 +845,10 @@ export function expectServerWorldDatapack(value: unknown): ServerWorldDatapackSn
     ...(resourceSource ? { resourceSource } : {}),
     fileName: datapack.fileName,
     kind: datapack.kind as ServerWorldDatapackSnapshot["kind"],
+    ...(typeof datapack.description === "string" && datapack.description
+      ? { description: datapack.description }
+      : {}),
+    ...(typeof datapack.iconDataUrl === "string" ? { iconDataUrl: datapack.iconDataUrl } : {}),
     updatedAt: datapack.updatedAt,
   };
 }

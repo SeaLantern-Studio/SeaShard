@@ -3,6 +3,7 @@ import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { resolveWorldDatapackDirectory } from "./world-storage";
+import { readDatapackMetadata } from "./datapack-metadata";
 
 const maximumWorldDatapackCount = 256;
 
@@ -59,6 +60,7 @@ async function readDatapackEntry(
   } else {
     return undefined;
   }
+  const metadata = await readDatapackMetadata(entryPath, kind);
   const details = await stat(entryPath);
   const relativePath = relative(storageRoot, entryPath).replaceAll("\\", "/");
   const resourceSource = instance.resourceSources?.datapacks?.[relativePath];
@@ -68,6 +70,8 @@ async function readDatapackEntry(
     ...(resourceSource ? { resourceSource } : {}),
     fileName: entry.name,
     kind,
+    ...(metadata.description ? { description: metadata.description } : {}),
+    ...(metadata.iconDataUrl ? { iconDataUrl: metadata.iconDataUrl } : {}),
     updatedAt: details.mtime.toISOString(),
   };
 }

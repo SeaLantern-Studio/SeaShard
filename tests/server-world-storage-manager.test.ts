@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { test } from "node:test";
+import { strToU8, zipSync } from "fflate";
 import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
 import { listWorldDatapacks } from "../components/server/instance-manager/src/world-datapacks.ts";
 import {
@@ -129,8 +130,19 @@ await test("world datapacks lists archives and valid folders from the logical ov
 
     const datapackDirectory = join(root, "survival", "datapacks");
     await mkdir(join(datapackDirectory, "local-pack"), { recursive: true });
-    await writeFile(join(datapackDirectory, "local-pack", "pack.mcmeta"), "{}");
-    await writeFile(join(datapackDirectory, "remote.zip"), Uint8Array.of(1, 2, 3));
+    await writeFile(
+      join(datapackDirectory, "local-pack", "pack.mcmeta"),
+      JSON.stringify({ pack: { pack_format: 48, description: "本地数据包介绍" } }),
+      "utf8",
+    );
+    await writeFile(join(datapackDirectory, "local-pack", "pack.png"), iconPng);
+    const remoteArchive = zipSync({
+      "pack.mcmeta": strToU8(
+        JSON.stringify({ pack: { pack_format: 48, description: "远程数据包介绍" } }),
+      ),
+      "pack.png": iconPng,
+    });
+    await writeFile(join(datapackDirectory, "remote.zip"), remoteArchive);
     await mkdir(join(datapackDirectory, "unrelated"), { recursive: true });
     await writeFile(join(datapackDirectory, "unrelated", "readme.txt"), "ignore");
 
@@ -146,6 +158,8 @@ await test("world datapacks lists archives and valid folders from the logical ov
             "survival/datapacks/remote.zip": {
               source: "curseforge",
               id: "123",
+              version: "2.0.0",
+              iconUrl: "https://media.forgecdn.net/files/123/456/icon.png",
             },
           },
         },
@@ -161,10 +175,28 @@ await test("world datapacks lists archives and valid folders from the logical ov
         { fileName: "remote.zip", kind: "archive" },
       ],
     );
-    assert.ok(datapacks.every(({ worldId }) => worldId === "survival"));
+    assert.equal(
+      datapacks.find(({ fileName }) => fileName === "local-pack")?.description,
+      "本地数据包介绍",
+    );
+    assert.equal(
+      datapacks.find(({ fileName }) => fileName === "remote.zip")?.description,
+      "远程数据包介绍",
+    );
+    const expectedDatapackIcon = `data:image/png;base64,${Buffer.from(iconPng).toString("base64")}`;
+    assert.equal(
+      datapacks.find(({ fileName }) => fileName === "local-pack")?.iconDataUrl,
+      expectedDatapackIcon,
+    );
+    assert.equal(
+      datapacks.find(({ fileName }) => fileName === "remote.zip")?.iconDataUrl,
+      expectedDatapackIcon,
+    );
     assert.deepEqual(datapacks.find(({ fileName }) => fileName === "remote.zip")?.resourceSource, {
       source: "curseforge",
       id: "123",
+      version: "2.0.0",
+      iconUrl: "https://media.forgecdn.net/files/123/456/icon.png",
     });
   } finally {
     await rm(root, { recursive: true, force: true });

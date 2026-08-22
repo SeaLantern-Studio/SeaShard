@@ -337,6 +337,7 @@ await test("desktop shell preserves unknown resource origins in world projection
   const resourceSource = {
     source: "github",
     id: "owner-repo",
+    version: "v1.4.0",
     iconUrl: "https://github.com/owner/repo/icon.png",
   };
   const storage = expectServerWorldStorageSnapshot({
@@ -350,18 +351,24 @@ await test("desktop shell preserves unknown resource origins in world projection
         dimension: "overworld",
         current: false,
         resourceSource,
+        iconDataUrl: "data:image/gif;base64,R0lGODlh",
       },
     ],
     dimensions: [],
   });
   assert.deepEqual(storage.saves[0]?.resourceSource, resourceSource);
+  assert.equal(storage.saves[0]?.iconDataUrl, "data:image/gif;base64,R0lGODlh");
   const datapack = expectServerWorldDatapack({
     instanceId: "instance-paper",
     worldId: "world",
     fileName: "pack.zip",
     kind: "archive",
+    description: "服务端数据包",
+    iconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
     updatedAt: "2026-08-21T00:00:00.000Z",
     resourceSource,
   });
   assert.deepEqual(datapack.resourceSource, resourceSource);
+  assert.equal(datapack.description, "服务端数据包");
+  assert.equal(datapack.iconDataUrl, "data:image/png;base64,iVBORw0KGgo=");
 });
