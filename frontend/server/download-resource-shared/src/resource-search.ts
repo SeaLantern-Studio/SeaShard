@@ -50,6 +50,7 @@ export interface ServerModMixedSearchState {
   readonly buffers: Record<ServerModSource, ServerModProject[]>;
   readonly totals: Record<ServerModSource, number>;
   readonly finished: Record<ServerModSource, boolean>;
+  fetchedItems: Record<ServerModSource, number>;
   consumedItems: number;
 }
 
@@ -59,6 +60,7 @@ export function createServerModMixedSearchState(): ServerModMixedSearchState {
     buffers: { modrinth: [], curseforge: [] },
     totals: { modrinth: 0, curseforge: 0 },
     finished: { modrinth: false, curseforge: false },
+    fetchedItems: { modrinth: 0, curseforge: 0 },
     consumedItems: 0,
   };
 }
@@ -95,17 +97,24 @@ export async function searchServerModMixedPage(
       const source = activeSources[index];
       if (!source) continue;
       if (result.status === "rejected") {
-        // 当前来源失败后停止本次混合搜索对它的继续请求，显式选择该来源时仍会显示原始错误。
+        // 当前来源失败后停止继续请求，并把总量裁到已经成功取得的项目数，避免页面永远认为还有下一页。
         state.finished[source] = true;
+        state.totals[source] = state.fetchedItems[source];
+        unavailableReason ??= sourceFailureMessage(result.reason);
         continue;
       }
       successfulSources += 1;
       unavailableReason ??= result.value.unavailableReason;
       state.buffers[source].push(...result.value.items);
+      state.fetchedItems[source] += result.value.items.length;
       state.offsets[source] += result.value.limit;
       state.totals[source] = result.value.total;
-      state.finished[source] =
+      const finished =
         result.value.items.length === 0 || state.offsets[source] >= result.value.total;
+      state.finished[source] = finished;
+      if (finished) {
+        state.totals[source] = state.fetchedItems[source];
+      }
     }
     if (
       successfulSources === 0 &&
@@ -151,6 +160,12 @@ function mergeFilterOptions(
     }
   }
   return [...merged.values()];
+}
+
+function sourceFailureMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message) return reason.message;
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  return "服务端资源来源暂时不可用";
 }
 
 function throwSourceFailure(reason: unknown): never {
