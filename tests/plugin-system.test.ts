@@ -243,7 +243,7 @@ await test("Agent resource registry routes, validates domain input and invalidat
         required: ["offset", "limit"],
         additionalProperties: false,
       },
-      presentation: { title: "读取服务器日志" },
+      presentation: { title: "读取服务器日志", icon: "help" },
       implementation: {
         async read({ pathParams, uri, input }) {
           observed = {
@@ -296,6 +296,11 @@ await test("Agent resource registry routes, validates domain input and invalidat
       ?.presentation?.title,
     "读取资源",
   );
+  assert.deepEqual(
+    snapshot.definitions.find(({ pattern }) => pattern === "server://instances/{instanceId}/logs")
+      ?.presentation,
+    { title: "读取服务器日志", icon: "help" },
+  );
   const prepared = snapshot.prepare("server://instances/server-a/logs?stream=stderr", {
     offset: 2,
     limit: 1,
@@ -326,6 +331,20 @@ await test("Agent resource registry routes, validates domain input and invalidat
         limit: 1,
       }),
     /不符合 inputSchema/,
+  );
+  assert.throws(
+    () =>
+      registry.register("invalid-icon-runtime", scope, "invalid://", {
+        description: "图标无效。",
+        inputSchema: { type: "object" },
+        presentation: { title: "无效图标", icon: "sparkles" as never },
+        implementation: {
+          async read() {
+            return { mimeType: "text/plain", content: "" };
+          },
+        },
+      }),
+    /presentation\.icon 不受支持/u,
   );
   assert.throws(
     () =>

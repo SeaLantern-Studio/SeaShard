@@ -3,6 +3,7 @@ import type { AgentToolCallSnapshot } from "@seashard/contracts";
 import type { AgentActivityPresentationField } from "@seashard/plugin-sdk";
 import {
   CheckCircle2,
+  CircleHelp,
   ChevronDown,
   CircleAlert,
   LoaderCircle,
@@ -17,6 +18,9 @@ const props = defineProps<{
 }>();
 
 const expanded = ref(false);
+const activityIcon = computed(() =>
+  props.call.presentation.icon === "help" ? CircleHelp : Wrench,
+);
 const statusText = computed(() => {
   switch (props.call.state) {
     case "running":
@@ -62,7 +66,7 @@ function formatPresentationFields(
       @click="expanded = !expanded"
     >
       <span class="agent-tool-call-glyph" aria-hidden="true">
-        <Wrench :size="15" :stroke-width="1.8" />
+        <component :is="activityIcon" :size="15" :stroke-width="1.8" />
       </span>
       <span class="agent-tool-call-heading">
         <span class="agent-tool-call-title">{{ call.presentation.title }}</span>

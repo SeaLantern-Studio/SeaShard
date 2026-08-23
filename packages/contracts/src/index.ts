@@ -1,6 +1,7 @@
 import type {
   ActivationScope,
   AgentActivityPresentationField,
+  AgentActivityPresentationIcon,
   JsonValue,
 } from "@seashard/plugin-sdk";
 
@@ -139,6 +140,7 @@ export type AgentToolCallState = "running" | "completed" | "cancelled" | "failed
 
 export interface AgentActivityPresentation {
   readonly title: string;
+  readonly icon?: AgentActivityPresentationIcon;
   readonly requestPayload?: readonly AgentActivityPresentationField[];
   readonly resultPayload?: readonly AgentActivityPresentationField[];
 }

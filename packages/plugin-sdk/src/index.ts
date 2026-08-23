@@ -136,11 +136,21 @@ export interface AgentActivityPresentationField {
   readonly value: string;
   readonly unit?: string;
 }
+/** Renderer 只接受 Host 内建的语义图标，禁止插件注入组件名、URL 或任意 SVG。 */
+export const agentActivityPresentationIcons = ["wrench", "help"] as const;
+export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];
+
+export function isAgentActivityPresentationIcon(
+  value: unknown,
+): value is AgentActivityPresentationIcon {
+  return value === "wrench" || value === "help";
+}
 
 export const defaultAgentResourcePresentationTitle = "读取资源";
 
 export interface AgentResourcePresentationDefinition {
   readonly title: string;
+  readonly icon?: AgentActivityPresentationIcon;
 }
 
 /** 资源对象中的可序列化能力说明；挂载 Pattern 由 agentResources() 的键提供。 */

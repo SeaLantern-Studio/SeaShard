@@ -50,6 +50,7 @@ import {
   type ServerModSearchResult,
   type ServerModVersion,
 } from "@seashard/contracts";
+import { isAgentActivityPresentationIcon } from "@seashard/plugin-sdk";
 import { isAbsolute } from "node:path";
 
 function isServerCoreIconUrl(value: unknown): value is string {
@@ -1349,8 +1350,12 @@ function expectAgentActivityPresentation(value: unknown, label: string): AgentAc
   if (typeof record.title !== "string" || !record.title) {
     throw new Error(`Agent Runtime returned invalid ${label}`);
   }
+  if (record.icon !== undefined && !isAgentActivityPresentationIcon(record.icon)) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
   return {
     title: record.title,
+    ...(record.icon === undefined ? {} : { icon: record.icon }),
     ...(record.requestPayload === undefined
       ? {}
       : {

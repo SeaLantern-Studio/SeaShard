@@ -10,6 +10,7 @@ import {
   AgentRuntime,
   AgentSessionJournal,
   AgentSessionLocalStore,
+  bindAgentHelpResource,
   bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
@@ -325,6 +326,136 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
   assert.equal((await runtime.getSession(reference.sessionId)).toolCalls.length, 2);
 });
 
+await test("Agent help:// 从冻结 Registry 快照生成工具与资源说明", async (context) => {
+  const sessionRoot = await mkdtemp(join(tmpdir(), "seashard-agent-help-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(sessionRoot, { recursive: true, force: true });
+  });
+
+  const tools = new AgentToolRegistry();
+  const toolRegistration = tools.register(
+    "test.server-runtime",
+    { type: "global", id: "global" },
+    {
+      namespace: "server",
+      name: "startserver",
+      title: "启动服务器",
+      description: "启动一个已经创建的服务器实例。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          instanceId: {
+            type: "string",
+            description: "服务器实例 ID。",
+          },
+        },
+        required: ["instanceId"],
+        additionalProperties: false,
+      },
+      outputDescription: "返回服务器启动后的当前状态。",
+      examples: [{ instanceId: "survival" }],
+    },
+    async (input) => input,
+  );
+  const resources = new AgentResourceRegistry();
+  const resourceRegistration = resources.register(
+    "test.server-runtime",
+    { type: "global", id: "global" },
+    "server://instances/{instanceId}",
+    {
+      description: "读取指定服务器实例的状态。",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      outputDescription: "返回服务器实例当前状态。",
+      examples: [{}],
+      help: "该资源只读取状态；启动操作使用 server_startserver。",
+      implementation: {
+        read({ pathParams }) {
+          return {
+            mimeType: "application/json",
+            content: { instanceId: pathParams.instanceId ?? "", state: "stopped" },
+          };
+        },
+      },
+    },
+  );
+
+  const localStore = new AgentSessionLocalStore(sessionRoot);
+  const frozen = bindAgentHelpResource(
+    bindAgentLocalResource(resources.snapshot(), localStore),
+    tools.snapshot(),
+  );
+  const readMarkdown = async (
+    snapshot: ReturnType<typeof bindAgentHelpResource>,
+    path: string,
+  ): Promise<string> => {
+    const result = await snapshot.prepare(path, {}).read();
+    assert.equal(result.mimeType, "text/markdown; charset=utf-8");
+    assert.equal(typeof result.content, "string");
+    return result.content as string;
+  };
+
+  const root = await readMarkdown(frozen, "help://");
+  assert.match(root, /help:\/\/tool/u);
+  assert.match(root, /help:\/\/resource/u);
+
+  const toolHelp = await readMarkdown(frozen, "help://tool/server/startserver");
+  assert.match(toolHelp, /Function Call：`server_startserver`/u);
+  assert.match(toolHelp, /"instanceId"/u);
+  assert.match(toolHelp, /"survival"/u);
+  assert.match(toolHelp, /返回服务器启动后的当前状态/u);
+
+  const localHelp = await readMarkdown(frozen, "help://resource/local");
+  assert.match(localHelp, /`local:\/\/`/u);
+  assert.match(localHelp, /"ranges"/u);
+  assert.match(localHelp, /"maximum": 2000/u);
+  assert.match(localHelp, /每组使用一基 start/u);
+
+  const serverHelp = await readMarkdown(frozen, "help://resource/server");
+  assert.match(serverHelp, /server:\/\/instances\/\{instanceId\}/u);
+  assert.match(serverHelp, /路径参数[\s\S]*`instanceId`/u);
+  assert.match(serverHelp, /server_startserver/u);
+
+  assert.deepEqual(frozen.prepare("help://", {}).definition.presentation, {
+    title: "获取帮助",
+    icon: "help",
+  });
+  assert.deepEqual(frozen.prepare("help://resource", {}).definition.presentation, {
+    title: "获取帮助: resources",
+    icon: "help",
+  });
+  assert.deepEqual(frozen.prepare("help://resource/server", {}).definition.presentation, {
+    title: "获取帮助: server",
+    icon: "help",
+  });
+  assert.throws(
+    () => frozen.prepare("help://resource/local", { unexpected: true }),
+    /help:\/\/ input 包含未知参数/u,
+  );
+  await assert.rejects(
+    () => frozen.prepare("help://tool/server/missing", {}).read(),
+    /Agent 帮助资源不存在/u,
+  );
+
+  // 已冻结的 Invocation 继续保留原目录；新 Invocation 只读取注销后的 Registry 状态。
+  toolRegistration.dispose();
+  resourceRegistration.dispose();
+  assert.match(await readMarkdown(frozen, "help://tool/server/startserver"), /server_startserver/u);
+  const next = bindAgentHelpResource(
+    bindAgentLocalResource(resources.snapshot(), localStore),
+    tools.snapshot(),
+  );
+  assert.doesNotMatch(await readMarkdown(next, "help://tool"), /help:\/\/tool\/server/u);
+  await assert.rejects(
+    () => next.prepare("help://resource/server", {}).read(),
+    /Agent 帮助资源不存在/u,
+  );
+});
+
 await test("Agent Output Collector 保存长文本和结构化输出", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-output-collector-"));
   context.after(async () => {
@@ -433,6 +564,22 @@ await test("Agent Session Journal 为无展示字段的读取记录补默认标�
       finishedAt: "2026-08-23T07:51:51.000Z",
     },
   ]);
+  await journal.appendToolCall(created.header.id, {
+    id: "help-read-1",
+    invocationId: "invocation-1",
+    toolName: "read",
+    presentation: { title: "获取帮助: server", icon: "help" },
+    state: "completed",
+    input: { path: "help://resource/server", input: {} },
+    output: "# `server://` 资源",
+    startedAt: "2026-08-23T07:52:00.000Z",
+    finishedAt: "2026-08-23T07:52:01.000Z",
+  });
+  assert.deepEqual(
+    (await journal.snapshot(created.header.id)).toolCalls.find(({ id }) => id === "help-read-1")
+      ?.presentation,
+    { title: "获取帮助: server", icon: "help" },
+  );
   assert.deepEqual(
     (await journal.list()).map(({ id }) => id),
     [created.header.id],
@@ -571,6 +718,7 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
   assert.match(readToolMetadata, /server:\/\/instances/u);
   assert.match(readToolMetadata, /读取服务器实例列表/u);
   assert.match(readToolMetadata, /不要猜测或使用列表外/u);
+  assert.match(readToolMetadata, /help:\/\//u);
   assert.deepEqual(invocation.toolCalls, [
     {
       id: "resource-read-1",

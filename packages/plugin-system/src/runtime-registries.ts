@@ -1,9 +1,13 @@
-import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
+import {
+  defaultAgentResourcePresentationTitle,
+  isAgentActivityPresentationIcon,
+} from "@seashard/plugin-sdk";
 import type {
   AgentActivityPresentationField,
   AgentResource,
   AgentResourceDefinition,
   AgentResourceExecutionContext,
+  AgentResourcePresentationDefinition,
   AgentResourceImplementation,
   AgentResourceReadRequest,
   AgentResourceReadResult,
@@ -518,10 +522,10 @@ function normalizeAgentResource(
   const examples = resource.examples?.map((value, index) =>
     normalizeAgentJsonValue(value, `Agent 资源输入示例 ${index + 1}`),
   );
-  const title =
+  const presentation =
     resource.presentation === undefined
-      ? defaultAgentResourcePresentationTitle
-      : requireAgentResourcePresentationTitle(resource.presentation, pattern);
+      ? { title: defaultAgentResourcePresentationTitle }
+      : normalizeAgentResourcePresentation(resource.presentation, pattern);
   if (!resource.implementation || typeof resource.implementation !== "object") {
     throw new TypeError(`Agent 资源 ${pattern} 缺少 implementation`);
   }
@@ -550,7 +554,7 @@ function normalizeAgentResource(
       ...(outputDescription === undefined ? {} : { outputDescription }),
       ...(examples === undefined ? {} : { examples }),
       ...(help === undefined ? {} : { help }),
-      presentation: { title },
+      presentation,
     },
     implementation,
   };
@@ -767,11 +771,22 @@ function normalizeAgentJsonValue(
   );
 }
 
-function requireAgentResourcePresentationTitle(value: unknown, pattern: string): string {
+function normalizeAgentResourcePresentation(
+  value: unknown,
+  pattern: string,
+): AgentResourcePresentationDefinition {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`Agent 资源 ${pattern} presentation 必须是对象`);
   }
-  return requireAgentPresentationText((value as { readonly title?: unknown }).title, "标题", 80);
+  const record = value as { readonly title?: unknown; readonly icon?: unknown };
+  const title = requireAgentPresentationText(record.title, "标题", 80);
+  if (record.icon !== undefined && !isAgentActivityPresentationIcon(record.icon)) {
+    throw new TypeError(`Agent 资源 ${pattern} presentation.icon 不受支持`);
+  }
+  return {
+    title,
+    ...(record.icon === undefined ? {} : { icon: record.icon }),
+  };
 }
 
 function requireAgentPresentationText(value: unknown, label: string, maximum: number): string {

@@ -6,7 +6,10 @@ import type {
   AgentSessionSummary,
   AgentToolCallSnapshot,
 } from "@seashard/contracts";
-import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
+import {
+  defaultAgentResourcePresentationTitle,
+  isAgentActivityPresentationIcon,
+} from "@seashard/plugin-sdk";
 import type { AgentActivityPresentationField, JsonValue } from "@seashard/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -401,8 +404,12 @@ function parseActivityPresentation(
   if (typeof record.title !== "string" || !record.title) {
     throw new Error(`Agent Tool Call presentation 标题损坏：${fileName}`);
   }
+  if (record.icon !== undefined && !isAgentActivityPresentationIcon(record.icon)) {
+    throw new Error(`Agent Tool Call presentation 图标损坏：${fileName}`);
+  }
   return {
     title: record.title,
+    ...(record.icon === undefined ? {} : { icon: record.icon }),
     ...(record.requestPayload === undefined
       ? {}
       : {

@@ -38,6 +38,7 @@ import { join } from "node:path";
 import { AgentModelCatalog, type ResolvedAgentModel } from "./model-config";
 import { AgentSessionJournal, type LoadedAgentSession } from "./session-journal";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
+import { bindAgentHelpResource } from "./help-resource";
 import { AgentOutputCollector } from "./output-collector";
 
 const maximumUserMessageLength = 100_000;
@@ -240,7 +241,8 @@ export class AgentRuntime {
     const localStore = new AgentSessionLocalStore(
       join(this.journal.sessionsRoot, session.storageKey),
     );
-    const resources = bindAgentLocalResource(this.resourceSource.snapshot(), localStore);
+    const localResources = bindAgentLocalResource(this.resourceSource.snapshot(), localStore);
+    const resources = bindAgentHelpResource(localResources, [...toolDefinitions.values()]);
     const outputCollector = new AgentOutputCollector(localStore);
 
     const invocationId = randomUUID();
@@ -660,8 +662,10 @@ function createToolSet(
             () => prepared.presentRequest(),
             (error) => resourceLifecycle.reportError(error),
           );
+          const preparedPresentation = prepared.definition.presentation;
           presentation = {
-            title: prepared.definition.presentation?.title ?? defaultAgentResourcePresentationTitle,
+            title: preparedPresentation?.title ?? defaultAgentResourcePresentationTitle,
+            ...(preparedPresentation?.icon ? { icon: preparedPresentation.icon } : {}),
             ...(requestPayload === undefined ? {} : { requestPayload }),
           };
           await resourceLifecycle.updatePresentation(toolCallId, presentation);

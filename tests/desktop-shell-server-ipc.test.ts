@@ -4,6 +4,7 @@ import {
 } from "../packages/contracts/src/index.ts";
 import {
   expectFileDownloadTasks,
+  expectAgentInvocation,
   expectServerModFilters,
   expectServerModSearchResult,
   expectServerWorldDatapack,
@@ -24,6 +25,45 @@ import {
   serverModSearchResult,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
+
+await test("desktop Agent 投影保留受信任的工具卡片图标", () => {
+  const invocation = {
+    id: "agent-invocation",
+    sessionId: "agent-session",
+    state: "completed",
+    model: { connectionId: "test", modelId: "test-model" },
+    startedAt: "2026-08-17T12:00:00.000Z",
+    finishedAt: "2026-08-17T12:00:01.000Z",
+    text: "done",
+    toolCalls: [
+      {
+        id: "help-read-1",
+        invocationId: "agent-invocation",
+        toolName: "read",
+        presentation: { title: "获取帮助: server", icon: "help" },
+        state: "completed",
+        input: { path: "help://resource/server", input: {} },
+        output: "# `server://` 资源",
+        startedAt: "2026-08-17T12:00:00.000Z",
+        finishedAt: "2026-08-17T12:00:01.000Z",
+      },
+    ],
+  };
+  assert.equal(expectAgentInvocation(invocation).toolCalls[0]?.presentation.icon, "help");
+  assert.throws(
+    () =>
+      expectAgentInvocation({
+        ...invocation,
+        toolCalls: [
+          {
+            ...invocation.toolCalls[0],
+            presentation: { title: "获取帮助: server", icon: "untrusted" },
+          },
+        ],
+      }),
+    /Agent Runtime returned invalid invocation tool call 0 presentation/u,
+  );
+});
 
 await test("desktop shell routes settings, downloads, instances, and configuration IPC", async () => {
   const harness = await createDesktopShellHarness();
