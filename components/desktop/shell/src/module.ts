@@ -263,6 +263,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             expectNonEmptyString(invocationId, "Agent invocation ID"),
           );
         });
+        config.runtime.handle(desktopChannels.agentInvocationCancel, (event, invocationId) => {
+          ownedWindow(event.sender.id);
+          return config.cancelAgentInvocation(
+            expectNonEmptyString(invocationId, "Agent invocation ID"),
+          );
+        });
         config.runtime.handle(desktopChannels.dialogSelectDirectory, async (event) => {
           const window = ownedWindow(event.sender.id);
           const settings = await config.readServerSettings();
@@ -817,6 +823,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.agentSessionStart);
           config.runtime.removeHandler(desktopChannels.agentMessageSend);
           config.runtime.removeHandler(desktopChannels.agentInvocationGet);
+          config.runtime.removeHandler(desktopChannels.agentInvocationCancel);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

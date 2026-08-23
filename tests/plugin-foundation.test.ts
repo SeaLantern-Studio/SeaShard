@@ -10,7 +10,12 @@ import {
 } from "../components/data/database-sqlite/src/index.ts";
 import { createPluginFoundationBootstrapDescriptor } from "../components/plugin/foundation/src/index.ts";
 import { defineDataCapsule } from "../packages/database/src/index.ts";
-import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
+import type {
+  ExecutionContext,
+  PluginContext,
+  PluginManifest,
+} from "../packages/plugin-sdk/src/index.ts";
+import { PluginKernel } from "../packages/plugin-system/src/kernel.ts";
 import { Context } from "cordis";
 import { databaseWorkerEntry } from "./plugin-test-fixtures.ts";
 
@@ -44,6 +49,101 @@ await test("plugin foundation keeps only package and Binding persistence", async
       await loader.dispose();
     }
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("built-in Agent tools follow Cordis Fiber reload and disposal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-agent-tool-fiber-"));
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
+  let kernel: PluginKernel | undefined;
+  try {
+    await loader.start([
+      createPluginFoundationBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    kernel = await PluginKernel.create({
+      dataRoot: directory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      platform: "win32",
+      architecture: "x64",
+      root,
+      store: root["plugin-foundation"].store,
+      pluginStorage: root["plugin-foundation"].storage,
+    });
+    const manifest = {
+      id: "seashard.test-agent-tool",
+      version: "0.0.0",
+      publisher: "seashard-tests",
+      entries: [
+        {
+          id: "agent-tool.host",
+          runtime: "host",
+          module: "./dist/host.js",
+          hostProfiles: ["node"],
+          activationScopes: ["global"],
+          permissions: [],
+        },
+      ],
+      compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+    } satisfies PluginManifest;
+    await kernel.registerBuiltIn({
+      manifest,
+      loaders: {
+        "agent-tool.host": {
+          load: async () => ({
+            apply(ctx: PluginContext) {
+              ctx.agentTool(
+                {
+                  namespace: "test",
+                  name: "echo",
+                  title: "测试回显",
+                  description: "回显测试输入。",
+                  inputSchema: { type: "object" },
+                },
+                async (input) => input,
+              );
+            },
+          }),
+        },
+      },
+      bindings: [
+        {
+          id: "test.agent-tool",
+          entryId: "agent-tool.host",
+          scopeType: "global",
+          scopeId: "global",
+          enabled: true,
+          config: null,
+        },
+      ],
+    });
+    await kernel.start();
+
+    const beforeReload = kernel.agentTools.snapshot()[0]!;
+    assert.equal(beforeReload.name, "test_echo");
+    assert.deepEqual(await beforeReload.execute({ value: "before" }, {}), { value: "before" });
+
+    await kernel.reload("test.agent-tool");
+    assert.equal(kernel.agentTools.snapshot().length, 1);
+    await assert.rejects(beforeReload.execute({ value: "stale" }, {}), /Agent 工具已停止/);
+
+    await kernel.dispose();
+    assert.equal(kernel.agentTools.snapshot().length, 0);
+  } finally {
+    await kernel?.dispose();
+    await loader.dispose();
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -92,16 +92,65 @@
 }
 
 .agent-assistant-message {
+  width: min(100%, 620px);
   min-width: 0;
-  max-width: calc(100% - 44px);
-  flex: 1;
+  max-width: 620px;
+  flex: 0 1 620px;
   padding-top: 3px;
   color: var(--sl-text-primary);
   line-height: 1.7;
 }
 
-.agent-assistant-message .cmz-markdown {
+.agent-assistant-message .cmz-md {
   color: inherit;
+}
+
+/*
+ * Cmz_Markdown 0.7.1 的 `ol li` 会同时命中有序项内部的无序列表，
+ * 导致子项继续递增外层计数器。计数只属于各级 ol 的直接子项。
+ */
+.agent-assistant-message .cmz-md ol li {
+  counter-increment: none;
+}
+
+.agent-assistant-message .cmz-md ol > li {
+  counter-increment: cmz-md-counter;
+}
+
+/* 数字徽标与父级标题行垂直对齐，不贴在卡片左上角。 */
+.agent-assistant-message .cmz-md ol > li::before {
+  top: 0.9em;
+}
+
+/* Markdown 的父级段落默认保留 1em 下边距，这里收紧到下一层列表。 */
+.agent-assistant-message .cmz-md ol > li > p {
+  margin-bottom: 0.2em;
+}
+
+/* 恢复 ol 内嵌 ul 的圆点，避免库中后声明的数字徽标样式覆盖它。 */
+.agent-assistant-message .cmz-md ul > li::before {
+  top: 0.75em;
+  min-width: 0;
+  height: 6px;
+  padding: 0;
+  content: "";
+  font-size: 0;
+  line-height: 0;
+}
+
+.agent-assistant-message .cmz-md li > ul {
+  margin-top: 0.1em;
+}
+
+.agent-assistant-message .cmz-md li > ul > li {
+  margin-bottom: 0;
+  padding-block: 0.15em;
+}
+
+.agent-assistant-message .cmz-md li > ul > li::before {
+  top: 50%;
+  height: 5px;
+  transform: translateY(-50%);
 }
 
 .agent-thinking {

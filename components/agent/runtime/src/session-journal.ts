@@ -3,7 +3,9 @@ import type {
   AgentModelSelection,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolCallSnapshot,
 } from "@seashard/contracts";
+import type { JsonValue } from "@seashard/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -34,12 +36,18 @@ interface InvocationRecord {
   readonly error?: string;
 }
 
+interface ToolCallRecord extends AgentToolCallSnapshot {
+  readonly type: "tool-call";
+  readonly timestamp: string;
+}
+
 export interface LoadedAgentSession {
   readonly storageKey: string;
   readonly header: SessionHeaderRecord;
   readonly title: string;
   readonly messages: readonly MessageRecord[];
   readonly invocations: readonly InvocationRecord[];
+  readonly toolCalls: readonly AgentToolCallSnapshot[];
   readonly updatedAt: string;
 }
 
@@ -83,6 +91,7 @@ export class AgentSessionJournal {
       title,
       messages: [],
       invocations: [],
+      toolCalls: [],
       updatedAt: timestamp,
     };
   }
@@ -109,7 +118,11 @@ export class AgentSessionJournal {
 
   async snapshot(sessionId: string): Promise<AgentSessionSnapshot> {
     const session = await this.get(sessionId);
-    return { ...projectSummary(session), messages: session.messages };
+    return {
+      ...projectSummary(session),
+      messages: session.messages,
+      toolCalls: session.toolCalls,
+    };
   }
 
   async appendMessage(input: {
@@ -145,6 +158,21 @@ export class AgentSessionJournal {
     return complete;
   }
 
+  /** 工具活动使用同一 toolCallId 追加状态，读取时投影为最后一次状态。 */
+  async appendToolCall(
+    sessionId: string,
+    record: AgentToolCallSnapshot,
+  ): Promise<AgentToolCallSnapshot> {
+    const session = await this.get(sessionId);
+    const complete: ToolCallRecord = {
+      type: "tool-call",
+      timestamp: new Date().toISOString(),
+      ...record,
+    };
+    await this.appendRecord(session.storageKey, complete);
+    return record;
+  }
+
   async rename(sessionId: string, title: string): Promise<void> {
     const session = await this.get(sessionId);
     const normalized = title.replace(/\s+/g, " ").trim();
@@ -163,7 +191,10 @@ export class AgentSessionJournal {
     await rm(join(this.sessionsRoot, session.storageKey), { recursive: true, force: true });
   }
 
-  private async appendRecord(storageKey: string, record: MessageRecord | InvocationRecord) {
+  private async appendRecord(
+    storageKey: string,
+    record: MessageRecord | InvocationRecord | ToolCallRecord,
+  ) {
     await appendFile(
       join(this.sessionsRoot, `${storageKey}.jsonl`),
       `${JSON.stringify(record)}\n`,
@@ -182,19 +213,29 @@ export class AgentSessionJournal {
     const header = parseHeader(lines.shift(), fileName);
     const messages: MessageRecord[] = [];
     const invocations: InvocationRecord[] = [];
+    const toolCallRecords: ToolCallRecord[] = [];
     let updatedAt = header.timestamp;
     for (const line of lines) {
       if (!line) continue;
       const record = parseRecord(line);
       if (record.type === "message") messages.push(parseMessage(record, fileName));
       if (record.type === "invocation") invocations.push(parseInvocation(record, fileName));
+      if (record.type === "tool-call") toolCallRecords.push(parseToolCall(record, fileName));
       if (typeof record.timestamp === "string") updatedAt = record.timestamp;
     }
     const title =
       titleRecord.type === "title" && typeof titleRecord.title === "string"
         ? titleRecord.title
         : header.title;
-    return { storageKey, header, title, messages, invocations, updatedAt };
+    return {
+      storageKey,
+      header,
+      title,
+      messages,
+      invocations,
+      toolCalls: projectToolCalls(toolCallRecords),
+      updatedAt,
+    };
   }
 }
 
@@ -292,6 +333,63 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
   };
 }
 
+function parseToolCall(record: Record<string, unknown>, fileName: string): ToolCallRecord {
+  if (
+    typeof record.id !== "string" ||
+    typeof record.invocationId !== "string" ||
+    typeof record.toolName !== "string" ||
+    typeof record.title !== "string" ||
+    !isToolCallState(record.state) ||
+    typeof record.startedAt !== "string" ||
+    typeof record.timestamp !== "string" ||
+    (record.finishedAt !== undefined && typeof record.finishedAt !== "string") ||
+    (record.error !== undefined && typeof record.error !== "string")
+  ) {
+    throw new Error(`Agent Tool Call 记录损坏：${fileName}`);
+  }
+  return {
+    type: "tool-call",
+    timestamp: record.timestamp,
+    id: record.id,
+    invocationId: record.invocationId,
+    toolName: record.toolName,
+    title: record.title,
+    state: record.state,
+    input: requireJsonValue(record.input, fileName, "input"),
+    ...(record.output === undefined
+      ? {}
+      : { output: requireJsonValue(record.output, fileName, "output") }),
+    ...(typeof record.error === "string" ? { error: record.error } : {}),
+    startedAt: record.startedAt,
+    ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
+  };
+}
+
+function projectToolCalls(records: readonly ToolCallRecord[]): readonly AgentToolCallSnapshot[] {
+  const calls = new Map<string, AgentToolCallSnapshot>();
+  for (const { type: _type, timestamp: _timestamp, ...record } of records) {
+    calls.set(record.id, record);
+  }
+  return [...calls.values()];
+}
+
+function requireJsonValue(value: unknown, fileName: string, field: string): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => requireJsonValue(entry, fileName, field));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        requireJsonValue(entry, fileName, `${field}.${key}`),
+      ]),
+    );
+  }
+  throw new Error(`Agent Tool Call ${field} 不是 JSON 值：${fileName}`);
+}
+
 function parseRecord(line: string): Record<string, unknown> {
   const value = JSON.parse(line) as unknown;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -301,6 +399,12 @@ function parseRecord(line: string): Record<string, unknown> {
 }
 
 function isInvocationState(value: unknown): value is InvocationRecord["state"] {
+  return (
+    value === "running" || value === "completed" || value === "cancelled" || value === "failed"
+  );
+}
+
+function isToolCallState(value: unknown): value is AgentToolCallSnapshot["state"] {
   return (
     value === "running" || value === "completed" || value === "cancelled" || value === "failed"
   );

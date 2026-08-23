@@ -115,6 +115,9 @@ export interface DesktopShellConfig {
     input: Parameters<AgentSessionService["sendMessage"]>[0],
   ): ReturnType<AgentSessionService["sendMessage"]>;
   readAgentInvocation(invocationId: string): ReturnType<AgentInvocationService["getInvocation"]>;
+  cancelAgentInvocation(
+    invocationId: string,
+  ): ReturnType<AgentInvocationService["cancelInvocation"]>;
   onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
   readServerCoreTypes(): ReturnType<ServerCoreSourceClientService["listTypes"]>;
   readServerCoreVersions(

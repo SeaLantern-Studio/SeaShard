@@ -108,6 +108,28 @@ export interface PluginStorageBroker {
   for(execution: ExecutionContext): PluginStorage;
 }
 
+/**
+ * Agent 工具声明只描述能力语义；运行时身份与生命周期由 Plugin Kernel 补齐。
+ */
+export interface AgentToolDefinition {
+  readonly namespace: string;
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
+  readonly inputSchema: JsonObject;
+  readonly outputDescription?: string;
+  readonly examples?: JsonValue[];
+}
+
+export interface AgentToolExecutionContext {
+  readonly signal?: AbortSignal;
+}
+
+export type AgentToolHandler = (
+  input: JsonValue,
+  context: AgentToolExecutionContext,
+) => Awaitable<JsonValue>;
+
 export interface PluginContext {
   readonly execution: ExecutionContext;
   readonly runtimeId: string;
@@ -116,6 +138,7 @@ export interface PluginContext {
   provide(contract: string, provider: ServiceProvider): void;
   service<T extends object>(contract: string): T;
   contribute(kind: string, value: JsonValue): string;
+  agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;
   on(event: string, handler: (payload: JsonValue) => Awaitable<void>): void;
   emit(event: string, payload: JsonValue): Promise<void>;
 }

@@ -1,15 +1,28 @@
 <script setup lang="ts">
 import type {
   AgentConfiguredModel,
+  AgentConversationMode,
   AgentInvocationService,
+  AgentMessageSnapshot,
   AgentModelSelection,
   AgentSessionService,
   AgentSessionSnapshot,
+  AgentToolCallSnapshot,
 } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
 import { Cmz_Markdown, Cmz_Toast, useToast } from "cmzya-modern-ui";
-import { ArrowUp, Bot, Check, ChevronDown, MessageCircle, Plus, Sparkles } from "lucide-vue-next";
+import {
+  ArrowUp,
+  Bot,
+  Check,
+  ChevronDown,
+  MessageCircle,
+  Plus,
+  Sparkles,
+  Square,
+} from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import AgentToolCallCard from "./AgentToolCallCard.vue";
 import "./AgentConversationPage.css";
 
 const props = defineProps<{
@@ -18,22 +31,58 @@ const props = defineProps<{
   workspace: typeof agentWorkspace;
 }>();
 
+interface ConversationEntry {
+  readonly kind: "message" | "tool";
+  readonly key: string;
+  readonly timestamp: string;
+  readonly role?: AgentMessageSnapshot["role"];
+  readonly content?: string;
+  readonly call?: AgentToolCallSnapshot;
+}
+
 const toast = useToast();
 const composer = ref("");
 const textarea = ref<HTMLTextAreaElement>();
-const session = ref<AgentSessionSnapshot>();
+const session = shallowRef<AgentSessionSnapshot>();
 const models = ref<readonly AgentConfiguredModel[]>([]);
 const selectedModel = shallowRef<AgentModelSelection>();
+const selectedMode = ref<AgentConversationMode>("chat");
 const modelMenuOpen = ref(false);
 const modeMenuOpen = ref(false);
 const sending = ref(false);
+const cancelling = ref(false);
 const liveAssistantText = ref("");
+const liveToolCalls = shallowRef<readonly AgentToolCallSnapshot[]>([]);
 const runningSessionId = ref<string>();
+const runningInvocationId = ref<string>();
 let conversationLoad = 0;
 let invocationPoll = 0;
 
 const activeConversationId = computed(() => props.workspace.activeConversationId.value);
 const messages = computed(() => session.value?.messages ?? []);
+const visibleToolCalls = computed<readonly AgentToolCallSnapshot[]>(() => {
+  const calls = new Map<string, AgentToolCallSnapshot>();
+  for (const call of session.value?.toolCalls ?? []) calls.set(call.id, call);
+  for (const call of liveToolCalls.value) calls.set(call.id, call);
+  return [...calls.values()];
+});
+const conversationEntries = computed<readonly ConversationEntry[]>(() =>
+  [
+    ...messages.value.map((message) => ({
+      kind: "message" as const,
+      key: `message:${message.id}`,
+      timestamp: message.timestamp,
+      role: message.role,
+      content: message.content,
+    })),
+    ...visibleToolCalls.value.map((call) => ({
+      kind: "tool" as const,
+      key: `tool:${call.id}`,
+      timestamp: call.startedAt,
+      call,
+    })),
+  ].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
+);
 const selectedModelRecord = computed(() =>
   models.value.find(
     (model) =>
@@ -42,11 +91,16 @@ const selectedModelRecord = computed(() =>
   ),
 );
 const selectedModelLabel = computed(() => selectedModelRecord.value?.name ?? "未配置模型");
+const selectedModeLabel = computed(() => (selectedMode.value === "agent" ? "Agent" : "Chat"));
 const canSend = computed(() =>
   Boolean(composer.value.trim() && selectedModel.value && !sending.value),
 );
 
-watch(activeConversationId, () => {
+watch(activeConversationId, (id) => {
+  if (id !== runningSessionId.value) {
+    liveAssistantText.value = "";
+    liveToolCalls.value = [];
+  }
   void loadActiveConversation();
   void nextTick(() => textarea.value?.focus());
 });
@@ -75,8 +129,6 @@ async function loadModels(): Promise<void> {
 async function loadActiveConversation(): Promise<void> {
   const load = ++conversationLoad;
   const id = activeConversationId.value;
-  liveAssistantText.value = "";
-  runningSessionId.value = undefined;
   if (!id || props.workspace.isDraft(id)) {
     session.value = undefined;
     return;
@@ -100,6 +152,11 @@ function selectionOf(model: AgentConfiguredModel): AgentModelSelection {
 function selectModel(model: AgentConfiguredModel): void {
   selectedModel.value = selectionOf(model);
   modelMenuOpen.value = false;
+}
+
+function selectMode(mode: AgentConversationMode): void {
+  selectedMode.value = mode;
+  modeMenuOpen.value = false;
 }
 
 function resizeComposer(): void {
@@ -127,24 +184,33 @@ async function sendMessage(): Promise<void> {
   try {
     const reference =
       !previousId || props.workspace.isDraft(previousId)
-        ? await props.sessions.startSession({ initialMessage: { text }, model })
+        ? await props.sessions.startSession({
+            initialMessage: { text },
+            mode: selectedMode.value,
+            model,
+          })
         : await props.sessions.sendMessage({
             sessionId: previousId,
             message: { text },
+            mode: selectedMode.value,
             model,
           });
     composer.value = "";
     await nextTick(resizeComposer);
-    await props.workspace.materializeDraft(previousId, reference.sessionId);
     runningSessionId.value = reference.sessionId;
+    runningInvocationId.value = reference.invocationId;
+    await props.workspace.materializeDraft(previousId, reference.sessionId);
     await loadActiveConversation();
     await pollInvocation(reference.invocationId, reference.sessionId);
   } catch (error) {
     toast.error({ title: "消息发送失败", description: errorMessage(error) });
   } finally {
     sending.value = false;
+    cancelling.value = false;
     runningSessionId.value = undefined;
+    runningInvocationId.value = undefined;
     liveAssistantText.value = "";
+    liveToolCalls.value = [];
     void nextTick(() => textarea.value?.focus());
   }
 }
@@ -153,7 +219,10 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
   const poll = ++invocationPoll;
   while (poll === invocationPoll) {
     const invocation = await props.invocations.getInvocation(invocationId);
-    if (activeConversationId.value === sessionId) liveAssistantText.value = invocation.text;
+    if (activeConversationId.value === sessionId) {
+      liveAssistantText.value = invocation.text;
+      liveToolCalls.value = invocation.toolCalls;
+    }
     if (invocation.state !== "running") {
       await props.workspace.refresh();
       if (activeConversationId.value === sessionId) await loadActiveConversation();
@@ -173,9 +242,16 @@ function showAttachmentPlaceholder(): void {
   toast.info({ title: "附件功能尚未开放" });
 }
 
-function showAgentPlaceholder(): void {
-  modeMenuOpen.value = false;
-  toast.info({ title: "Agent 模式尚未开放" });
+async function cancelActiveInvocation(): Promise<void> {
+  const invocationId = runningInvocationId.value;
+  if (!invocationId || cancelling.value) return;
+  cancelling.value = true;
+  try {
+    await props.invocations.cancelInvocation(invocationId);
+  } catch (error) {
+    cancelling.value = false;
+    toast.error({ title: "停止响应失败", description: errorMessage(error) });
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -192,28 +268,38 @@ function delay(milliseconds: number): Promise<void> {
     <Cmz_Toast position="top-right" />
 
     <div class="agent-conversation-scroll">
-      <div v-if="messages.length === 0 && !liveAssistantText" class="agent-conversation-empty">
+      <div
+        v-if="messages.length === 0 && visibleToolCalls.length === 0 && !liveAssistantText"
+        class="agent-conversation-empty"
+      >
         <div class="agent-brand-mark" aria-hidden="true"></div>
         <h1>今天想完成什么？</h1>
       </div>
 
       <div v-else class="agent-message-list" aria-live="polite">
-        <article
-          v-for="message in messages"
-          :key="message.id"
-          class="agent-message"
-          :class="`is-${message.role}`"
-        >
-          <div v-if="message.role === 'assistant'" class="agent-message-avatar" aria-hidden="true">
-            <div class="agent-brand-mark"></div>
-          </div>
-          <div v-if="message.role === 'user'" class="agent-user-message">
-            {{ message.content }}
-          </div>
-          <div v-else class="agent-assistant-message">
-            <Cmz_Markdown :content="message.content" variant="plain" />
-          </div>
-        </article>
+        <template v-for="entry in conversationEntries" :key="entry.key">
+          <article
+            v-if="entry.kind === 'message'"
+            class="agent-message"
+            :class="`is-${entry.role}`"
+          >
+            <div v-if="entry.role === 'assistant'" class="agent-message-avatar" aria-hidden="true">
+              <div class="agent-brand-mark"></div>
+            </div>
+            <div v-if="entry.role === 'user'" class="agent-user-message">
+              {{ entry.content }}
+            </div>
+            <div v-else class="agent-assistant-message">
+              <Cmz_Markdown :content="entry.content ?? ''" variant="plain" />
+            </div>
+          </article>
+          <article v-else-if="entry.call" class="agent-message is-assistant is-tool-call">
+            <div class="agent-message-avatar" aria-hidden="true">
+              <div class="agent-brand-mark"></div>
+            </div>
+            <AgentToolCallCard :call="entry.call" />
+          </article>
+        </template>
 
         <article
           v-if="sending && runningSessionId === activeConversationId"
@@ -268,25 +354,33 @@ function delay(milliseconds: number): Promise<void> {
                   modelMenuOpen = false;
                 "
               >
-                <MessageCircle :size="15" :stroke-width="1.8" />
-                <span>Chat</span>
+                <Sparkles v-if="selectedMode === 'agent'" :size="15" :stroke-width="1.8" />
+                <MessageCircle v-else :size="15" :stroke-width="1.8" />
+                <span>{{ selectedModeLabel }}</span>
                 <ChevronDown :size="13" :stroke-width="1.8" />
               </button>
               <div v-if="modeMenuOpen" class="agent-popup agent-mode-menu" role="menu">
-                <button type="button" class="agent-popup-option selected" role="menuitem">
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedMode === 'chat' }"
+                  role="menuitem"
+                  @click="selectMode('chat')"
+                >
                   <MessageCircle :size="15" />
                   <span>Chat</span>
-                  <Check :size="14" />
+                  <Check v-if="selectedMode === 'chat'" :size="14" />
                 </button>
                 <button
                   type="button"
                   class="agent-popup-option"
+                  :class="{ selected: selectedMode === 'agent' }"
                   role="menuitem"
-                  @click="showAgentPlaceholder"
+                  @click="selectMode('agent')"
                 >
                   <Sparkles :size="15" />
                   <span>Agent</span>
-                  <small>即将支持</small>
+                  <Check v-if="selectedMode === 'agent'" :size="14" />
                 </button>
               </div>
             </div>
@@ -347,12 +441,13 @@ function delay(milliseconds: number): Promise<void> {
             <button
               type="button"
               class="agent-send-button"
-              :disabled="!canSend"
-              title="发送"
-              aria-label="发送消息"
-              @click="sendMessage"
+              :disabled="sending ? !runningInvocationId || cancelling : !canSend"
+              :title="sending ? '停止' : '发送'"
+              :aria-label="sending ? '停止响应' : '发送消息'"
+              @click="sending ? cancelActiveInvocation() : sendMessage()"
             >
-              <ArrowUp :size="18" :stroke-width="2.2" />
+              <Square v-if="sending" :size="14" :stroke-width="2.2" fill="currentColor" />
+              <ArrowUp v-else :size="18" :stroke-width="2.2" />
             </button>
           </div>
         </div>

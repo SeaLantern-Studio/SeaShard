@@ -1,4 +1,5 @@
 import type {
+  AgentToolDefinition,
   ExecutionContext,
   JsonValue,
   PluginStorageDeleteOptions,
@@ -59,6 +60,16 @@ export interface ContributionRegistrationPayload {
 export interface EventRegistrationPayload {
   registrationId: string;
   event: string;
+}
+
+export interface AgentToolRegistrationPayload {
+  registrationId: string;
+  definition: AgentToolDefinition;
+}
+
+export interface AgentToolInvocationPayload {
+  registrationId: string;
+  input: JsonValue;
 }
 
 export interface ServiceCallPayload {

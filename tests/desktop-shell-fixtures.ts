@@ -603,6 +603,7 @@ export async function createDesktopShellHarness(
         createdAt: "2026-08-17T12:00:00.000Z",
         updatedAt: "2026-08-17T12:00:00.000Z",
         messages: [],
+        toolCalls: [],
       }),
       startAgentSession: async () => ({
         sessionId: "agent-session",
@@ -620,7 +621,9 @@ export async function createDesktopShellHarness(
         startedAt: "2026-08-17T12:00:00.000Z",
         finishedAt: "2026-08-17T12:00:01.000Z",
         text: "done",
+        toolCalls: [],
       }),
+      cancelAgentInvocation: async () => {},
       readServerCoreTypes: async () => serverCoreTypes,
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>

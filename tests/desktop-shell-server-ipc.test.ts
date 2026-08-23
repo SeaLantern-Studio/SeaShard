@@ -43,6 +43,7 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   assert.deepEqual(
     await runtime.invoke(desktopChannels.agentSessionStart, 1, {
       initialMessage: { text: "hello" },
+      mode: "agent",
       model: { connectionId: "test", modelId: "test-model" },
     }),
     { sessionId: "agent-session", invocationId: "agent-invocation" },
@@ -51,6 +52,7 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     await runtime.invoke(desktopChannels.agentMessageSend, 1, {
       sessionId: "agent-session",
       message: { text: "continue" },
+      mode: "chat",
       model: { connectionId: "test", modelId: "test-model" },
     }),
     { sessionId: "agent-session", invocationId: "agent-invocation" },
@@ -63,9 +65,17 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     ).text,
     "done",
   );
+  await runtime.invoke(desktopChannels.agentInvocationCancel, 1, "agent-invocation");
   await assert.rejects(
     runtime.invoke(desktopChannels.agentSessionStart, 1, { initialMessage: { text: "" } }),
     /non-empty string/,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.agentSessionStart, 1, {
+      initialMessage: { text: "hello" },
+      mode: "invalid",
+    }),
+    /mode must be chat or agent/,
   );
   await assert.rejects(runtime.invoke(desktopChannels.agentModelsList, 999), /request rejected/);
   assert.equal(

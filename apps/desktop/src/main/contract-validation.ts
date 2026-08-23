@@ -15,6 +15,7 @@ import {
   type AgentModelSelection,
   type AgentSessionSnapshot,
   type AgentSessionSummary,
+  type AgentToolCallSnapshot,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
@@ -1233,6 +1234,9 @@ export function expectAgentSession(value: unknown): AgentSessionSnapshot {
   const summary = expectAgentSessionSummary(value, "session");
   const record = value as Record<string, unknown>;
   if (!Array.isArray(record.messages)) throw new Error("Agent Runtime returned invalid messages");
+  if (!Array.isArray(record.toolCalls)) {
+    throw new Error("Agent Runtime returned invalid tool calls");
+  }
   const messages = record.messages.map((message, index): AgentMessageSnapshot => {
     const item = expectAgentRecord(message, `message ${index}`);
     if (
@@ -1255,7 +1259,10 @@ export function expectAgentSession(value: unknown): AgentSessionSnapshot {
       timestamp: item.timestamp,
     };
   });
-  return { ...summary, messages };
+  const toolCalls = record.toolCalls.map((call, index) =>
+    expectAgentToolCall(call, `tool call ${index}`),
+  );
+  return { ...summary, messages, toolCalls };
 }
 
 export function expectAgentInvocationReference(value: unknown): AgentInvocationReference {
@@ -1282,6 +1289,7 @@ export function expectAgentInvocation(value: unknown): AgentInvocationSnapshot {
     typeof record.startedAt !== "string" ||
     !isIsoTimestamp(record.startedAt) ||
     typeof record.text !== "string" ||
+    !Array.isArray(record.toolCalls) ||
     (record.finishedAt !== undefined && !isIsoTimestamp(record.finishedAt)) ||
     (record.error !== undefined && typeof record.error !== "string")
   ) {
@@ -1294,9 +1302,64 @@ export function expectAgentInvocation(value: unknown): AgentInvocationSnapshot {
     model: expectAgentModelSelection(record.model, "invocation model"),
     startedAt: record.startedAt,
     text: record.text,
+    toolCalls: record.toolCalls.map((call, index) =>
+      expectAgentToolCall(call, `invocation tool call ${index}`),
+    ),
     ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
     ...(typeof record.error === "string" ? { error: record.error } : {}),
   };
+}
+
+function expectAgentToolCall(value: unknown, label: string): AgentToolCallSnapshot {
+  const record = expectAgentRecord(value, label);
+  if (
+    typeof record.id !== "string" ||
+    !record.id ||
+    typeof record.invocationId !== "string" ||
+    !record.invocationId ||
+    typeof record.toolName !== "string" ||
+    !record.toolName ||
+    typeof record.title !== "string" ||
+    !record.title ||
+    !["running", "completed", "cancelled", "failed"].includes(String(record.state)) ||
+    typeof record.startedAt !== "string" ||
+    !isIsoTimestamp(record.startedAt) ||
+    (record.finishedAt !== undefined && !isIsoTimestamp(record.finishedAt)) ||
+    (record.error !== undefined && typeof record.error !== "string")
+  ) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
+  return {
+    id: record.id,
+    invocationId: record.invocationId,
+    toolName: record.toolName,
+    title: record.title,
+    state: record.state as AgentToolCallSnapshot["state"],
+    input: expectAgentJsonValue(record.input, `${label} input`),
+    ...(record.output === undefined
+      ? {}
+      : { output: expectAgentJsonValue(record.output, `${label} output`) }),
+    ...(typeof record.error === "string" ? { error: record.error } : {}),
+    startedAt: record.startedAt,
+    ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
+  };
+}
+
+function expectAgentJsonValue(value: unknown, label: string): AgentToolCallSnapshot["input"] {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => expectAgentJsonValue(entry, `${label}[${index}]`));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        expectAgentJsonValue(entry, `${label}.${key}`),
+      ]),
+    );
+  }
+  throw new Error(`Agent Runtime returned invalid ${label}`);
 }
 
 function expectAgentSessionSummary(value: unknown, label: string): AgentSessionSummary {

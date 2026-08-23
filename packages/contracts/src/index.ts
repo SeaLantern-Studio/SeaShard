@@ -69,6 +69,7 @@ export const desktopChannels = {
   agentSessionStart: "seashard.agent.session-start",
   agentMessageSend: "seashard.agent.message-send",
   agentInvocationGet: "seashard.agent.invocation-get",
+  agentInvocationCancel: "seashard.agent.invocation-cancel",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -122,12 +123,29 @@ export interface AgentUserMessage {
   readonly text: string;
 }
 
+export type AgentConversationMode = "chat" | "agent";
+
 export interface AgentInvocationReference {
   readonly sessionId: string;
   readonly invocationId: string;
 }
 
 export type AgentInvocationState = "running" | "completed" | "cancelled" | "failed";
+export type AgentToolCallState = "running" | "completed" | "cancelled" | "failed";
+
+/** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */
+export interface AgentToolCallSnapshot {
+  readonly id: string;
+  readonly invocationId: string;
+  readonly toolName: string;
+  readonly title: string;
+  readonly state: AgentToolCallState;
+  readonly input: JsonValue;
+  readonly output?: JsonValue;
+  readonly error?: string;
+  readonly startedAt: string;
+  readonly finishedAt?: string;
+}
 
 export interface AgentMessageSnapshot {
   readonly id: string;
@@ -147,6 +165,7 @@ export interface AgentSessionSummary {
 
 export interface AgentSessionSnapshot extends AgentSessionSummary {
   readonly messages: readonly AgentMessageSnapshot[];
+  readonly toolCalls: readonly AgentToolCallSnapshot[];
 }
 
 export interface AgentInvocationSummary {
@@ -161,17 +180,20 @@ export interface AgentInvocationSummary {
 
 export interface AgentInvocationSnapshot extends AgentInvocationSummary {
   readonly text: string;
+  readonly toolCalls: readonly AgentToolCallSnapshot[];
 }
 
 export interface AgentSessionService {
   listModels(): Promise<readonly AgentConfiguredModel[]>;
   startSession(input: {
     initialMessage: AgentUserMessage;
+    mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
   sendMessage(input: {
     sessionId: string;
     message: AgentUserMessage;
+    mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
   listSessions(): Promise<readonly AgentSessionSummary[]>;
@@ -191,7 +213,7 @@ export interface AgentClientService
       AgentSessionService,
       "listModels" | "startSession" | "sendMessage" | "listSessions" | "getSession"
     >,
-    Pick<AgentInvocationService, "getInvocation"> {}
+    AgentInvocationService {}
 
 /** 面向客户端的单个插件运行视图。 */
 export type ComponentSnapshot = {

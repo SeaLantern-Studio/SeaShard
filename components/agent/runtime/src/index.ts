@@ -1,6 +1,7 @@
 import {
   agentInvocationContract,
   agentSessionContract,
+  type AgentConversationMode,
   type AgentInvocationService,
   type AgentModelSelection,
   type AgentSessionService,
@@ -76,11 +77,13 @@ export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginMo
 
 function parseStartSessionInput(value: unknown): {
   initialMessage: AgentUserMessage;
+  mode: AgentConversationMode;
   model?: AgentModelSelection;
 } {
   const object = requireObject(value, "startSession input");
   return {
     initialMessage: parseUserMessage(object.initialMessage),
+    mode: parseConversationMode(object.mode),
     ...(object.model === undefined ? {} : { model: parseModelSelection(object.model) }),
   };
 }
@@ -88,12 +91,14 @@ function parseStartSessionInput(value: unknown): {
 function parseSendMessageInput(value: unknown): {
   sessionId: string;
   message: AgentUserMessage;
+  mode: AgentConversationMode;
   model?: AgentModelSelection;
 } {
   const object = requireObject(value, "sendMessage input");
   return {
     sessionId: requireString(object.sessionId, "sessionId"),
     message: parseUserMessage(object.message),
+    mode: parseConversationMode(object.mode),
     ...(object.model === undefined ? {} : { model: parseModelSelection(object.model) }),
   };
 }
@@ -111,6 +116,12 @@ function parseModelSelection(value: unknown): AgentModelSelection {
   };
 }
 
+function parseConversationMode(value: unknown): AgentConversationMode {
+  if (value !== "chat" && value !== "agent") {
+    throw new TypeError("mode must be chat or agent");
+  }
+  return value;
+}
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object`);

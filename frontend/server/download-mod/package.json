@@ -12,7 +12,7 @@
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/server-download-resource-shared": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",
-    "cmzya-modern-ui": "0.6.2",
+    "cmzya-modern-ui": "0.7.1",
     "lucide-vue-next": "0.400.0",
     "vue": "3.5.41"
   }

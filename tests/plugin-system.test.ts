@@ -7,7 +7,10 @@ import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
 import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
-import { ServiceRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
+import {
+  AgentToolRegistry,
+  ServiceRegistry,
+} from "../packages/plugin-system/src/runtime-registries.ts";
 import { PluginStore } from "../packages/plugin-system/src/store.ts";
 import { databaseWorkerEntry, validManifest } from "./plugin-test-fixtures.ts";
 
@@ -178,4 +181,40 @@ await test("service registry selects the nearest active provider", async () => {
   );
   replacementDispose();
   globalDispose();
+});
+
+await test("Agent tool registry rejects duplicates and invalidates Fiber snapshots", async () => {
+  const registry = new AgentToolRegistry();
+  const scope = { type: "global" as const, id: "global" };
+  const definition = {
+    namespace: "server",
+    name: "list",
+    title: "读取服务器列表",
+    description: "读取已登记的服务器实例。",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  };
+  const registration = registry.register("server-manager", scope, definition, async () => ({
+    count: 1,
+  }));
+
+  const [snapshot] = registry.snapshot();
+  assert.equal(snapshot?.name, "server_list");
+  assert.equal(registry.countRuntime("server-manager"), 1);
+  assert.deepEqual(await snapshot?.execute({}, {}), { count: 1 });
+  assert.throws(
+    () => registry.register("duplicate-manager", scope, definition, async () => null),
+    /server_list.*server-manager/,
+  );
+
+  registration.dispose();
+  assert.deepEqual(registry.snapshot(), []);
+  await assert.rejects(snapshot!.execute({}, {}), /Agent 工具已停止：server_list/);
+
+  registry.register("replacement-manager", scope, definition, async () => null);
+  registry.removeRuntime("replacement-manager");
+  assert.equal(registry.countRuntime(), 0);
 });

@@ -292,6 +292,7 @@ export function expectAgentStartSessionInput(
         "Agent initial message text",
       ),
     },
+    mode: expectAgentConversationMode(record.mode),
     ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
   };
 }
@@ -308,6 +309,7 @@ export function expectAgentSendMessageInput(
         "Agent message text",
       ),
     },
+    mode: expectAgentConversationMode(record.mode),
     ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
   };
 }
@@ -318,4 +320,11 @@ function expectAgentModelSelection(value: unknown): AgentModelSelection {
     connectionId: expectNonEmptyString(record.connectionId, "Agent connection ID"),
     modelId: expectNonEmptyString(record.modelId, "Agent model ID"),
   };
+}
+
+function expectAgentConversationMode(value: unknown): "chat" | "agent" {
+  if (value !== "chat" && value !== "agent") {
+    throw new TypeError("Agent mode must be chat or agent");
+  }
+  return value;
 }

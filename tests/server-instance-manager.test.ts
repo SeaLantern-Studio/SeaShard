@@ -16,6 +16,7 @@ import type {
 import {
   ServerInstanceManager,
   SQLiteServerInstanceRegistry,
+  registerServerInstanceAgentTools,
   createShortRandomId,
   portableInstanceMetadataDirectoryName,
   portableSeaShardInstanceFileName,
@@ -27,6 +28,7 @@ import {
   type PortableSeaShardInstanceManifest,
   type PortableServerInformationManifest,
 } from "../components/server/instance-manager/src/index.ts";
+import { AgentToolRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,6 +38,57 @@ import test from "node:test";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
+await test("server instance component owns its Agent tool projection", async () => {
+  const registry = new AgentToolRegistry();
+  registerServerInstanceAgentTools(
+    {
+      agentTool(definition, execute) {
+        return registry.register(
+          "test.server-instance-manager",
+          { type: "global", id: "global" },
+          definition,
+          execute,
+        ).id;
+      },
+    },
+    {
+      listInstances: async () => [
+        {
+          id: "server-1",
+          name: "Paper",
+          rootPath: "C:/SeaShard/servers/server-1",
+          coreJarPath: "C:/SeaShard/servers/server-1/paper.jar",
+          iconPath: "C:/SeaShard/servers/server-1/.seashard/icon.png",
+          storageMode: "managed",
+          source: "downloaded",
+          modLoader: null,
+          serverType: "paper",
+          gameVersion: "1.21.1",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T01:00:00.000Z",
+          lastStartedAt: "2026-08-21T00:30:00.000Z",
+        },
+      ],
+    },
+  );
+  const [tool] = registry.snapshot();
+  assert.equal(tool?.name, "server_list");
+  assert.deepEqual(await tool?.execute({}, {}), [
+    {
+      id: "server-1",
+      name: "Paper",
+      storageMode: "managed",
+      source: "downloaded",
+      modLoader: null,
+      serverType: "paper",
+      gameVersion: "1.21.1",
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T01:00:00.000Z",
+      lastStartedAt: "2026-08-21T00:30:00.000Z",
+    },
+  ]);
+});
+
 await test("resource source index keeps valid unknown origins and ignores malformed records", () => {
   const valid = {
     source: "modrinth",

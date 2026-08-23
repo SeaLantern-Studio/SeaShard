@@ -1,4 +1,5 @@
 import type {
+  AgentToolHandler,
   ExecutionContext,
   JsonValue,
   PluginContext,
@@ -7,6 +8,8 @@ import type {
   ServiceProvider,
 } from "@seashard/plugin-sdk";
 import type {
+  AgentToolInvocationPayload,
+  AgentToolRegistrationPayload,
   EventDispatchPayload,
   HostProtocolMessage,
   PrepareRuntimePayload,
@@ -33,6 +36,7 @@ const pending = new Map<
 >();
 const providers = new Map<string, ServiceProvider>();
 const eventHandlers = new Map<string, (payload: JsonValue) => Promise<void> | void>();
+const agentToolHandlers = new Map<string, AgentToolHandler>();
 let requestCounter = 0;
 let registrationCounter = 0;
 let prepared: PreparedState | undefined;
@@ -88,6 +92,8 @@ async function executeCommand(command: string, payload: JsonValue): Promise<Json
     case "dispatch-event":
       await dispatchEvent(payload as unknown as EventDispatchPayload);
       return undefined;
+    case "invoke-agent-tool":
+      return invokeAgentTool(payload as unknown as AgentToolInvocationPayload);
     case "stop":
       await dispose();
       return undefined;
@@ -213,6 +219,22 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
       );
       return registrationId;
     },
+    agentTool(definition, execute) {
+      const registrationId = nextRegistrationId("agent-tool");
+      agentToolHandlers.set(registrationId, execute);
+      notify("agent-tool-register", {
+        registrationId,
+        definition,
+      } satisfies AgentToolRegistrationPayload);
+      cordisContext.effect(
+        () => () => {
+          agentToolHandlers.delete(registrationId);
+          notify("agent-tool-unregister", { registrationId });
+        },
+        `Agent tool ${definition.namespace}_${definition.name}`,
+      );
+      return registrationId;
+    },
     on(event, handler) {
       const registrationId = nextRegistrationId("event");
       eventHandlers.set(registrationId, handler);
@@ -247,6 +269,11 @@ async function dispatchEvent(payload: EventDispatchPayload): Promise<void> {
   await handler(payload.payload);
 }
 
+async function invokeAgentTool(payload: AgentToolInvocationPayload): Promise<JsonValue> {
+  const handler = agentToolHandlers.get(payload.registrationId);
+  if (!handler) throw new Error(`Agent tool registration is not active: ${payload.registrationId}`);
+  return handler(payload.input, {});
+}
 async function dispose(): Promise<void> {
   await fiber?.dispose();
   fiber = undefined;
@@ -254,6 +281,7 @@ async function dispose(): Promise<void> {
   prepared = undefined;
   providers.clear();
   eventHandlers.clear();
+  agentToolHandlers.clear();
 }
 
 async function receiveNotification(message: ProtocolNotification): Promise<void> {

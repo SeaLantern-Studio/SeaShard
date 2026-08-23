@@ -13,6 +13,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
+  AgentToolInvocationPayload,
+  AgentToolRegistrationPayload,
   ContributionRegistrationPayload,
   EventDispatchPayload,
   EventRegistrationPayload,
@@ -29,11 +31,17 @@ import type {
   StoragePutPayload,
 } from "./host-protocol";
 import { PluginRegistry } from "./registry";
-import { ContributionRegistry, PluginEventBus, ServiceRegistry } from "./runtime-registries";
+import {
+  AgentToolRegistry,
+  ContributionRegistry,
+  PluginEventBus,
+  ServiceRegistry,
+} from "./runtime-registries";
 import type { ResolvedEntry } from "./types";
 
 interface RuntimeRegistries {
   services: ServiceRegistry;
+  agentTools: AgentToolRegistry;
   contributions: ContributionRegistry;
   events: PluginEventBus;
   storage: PluginStorageBroker;
@@ -322,6 +330,7 @@ class PluginHostSession {
       case "service-unregister":
       case "contribution-unregister":
       case "event-unregister":
+      case "agent-tool-unregister":
         this.removeRegistration(payload as unknown as ServiceUnregistrationPayload);
         break;
       case "contribution-register":
@@ -329,6 +338,9 @@ class PluginHostSession {
         break;
       case "event-register":
         this.registerEvent(payload as unknown as EventRegistrationPayload);
+        break;
+      case "agent-tool-register":
+        this.registerAgentTool(payload as unknown as AgentToolRegistrationPayload);
         break;
       default:
         throw new Error(`unknown plugin host notification: ${event}`);
@@ -380,6 +392,25 @@ class PluginHostSession {
       },
     );
     this.registrationDisposers.set(payload.registrationId, dispose);
+  }
+
+  private registerAgentTool(payload: AgentToolRegistrationPayload): void {
+    const registration = this.registries.agentTools.register(
+      this.entry.runtimeId,
+      scopeFor(this.entry),
+      payload.definition,
+      async (input) => {
+        const result = await this.request("invoke-agent-tool", {
+          registrationId: payload.registrationId,
+          input,
+        } satisfies AgentToolInvocationPayload);
+        if (result === undefined) {
+          throw new Error(`external Agent tool returned no JSON value: ${payload.registrationId}`);
+        }
+        return result;
+      },
+    );
+    this.registrationDisposers.set(payload.registrationId, registration.dispose);
   }
 
   private removeRegistration(payload: ServiceUnregistrationPayload): void {
@@ -462,6 +493,19 @@ function createLocalPluginContext(
       cordisContext.effect(() => registration.dispose, `contribution ${kind}`);
       return registration.id;
     },
+    agentTool(definition, execute) {
+      const registration = registries.agentTools.register(
+        entry.runtimeId,
+        scope,
+        definition,
+        execute,
+      );
+      cordisContext.effect(
+        () => registration.dispose,
+        `Agent tool ${definition.namespace}_${definition.name}`,
+      );
+      return registration.id;
+    },
     on(event, handler) {
       cordisContext.effect(
         () => registries.events.on(event, entry.runtimeId, scope, handler),
@@ -497,6 +541,7 @@ function removeRuntimeRegistrations(registries: RuntimeRegistries, runtimeId: st
   registries.services.removeRuntime(runtimeId);
   registries.contributions.removeRuntime(runtimeId);
   registries.events.removeRuntime(runtimeId);
+  registries.agentTools.removeRuntime(runtimeId);
 }
 
 function validatePluginModule(value: unknown): PluginModule {

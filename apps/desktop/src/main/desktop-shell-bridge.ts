@@ -167,6 +167,9 @@ export async function registerDesktopShellBridge(
               expectAgentInvocation(
                 await kernel.callService(agentInvocationContract, "getInvocation", [invocationId]),
               ),
+            cancelAgentInvocation: async (invocationId) => {
+              await kernel.callService(agentInvocationContract, "cancelInvocation", [invocationId]);
+            },
             readServerCoreTypes: async () =>
               expectServerCoreTypes(
                 await kernel.callService(serverCoreSourceContract, "listTypes", []),

@@ -103,10 +103,11 @@ export class AgentModelCatalog {
     if (!provider || !model) {
       throw new Error(`Agent 模型不存在：${selected.connectionId}/${selected.modelId}`);
     }
+    const providerOptions = resolveProviderOptions(provider, model);
     return {
       selection: { connectionId: provider.id, modelId: model.modelId },
       languageModel: createLanguageModel(provider, model, this.environment, this.configPath),
-      ...(model.providerOptions ? { providerOptions: model.providerOptions } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
     };
   }
 
@@ -265,6 +266,27 @@ function createLanguageModel(
     ...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   }).languageModel(model.modelId);
+}
+
+/**
+ * Responses 工具闭环由本地 Session 回放完整上下文，不依赖供应商保存响应。
+ * 显式关闭 store 后，OpenAI Provider 会请求并回传 encrypted reasoning，
+ * 避免中转层将 store 强制改为 false 时继续引用上游未保存的 rs_* 项。
+ */
+function resolveProviderOptions(
+  provider: ParsedProvider,
+  model: ParsedModel,
+): AgentProviderOptions | undefined {
+  if (model.api !== "openai-responses") return model.providerOptions;
+  const configured = model.providerOptions ?? {};
+  const optionNamespace = provider.id.includes("azure") ? "azure" : "openai";
+  return {
+    ...configured,
+    [optionNamespace]: {
+      ...configured[optionNamespace],
+      store: false,
+    },
+  };
 }
 
 function resolveApiKey(

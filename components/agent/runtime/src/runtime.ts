@@ -1,38 +1,74 @@
 import type {
   AgentConfiguredModel,
+  AgentConversationMode,
   AgentInvocationReference,
   AgentInvocationSnapshot,
   AgentInvocationState,
   AgentModelSelection,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
-import { streamText, type ModelMessage } from "ai";
+import type { AgentToolDefinition, AgentToolHandler, JsonValue } from "@seashard/plugin-sdk";
+import {
+  APICallError,
+  isStepCount,
+  jsonSchema,
+  RetryError,
+  streamText,
+  tool,
+  type JSONSchema7,
+  type ModelMessage,
+  type ToolSet,
+} from "ai";
 import { randomUUID } from "node:crypto";
 import { AgentModelCatalog, type ResolvedAgentModel } from "./model-config";
 import { AgentSessionJournal, type LoadedAgentSession } from "./session-journal";
 
 const maximumUserMessageLength = 100_000;
+const maximumAgentSteps = 6;
+const toolNamePattern = /^[A-Za-z0-9_-]+$/u;
+
+export interface AgentModelSource {
+  initialize(): Promise<void>;
+  list(): Promise<readonly AgentConfiguredModel[]>;
+  resolve(selection?: AgentModelSelection): Promise<ResolvedAgentModel>;
+}
+
+export interface AgentRuntimeTool {
+  readonly name: string;
+  readonly definition: AgentToolDefinition;
+  readonly execute: AgentToolHandler;
+}
+
+export interface AgentRuntimeToolSource {
+  snapshot(): readonly AgentRuntimeTool[];
+}
 
 interface RunningInvocation {
   snapshot: AgentInvocationSnapshot;
+  readonly mode: AgentConversationMode;
   readonly controller: AbortController;
   readonly resolvedModel: ResolvedAgentModel;
+  readonly toolDefinitions: ReadonlyMap<string, AgentRuntimeTool>;
+  readonly tools: ToolSet;
 }
 
 export interface AgentRuntimeOptions {
   readonly userDataRoot: string;
-  readonly modelCatalog?: AgentModelCatalog;
+  readonly modelCatalog?: AgentModelSource;
+  readonly toolSource: AgentRuntimeToolSource;
   readonly reportError?: (error: unknown) => void;
 }
 
-/** 第一阶段 Agent 执行内核：模型解析、持久化 Session、文本流与取消。 */
+/** Agent 执行内核：模型解析、持久化 Session、文本流、工具闭环与取消。 */
 export class AgentRuntime {
   readonly journal: AgentSessionJournal;
-  readonly models: AgentModelCatalog;
+  readonly models: AgentModelSource;
 
   private readonly reportError: (error: unknown) => void;
+  private readonly toolSource: AgentRuntimeToolSource;
   private readonly running = new Map<string, RunningInvocation>();
   private readonly tasks = new Map<string, Promise<void>>();
   private readonly invocations = new Map<string, AgentInvocationSnapshot>();
@@ -45,6 +81,7 @@ export class AgentRuntime {
     this.journal = new AgentSessionJournal(options.userDataRoot);
     this.reportError =
       options.reportError ?? ((error) => console.error("Agent Runtime failed", error));
+    this.toolSource = options.toolSource;
   }
 
   async initialize(): Promise<void> {
@@ -60,29 +97,38 @@ export class AgentRuntime {
 
   async startSession(input: {
     initialMessage: AgentUserMessage;
+    mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference> {
     this.assertAvailable();
     const text = validateUserMessage(input.initialMessage);
+    const mode = validateConversationMode(input.mode);
     const resolvedModel = await this.models.resolve(input.model);
     const session = await this.journal.create(resolvedModel.selection);
     try {
-      return await this.beginInvocation(session, text, resolvedModel);
+      return await this.beginInvocation(session, text, mode, resolvedModel);
     } catch (error) {
       await this.journal.delete(session.header.id).catch(this.reportError);
       throw error;
     }
   }
+
   async sendMessage(input: {
     sessionId: string;
     message: AgentUserMessage;
+    mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference> {
     this.assertAvailable();
     const session = await this.journal.get(validateIdentifier(input.sessionId, "sessionId"));
     const currentModel = session.invocations.at(-1)?.model ?? session.header.model;
     const resolvedModel = await this.models.resolve(input.model ?? currentModel);
-    return this.beginInvocation(session, validateUserMessage(input.message), resolvedModel);
+    return this.beginInvocation(
+      session,
+      validateUserMessage(input.message),
+      validateConversationMode(input.mode),
+      resolvedModel,
+    );
   }
 
   listSessions(): Promise<readonly AgentSessionSummary[]> {
@@ -148,10 +194,12 @@ export class AgentRuntime {
   private async beginInvocation(
     session: LoadedAgentSession,
     text: string,
+    mode: AgentConversationMode,
     resolvedModel: ResolvedAgentModel,
   ): Promise<AgentInvocationReference> {
     const active = this.activeBySession.get(session.header.id);
     if (active) throw new Error(`当前对话已有正在运行的请求：${active}`);
+    const toolDefinitions = indexToolDefinitions(this.toolSource.snapshot());
 
     const invocationId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -174,11 +222,15 @@ export class AgentRuntime {
       model: { ...resolvedModel.selection },
       startedAt,
       text: "",
+      toolCalls: [],
     };
     const running: RunningInvocation = {
       snapshot,
+      mode,
       controller: new AbortController(),
       resolvedModel,
+      toolDefinitions,
+      tools: createToolSet(toolDefinitions.values()),
     };
     this.running.set(invocationId, running);
     this.invocations.set(invocationId, snapshot);
@@ -196,24 +248,56 @@ export class AgentRuntime {
     let text = "";
     try {
       const session = await this.journal.get(invocation.snapshot.sessionId);
-      const messages: ModelMessage[] = session.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
+      const messages = projectModelMessages(session);
+      const agentMode = invocation.mode === "agent" && invocation.toolDefinitions.size > 0;
       const result = streamText({
         model: invocation.resolvedModel.languageModel,
         messages,
         ...(invocation.resolvedModel.providerOptions
           ? { providerOptions: invocation.resolvedModel.providerOptions }
           : {}),
+        ...(agentMode ? { tools: invocation.tools, stopWhen: isStepCount(maximumAgentSteps) } : {}),
         abortSignal: invocation.controller.signal,
       });
-      for await (const delta of result.textStream) {
-        text += delta;
-        invocation.snapshot = { ...invocation.snapshot, text };
-        this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+
+      for await (const part of result.fullStream) {
+        if (part.type === "text-delta") {
+          text += part.text;
+          this.updateInvocationText(invocation, text);
+          continue;
+        }
+        if (part.type === "tool-call") {
+          await this.startToolCall(invocation, {
+            id: part.toolCallId,
+            toolName: part.toolName,
+            input: requireJsonValue(part.input, `工具 ${part.toolName} 输入`),
+          });
+          continue;
+        }
+        if (part.type === "tool-result") {
+          await this.finishToolCall(
+            invocation,
+            part.toolCallId,
+            "completed",
+            requireJsonValue(part.output, `工具 ${part.toolName} 输出`),
+          );
+          continue;
+        }
+        if (part.type === "tool-error") {
+          await this.finishToolCall(
+            invocation,
+            part.toolCallId,
+            "failed",
+            undefined,
+            errorMessage(part.error),
+          );
+          continue;
+        }
+        if (part.type === "error") throw part.error;
       }
+
       if (invocation.controller.signal.aborted) {
+        await this.finishOpenToolCalls(invocation, "cancelled", "调用已取消");
         await this.finishInvocation(invocation, "cancelled", text);
         return;
       }
@@ -228,14 +312,86 @@ export class AgentRuntime {
       await this.finishInvocation(invocation, "completed", text);
     } catch (error) {
       const cancelled = invocation.controller.signal.aborted || isAbortError(error);
+      const message = cancelled ? "调用已取消" : errorMessage(error);
+      await this.finishOpenToolCalls(invocation, cancelled ? "cancelled" : "failed", message);
       await this.finishInvocation(
         invocation,
         cancelled ? "cancelled" : "failed",
         text,
-        cancelled ? undefined : errorMessage(error),
+        cancelled ? undefined : message,
       );
       if (!cancelled) this.reportError(error);
     }
+  }
+
+  private updateInvocationText(invocation: RunningInvocation, text: string): void {
+    invocation.snapshot = { ...invocation.snapshot, text };
+    this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+  }
+
+  private async startToolCall(
+    invocation: RunningInvocation,
+    call: { readonly id: string; readonly toolName: string; readonly input: JsonValue },
+  ): Promise<void> {
+    const startedAt = new Date().toISOString();
+    const snapshot: AgentToolCallSnapshot = {
+      id: call.id,
+      invocationId: invocation.snapshot.id,
+      toolName: call.toolName,
+      title: invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName,
+      state: "running",
+      input: call.input,
+      startedAt,
+    };
+    await this.recordToolCall(invocation, snapshot);
+  }
+
+  private async finishToolCall(
+    invocation: RunningInvocation,
+    toolCallId: string,
+    state: "completed" | "failed",
+    output?: JsonValue,
+    error?: string,
+  ): Promise<void> {
+    const current = invocation.snapshot.toolCalls.find(({ id }) => id === toolCallId);
+    if (!current) throw new Error(`Agent Tool Call 不存在：${toolCallId}`);
+    const snapshot: AgentToolCallSnapshot = {
+      ...current,
+      state,
+      ...(output === undefined ? {} : { output }),
+      ...(error ? { error } : {}),
+      finishedAt: new Date().toISOString(),
+    };
+    await this.recordToolCall(invocation, snapshot);
+  }
+
+  private async finishOpenToolCalls(
+    invocation: RunningInvocation,
+    state: "cancelled" | "failed",
+    error: string,
+  ): Promise<void> {
+    for (const call of invocation.snapshot.toolCalls) {
+      if (call.state !== "running") continue;
+      await this.recordToolCall(invocation, {
+        ...call,
+        state,
+        error,
+        finishedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  private async recordToolCall(
+    invocation: RunningInvocation,
+    snapshot: AgentToolCallSnapshot,
+  ): Promise<void> {
+    await this.journal.appendToolCall(invocation.snapshot.sessionId, snapshot);
+    const exists = invocation.snapshot.toolCalls.some(({ id }) => id === snapshot.id);
+    const toolCalls = exists
+      ? invocation.snapshot.toolCalls.map((call) => (call.id === snapshot.id ? snapshot : call))
+      : [...invocation.snapshot.toolCalls, snapshot];
+    invocation.snapshot = { ...invocation.snapshot, toolCalls };
+    this.invocations.set(invocation.snapshot.id, invocation.snapshot);
   }
 
   private async finishInvocation(
@@ -282,9 +438,95 @@ function projectInvocation(
     model: { ...last.model },
     startedAt: first.timestamp,
     text: last.text ?? "",
+    toolCalls: session.toolCalls.filter((call) => call.invocationId === invocationId),
     ...(last.state === "running" ? {} : { finishedAt: last.timestamp }),
     ...(last.error ? { error: last.error } : {}),
   };
+}
+
+/** 按 Invocation 重建工具调用消息，确保后续轮次能看到既有工具结果。 */
+function projectModelMessages(session: LoadedAgentSession): ModelMessage[] {
+  const messages: ModelMessage[] = [];
+  const assistantByInvocation = new Map<string, typeof session.messages>();
+  for (const message of session.messages) {
+    if (message.role !== "assistant") continue;
+    const group = assistantByInvocation.get(message.invocationId) ?? [];
+    assistantByInvocation.set(message.invocationId, [...group, message]);
+  }
+
+  for (const message of session.messages) {
+    if (message.role !== "user") continue;
+    messages.push({ role: "user", content: message.content });
+    for (const call of session.toolCalls) {
+      if (call.invocationId !== message.invocationId || call.state === "running") continue;
+      messages.push({
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: call.id,
+            toolName: call.toolName,
+            input: call.input,
+          },
+        ],
+      });
+      messages.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: call.id,
+            toolName: call.toolName,
+            output:
+              call.state === "completed"
+                ? { type: "json", value: call.output ?? null }
+                : { type: "error-text", value: call.error ?? "工具调用未完成" },
+          },
+        ],
+      });
+    }
+    for (const assistant of assistantByInvocation.get(message.invocationId) ?? []) {
+      messages.push({ role: "assistant", content: assistant.content });
+    }
+  }
+  return messages;
+}
+
+function indexToolDefinitions(
+  definitions: readonly AgentRuntimeTool[],
+): ReadonlyMap<string, AgentRuntimeTool> {
+  const indexed = new Map<string, AgentRuntimeTool>();
+  for (const entry of definitions) {
+    if (!toolNamePattern.test(entry.name)) {
+      throw new TypeError(`Agent 工具名称不合法：${entry.name}`);
+    }
+    const expectedName = `${entry.definition.namespace}_${entry.definition.name}`;
+    if (entry.name !== expectedName) {
+      throw new TypeError(`Agent 工具身份不一致：${entry.name} != ${expectedName}`);
+    }
+    if (!entry.definition.title.trim() || !entry.definition.description.trim()) {
+      throw new TypeError(`Agent 工具缺少标题或描述：${entry.name}`);
+    }
+    if (indexed.has(entry.name)) throw new TypeError(`Agent 工具名称重复：${entry.name}`);
+    indexed.set(entry.name, entry);
+  }
+  return indexed;
+}
+
+function createToolSet(definitions: Iterable<AgentRuntimeTool>): ToolSet {
+  const tools: ToolSet = {};
+  for (const entry of definitions) {
+    tools[entry.name] = tool({
+      title: entry.definition.title,
+      description: entry.definition.description,
+      inputSchema: jsonSchema<JsonValue>(entry.definition.inputSchema as JSONSchema7),
+      execute: async (input, { abortSignal }) =>
+        entry.execute(requireJsonValue(input, `工具 ${entry.name} 输入`), {
+          signal: abortSignal,
+        }),
+    });
+  }
+  return tools;
 }
 
 function validateUserMessage(message: AgentUserMessage): string {
@@ -299,13 +541,37 @@ function validateUserMessage(message: AgentUserMessage): string {
   return text;
 }
 
+function validateConversationMode(value: AgentConversationMode): AgentConversationMode {
+  if (value !== "chat" && value !== "agent") throw new TypeError("Agent mode 不合法");
+  return value;
+}
+
 function validateIdentifier(value: string, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new TypeError(`${label} 必须是字符串`);
   return value;
 }
 
+function requireJsonValue(value: unknown, label: string): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map((entry) => requireJsonValue(entry, label));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        requireJsonValue(entry, `${label}.${key}`),
+      ]),
+    );
+  }
+  throw new TypeError(`${label} 必须是 JSON 值`);
+}
+
 function cloneInvocation(snapshot: AgentInvocationSnapshot): AgentInvocationSnapshot {
-  return { ...snapshot, model: { ...snapshot.model } };
+  return {
+    ...snapshot,
+    model: { ...snapshot.model },
+    toolCalls: snapshot.toolCalls.map((call) => ({ ...call })),
+  };
 }
 
 function isAbortError(error: unknown): boolean {
@@ -313,5 +579,35 @@ function isAbortError(error: unknown): boolean {
 }
 
 function errorMessage(error: unknown): string {
+  const retry = RetryError.isInstance(error) ? error : undefined;
+  const cause = retry?.lastError ?? error;
+  if (APICallError.isInstance(cause)) {
+    const status = cause.statusCode ? `HTTP ${cause.statusCode}` : "上游请求失败";
+    const attempts = retry && retry.errors.length > 1 ? `，共尝试 ${retry.errors.length} 次` : "";
+    const responseDetail = apiErrorResponseDetail(cause.responseBody);
+    const detail =
+      responseDetail && responseDetail !== cause.message
+        ? `${cause.message}；${responseDetail}`
+        : cause.message;
+    return `${status}${attempts}：${detail}`.slice(0, 2_000);
+  }
   return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+}
+
+/** 只投影结构化错误字段，避免把请求头、凭据或任意 HTML 响应带到 Renderer。 */
+function apiErrorResponseDetail(responseBody: string | undefined): string | undefined {
+  if (!responseBody) return undefined;
+  try {
+    const body = JSON.parse(responseBody) as {
+      error?: { message?: unknown; type?: unknown; code?: unknown; param?: unknown };
+    };
+    const error = body.error;
+    if (!error || typeof error.message !== "string") return undefined;
+    const labels = [error.type, error.code, error.param].filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    );
+    return labels.length > 0 ? `${labels.join("/")}：${error.message}` : error.message;
+  } catch {
+    return undefined;
+  }
 }
