@@ -38,31 +38,33 @@ import test from "node:test";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
-await test("server instance component owns its Agent resource projection", async () => {
+await test("server instance component owns pagination, projection and card presentation", async () => {
   const registry = new AgentResourceRegistry();
   registerServerInstanceAgentResources(
     {
-      agentResource(definition, read) {
-        return registry.register(
-          "test.server-instance-manager",
-          { type: "global", id: "global" },
-          definition,
-          read,
-        ).id;
+      agentResources(resources) {
+        for (const [pattern, resource] of Object.entries(resources)) {
+          registry.register(
+            "test.server-instance-manager",
+            { type: "global", id: "global" },
+            pattern,
+            resource,
+          );
+        }
       },
     },
     {
       listInstances: async () => [
         {
           id: "server-1",
-          name: "Paper",
+          name: "Fabric",
           rootPath: "C:/SeaShard/servers/server-1",
-          coreJarPath: "C:/SeaShard/servers/server-1/paper.jar",
+          coreJarPath: "C:/SeaShard/servers/server-1/fabric.jar",
           iconPath: "C:/SeaShard/servers/server-1/.seashard/icon.png",
           storageMode: "managed",
           source: "downloaded",
-          modLoader: null,
-          serverType: "paper",
+          modLoader: "fabric",
+          serverType: "fabric",
           gameVersion: "1.21.1",
           createdAt: "2026-08-21T00:00:00.000Z",
           updatedAt: "2026-08-21T01:00:00.000Z",
@@ -72,30 +74,53 @@ await test("server instance component owns its Agent resource projection", async
     },
   );
   const snapshot = registry.snapshot();
-  assert.deepEqual(snapshot.definitions, [
-    {
-      pattern: "server://instances",
-      description:
-        "读取 SeaShard 已登记的服务器实例，包括名称、核心类型、Minecraft 版本、存储方式、来源和最近启动时间；结果不包含宿主文件路径。",
-    },
+  assert.equal(snapshot.definitions.length, 1);
+  assert.equal(snapshot.definitions[0]?.pattern, "server://instances");
+  assert.equal(snapshot.definitions[0]?.presentation?.title, "读取服务器实例");
+  assert.deepEqual(snapshot.definitions[0]?.inputSchema.required, undefined);
+  const prepared = snapshot.prepare("server://instances", {
+    page: 1,
+    pageSize: 10,
+    modLoader: "fabric",
+  });
+  assert.deepEqual(await prepared.presentRequest(), [
+    { value: "1～10" },
+    { label: "类型", value: "Fabric" },
   ]);
-  const result = await snapshot.read("server://instances");
+  const result = await prepared.read();
   assert.equal(result.mimeType, "application/json");
-  assert.deepEqual(JSON.parse(result.content), [
-    {
-      id: "server-1",
-      name: "Paper",
-      storageMode: "managed",
-      source: "downloaded",
-      modLoader: null,
-      serverType: "paper",
-      gameVersion: "1.21.1",
-      createdAt: "2026-08-21T00:00:00.000Z",
-      updatedAt: "2026-08-21T01:00:00.000Z",
-      lastStartedAt: "2026-08-21T00:30:00.000Z",
+  assert.deepEqual(result.content, {
+    items: [
+      {
+        id: "server-1",
+        name: "Fabric",
+        storageMode: "managed",
+        source: "downloaded",
+        modLoader: "fabric",
+        serverType: "fabric",
+        gameVersion: "1.21.1",
+        createdAt: "2026-08-21T00:00:00.000Z",
+        updatedAt: "2026-08-21T01:00:00.000Z",
+        lastStartedAt: "2026-08-21T00:30:00.000Z",
+      },
+    ],
+    pagination: {
+      page: 1,
+      pageSize: 10,
+      totalItems: 1,
+      totalPages: 1,
+      hasMore: false,
     },
-  ]);
-  assert.doesNotMatch(result.content, /rootPath|coreJarPath|iconPath|SeaShard\/servers/u);
+  });
+  assert.deepEqual(await prepared.presentResult(result), [{ value: "1", unit: "个结果" }]);
+  assert.doesNotMatch(
+    JSON.stringify(result.content),
+    /rootPath|coreJarPath|iconPath|SeaShard\/servers/u,
+  );
+  assert.throws(
+    () => snapshot.prepare("server://instances", { page: 1, pageSize: 101 }),
+    /不符合 inputSchema/,
+  );
 });
 
 await test("resource source index keeps valid unknown origins and ignores malformed records", () => {

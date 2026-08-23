@@ -1,5 +1,7 @@
 import type { PreparedPlugin, RunningPlugin } from "./runtime";
 import type {
+  AgentActivityPresentationField,
+  AgentResource,
   AgentResourceReadRequest,
   AgentResourceReadResult,
   ExecutionContext,
@@ -16,6 +18,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   AgentCallCancellationPayload,
+  AgentResourcePresentRequestPayload,
+  AgentResourcePresentResultPayload,
+  AgentResourcePresentationResponsePayload,
   AgentResourceReadPayload,
   AgentResourceReadResponsePayload,
   AgentResourceRegistrationPayload,
@@ -306,6 +311,38 @@ class PluginHostSession {
     });
   }
 
+  private async presentExternalAgentResourceRequest(
+    registrationId: string,
+    request: AgentResourceReadRequest,
+  ): Promise<readonly AgentActivityPresentationField[]> {
+    const result = await this.request("present-agent-resource-request", {
+      registrationId,
+      request,
+    } satisfies AgentResourcePresentRequestPayload);
+    if (result === undefined) {
+      throw new Error(
+        `external Agent resource returned no request presentation: ${registrationId}`,
+      );
+    }
+    return result as unknown as AgentResourcePresentationResponsePayload;
+  }
+
+  private async presentExternalAgentResourceResult(
+    registrationId: string,
+    request: AgentResourceReadRequest,
+    result: AgentResourceReadResult,
+  ): Promise<readonly AgentActivityPresentationField[]> {
+    const presentation = await this.request("present-agent-resource-result", {
+      registrationId,
+      request,
+      result,
+    } satisfies AgentResourcePresentResultPayload);
+    if (presentation === undefined) {
+      throw new Error(`external Agent resource returned no result presentation: ${registrationId}`);
+    }
+    return presentation as unknown as AgentResourcePresentationResponsePayload;
+  }
+
   close(): Promise<void> {
     this.closeTask ??= this.closeProcess();
     return this.closeTask;
@@ -472,12 +509,31 @@ class PluginHostSession {
   }
 
   private registerAgentResource(payload: AgentResourceRegistrationPayload): void {
+    const { pattern, ...descriptor } = payload.definition;
+    const resource: AgentResource = {
+      ...descriptor,
+      implementation: {
+        read: (request, context) =>
+          this.readExternalAgentResource(payload.registrationId, request, context.signal),
+        ...(payload.hasPresentRequest
+          ? {
+              presentRequest: (request: AgentResourceReadRequest) =>
+                this.presentExternalAgentResourceRequest(payload.registrationId, request),
+            }
+          : {}),
+        ...(payload.hasPresentResult
+          ? {
+              presentResult: (request: AgentResourceReadRequest, result: AgentResourceReadResult) =>
+                this.presentExternalAgentResourceResult(payload.registrationId, request, result),
+            }
+          : {}),
+      },
+    };
     const registration = this.registries.agentResources.register(
       this.entry.runtimeId,
       scopeFor(this.entry),
-      payload.definition,
-      (request, context) =>
-        this.readExternalAgentResource(payload.registrationId, request, context.signal),
+      pattern,
+      resource,
     );
     this.registrationDisposers.set(payload.registrationId, registration.dispose);
   }
@@ -575,15 +631,16 @@ function createLocalPluginContext(
       );
       return registration.id;
     },
-    agentResource(definition, read) {
-      const registration = registries.agentResources.register(
-        entry.runtimeId,
-        scope,
-        definition,
-        read,
-      );
-      cordisContext.effect(() => registration.dispose, `Agent resource ${definition.pattern}`);
-      return registration.id;
+    agentResources(resources) {
+      for (const [pattern, resource] of Object.entries(resources)) {
+        const registration = registries.agentResources.register(
+          entry.runtimeId,
+          scope,
+          pattern,
+          resource,
+        );
+        cordisContext.effect(() => registration.dispose, `Agent resource ${pattern}`);
+      }
     },
     on(event, handler) {
       cordisContext.effect(

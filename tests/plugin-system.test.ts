@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
-import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
+import type { ExecutionContext, JsonValue } from "../packages/plugin-sdk/src/index.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
   AgentResourceRegistry,
@@ -218,85 +218,139 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
   assert.equal(registry.countRuntime(), 0);
 });
 
-await test("Agent resource registry routes, paginates and invalidates snapshots", async () => {
+await test("Agent resource registry routes, validates domain input and invalidates snapshots", async () => {
   const registry = new AgentResourceRegistry();
   const scope = { type: "global" as const, id: "global" };
   let observed:
     | {
-        readonly params: Readonly<Record<string, string>>;
+        readonly pathParams: Readonly<Record<string, string>>;
         readonly query: Readonly<Record<string, string>>;
+        readonly input: JsonValue;
       }
     | undefined;
   const registration = registry.register(
     "server-runtime",
     scope,
+    "server://instances/{instanceId}/logs",
     {
-      pattern: "server://instances/{instanceId}/logs",
       description: "读取服务器日志。",
-    },
-    async ({ params, uri }) => {
-      observed = { params: { ...params }, query: { ...uri.query } };
-      return {
-        mimeType: "text/plain",
-        content: "first\nsecond\nthird",
-      };
+      inputSchema: {
+        type: "object",
+        properties: {
+          offset: { type: "integer", minimum: 1 },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+        required: ["offset", "limit"],
+        additionalProperties: false,
+      },
+      presentation: { title: "读取服务器日志" },
+      implementation: {
+        async read({ pathParams, uri, input }) {
+          observed = {
+            pathParams: { ...pathParams },
+            query: { ...uri.query },
+            input,
+          };
+          const options = input as { offset: number; limit: number };
+          const lines = ["first", "second", "third"].slice(
+            options.offset - 1,
+            options.offset - 1 + options.limit,
+          );
+          return {
+            mimeType: "application/json",
+            content: {
+              lines,
+              pagination: {
+                offset: options.offset,
+                limit: options.limit,
+                total: 3,
+                hasMore: options.offset - 1 + lines.length < 3,
+              },
+            },
+          };
+        },
+        presentRequest({ input }) {
+          const options = input as { offset: number; limit: number };
+          return [{ value: `${options.offset}～${options.offset + options.limit - 1}` }];
+        },
+        presentResult(_request, result) {
+          const content = result.content as unknown as { lines: readonly JsonValue[] };
+          return [{ value: String(content.lines.length), unit: "行" }];
+        },
+      },
     },
   );
-  registry.register(
-    "server-runtime",
-    scope,
-    {
-      pattern: "server://instances/current/logs",
-      description: "读取当前服务器日志。",
+  registry.register("server-runtime", scope, "server://instances/current/logs", {
+    description: "读取当前服务器日志。",
+    inputSchema: { type: "object", additionalProperties: false },
+    implementation: {
+      async read() {
+        return { mimeType: "text/plain", content: "current" };
+      },
     },
-    async () => ({
-      mimeType: "text/plain",
-      content: "current",
-    }),
-  );
+  });
 
   const snapshot = registry.snapshot();
-  assert.deepEqual(
-    await snapshot.read("server://instances/server-a/logs?stream=stderr", {
-      offset: 2,
-      limit: 1,
-    }),
-    {
-      mimeType: "text/plain",
-      content: "second",
-      totalLines: 3,
-      truncated: true,
-    },
+  assert.equal(
+    snapshot.definitions.find(({ pattern }) => pattern === "server://instances/current/logs")
+      ?.presentation?.title,
+    "读取资源",
   );
-  assert.deepEqual(observed, {
-    params: { instanceId: "server-a" },
-    query: { stream: "stderr" },
+  const prepared = snapshot.prepare("server://instances/server-a/logs?stream=stderr", {
+    offset: 2,
+    limit: 1,
   });
-  assert.deepEqual(await snapshot.read("server://instances/current/logs"), {
+  assert.deepEqual(await prepared.presentRequest(), [{ value: "2～2" }]);
+  const result = await prepared.read();
+  assert.deepEqual(result, {
+    mimeType: "application/json",
+    content: {
+      lines: ["second"],
+      pagination: { offset: 2, limit: 1, total: 3, hasMore: true },
+    },
+  });
+  assert.deepEqual(await prepared.presentResult(result), [{ value: "1", unit: "行" }]);
+  assert.deepEqual(observed, {
+    pathParams: { instanceId: "server-a" },
+    query: { stream: "stderr" },
+    input: { offset: 2, limit: 1 },
+  });
+  assert.deepEqual(await snapshot.read("server://instances/current/logs", {}), {
     mimeType: "text/plain",
     content: "current",
-    totalLines: 1,
   });
   assert.throws(
     () =>
-      registry.register(
-        "duplicate-runtime",
-        scope,
-        {
-          pattern: "server://instances/{name}/logs",
-          description: "重复路由。",
+      snapshot.prepare("server://instances/server-a/logs", {
+        offset: 0,
+        limit: 1,
+      }),
+    /不符合 inputSchema/,
+  );
+  assert.throws(
+    () =>
+      registry.register("duplicate-runtime", scope, "server://instances/{name}/logs", {
+        description: "重复路由。",
+        inputSchema: { type: "object" },
+        presentation: { title: "重复资源" },
+        implementation: {
+          async read() {
+            return { mimeType: "text/plain", content: "" };
+          },
         },
-        async () => ({ mimeType: "text/plain", content: "" }),
-      ),
-    /路由冲突/,
+      }),
+    /server:\/\/instances\/\{\*\}\/logs/,
   );
   await assert.rejects(
-    snapshot.read("server://instances/%2E%2E/logs"),
+    snapshot.read("server://instances/%2E%2E/logs", {}),
     /Agent 资源 URI 路径不合法/,
   );
 
   registration.dispose();
-  await assert.rejects(snapshot.read("server://instances/server-a/logs"), /Agent 资源已停止/);
+  await assert.rejects(
+    snapshot.read("server://instances/server-a/logs", { offset: 1, limit: 1 }),
+    /Agent 资源已停止/,
+  );
   registry.removeRuntime("server-runtime");
   assert.equal(registry.countRuntime(), 0);
 });

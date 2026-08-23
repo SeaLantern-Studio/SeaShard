@@ -130,11 +130,32 @@ export type AgentToolHandler = (
   context: AgentToolExecutionContext,
 ) => Awaitable<JsonValue>;
 
-/** Agent 资源声明只包含可序列化的路由元数据，读取处理器由所属运行时持有。 */
-export interface AgentResourceDefinition {
-  readonly pattern: string;
+/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */
+export interface AgentActivityPresentationField {
+  readonly label?: string;
+  readonly value: string;
+  readonly unit?: string;
+}
+
+export const defaultAgentResourcePresentationTitle = "读取资源";
+
+export interface AgentResourcePresentationDefinition {
+  readonly title: string;
+}
+
+/** 资源对象中的可序列化能力说明；挂载 Pattern 由 agentResources() 的键提供。 */
+export interface AgentResourceDescriptor {
   readonly description: string;
+  readonly inputSchema: JsonObject;
+  readonly outputDescription?: string;
+  readonly examples?: readonly JsonValue[];
   readonly help?: string;
+  readonly presentation?: AgentResourcePresentationDefinition;
+}
+
+/** Registry 与 External Plugin Host 使用的完整可序列化路由定义。 */
+export interface AgentResourceDefinition extends AgentResourceDescriptor {
+  readonly pattern: string;
 }
 
 export interface AgentResourceUri {
@@ -144,26 +165,54 @@ export interface AgentResourceUri {
   readonly query: Readonly<Record<string, string>>;
 }
 
-export interface AgentResourceReadRequest {
+export interface AgentResourceReadRequest<Input extends JsonValue = JsonValue> {
   readonly uri: AgentResourceUri;
-  readonly params: Readonly<Record<string, string>>;
+  readonly pathParams: Readonly<Record<string, string>>;
+  readonly input: Input;
 }
 
-export interface AgentResourceReadResult {
+export interface AgentResourceReadResult<Output extends JsonValue = JsonValue> {
   readonly mimeType: string;
-  readonly content: string;
-  readonly totalLines?: number;
-  readonly truncated?: boolean;
+  readonly content: Output;
 }
 
 export interface AgentResourceExecutionContext {
   readonly signal?: AbortSignal;
 }
 
-export type AgentResourceHandler = (
-  request: AgentResourceReadRequest,
-  context: AgentResourceExecutionContext,
-) => Awaitable<AgentResourceReadResult>;
+export interface AgentResourceImplementation<
+  Input extends JsonValue = JsonValue,
+  Output extends JsonValue = JsonValue,
+> {
+  read(
+    request: AgentResourceReadRequest<Input>,
+    context: AgentResourceExecutionContext,
+  ): Awaitable<AgentResourceReadResult<Output>>;
+  presentRequest?(
+    request: AgentResourceReadRequest<Input>,
+  ): Awaitable<readonly AgentActivityPresentationField[]>;
+  presentResult?(
+    request: AgentResourceReadRequest<Input>,
+    result: AgentResourceReadResult<Output>,
+  ): Awaitable<readonly AgentActivityPresentationField[]>;
+}
+
+export interface AgentResource<
+  Input extends JsonValue = JsonValue,
+  Output extends JsonValue = JsonValue,
+> extends AgentResourceDescriptor {
+  readonly implementation: AgentResourceImplementation<Input, Output>;
+}
+
+export type AgentResourceMap = Readonly<Record<string, AgentResource>>;
+
+/** 保留资源输入与输出的泛型推导；注册行为仍由 PluginContext 提供。 */
+export function defineAgentResource<
+  Input extends JsonValue = JsonValue,
+  Output extends JsonValue = JsonValue,
+>(resource: AgentResource<Input, Output>): AgentResource<Input, Output> {
+  return resource;
+}
 
 export interface PluginContext {
   readonly execution: ExecutionContext;
@@ -174,7 +223,7 @@ export interface PluginContext {
   service<T extends object>(contract: string): T;
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;
-  agentResource(definition: AgentResourceDefinition, read: AgentResourceHandler): string;
+  agentResources(resources: AgentResourceMap): void;
   on(event: string, handler: (payload: JsonValue) => Awaitable<void>): void;
   emit(event: string, payload: JsonValue): Promise<void>;
 }

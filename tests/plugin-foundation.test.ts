@@ -114,16 +114,24 @@ await test("built-in Agent capabilities follow Cordis Fiber reload and disposal"
                 },
                 async (input) => input,
               );
-              ctx.agentResource(
-                {
-                  pattern: "test://state/{name}",
+              ctx.agentResources({
+                "test://state/{name}": {
                   description: "读取测试状态。",
+                  inputSchema: {
+                    type: "object",
+                    additionalProperties: false,
+                  },
+                  presentation: { title: "读取测试状态" },
+                  implementation: {
+                    async read({ pathParams }) {
+                      return {
+                        mimeType: "text/plain",
+                        content: pathParams.name!,
+                      };
+                    },
+                  },
                 },
-                async ({ params }) => ({
-                  mimeType: "text/plain",
-                  content: params.name!,
-                }),
-              );
+              });
             },
           }),
         },
@@ -145,17 +153,16 @@ await test("built-in Agent capabilities follow Cordis Fiber reload and disposal"
     assert.equal(beforeReload.name, "test_echo");
     assert.deepEqual(await beforeReload.execute({ value: "before" }, {}), { value: "before" });
     const resourcesBeforeReload = kernel.agentResources.snapshot();
-    assert.deepEqual(await resourcesBeforeReload.read("test://state/before"), {
+    assert.deepEqual(await resourcesBeforeReload.read("test://state/before", {}), {
       mimeType: "text/plain",
       content: "before",
-      totalLines: 1,
     });
 
     await kernel.reload("test.agent-tool");
     assert.equal(kernel.agentTools.snapshot().length, 1);
     await assert.rejects(beforeReload.execute({ value: "stale" }, {}), /Agent 工具已停止/);
     assert.equal(kernel.agentResources.snapshot().definitions.length, 1);
-    await assert.rejects(resourcesBeforeReload.read("test://state/stale"), /Agent 资源已停止/);
+    await assert.rejects(resourcesBeforeReload.read("test://state/stale", {}), /Agent 资源已停止/);
 
     await kernel.dispose();
     assert.equal(kernel.agentTools.snapshot().length, 0);

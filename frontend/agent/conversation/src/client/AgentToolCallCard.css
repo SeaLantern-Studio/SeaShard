@@ -42,10 +42,25 @@
   color: var(--sl-text-secondary);
 }
 
-.agent-tool-call-title {
+.agent-tool-call-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
   overflow: hidden;
+  white-space: nowrap;
+}
+
+.agent-tool-call-title {
+  flex: 0 0 auto;
   font-size: var(--sl-font-size-sm);
   font-weight: 600;
+}
+
+.agent-tool-call-request {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

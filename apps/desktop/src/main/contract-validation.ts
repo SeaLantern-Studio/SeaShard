@@ -8,6 +8,7 @@ import {
   serverModSearchLimits,
   serverModLoaders,
   isServerModSource,
+  type AgentActivityPresentation,
   type AgentConfiguredModel,
   type AgentInvocationReference,
   type AgentInvocationSnapshot,
@@ -1319,8 +1320,6 @@ function expectAgentToolCall(value: unknown, label: string): AgentToolCallSnapsh
     !record.invocationId ||
     typeof record.toolName !== "string" ||
     !record.toolName ||
-    typeof record.title !== "string" ||
-    !record.title ||
     !["running", "completed", "cancelled", "failed"].includes(String(record.state)) ||
     typeof record.startedAt !== "string" ||
     !isIsoTimestamp(record.startedAt) ||
@@ -1333,7 +1332,7 @@ function expectAgentToolCall(value: unknown, label: string): AgentToolCallSnapsh
     id: record.id,
     invocationId: record.invocationId,
     toolName: record.toolName,
-    title: record.title,
+    presentation: expectAgentActivityPresentation(record.presentation, `${label} presentation`),
     state: record.state as AgentToolCallSnapshot["state"],
     input: expectAgentJsonValue(record.input, `${label} input`),
     ...(record.output === undefined
@@ -1343,6 +1342,51 @@ function expectAgentToolCall(value: unknown, label: string): AgentToolCallSnapsh
     startedAt: record.startedAt,
     ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
   };
+}
+
+function expectAgentActivityPresentation(value: unknown, label: string): AgentActivityPresentation {
+  const record = expectAgentRecord(value, label);
+  if (typeof record.title !== "string" || !record.title) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
+  return {
+    title: record.title,
+    ...(record.requestPayload === undefined
+      ? {}
+      : {
+          requestPayload: expectAgentActivityPresentationFields(
+            record.requestPayload,
+            `${label} requestPayload`,
+          ),
+        }),
+    ...(record.resultPayload === undefined
+      ? {}
+      : {
+          resultPayload: expectAgentActivityPresentationFields(
+            record.resultPayload,
+            `${label} resultPayload`,
+          ),
+        }),
+  };
+}
+
+function expectAgentActivityPresentationFields(value: unknown, label: string) {
+  if (!Array.isArray(value)) throw new Error(`Agent Runtime returned invalid ${label}`);
+  return value.map((field, index) => {
+    const record = expectAgentRecord(field, `${label}[${index}]`);
+    if (
+      typeof record.value !== "string" ||
+      (record.label !== undefined && typeof record.label !== "string") ||
+      (record.unit !== undefined && typeof record.unit !== "string")
+    ) {
+      throw new Error(`Agent Runtime returned invalid ${label}[${index}]`);
+    }
+    return {
+      ...(typeof record.label === "string" ? { label: record.label } : {}),
+      value: record.value,
+      ...(typeof record.unit === "string" ? { unit: record.unit } : {}),
+    };
+  });
 }
 
 function expectAgentJsonValue(value: unknown, label: string): AgentToolCallSnapshot["input"] {

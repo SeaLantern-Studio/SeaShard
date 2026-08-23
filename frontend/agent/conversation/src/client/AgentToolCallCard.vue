@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AgentToolCallSnapshot } from "@seashard/contracts";
+import type { AgentActivityPresentationField } from "@seashard/plugin-sdk";
 import {
   CheckCircle2,
   ChevronDown,
@@ -28,12 +29,26 @@ const statusText = computed(() => {
       return "调用失败";
   }
 });
+const requestSummary = computed(() =>
+  formatPresentationFields(props.call.presentation.requestPayload),
+);
+const resultSummary = computed(() =>
+  formatPresentationFields(props.call.presentation.resultPayload),
+);
 const hasDetails = computed(
   () => props.call.input !== null || props.call.output !== undefined || Boolean(props.call.error),
 );
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function formatPresentationFields(
+  fields: readonly AgentActivityPresentationField[] | undefined,
+): string {
+  return (fields ?? [])
+    .map(({ label, value, unit }) => `${label ? `${label}：` : ""}${value}${unit ?? ""}`)
+    .join("，");
 }
 </script>
 
@@ -49,13 +64,16 @@ function formatJson(value: unknown): string {
       <span class="agent-tool-call-glyph" aria-hidden="true">
         <Wrench :size="15" :stroke-width="1.8" />
       </span>
-      <span class="agent-tool-call-title">{{ call.title }}</span>
+      <span class="agent-tool-call-heading">
+        <span class="agent-tool-call-title">{{ call.presentation.title }}</span>
+        <span v-if="requestSummary" class="agent-tool-call-request">：{{ requestSummary }}</span>
+      </span>
       <span class="agent-tool-call-state">
         <LoaderCircle v-if="call.state === 'running'" class="is-spinning" :size="14" />
         <CheckCircle2 v-else-if="call.state === 'completed'" :size="14" />
         <OctagonX v-else-if="call.state === 'cancelled'" :size="14" />
         <CircleAlert v-else :size="14" />
-        <span>{{ statusText }}</span>
+        <span>{{ resultSummary || statusText }}</span>
       </span>
       <ChevronDown
         v-if="hasDetails"

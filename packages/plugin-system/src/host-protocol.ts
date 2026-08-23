@@ -1,4 +1,5 @@
 import type {
+  AgentActivityPresentationField,
   AgentResourceDefinition,
   AgentResourceReadRequest,
   AgentResourceReadResult,
@@ -78,6 +79,8 @@ export interface AgentToolInvocationPayload {
 export interface AgentResourceRegistrationPayload {
   registrationId: string;
   definition: AgentResourceDefinition;
+  hasPresentRequest: boolean;
+  hasPresentResult: boolean;
 }
 
 export interface AgentResourceReadPayload {
@@ -86,7 +89,19 @@ export interface AgentResourceReadPayload {
   request: AgentResourceReadRequest;
 }
 
+export interface AgentResourcePresentRequestPayload {
+  registrationId: string;
+  request: AgentResourceReadRequest;
+}
+
+export interface AgentResourcePresentResultPayload {
+  registrationId: string;
+  request: AgentResourceReadRequest;
+  result: AgentResourceReadResult;
+}
+
 export type AgentResourceReadResponsePayload = AgentResourceReadResult;
+export type AgentResourcePresentationResponsePayload = readonly AgentActivityPresentationField[];
 
 export interface AgentCallCancellationPayload {
   callId: string;

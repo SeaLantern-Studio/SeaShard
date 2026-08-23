@@ -1,11 +1,13 @@
 import type {
+  AgentActivityPresentation,
   AgentMessageSnapshot,
   AgentModelSelection,
   AgentSessionSnapshot,
   AgentSessionSummary,
   AgentToolCallSnapshot,
 } from "@seashard/contracts";
-import type { JsonValue } from "@seashard/plugin-sdk";
+import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
+import type { AgentActivityPresentationField, JsonValue } from "@seashard/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -220,7 +222,10 @@ export class AgentSessionJournal {
       const record = parseRecord(line);
       if (record.type === "message") messages.push(parseMessage(record, fileName));
       if (record.type === "invocation") invocations.push(parseInvocation(record, fileName));
-      if (record.type === "tool-call") toolCallRecords.push(parseToolCall(record, fileName));
+      if (record.type === "tool-call") {
+        const toolCall = tryParseToolCall(record, fileName);
+        if (toolCall) toolCallRecords.push(toolCall);
+      }
       if (typeof record.timestamp === "string") updatedAt = record.timestamp;
     }
     const title =
@@ -333,12 +338,26 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
   };
 }
 
+/**
+ * Tool Call 是对话的辅助活动投影。单条记录损坏时只舍弃该投影，
+ * 不能让会话标题、消息历史和后续消息发送一起失效。
+ */
+function tryParseToolCall(
+  record: Record<string, unknown>,
+  fileName: string,
+): ToolCallRecord | undefined {
+  try {
+    return parseToolCall(record, fileName);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseToolCall(record: Record<string, unknown>, fileName: string): ToolCallRecord {
   if (
     typeof record.id !== "string" ||
     typeof record.invocationId !== "string" ||
     typeof record.toolName !== "string" ||
-    typeof record.title !== "string" ||
     !isToolCallState(record.state) ||
     typeof record.startedAt !== "string" ||
     typeof record.timestamp !== "string" ||
@@ -353,7 +372,11 @@ function parseToolCall(record: Record<string, unknown>, fileName: string): ToolC
     id: record.id,
     invocationId: record.invocationId,
     toolName: record.toolName,
-    title: record.title,
+    presentation: parseActivityPresentation(
+      record.presentation,
+      fileName,
+      defaultToolCallPresentationTitle(record.toolName),
+    ),
     state: record.state,
     input: requireJsonValue(record.input, fileName, "input"),
     ...(record.output === undefined
@@ -363,6 +386,73 @@ function parseToolCall(record: Record<string, unknown>, fileName: string): ToolC
     startedAt: record.startedAt,
     ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
   };
+}
+
+function parseActivityPresentation(
+  value: unknown,
+  fileName: string,
+  fallbackTitle: string,
+): AgentActivityPresentation {
+  if (value === undefined) return { title: fallbackTitle };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Agent Tool Call presentation 记录损坏：${fileName}`);
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.title !== "string" || !record.title) {
+    throw new Error(`Agent Tool Call presentation 标题损坏：${fileName}`);
+  }
+  return {
+    title: record.title,
+    ...(record.requestPayload === undefined
+      ? {}
+      : {
+          requestPayload: parseActivityPresentationFields(
+            record.requestPayload,
+            fileName,
+            "requestPayload",
+          ),
+        }),
+    ...(record.resultPayload === undefined
+      ? {}
+      : {
+          resultPayload: parseActivityPresentationFields(
+            record.resultPayload,
+            fileName,
+            "resultPayload",
+          ),
+        }),
+  };
+}
+
+function parseActivityPresentationFields(
+  value: unknown,
+  fileName: string,
+  label: string,
+): readonly AgentActivityPresentationField[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Agent Tool Call ${label} 记录损坏：${fileName}`);
+  }
+  return value.map((field, index) => {
+    if (!field || typeof field !== "object" || Array.isArray(field)) {
+      throw new Error(`Agent Tool Call ${label}[${index}] 记录损坏：${fileName}`);
+    }
+    const record = field as Record<string, unknown>;
+    if (
+      typeof record.value !== "string" ||
+      (record.label !== undefined && typeof record.label !== "string") ||
+      (record.unit !== undefined && typeof record.unit !== "string")
+    ) {
+      throw new Error(`Agent Tool Call ${label}[${index}] 记录损坏：${fileName}`);
+    }
+    return {
+      ...(typeof record.label === "string" ? { label: record.label } : {}),
+      value: record.value,
+      ...(typeof record.unit === "string" ? { unit: record.unit } : {}),
+    };
+  });
+}
+function defaultToolCallPresentationTitle(toolName: string): string {
+  return toolName === "read" ? defaultAgentResourcePresentationTitle : toolName;
 }
 
 function projectToolCalls(records: readonly ToolCallRecord[]): readonly AgentToolCallSnapshot[] {

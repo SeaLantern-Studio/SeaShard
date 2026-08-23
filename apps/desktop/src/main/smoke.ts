@@ -56,10 +56,19 @@ export async function verifySmokeRuntime(
       await pluginKernel.callService(serverInstanceManagerContract, "list", []),
     );
     console.log(`SEASHARD_SMOKE_SERVER_INSTANCES count=${instances.length}`);
-    const resource = await pluginKernel.agentResources.snapshot().read("server://instances");
-    const resourceInstances = expectServerInstances(JSON.parse(resource.content) as unknown);
-    if (resource.mimeType !== "application/json" || resourceInstances.length !== instances.length) {
+    const resource = await pluginKernel.agentResources.snapshot().read("server://instances", {});
+    if (
+      resource.mimeType !== "application/json" ||
+      !resource.content ||
+      typeof resource.content !== "object" ||
+      Array.isArray(resource.content) ||
+      !Array.isArray(resource.content.items)
+    ) {
       throw new Error("server instance Agent resource returned an unexpected projection");
+    }
+    const resourceInstances = expectServerInstances(resource.content.items);
+    if (resourceInstances.length !== instances.length) {
+      throw new Error("server instance Agent resource returned an unexpected instance count");
     }
     console.log(`SEASHARD_SMOKE_AGENT_SERVER_RESOURCE count=${resourceInstances.length}`);
   }
@@ -76,22 +85,27 @@ export async function verifySmokeRuntime(
       [],
     );
     const resourcesBeforeReload = pluginKernel.agentResources.snapshot();
-    const resourceBeforeReload = await resourcesBeforeReload.read(
-      "smoke://state/probe?format=detail",
-    );
+    const preparedBeforeReload = resourcesBeforeReload.prepare("smoke://state/probe", {
+      format: "detail",
+    });
+    const requestPresentationBeforeReload = await preparedBeforeReload.presentRequest();
+    const resourceBeforeReload = await preparedBeforeReload.read();
+    const resultPresentationBeforeReload =
+      await preparedBeforeReload.presentResult(resourceBeforeReload);
+    const defaultPresentationTitle = preparedBeforeReload.definition.presentation?.title;
     const before = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
     await pluginKernel.reload("smoke.external-plugin");
+    const reloadedEcho = await pluginKernel.callService("seashard.smoke.echo", "echo", ["reload"]);
     const after = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
     let staleResourceRejected = false;
     try {
-      await resourcesBeforeReload.read("smoke://state/stale");
+      await resourcesBeforeReload.read("smoke://state/stale", {});
     } catch (error) {
       staleResourceRejected = error instanceof Error && error.message.includes("Agent 资源已停止");
     }
     const resourceAfterReload = await pluginKernel.agentResources
       .snapshot()
-      .read("smoke://state/reload");
-    const reloadedEcho = await pluginKernel.callService("seashard.smoke.echo", "echo", ["reload"]);
+      .read("smoke://state/reload", {});
     const activationAfter = await pluginKernel.callService(
       "seashard.smoke.echo",
       "activationCount",
@@ -108,6 +122,14 @@ export async function verifySmokeRuntime(
       pluginKernel.diagnostics().contributions !== 1 ||
       resourceBeforeReload.content !== "core-smoke:probe:detail" ||
       resourceAfterReload.content !== "core-smoke:reload:plain" ||
+      defaultPresentationTitle !== "读取资源" ||
+      JSON.stringify(requestPresentationBeforeReload) !==
+        JSON.stringify([
+          { label: "名称", value: "probe" },
+          { label: "格式", value: "detail" },
+        ]) ||
+      JSON.stringify(resultPresentationBeforeReload) !==
+        JSON.stringify([{ value: "1", unit: "个状态" }]) ||
       !staleResourceRejected
     ) {
       throw new Error("external plugin reload did not produce an active plugin");

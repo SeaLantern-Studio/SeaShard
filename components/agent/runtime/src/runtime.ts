@@ -1,4 +1,5 @@
 import type {
+  AgentActivityPresentation,
   AgentConfiguredModel,
   AgentConversationMode,
   AgentInvocationReference,
@@ -10,8 +11,12 @@ import type {
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
+import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
 import type {
+  AgentActivityPresentationField,
   AgentResourceDefinition,
+  AgentResourceExecutionContext,
+  AgentResourceReadRequest,
   AgentResourceReadResult,
   AgentToolDefinition,
   AgentToolHandler,
@@ -52,16 +57,19 @@ export interface AgentRuntimeToolSource {
   snapshot(): readonly AgentRuntimeTool[];
 }
 
+export interface AgentRuntimePreparedResourceRead {
+  readonly definition: AgentResourceDefinition;
+  readonly request: AgentResourceReadRequest;
+  presentRequest(): Promise<readonly AgentActivityPresentationField[] | undefined>;
+  read(context?: AgentResourceExecutionContext): Promise<AgentResourceReadResult>;
+  presentResult(
+    result: AgentResourceReadResult,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined>;
+}
+
 export interface AgentRuntimeResourceSnapshot {
   readonly definitions: readonly AgentResourceDefinition[];
-  read(
-    path: string,
-    options?: {
-      readonly offset?: number;
-      readonly limit?: number;
-      readonly signal?: AbortSignal;
-    },
-  ): Promise<AgentResourceReadResult>;
+  prepare(path: string, input: JsonValue): AgentRuntimePreparedResourceRead;
 }
 
 export interface AgentRuntimeResourceSource {
@@ -251,14 +259,24 @@ export class AgentRuntime {
       text: "",
       toolCalls: [],
     };
-    const running: RunningInvocation = {
+    let running!: RunningInvocation;
+    const controller = new AbortController();
+    const tools = createToolSet(toolDefinitions.values(), resources, {
+      start: (call) => this.startToolCall(running, call),
+      updatePresentation: (toolCallId, presentation) =>
+        this.updateToolCallPresentation(running, toolCallId, presentation),
+      finish: (toolCallId, state, output, error, presentation) =>
+        this.finishToolCall(running, toolCallId, state, output, error, presentation),
+      reportError: this.reportError,
+    });
+    running = {
       snapshot,
       mode,
-      controller: new AbortController(),
+      controller,
       resolvedModel,
       toolDefinitions,
       hasTools: toolDefinitions.size > 0 || resources.definitions.length > 0,
-      tools: createToolSet(toolDefinitions.values(), resources),
+      tools,
     };
     this.running.set(invocationId, running);
     this.invocations.set(invocationId, snapshot);
@@ -295,6 +313,7 @@ export class AgentRuntime {
           continue;
         }
         if (part.type === "tool-call") {
+          if (part.toolName === "read") continue;
           await this.startToolCall(invocation, {
             id: part.toolCallId,
             toolName: part.toolName,
@@ -303,6 +322,7 @@ export class AgentRuntime {
           continue;
         }
         if (part.type === "tool-result") {
+          if (part.toolName === "read") continue;
           await this.finishToolCall(
             invocation,
             part.toolCallId,
@@ -312,6 +332,7 @@ export class AgentRuntime {
           continue;
         }
         if (part.type === "tool-error") {
+          if (part.toolName === "read") continue;
           await this.finishToolCall(
             invocation,
             part.toolCallId,
@@ -359,17 +380,26 @@ export class AgentRuntime {
 
   private async startToolCall(
     invocation: RunningInvocation,
-    call: { readonly id: string; readonly toolName: string; readonly input: JsonValue },
+    call: {
+      readonly id: string;
+      readonly toolName: string;
+      readonly input: JsonValue;
+      readonly presentation?: AgentActivityPresentation;
+    },
   ): Promise<void> {
     const startedAt = new Date().toISOString();
     const snapshot: AgentToolCallSnapshot = {
       id: call.id,
       invocationId: invocation.snapshot.id,
       toolName: call.toolName,
-      title:
-        call.toolName === "read"
-          ? "读取资源"
-          : (invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName),
+      presentation:
+        call.presentation ??
+        ({
+          title:
+            call.toolName === "read"
+              ? "读取资源"
+              : (invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName),
+        } satisfies AgentActivityPresentation),
       state: "running",
       input: call.input,
       startedAt,
@@ -377,12 +407,23 @@ export class AgentRuntime {
     await this.recordToolCall(invocation, snapshot);
   }
 
+  private async updateToolCallPresentation(
+    invocation: RunningInvocation,
+    toolCallId: string,
+    presentation: AgentActivityPresentation,
+  ): Promise<void> {
+    const current = invocation.snapshot.toolCalls.find(({ id }) => id === toolCallId);
+    if (!current) throw new Error(`Agent Tool Call 不存在：${toolCallId}`);
+    await this.recordToolCall(invocation, { ...current, presentation });
+  }
+
   private async finishToolCall(
     invocation: RunningInvocation,
     toolCallId: string,
-    state: "completed" | "failed",
+    state: "completed" | "cancelled" | "failed",
     output?: JsonValue,
     error?: string,
+    presentation?: AgentActivityPresentation,
   ): Promise<void> {
     const current = invocation.snapshot.toolCalls.find(({ id }) => id === toolCallId);
     if (!current) throw new Error(`Agent Tool Call 不存在：${toolCallId}`);
@@ -391,6 +432,7 @@ export class AgentRuntime {
       state,
       ...(output === undefined ? {} : { output }),
       ...(error ? { error } : {}),
+      ...(presentation === undefined ? {} : { presentation }),
       finishedAt: new Date().toISOString(),
     };
     await this.recordToolCall(invocation, snapshot);
@@ -544,9 +586,27 @@ function indexToolDefinitions(
   return indexed;
 }
 
+interface AgentResourceToolLifecycle {
+  start(call: {
+    readonly id: string;
+    readonly toolName: "read";
+    readonly input: JsonValue;
+  }): Promise<void>;
+  updatePresentation(toolCallId: string, presentation: AgentActivityPresentation): Promise<void>;
+  finish(
+    toolCallId: string,
+    state: "completed" | "cancelled" | "failed",
+    output?: JsonValue,
+    error?: string,
+    presentation?: AgentActivityPresentation,
+  ): Promise<void>;
+  reportError(error: unknown): void;
+}
+
 function createToolSet(
   definitions: Iterable<AgentRuntimeTool>,
   resources: AgentRuntimeResourceSnapshot,
+  resourceLifecycle: AgentResourceToolLifecycle,
 ): ToolSet {
   const tools: ToolSet = {};
   if (resources.definitions.length) {
@@ -554,7 +614,7 @@ function createToolSet(
     tools.read = tool({
       title: "读取资源",
       description: [
-        "读取当前组件声明的只读资源 URI，可按行分页。",
+        "读取当前组件声明的只读资源 URI。每个资源自行定义 input 中的分页、过滤和排序参数。",
         "只能使用下面列出的 URI 模式；不要猜测或使用列表外的 scheme 和路径。",
         "",
         resourceCatalog,
@@ -564,21 +624,65 @@ function createToolSet(
         properties: {
           path: {
             type: "string",
-            description: `完整资源 URI，必须匹配当前可用模式：\n${resourceCatalog}`,
+            description: `完整资源 URI，必须匹配当前可用模式：\n${formatResourcePatterns(
+              resources.definitions,
+            )}`,
           },
-          offset: { type: "integer", minimum: 1, description: "可选的起始行，第一行为 1" },
-          limit: { type: "integer", minimum: 1, description: "可选的最大返回行数" },
+          input: {
+            description: "资源专有读取参数，必须符合所选 URI 模式列出的输入 Schema",
+          },
         },
-        required: ["path"],
+        required: ["path", "input"],
         additionalProperties: false,
       }),
-      execute: async (input, { abortSignal }) => {
-        const request = parseResourceReadInput(input);
-        return resources.read(request.path, {
-          ...(request.offset === undefined ? {} : { offset: request.offset }),
-          ...(request.limit === undefined ? {} : { limit: request.limit }),
-          signal: abortSignal,
+      execute: async (input, { abortSignal, toolCallId }) => {
+        const callInput = requireJsonValue(input, "读取资源输入");
+        await resourceLifecycle.start({
+          id: toolCallId,
+          toolName: "read",
+          input: callInput,
         });
+        let presentation: AgentActivityPresentation = {
+          title: defaultAgentResourcePresentationTitle,
+        };
+        try {
+          const request = parseResourceReadInput(callInput);
+          const prepared = resources.prepare(request.path, request.input);
+          const requestPayload = await safelyPresentAgentResource(
+            () => prepared.presentRequest(),
+            (error) => resourceLifecycle.reportError(error),
+          );
+          presentation = {
+            title: prepared.definition.presentation?.title ?? defaultAgentResourcePresentationTitle,
+            ...(requestPayload === undefined ? {} : { requestPayload }),
+          };
+          await resourceLifecycle.updatePresentation(toolCallId, presentation);
+          const result = await prepared.read({ signal: abortSignal });
+          const resultPayload = await safelyPresentAgentResource(
+            () => prepared.presentResult(result),
+            (error) => resourceLifecycle.reportError(error),
+          );
+          presentation =
+            resultPayload === undefined ? presentation : { ...presentation, resultPayload };
+          await resourceLifecycle.finish(
+            toolCallId,
+            "completed",
+            result.content,
+            undefined,
+            presentation,
+          );
+          return result.content;
+        } catch (error) {
+          const cancelled = abortSignal?.aborted || isAbortError(error);
+          await resourceLifecycle.finish(
+            toolCallId,
+            cancelled ? "cancelled" : "failed",
+            undefined,
+            cancelled ? "调用已取消" : errorMessage(error),
+            presentation,
+          );
+          throw error;
+        }
       },
     });
   }
@@ -596,47 +700,60 @@ function createToolSet(
   return tools;
 }
 
-function parseResourceReadInput(value: unknown): {
+function parseResourceReadInput(value: JsonValue): {
   readonly path: string;
-  readonly offset?: number;
-  readonly limit?: number;
+  readonly input: JsonValue;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("read 输入必须是对象");
   }
-  const input = value as Record<string, unknown>;
-  const unexpected = Object.keys(input).filter(
-    (key) => key !== "path" && key !== "offset" && key !== "limit",
-  );
+  const unexpected = Object.keys(value).filter((key) => key !== "path" && key !== "input");
   if (unexpected.length) throw new TypeError(`read 包含未知参数：${unexpected.join(", ")}`);
-  if (typeof input.path !== "string" || !input.path.trim()) {
+  if (typeof value.path !== "string" || !value.path.trim()) {
     throw new TypeError("read.path 必须是非空字符串");
   }
-  const offset = parseResourcePageNumber(input.offset, "read.offset");
-  const limit = parseResourcePageNumber(input.limit, "read.limit");
+  if (!Object.hasOwn(value, "input")) throw new TypeError("read.input 是必填字段");
   return {
-    path: input.path.trim(),
-    ...(offset === undefined ? {} : { offset }),
-    ...(limit === undefined ? {} : { limit }),
+    path: value.path.trim(),
+    input: value.input!,
   };
 }
 
-/** 把当前 Invocation 真正可用的路径压缩进工具元数据，避免模型猜测 URI。 */
+async function safelyPresentAgentResource(
+  present: () => Promise<readonly AgentActivityPresentationField[] | undefined>,
+  reportError: (error: unknown) => void,
+): Promise<readonly AgentActivityPresentationField[] | undefined> {
+  try {
+    return await present();
+  } catch (error) {
+    reportError(error);
+    return undefined;
+  }
+}
+
+/** 把当前 Invocation 真正可用的资源定义写进工具元数据，避免模型猜测路径和 input。 */
 function formatResourceCatalog(definitions: readonly AgentResourceDefinition[]): string {
   return [
-    "当前可用资源 URI 模式：",
-    ...definitions.map(
-      ({ pattern, description }) => `- ${pattern} — ${description.replace(/\s+/gu, " ")}`,
+    "当前可用资源：",
+    ...definitions.map((definition) =>
+      [
+        `- ${definition.pattern} — ${definition.description.replace(/\s+/gu, " ")}`,
+        `  输入 Schema：${JSON.stringify(definition.inputSchema)}`,
+        ...(definition.examples?.length
+          ? [
+              `  输入示例：${definition.examples.map((example) => JSON.stringify(example)).join("；")}`,
+            ]
+          : []),
+        ...(definition.outputDescription
+          ? [`  返回：${definition.outputDescription.replace(/\s+/gu, " ")}`]
+          : []),
+      ].join("\n"),
     ),
   ].join("\n");
 }
 
-function parseResourcePageNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError(`${label} 必须是正整数`);
-  }
-  return value;
+function formatResourcePatterns(definitions: readonly AgentResourceDefinition[]): string {
+  return definitions.map(({ pattern }) => `- ${pattern}`).join("\n");
 }
 
 function validateUserMessage(message: AgentUserMessage): string {
@@ -680,7 +797,22 @@ function cloneInvocation(snapshot: AgentInvocationSnapshot): AgentInvocationSnap
   return {
     ...snapshot,
     model: { ...snapshot.model },
-    toolCalls: snapshot.toolCalls.map((call) => ({ ...call })),
+    toolCalls: snapshot.toolCalls.map((call) => ({
+      ...call,
+      presentation: {
+        ...call.presentation,
+        ...(call.presentation.requestPayload
+          ? {
+              requestPayload: call.presentation.requestPayload.map((field) => ({ ...field })),
+            }
+          : {}),
+        ...(call.presentation.resultPayload
+          ? {
+              resultPayload: call.presentation.resultPayload.map((field) => ({ ...field })),
+            }
+          : {}),
+      },
+    })),
   };
 }
 

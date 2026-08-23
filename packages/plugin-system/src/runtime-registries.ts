@@ -1,7 +1,11 @@
+import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
 import type {
+  AgentActivityPresentationField,
+  AgentResource,
   AgentResourceDefinition,
   AgentResourceExecutionContext,
-  AgentResourceHandler,
+  AgentResourceImplementation,
+  AgentResourceReadRequest,
   AgentResourceReadResult,
   AgentResourceUri,
   AgentToolDefinition,
@@ -14,6 +18,7 @@ import type {
   ScopeAddress,
   ServiceProvider,
 } from "@seashard/plugin-sdk";
+import { compileJsonSchemaValidator } from "./json-schema";
 
 interface ServiceRegistration {
   contract: string;
@@ -69,19 +74,30 @@ interface AgentResourceRegistration {
   readonly runtimeId: string;
   readonly scope: ScopeAddress;
   readonly definition: AgentResourceDefinition;
-  readonly handler: AgentResourceHandler;
+  readonly implementation: AgentResourceImplementation;
   readonly route: CompiledAgentResourcePattern;
+  readonly validateInput: (value: JsonValue) => void;
   active: boolean;
 }
 
-export interface AgentResourceReadOptions extends AgentResourceExecutionContext {
-  readonly offset?: number;
-  readonly limit?: number;
+export interface AgentResourcePreparedRead {
+  readonly definition: AgentResourceDefinition;
+  readonly request: AgentResourceReadRequest;
+  presentRequest(): Promise<readonly AgentActivityPresentationField[] | undefined>;
+  read(context?: AgentResourceExecutionContext): Promise<AgentResourceReadResult>;
+  presentResult(
+    result: AgentResourceReadResult,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined>;
 }
 
 export interface AgentResourceRegistrySnapshot {
   readonly definitions: readonly AgentResourceDefinition[];
-  read(path: string, options?: AgentResourceReadOptions): Promise<AgentResourceReadResult>;
+  prepare(path: string, input: JsonValue): AgentResourcePreparedRead;
+  read(
+    path: string,
+    input: JsonValue,
+    context?: AgentResourceExecutionContext,
+  ): Promise<AgentResourceReadResult>;
 }
 export interface ContributionSnapshot {
   id: string;
@@ -292,16 +308,19 @@ export class AgentResourceRegistry {
   register(
     runtimeId: string,
     scope: ScopeAddress,
-    definition: AgentResourceDefinition,
-    handler: AgentResourceHandler,
+    pattern: string,
+    resource: AgentResource,
   ): { id: string; dispose: () => void } {
-    if (typeof handler !== "function") throw new TypeError("Agent 资源处理器必须是函数");
-    const normalized = normalizeAgentResourceDefinition(definition);
-    const route = compileAgentResourcePattern(normalized.pattern);
+    const normalized = normalizeAgentResource(pattern, resource);
+    const route = compileAgentResourcePattern(normalized.definition.pattern);
     const existing = this.registrations.get(route.shape);
     if (existing) {
       throw new Error(
-        `Agent 资源 ${normalized.pattern} 与 ${existing.definition.pattern} 路由冲突`,
+        [
+          `Agent 资源路由冲突：${route.shape}`,
+          `已注册：${existing.definition.pattern}（${existing.runtimeId}）`,
+          `新声明：${normalized.definition.pattern}（${runtimeId}）`,
+        ].join("\n"),
       );
     }
 
@@ -309,9 +328,13 @@ export class AgentResourceRegistry {
       id: `${runtimeId}:agent-resource:${++this.counter}`,
       runtimeId,
       scope: { ...scope },
-      definition: normalized,
-      handler,
+      definition: normalized.definition,
+      implementation: normalized.implementation,
       route,
+      validateInput: compileJsonSchemaValidator(
+        normalized.definition.inputSchema,
+        `Agent 资源 ${normalized.definition.pattern} `,
+      ),
       active: true,
     };
     this.registrations.set(route.shape, registration);
@@ -324,21 +347,48 @@ export class AgentResourceRegistry {
   /** 每次 Invocation 开始时读取一次，防止一次工具闭环内的路由集合漂移。 */
   snapshot(): AgentResourceRegistrySnapshot {
     const registrations = [...this.registrations.values()].sort(compareAgentResourceRoutes);
+    const prepare = (path: string, input: JsonValue): AgentResourcePreparedRead => {
+      const uri = parseAgentResourceUri(path);
+      const matched = matchAgentResourceRegistration(registrations, uri);
+      if (!matched) throw new Error(`Agent 资源不存在：${uri.href}`);
+      assertAgentResourceActive(matched.registration);
+      matched.registration.validateInput(input);
+      const request: AgentResourceReadRequest = {
+        uri,
+        pathParams: matched.params,
+        input,
+      };
+      return {
+        definition: matched.registration.definition,
+        request,
+        presentRequest: async () => {
+          assertAgentResourceActive(matched.registration);
+          const { implementation } = matched.registration;
+          if (!implementation.presentRequest) return undefined;
+          return normalizeAgentActivityPresentationFields(
+            await implementation.presentRequest(request),
+          );
+        },
+        read: async (context = {}) => {
+          assertAgentResourceActive(matched.registration);
+          return normalizeAgentResourceReadResult(
+            await matched.registration.implementation.read(request, context),
+          );
+        },
+        presentResult: async (result) => {
+          assertAgentResourceActive(matched.registration);
+          const { implementation } = matched.registration;
+          if (!implementation.presentResult) return undefined;
+          return normalizeAgentActivityPresentationFields(
+            await implementation.presentResult(request, result),
+          );
+        },
+      };
+    };
     return {
       definitions: registrations.map(({ definition }) => definition),
-      read: async (path, options = {}) => {
-        const uri = parseAgentResourceUri(path);
-        const matched = matchAgentResourceRegistration(registrations, uri);
-        if (!matched) throw new Error(`Agent 资源不存在：${uri.href}`);
-        if (!matched.registration.active) {
-          throw new Error(`Agent 资源已停止：${matched.registration.definition.pattern}`);
-        }
-        const result = await matched.registration.handler(
-          { uri, params: matched.params },
-          { signal: options.signal },
-        );
-        return paginateAgentResourceResult(result, options);
-      },
+      prepare,
+      read: async (path, input, context = {}) => prepare(path, input).read(context),
     };
   }
 
@@ -446,23 +496,63 @@ function validateContract(value: string): void {
   }
 }
 
-function normalizeAgentResourceDefinition(
-  definition: AgentResourceDefinition,
-): AgentResourceDefinition {
-  if (!definition || typeof definition !== "object") {
-    throw new TypeError("Agent 资源定义必须是对象");
+function normalizeAgentResource(
+  patternValue: string,
+  resource: AgentResource,
+): {
+  readonly definition: AgentResourceDefinition;
+  readonly implementation: AgentResourceImplementation;
+} {
+  if (!resource || typeof resource !== "object") {
+    throw new TypeError("Agent 资源必须是对象");
   }
-  const pattern = requireAgentResourceText(definition.pattern, "路径模式");
-  const description = requireAgentResourceText(definition.description, "描述");
-  const help =
-    definition.help === undefined
+  const pattern = requireAgentResourceText(patternValue, "路径模式");
+  const description = requireAgentResourceText(resource.description, "描述");
+  const inputSchema = requireAgentResourceJsonObject(resource.inputSchema, "inputSchema");
+  const outputDescription =
+    resource.outputDescription === undefined
       ? undefined
-      : requireAgentResourceText(definition.help, "详细说明");
+      : requireAgentResourceText(resource.outputDescription, "返回说明");
+  const help =
+    resource.help === undefined ? undefined : requireAgentResourceText(resource.help, "详细说明");
+  const examples = resource.examples?.map((value, index) =>
+    normalizeAgentJsonValue(value, `Agent 资源输入示例 ${index + 1}`),
+  );
+  const title =
+    resource.presentation === undefined
+      ? defaultAgentResourcePresentationTitle
+      : requireAgentResourcePresentationTitle(resource.presentation, pattern);
+  if (!resource.implementation || typeof resource.implementation !== "object") {
+    throw new TypeError(`Agent 资源 ${pattern} 缺少 implementation`);
+  }
+  const implementation = resource.implementation;
+  if (typeof implementation.read !== "function") {
+    throw new TypeError(`Agent 资源 ${pattern} 缺少 read 实现`);
+  }
+  if (
+    implementation.presentRequest !== undefined &&
+    typeof implementation.presentRequest !== "function"
+  ) {
+    throw new TypeError(`Agent 资源 ${pattern} presentRequest 必须是函数`);
+  }
+  if (
+    implementation.presentResult !== undefined &&
+    typeof implementation.presentResult !== "function"
+  ) {
+    throw new TypeError(`Agent 资源 ${pattern} presentResult 必须是函数`);
+  }
   compileAgentResourcePattern(pattern);
   return {
-    pattern,
-    description,
-    ...(help === undefined ? {} : { help }),
+    definition: {
+      pattern,
+      description,
+      inputSchema,
+      ...(outputDescription === undefined ? {} : { outputDescription }),
+      ...(examples === undefined ? {} : { examples }),
+      ...(help === undefined ? {} : { help }),
+      presentation: { title },
+    },
+    implementation,
   };
 }
 
@@ -484,7 +574,7 @@ function compileAgentResourcePattern(pattern: string): CompiledAgentResourcePatt
     segments.push({ type: "static", value: segment });
   }
   const shape = `${uri.scheme}://${segments
-    .map((segment) => (segment.type === "static" ? `s:${segment.value}` : "p:{}"))
+    .map((segment) => (segment.type === "static" ? segment.value : "{*}"))
     .join("/")}`;
   return {
     scheme: uri.scheme,
@@ -600,62 +690,102 @@ function matchAgentResourceRegistration(
   return undefined;
 }
 
-function paginateAgentResourceResult(
-  value: AgentResourceReadResult,
-  options: AgentResourceReadOptions,
-): AgentResourceReadResult {
-  if (!value || typeof value !== "object") {
+function assertAgentResourceActive(registration: AgentResourceRegistration): void {
+  if (!registration.active) {
+    throw new Error(`Agent 资源已停止：${registration.definition.pattern}`);
+  }
+}
+
+function normalizeAgentResourceReadResult(value: AgentResourceReadResult): AgentResourceReadResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Agent 资源读取结果必须是对象");
   }
-  const mimeType = requireAgentResourceText(value.mimeType, "MIME 类型");
-  if (typeof value.content !== "string") {
-    throw new TypeError("Agent 资源内容必须是字符串");
-  }
-  const offset = validateAgentResourcePageNumber(options.offset, "offset") ?? 1;
-  const limit = validateAgentResourcePageNumber(options.limit, "limit");
-  const lines = value.content ? value.content.split(/\r\n|\n|\r/u) : [];
-  const reportedTotal =
-    value.totalLines === undefined
-      ? lines.length
-      : validateAgentResourceNonNegativeInteger(value.totalLines, "totalLines");
-  if (reportedTotal < lines.length) {
-    throw new TypeError("Agent 资源 totalLines 不能小于当前内容行数");
-  }
-  if (value.truncated !== undefined && typeof value.truncated !== "boolean") {
-    throw new TypeError("Agent 资源 truncated 必须是布尔值");
-  }
-  const start = Math.min(offset - 1, lines.length);
-  const end = limit === undefined ? lines.length : Math.min(start + limit, lines.length);
-  const unpaginated = options.offset === undefined && options.limit === undefined;
-  const truncated =
-    value.truncated === true || start > 0 || end < lines.length || reportedTotal > lines.length;
   return {
-    mimeType,
-    content: unpaginated ? value.content : lines.slice(start, end).join("\n"),
-    totalLines: reportedTotal,
-    ...(truncated ? { truncated: true } : {}),
+    mimeType: requireAgentResourceText(value.mimeType, "MIME 类型"),
+    content: normalizeAgentJsonValue(value.content, "Agent 资源内容"),
   };
 }
 
-function validateAgentResourcePageNumber(
-  value: number | undefined,
+function normalizeAgentActivityPresentationFields(
+  value: readonly AgentActivityPresentationField[],
+): readonly AgentActivityPresentationField[] {
+  if (!Array.isArray(value)) throw new TypeError("Agent 资源展示字段必须是数组");
+  if (value.length > 8) throw new TypeError("Agent 资源展示字段不能超过 8 个");
+  return value.map((field, index) => {
+    if (!field || typeof field !== "object" || Array.isArray(field)) {
+      throw new TypeError(`Agent 资源展示字段 ${index + 1} 必须是对象`);
+    }
+    const label =
+      field.label === undefined
+        ? undefined
+        : requireAgentPresentationText(field.label, `字段 ${index + 1} 标签`, 40);
+    const unit =
+      field.unit === undefined
+        ? undefined
+        : requireAgentPresentationText(field.unit, `字段 ${index + 1} 单位`, 30);
+    return {
+      ...(label === undefined ? {} : { label }),
+      value: requireAgentPresentationText(field.value, `字段 ${index + 1} 值`, 120),
+      ...(unit === undefined ? {} : { unit }),
+    };
+  });
+}
+
+function requireAgentResourceJsonObject(value: unknown, label: string): JsonObject {
+  const normalized = normalizeAgentJsonValue(value, `Agent 资源${label}`);
+  if (normalized === null || typeof normalized !== "object" || Array.isArray(normalized)) {
+    throw new TypeError(`Agent 资源${label}必须是对象`);
+  }
+  return normalized;
+}
+
+function normalizeAgentJsonValue(
+  value: unknown,
   label: string,
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError(`Agent 资源 ${label} 必须是正整数`);
+  ancestors: ReadonlySet<object> = new Set(),
+): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (!value || typeof value !== "object") throw new TypeError(`${label}必须是 JSON 值`);
+  if (ancestors.has(value)) throw new TypeError(`${label}不能循环引用`);
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(value);
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      normalizeAgentJsonValue(entry, `${label}[${index}]`, nextAncestors),
+    );
   }
-  return value;
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label}必须是普通 JSON 对象`);
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      normalizeAgentJsonValue(entry, `${label}.${key}`, nextAncestors),
+    ]),
+  );
 }
 
-function validateAgentResourceNonNegativeInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`Agent 资源 ${label} 必须是非负整数`);
+function requireAgentResourcePresentationTitle(value: unknown, pattern: string): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`Agent 资源 ${pattern} presentation 必须是对象`);
   }
-  return value;
+  return requireAgentPresentationText((value as { readonly title?: unknown }).title, "标题", 80);
 }
 
-function requireAgentResourceText(value: string, label: string): string {
+function requireAgentPresentationText(value: unknown, label: string, maximum: number): string {
+  const normalized = requireAgentResourceText(value, label);
+  if (Array.from(normalized).length > maximum) {
+    throw new TypeError(`Agent 资源${label}不能超过 ${maximum} 个字符`);
+  }
+  if (/<\/?[A-Za-z][^>]*>/u.test(normalized) || /\[[^\]]+\]\([^)]+\)/u.test(normalized)) {
+    throw new TypeError(`Agent 资源${label}只能使用纯文本`);
+  }
+  return normalized;
+}
+
+function requireAgentResourceText(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new TypeError(`Agent 资源${label}不能为空`);
   }

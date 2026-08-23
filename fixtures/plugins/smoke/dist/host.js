@@ -36,16 +36,35 @@ export async function apply(ctx, config) {
       return savedActivation.value.count;
     },
   });
-  ctx.agentResource(
-    {
-      pattern: "smoke://state/{name}",
+  ctx.agentResources({
+    "smoke://state/{name}": {
       description: "Read the external smoke plugin state.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          format: { type: "string", enum: ["plain", "detail"] },
+        },
+        additionalProperties: false,
+      },
+      implementation: {
+        async read({ pathParams, input }) {
+          return {
+            mimeType: "text/plain",
+            content: `${prefix}:${pathParams.name}:${input.format ?? "plain"}`,
+          };
+        },
+        presentRequest({ pathParams, input }) {
+          return [
+            { label: "名称", value: pathParams.name },
+            { label: "格式", value: input.format ?? "plain" },
+          ];
+        },
+        presentResult() {
+          return [{ value: "1", unit: "个状态" }];
+        },
+      },
     },
-    async ({ params, uri }) => ({
-      mimeType: "text/plain",
-      content: `${prefix}:${params.name}:${uri.query.format ?? "plain"}`,
-    }),
-  );
+  });
   ctx.contribute("seashard.smoke.contribution", {
     runtimeId: ctx.runtimeId,
     generation: ctx.generation,

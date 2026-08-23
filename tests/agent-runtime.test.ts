@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,6 +15,7 @@ import {
   AgentResourceRegistry,
   AgentToolRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
+import type { JsonValue } from "../packages/plugin-sdk/src/index.ts";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
@@ -97,7 +98,71 @@ await test("Agent Session Journal 保留新对话标题并投影最近使用的�
   assert.equal((await journal.snapshot(created.header.id)).title, "服务端规划");
 });
 
-await test("Agent 通用 read 工具读取 Invocation 资源快照并统一分页", async (context) => {
+await test("Agent Session Journal 为无展示字段的读取记录补默认标题", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-damaged-tool-call-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const journal = new AgentSessionJournal(userDataRoot);
+  await journal.initialize();
+  const created = await journal.create({ connectionId: "openai", modelId: "gpt-a" });
+  await journal.appendMessage({
+    sessionId: created.header.id,
+    invocationId: "invocation-1",
+    role: "user",
+    content: "保留这条消息",
+  });
+  await journal.appendInvocation(created.header.id, {
+    id: "invocation-1",
+    state: "completed",
+    model: { connectionId: "openai", modelId: "gpt-a" },
+    text: "已保留",
+  });
+  await appendFile(
+    join(journal.sessionsRoot, `${created.storageKey}.jsonl`),
+    `${JSON.stringify({
+      type: "tool-call",
+      timestamp: "2026-08-23T07:51:51.000Z",
+      id: "legacy-read-1",
+      invocationId: "invocation-1",
+      toolName: "read",
+      title: "读取资源",
+      state: "completed",
+      input: { path: "server://instances" },
+      output: [],
+      startedAt: "2026-08-23T07:51:50.000Z",
+      finishedAt: "2026-08-23T07:51:51.000Z",
+    })}\n`,
+    "utf8",
+  );
+
+  const snapshot = await journal.snapshot(created.header.id);
+  assert.deepEqual(
+    snapshot.messages.map(({ content }) => content),
+    ["保留这条消息"],
+  );
+  assert.deepEqual(snapshot.toolCalls, [
+    {
+      id: "legacy-read-1",
+      invocationId: "invocation-1",
+      toolName: "read",
+      presentation: { title: "读取资源" },
+      state: "completed",
+      input: { path: "server://instances" },
+      output: [],
+      startedAt: "2026-08-23T07:51:50.000Z",
+      finishedAt: "2026-08-23T07:51:51.000Z",
+    },
+  ]);
+  assert.deepEqual(
+    (await journal.list()).map(({ id }) => id),
+    [created.header.id],
+  );
+});
+
+await test("Agent 通用 read 工具保留领域分页并持久化展示投影", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-read-"));
   context.after(async () => {
     const { rm } = await import("node:fs/promises");
@@ -117,7 +182,7 @@ await test("Agent 通用 read 工具读取 Invocation 资源快照并统一分�
               type: "tool-call",
               toolCallId: "resource-read-1",
               toolName: "read",
-              input: '{"path":"server://instances","offset":2,"limit":1}',
+              input: '{"path":"server://instances","input":{"offset":2,"limit":1}}',
             },
             {
               type: "finish",
@@ -161,14 +226,48 @@ await test("Agent 通用 read 工具读取 Invocation 资源快照并统一分�
   resources.register(
     "test.server-manager",
     { type: "global", id: "global" },
+    "server://instances",
     {
-      pattern: "server://instances",
       description: "读取服务器实例列表。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          offset: { type: "integer", minimum: 1 },
+          limit: { type: "integer", minimum: 1 },
+        },
+        required: ["offset", "limit"],
+        additionalProperties: false,
+      },
+      outputDescription: "返回完整实例条目和分页信息。",
+      presentation: { title: "读取服务器实例" },
+      implementation: {
+        async read({ input }) {
+          const options = input as { offset: number; limit: number };
+          const instances = ["Paper", "Fabric", "Vanilla"];
+          const items = instances.slice(options.offset - 1, options.offset - 1 + options.limit);
+          return {
+            mimeType: "application/json",
+            content: {
+              items,
+              pagination: {
+                offset: options.offset,
+                limit: options.limit,
+                total: instances.length,
+                hasMore: options.offset - 1 + items.length < instances.length,
+              },
+            },
+          };
+        },
+        presentRequest({ input }) {
+          const options = input as { offset: number; limit: number };
+          return [{ value: `${options.offset}～${options.offset + options.limit - 1}` }];
+        },
+        presentResult(_request, result) {
+          const content = result.content as unknown as { items: readonly JsonValue[] };
+          return [{ value: String(content.items.length), unit: "个结果" }];
+        },
+      },
     },
-    async () => ({
-      mimeType: "text/plain",
-      content: "Paper\nFabric\nVanilla",
-    }),
   );
   const runtime = new AgentRuntime({
     userDataRoot,
@@ -200,19 +299,127 @@ await test("Agent 通用 read 工具读取 Invocation 资源快照并统一分�
       id: "resource-read-1",
       invocationId: reference.invocationId,
       toolName: "read",
-      title: "读取资源",
+      presentation: {
+        title: "读取服务器实例",
+        requestPayload: [{ value: "2～2" }],
+        resultPayload: [{ value: "1", unit: "个结果" }],
+      },
       state: "completed",
-      input: { path: "server://instances", offset: 2, limit: 1 },
+      input: {
+        path: "server://instances",
+        input: { offset: 2, limit: 1 },
+      },
       output: {
-        mimeType: "text/plain",
-        content: "Fabric",
-        totalLines: 3,
-        truncated: true,
+        items: ["Fabric"],
+        pagination: { offset: 2, limit: 1, total: 3, hasMore: true },
       },
       startedAt: invocation.toolCalls[0]?.startedAt,
       finishedAt: invocation.toolCalls[0]?.finishedAt,
     },
   ]);
+});
+
+await test("Agent 资源展示投影失败不会中断读取", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-presenter-failure-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  const model = new MockLanguageModelV4({
+    doStream: [
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            {
+              type: "tool-call",
+              toolCallId: "presenter-failure-1",
+              toolName: "read",
+              input: '{"path":"test://presenter-failure","input":{}}',
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "读取完成。" },
+            { type: "text-end", id: "answer" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+    ],
+  });
+  const modelSource: AgentModelSource = {
+    initialize: async () => {},
+    list: async () => [],
+    resolve: async () => ({
+      selection: { connectionId: "test", modelId: "presenter-failure-model" },
+      languageModel: model,
+    }),
+  };
+  const resources = new AgentResourceRegistry();
+  resources.register(
+    "test.presenter-failure",
+    { type: "global", id: "global" },
+    "test://presenter-failure",
+    {
+      description: "验证展示投影故障隔离。",
+      inputSchema: { type: "object", additionalProperties: false },
+      implementation: {
+        async read() {
+          return { mimeType: "application/json", content: { ok: true } };
+        },
+        presentRequest() {
+          return [{ value: "测试请求" }];
+        },
+        presentResult() {
+          throw new Error("fixture presenter failed");
+        },
+      },
+    },
+  );
+  const reported: unknown[] = [];
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: resources,
+    reportError: (error) => reported.push(error),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "读取测试资源。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.state, "completed");
+  assert.deepEqual(invocation.toolCalls[0]?.output, { ok: true });
+  assert.deepEqual(invocation.toolCalls[0]?.presentation, {
+    title: "读取资源",
+    requestPayload: [{ value: "测试请求" }],
+  });
+  assert.deepEqual(
+    reported.map((error) => (error instanceof Error ? error.message : String(error))),
+    ["fixture presenter failed"],
+  );
 });
 
 await test("Agent 模式执行工具闭环并持久化工具活动", async (context) => {
@@ -325,7 +532,7 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       id: "echo-1",
       invocationId: reference.invocationId,
       toolName: "test_echo",
-      title: "测试回显",
+      presentation: { title: "测试回显" },
       state: "completed",
       input: { value: "probe" },
       output: { value: "probe" },
@@ -348,7 +555,7 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
 await test("OpenAI Responses 工具结果会触发第二次上游请求", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-responses-loop-"));
   const requests: Array<Record<string, unknown>> = [];
-  const expectedResourceContent = [
+  const expectedResourceItems = [
     {
       id: "server-1",
       name: "Paper",
@@ -361,11 +568,15 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
       gameVersion: "1.21.1",
     },
   ];
-  const serializedResourceContent = JSON.stringify(expectedResourceContent, null, 2);
   const expectedToolOutput = {
-    mimeType: "application/json",
-    content: serializedResourceContent,
-    totalLines: serializedResourceContent.split("\n").length,
+    items: expectedResourceItems,
+    pagination: {
+      page: 1,
+      pageSize: 10,
+      totalItems: 1,
+      totalPages: 1,
+      hasMore: false,
+    },
   };
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -416,13 +627,15 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
   const resourceRegistry = new AgentResourceRegistry();
   registerServerInstanceAgentResources(
     {
-      agentResource(definition, read) {
-        return resourceRegistry.register(
-          "test.server-instance-manager",
-          { type: "global", id: "global" },
-          definition,
-          read,
-        ).id;
+      agentResources(resources) {
+        for (const [pattern, resource] of Object.entries(resources)) {
+          resourceRegistry.register(
+            "test.server-instance-manager",
+            { type: "global", id: "global" },
+            pattern,
+            resource,
+          );
+        }
       },
     },
     {
@@ -485,7 +698,7 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
       type: "function_call",
       call_id: "server-read-1",
       name: "read",
-      arguments: '{"path":"server://instances"}',
+      arguments: '{"path":"server://instances","input":{}}',
     },
   ]);
   assert.equal(continuation[2]?.type, "function_call_output");
@@ -527,7 +740,7 @@ function openAiResponseEvents(requestNumber: number): readonly Record<string, un
       id: "function-call-1",
       call_id: "server-read-1",
       name: "read",
-      arguments: '{"path":"server://instances"}',
+      arguments: '{"path":"server://instances","input":{}}',
     };
     return [
       { type: "response.created", response },

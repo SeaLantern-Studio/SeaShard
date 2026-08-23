@@ -1,4 +1,8 @@
-import type { ActivationScope, JsonValue } from "@seashard/plugin-sdk";
+import type {
+  ActivationScope,
+  AgentActivityPresentationField,
+  JsonValue,
+} from "@seashard/plugin-sdk";
 
 export type RuntimePhase = "active" | "failed";
 
@@ -133,12 +137,18 @@ export interface AgentInvocationReference {
 export type AgentInvocationState = "running" | "completed" | "cancelled" | "failed";
 export type AgentToolCallState = "running" | "completed" | "cancelled" | "failed";
 
+export interface AgentActivityPresentation {
+  readonly title: string;
+  readonly requestPayload?: readonly AgentActivityPresentationField[];
+  readonly resultPayload?: readonly AgentActivityPresentationField[];
+}
+
 /** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */
 export interface AgentToolCallSnapshot {
   readonly id: string;
   readonly invocationId: string;
   readonly toolName: string;
-  readonly title: string;
+  readonly presentation: AgentActivityPresentation;
   readonly state: AgentToolCallState;
   readonly input: JsonValue;
   readonly output?: JsonValue;

@@ -1,5 +1,7 @@
 import type {
-  AgentResourceHandler,
+  AgentActivityPresentationField,
+  AgentResourceDefinition,
+  AgentResourceImplementation,
   AgentResourceReadResult,
   AgentToolHandler,
   ExecutionContext,
@@ -11,6 +13,8 @@ import type {
 } from "@seashard/plugin-sdk";
 import type {
   AgentCallCancellationPayload,
+  AgentResourcePresentRequestPayload,
+  AgentResourcePresentResultPayload,
   AgentResourceReadPayload,
   AgentResourceRegistrationPayload,
   AgentToolInvocationPayload,
@@ -42,7 +46,7 @@ const pending = new Map<
 const providers = new Map<string, ServiceProvider>();
 const eventHandlers = new Map<string, (payload: JsonValue) => Promise<void> | void>();
 const agentToolHandlers = new Map<string, AgentToolHandler>();
-const agentResourceHandlers = new Map<string, AgentResourceHandler>();
+const agentResourceImplementations = new Map<string, AgentResourceImplementation>();
 const agentResourceCalls = new Map<string, AbortController>();
 let requestCounter = 0;
 let registrationCounter = 0;
@@ -104,6 +108,14 @@ async function executeCommand(command: string, payload: JsonValue): Promise<Json
     case "read-agent-resource":
       return (await readAgentResource(
         payload as unknown as AgentResourceReadPayload,
+      )) as unknown as JsonValue;
+    case "present-agent-resource-request":
+      return (await presentAgentResourceRequest(
+        payload as unknown as AgentResourcePresentRequestPayload,
+      )) as unknown as JsonValue;
+    case "present-agent-resource-result":
+      return (await presentAgentResourceResult(
+        payload as unknown as AgentResourcePresentResultPayload,
       )) as unknown as JsonValue;
     case "stop":
       await dispose();
@@ -246,21 +258,26 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
       );
       return registrationId;
     },
-    agentResource(definition, read) {
-      const registrationId = nextRegistrationId("agent-resource");
-      agentResourceHandlers.set(registrationId, read);
-      notify("agent-resource-register", {
-        registrationId,
-        definition,
-      } satisfies AgentResourceRegistrationPayload);
-      cordisContext.effect(
-        () => () => {
-          agentResourceHandlers.delete(registrationId);
-          notify("agent-resource-unregister", { registrationId });
-        },
-        `Agent resource ${definition.pattern}`,
-      );
-      return registrationId;
+    agentResources(resources) {
+      for (const [pattern, resource] of Object.entries(resources)) {
+        const registrationId = nextRegistrationId("agent-resource");
+        const { implementation, ...descriptor } = resource;
+        const definition: AgentResourceDefinition = { pattern, ...descriptor };
+        agentResourceImplementations.set(registrationId, implementation);
+        notify("agent-resource-register", {
+          registrationId,
+          definition,
+          hasPresentRequest: implementation.presentRequest !== undefined,
+          hasPresentResult: implementation.presentResult !== undefined,
+        } satisfies AgentResourceRegistrationPayload);
+        cordisContext.effect(
+          () => () => {
+            agentResourceImplementations.delete(registrationId);
+            notify("agent-resource-unregister", { registrationId });
+          },
+          `Agent resource ${pattern}`,
+        );
+      }
     },
     on(event, handler) {
       const registrationId = nextRegistrationId("event");
@@ -305,17 +322,40 @@ async function invokeAgentTool(payload: AgentToolInvocationPayload): Promise<Jso
 async function readAgentResource(
   payload: AgentResourceReadPayload,
 ): Promise<AgentResourceReadResult> {
-  const handler = agentResourceHandlers.get(payload.registrationId);
-  if (!handler) {
-    throw new Error(`Agent resource registration is not active: ${payload.registrationId}`);
-  }
+  const implementation = requireAgentResourceImplementation(payload.registrationId);
   const controller = new AbortController();
   agentResourceCalls.set(payload.callId, controller);
   try {
-    return await handler(payload.request, { signal: controller.signal });
+    return await implementation.read(payload.request, { signal: controller.signal });
   } finally {
     agentResourceCalls.delete(payload.callId);
   }
+}
+
+async function presentAgentResourceRequest(
+  payload: AgentResourcePresentRequestPayload,
+): Promise<readonly AgentActivityPresentationField[]> {
+  const implementation = requireAgentResourceImplementation(payload.registrationId);
+  if (!implementation.presentRequest)
+    throw new Error(`Agent resource has no request presenter: ${payload.registrationId}`);
+  return implementation.presentRequest(payload.request);
+}
+
+async function presentAgentResourceResult(
+  payload: AgentResourcePresentResultPayload,
+): Promise<readonly AgentActivityPresentationField[]> {
+  const implementation = requireAgentResourceImplementation(payload.registrationId);
+  if (!implementation.presentResult)
+    throw new Error(`Agent resource has no result presenter: ${payload.registrationId}`);
+  return implementation.presentResult(payload.request, payload.result);
+}
+
+function requireAgentResourceImplementation(registrationId: string): AgentResourceImplementation {
+  const implementation = agentResourceImplementations.get(registrationId);
+  if (!implementation) {
+    throw new Error(`Agent resource registration is not active: ${registrationId}`);
+  }
+  return implementation;
 }
 async function dispose(): Promise<void> {
   for (const controller of agentResourceCalls.values()) controller.abort("Plugin Host 正在停止");
@@ -326,7 +366,7 @@ async function dispose(): Promise<void> {
   providers.clear();
   eventHandlers.clear();
   agentToolHandlers.clear();
-  agentResourceHandlers.clear();
+  agentResourceImplementations.clear();
   agentResourceCalls.clear();
 }
 
