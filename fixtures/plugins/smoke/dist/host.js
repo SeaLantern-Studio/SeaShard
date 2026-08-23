@@ -36,6 +36,16 @@ export async function apply(ctx, config) {
       return savedActivation.value.count;
     },
   });
+  ctx.agentResource(
+    {
+      pattern: "smoke://state/{name}",
+      description: "Read the external smoke plugin state.",
+    },
+    async ({ params, uri }) => ({
+      mimeType: "text/plain",
+      content: `${prefix}:${params.name}:${uri.query.format ?? "plain"}`,
+    }),
+  );
   ctx.contribute("seashard.smoke.contribution", {
     runtimeId: ctx.runtimeId,
     generation: ctx.generation,

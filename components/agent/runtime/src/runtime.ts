@@ -10,7 +10,13 @@ import type {
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
-import type { AgentToolDefinition, AgentToolHandler, JsonValue } from "@seashard/plugin-sdk";
+import type {
+  AgentResourceDefinition,
+  AgentResourceReadResult,
+  AgentToolDefinition,
+  AgentToolHandler,
+  JsonValue,
+} from "@seashard/plugin-sdk";
 import {
   APICallError,
   isStepCount,
@@ -46,12 +52,29 @@ export interface AgentRuntimeToolSource {
   snapshot(): readonly AgentRuntimeTool[];
 }
 
+export interface AgentRuntimeResourceSnapshot {
+  readonly definitions: readonly AgentResourceDefinition[];
+  read(
+    path: string,
+    options?: {
+      readonly offset?: number;
+      readonly limit?: number;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<AgentResourceReadResult>;
+}
+
+export interface AgentRuntimeResourceSource {
+  snapshot(): AgentRuntimeResourceSnapshot;
+}
+
 interface RunningInvocation {
   snapshot: AgentInvocationSnapshot;
   readonly mode: AgentConversationMode;
   readonly controller: AbortController;
   readonly resolvedModel: ResolvedAgentModel;
   readonly toolDefinitions: ReadonlyMap<string, AgentRuntimeTool>;
+  readonly hasTools: boolean;
   readonly tools: ToolSet;
 }
 
@@ -59,6 +82,7 @@ export interface AgentRuntimeOptions {
   readonly userDataRoot: string;
   readonly modelCatalog?: AgentModelSource;
   readonly toolSource: AgentRuntimeToolSource;
+  readonly resourceSource: AgentRuntimeResourceSource;
   readonly reportError?: (error: unknown) => void;
 }
 
@@ -69,6 +93,7 @@ export class AgentRuntime {
 
   private readonly reportError: (error: unknown) => void;
   private readonly toolSource: AgentRuntimeToolSource;
+  private readonly resourceSource: AgentRuntimeResourceSource;
   private readonly running = new Map<string, RunningInvocation>();
   private readonly tasks = new Map<string, Promise<void>>();
   private readonly invocations = new Map<string, AgentInvocationSnapshot>();
@@ -82,6 +107,7 @@ export class AgentRuntime {
     this.reportError =
       options.reportError ?? ((error) => console.error("Agent Runtime failed", error));
     this.toolSource = options.toolSource;
+    this.resourceSource = options.resourceSource;
   }
 
   async initialize(): Promise<void> {
@@ -200,6 +226,7 @@ export class AgentRuntime {
     const active = this.activeBySession.get(session.header.id);
     if (active) throw new Error(`当前对话已有正在运行的请求：${active}`);
     const toolDefinitions = indexToolDefinitions(this.toolSource.snapshot());
+    const resources = this.resourceSource.snapshot();
 
     const invocationId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -230,7 +257,8 @@ export class AgentRuntime {
       controller: new AbortController(),
       resolvedModel,
       toolDefinitions,
-      tools: createToolSet(toolDefinitions.values()),
+      hasTools: toolDefinitions.size > 0 || resources.definitions.length > 0,
+      tools: createToolSet(toolDefinitions.values(), resources),
     };
     this.running.set(invocationId, running);
     this.invocations.set(invocationId, snapshot);
@@ -249,7 +277,7 @@ export class AgentRuntime {
     try {
       const session = await this.journal.get(invocation.snapshot.sessionId);
       const messages = projectModelMessages(session);
-      const agentMode = invocation.mode === "agent" && invocation.toolDefinitions.size > 0;
+      const agentMode = invocation.mode === "agent" && invocation.hasTools;
       const result = streamText({
         model: invocation.resolvedModel.languageModel,
         messages,
@@ -338,7 +366,10 @@ export class AgentRuntime {
       id: call.id,
       invocationId: invocation.snapshot.id,
       toolName: call.toolName,
-      title: invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName,
+      title:
+        call.toolName === "read"
+          ? "读取资源"
+          : (invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName),
       state: "running",
       input: call.input,
       startedAt,
@@ -513,8 +544,44 @@ function indexToolDefinitions(
   return indexed;
 }
 
-function createToolSet(definitions: Iterable<AgentRuntimeTool>): ToolSet {
+function createToolSet(
+  definitions: Iterable<AgentRuntimeTool>,
+  resources: AgentRuntimeResourceSnapshot,
+): ToolSet {
   const tools: ToolSet = {};
+  if (resources.definitions.length) {
+    const resourceCatalog = formatResourceCatalog(resources.definitions);
+    tools.read = tool({
+      title: "读取资源",
+      description: [
+        "读取当前组件声明的只读资源 URI，可按行分页。",
+        "只能使用下面列出的 URI 模式；不要猜测或使用列表外的 scheme 和路径。",
+        "",
+        resourceCatalog,
+      ].join("\n"),
+      inputSchema: jsonSchema<JsonValue>({
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: `完整资源 URI，必须匹配当前可用模式：\n${resourceCatalog}`,
+          },
+          offset: { type: "integer", minimum: 1, description: "可选的起始行，第一行为 1" },
+          limit: { type: "integer", minimum: 1, description: "可选的最大返回行数" },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      }),
+      execute: async (input, { abortSignal }) => {
+        const request = parseResourceReadInput(input);
+        return resources.read(request.path, {
+          ...(request.offset === undefined ? {} : { offset: request.offset }),
+          ...(request.limit === undefined ? {} : { limit: request.limit }),
+          signal: abortSignal,
+        });
+      },
+    });
+  }
   for (const entry of definitions) {
     tools[entry.name] = tool({
       title: entry.definition.title,
@@ -527,6 +594,49 @@ function createToolSet(definitions: Iterable<AgentRuntimeTool>): ToolSet {
     });
   }
   return tools;
+}
+
+function parseResourceReadInput(value: unknown): {
+  readonly path: string;
+  readonly offset?: number;
+  readonly limit?: number;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("read 输入必须是对象");
+  }
+  const input = value as Record<string, unknown>;
+  const unexpected = Object.keys(input).filter(
+    (key) => key !== "path" && key !== "offset" && key !== "limit",
+  );
+  if (unexpected.length) throw new TypeError(`read 包含未知参数：${unexpected.join(", ")}`);
+  if (typeof input.path !== "string" || !input.path.trim()) {
+    throw new TypeError("read.path 必须是非空字符串");
+  }
+  const offset = parseResourcePageNumber(input.offset, "read.offset");
+  const limit = parseResourcePageNumber(input.limit, "read.limit");
+  return {
+    path: input.path.trim(),
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+/** 把当前 Invocation 真正可用的路径压缩进工具元数据，避免模型猜测 URI。 */
+function formatResourceCatalog(definitions: readonly AgentResourceDefinition[]): string {
+  return [
+    "当前可用资源 URI 模式：",
+    ...definitions.map(
+      ({ pattern, description }) => `- ${pattern} — ${description.replace(/\s+/gu, " ")}`,
+    ),
+  ].join("\n");
+}
+
+function parseResourcePageNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${label} 必须是正整数`);
+  }
+  return value;
 }
 
 function validateUserMessage(message: AgentUserMessage): string {

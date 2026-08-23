@@ -8,6 +8,7 @@ import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/ind
 import type { ExecutionContext } from "../packages/plugin-sdk/src/index.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
+  AgentResourceRegistry,
   AgentToolRegistry,
   ServiceRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
@@ -187,34 +188,115 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
   const registry = new AgentToolRegistry();
   const scope = { type: "global" as const, id: "global" };
   const definition = {
-    namespace: "server",
-    name: "list",
-    title: "读取服务器列表",
-    description: "读取已登记的服务器实例。",
+    namespace: "test",
+    name: "echo",
+    title: "测试回显",
+    description: "回显输入。",
     inputSchema: {
       type: "object",
       properties: {},
       additionalProperties: false,
     },
   };
-  const registration = registry.register("server-manager", scope, definition, async () => ({
-    count: 1,
-  }));
+  const registration = registry.register("test-handler", scope, definition, async (input) => input);
 
   const [snapshot] = registry.snapshot();
-  assert.equal(snapshot?.name, "server_list");
-  assert.equal(registry.countRuntime("server-manager"), 1);
-  assert.deepEqual(await snapshot?.execute({}, {}), { count: 1 });
+  assert.equal(snapshot?.name, "test_echo");
+  assert.equal(registry.countRuntime("test-handler"), 1);
+  assert.deepEqual(await snapshot?.execute({ value: 1 }, {}), { value: 1 });
   assert.throws(
-    () => registry.register("duplicate-manager", scope, definition, async () => null),
-    /server_list.*server-manager/,
+    () => registry.register("duplicate-handler", scope, definition, async () => null),
+    /test_echo.*test-handler/,
   );
 
   registration.dispose();
   assert.deepEqual(registry.snapshot(), []);
-  await assert.rejects(snapshot!.execute({}, {}), /Agent 工具已停止：server_list/);
+  await assert.rejects(snapshot!.execute({}, {}), /Agent 工具已停止：test_echo/);
 
-  registry.register("replacement-manager", scope, definition, async () => null);
-  registry.removeRuntime("replacement-manager");
+  registry.register("replacement-handler", scope, definition, async () => null);
+  registry.removeRuntime("replacement-handler");
+  assert.equal(registry.countRuntime(), 0);
+});
+
+await test("Agent resource registry routes, paginates and invalidates snapshots", async () => {
+  const registry = new AgentResourceRegistry();
+  const scope = { type: "global" as const, id: "global" };
+  let observed:
+    | {
+        readonly params: Readonly<Record<string, string>>;
+        readonly query: Readonly<Record<string, string>>;
+      }
+    | undefined;
+  const registration = registry.register(
+    "server-runtime",
+    scope,
+    {
+      pattern: "server://instances/{instanceId}/logs",
+      description: "读取服务器日志。",
+    },
+    async ({ params, uri }) => {
+      observed = { params: { ...params }, query: { ...uri.query } };
+      return {
+        mimeType: "text/plain",
+        content: "first\nsecond\nthird",
+      };
+    },
+  );
+  registry.register(
+    "server-runtime",
+    scope,
+    {
+      pattern: "server://instances/current/logs",
+      description: "读取当前服务器日志。",
+    },
+    async () => ({
+      mimeType: "text/plain",
+      content: "current",
+    }),
+  );
+
+  const snapshot = registry.snapshot();
+  assert.deepEqual(
+    await snapshot.read("server://instances/server-a/logs?stream=stderr", {
+      offset: 2,
+      limit: 1,
+    }),
+    {
+      mimeType: "text/plain",
+      content: "second",
+      totalLines: 3,
+      truncated: true,
+    },
+  );
+  assert.deepEqual(observed, {
+    params: { instanceId: "server-a" },
+    query: { stream: "stderr" },
+  });
+  assert.deepEqual(await snapshot.read("server://instances/current/logs"), {
+    mimeType: "text/plain",
+    content: "current",
+    totalLines: 1,
+  });
+  assert.throws(
+    () =>
+      registry.register(
+        "duplicate-runtime",
+        scope,
+        {
+          pattern: "server://instances/{name}/logs",
+          description: "重复路由。",
+        },
+        async () => ({ mimeType: "text/plain", content: "" }),
+      ),
+    /路由冲突/,
+  );
+  await assert.rejects(
+    snapshot.read("server://instances/%2E%2E/logs"),
+    /Agent 资源 URI 路径不合法/,
+  );
+
+  registration.dispose();
+  await assert.rejects(snapshot.read("server://instances/server-a/logs"), /Agent 资源已停止/);
+  registry.removeRuntime("server-runtime");
   assert.equal(registry.countRuntime(), 0);
 });

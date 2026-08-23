@@ -10,8 +10,11 @@ import {
   AgentSessionJournal,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
-import { registerServerInstanceAgentTools } from "../components/server/instance-manager/src/index.ts";
-import { AgentToolRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
+import { registerServerInstanceAgentResources } from "../components/server/instance-manager/src/index.ts";
+import {
+  AgentResourceRegistry,
+  AgentToolRegistry,
+} from "../packages/plugin-system/src/runtime-registries.ts";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
@@ -94,6 +97,124 @@ await test("Agent Session Journal 保留新对话标题并投影最近使用的�
   assert.equal((await journal.snapshot(created.header.id)).title, "服务端规划");
 });
 
+await test("Agent 通用 read 工具读取 Invocation 资源快照并统一分页", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-read-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const usage = {
+    inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 2, text: 2, reasoning: undefined },
+  };
+  const model = new MockLanguageModelV4({
+    doStream: [
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            {
+              type: "tool-call",
+              toolCallId: "resource-read-1",
+              toolName: "read",
+              input: '{"path":"server://instances","offset":2,"limit":1}',
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "读取到了第二个服务器。" },
+            { type: "text-end", id: "answer" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+    ],
+  });
+  const configuredModel = {
+    connectionId: "test",
+    modelId: "resource-model",
+    name: "Resource Model",
+    api: "openai-responses" as const,
+  };
+  const modelSource: AgentModelSource = {
+    initialize: async () => {},
+    list: async () => [configuredModel],
+    resolve: async () => ({
+      selection: { connectionId: configuredModel.connectionId, modelId: configuredModel.modelId },
+      languageModel: model,
+    }),
+  };
+  const resources = new AgentResourceRegistry();
+  resources.register(
+    "test.server-manager",
+    { type: "global", id: "global" },
+    {
+      pattern: "server://instances",
+      description: "读取服务器实例列表。",
+    },
+    async () => ({
+      mimeType: "text/plain",
+      content: "Paper\nFabric\nVanilla",
+    }),
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: resources,
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "读取第二个服务器。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.state, "completed");
+  assert.equal(invocation.text, "读取到了第二个服务器。");
+  assert.equal(model.doStreamCalls.length, 2);
+  assert.deepEqual(
+    model.doStreamCalls[0]?.tools?.map(({ name }) => name),
+    ["read"],
+  );
+  const readToolMetadata = JSON.stringify(model.doStreamCalls[0]?.tools);
+  assert.match(readToolMetadata, /server:\/\/instances/u);
+  assert.match(readToolMetadata, /读取服务器实例列表/u);
+  assert.match(readToolMetadata, /不要猜测或使用列表外/u);
+  assert.deepEqual(invocation.toolCalls, [
+    {
+      id: "resource-read-1",
+      invocationId: reference.invocationId,
+      toolName: "read",
+      title: "读取资源",
+      state: "completed",
+      input: { path: "server://instances", offset: 2, limit: 1 },
+      output: {
+        mimeType: "text/plain",
+        content: "Fabric",
+        totalLines: 3,
+        truncated: true,
+      },
+      startedAt: invocation.toolCalls[0]?.startedAt,
+      finishedAt: invocation.toolCalls[0]?.finishedAt,
+    },
+  ]);
+});
+
 await test("Agent 模式执行工具闭环并持久化工具活动", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-tools-"));
   context.after(async () => {
@@ -112,9 +233,9 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
           chunks: [
             {
               type: "tool-call",
-              toolCallId: "server-list-1",
-              toolName: "server_list",
-              input: "{}",
+              toolCallId: "echo-1",
+              toolName: "test_echo",
+              input: '{"value":"probe"}',
             },
             {
               type: "finish",
@@ -128,7 +249,7 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
         stream: simulateReadableStream({
           chunks: [
             { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "当前有 1 个服务器。" },
+            { type: "text-delta", id: "answer", delta: "回显完成。" },
             { type: "text-end", id: "answer" },
             {
               type: "finish",
@@ -160,44 +281,54 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
     userDataRoot,
     modelCatalog: modelSource,
     toolSource: toolRegistry,
+    resourceSource: new AgentResourceRegistry(),
   });
   await runtime.initialize();
   context.after(() => runtime.dispose());
   // Runtime 构造完成后再注册，证明 Invocation 读取的是实时 Registry 快照。
   toolRegistry.register(
-    "test.server-manager",
+    "test.echo",
     { type: "global", id: "global" },
     {
-      namespace: "server",
-      name: "list",
-      title: "读取服务器列表",
-      description: "读取已登记的服务器实例。",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      namespace: "test",
+      name: "echo",
+      title: "测试回显",
+      description: "回显输入内容。",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
     },
-    async () => {
+    async (input) => {
       executions += 1;
-      return [{ id: "server-1", name: "Paper" }];
+      return input;
     },
   );
 
   const reference = await runtime.startSession({
-    initialMessage: { text: "我有哪些服务器？" },
+    initialMessage: { text: "回显 probe。" },
     mode: "agent",
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
-  assert.equal(invocation.text, "当前有 1 个服务器。");
+  assert.equal(invocation.text, "回显完成。");
   assert.equal(executions, 1);
   assert.equal(model.doStreamCalls.length, 2);
+  assert.deepEqual(
+    model.doStreamCalls[0]?.tools?.map(({ name }) => name),
+    ["test_echo"],
+  );
   assert.deepEqual(invocation.toolCalls, [
     {
-      id: "server-list-1",
+      id: "echo-1",
       invocationId: reference.invocationId,
-      toolName: "server_list",
-      title: "读取服务器列表",
+      toolName: "test_echo",
+      title: "测试回显",
       state: "completed",
-      input: {},
-      output: [{ id: "server-1", name: "Paper" }],
+      input: { value: "probe" },
+      output: { value: "probe" },
       startedAt: invocation.toolCalls[0]?.startedAt,
       finishedAt: invocation.toolCalls[0]?.finishedAt,
     },
@@ -208,8 +339,8 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
   assert.deepEqual(
     session.messages.map(({ role, content }) => ({ role, content })),
     [
-      { role: "user", content: "我有哪些服务器？" },
-      { role: "assistant", content: "当前有 1 个服务器。" },
+      { role: "user", content: "回显 probe。" },
+      { role: "assistant", content: "回显完成。" },
     ],
   );
 });
@@ -217,19 +348,25 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
 await test("OpenAI Responses 工具结果会触发第二次上游请求", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-responses-loop-"));
   const requests: Array<Record<string, unknown>> = [];
-  const expectedToolOutput = [
+  const expectedResourceContent = [
     {
       id: "server-1",
       name: "Paper",
       storageMode: "managed",
       source: "downloaded",
       modLoader: null,
-      serverType: "paper",
-      gameVersion: "1.21.1",
       createdAt: "2026-08-21T00:00:00.000Z",
       updatedAt: "2026-08-21T01:00:00.000Z",
+      serverType: "paper",
+      gameVersion: "1.21.1",
     },
   ];
+  const serializedResourceContent = JSON.stringify(expectedResourceContent, null, 2);
+  const expectedToolOutput = {
+    mimeType: "application/json",
+    content: serializedResourceContent,
+    totalLines: serializedResourceContent.split("\n").length,
+  };
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -276,15 +413,15 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
     ].join("\n"),
     "utf8",
   );
-  const toolRegistry = new AgentToolRegistry();
-  registerServerInstanceAgentTools(
+  const resourceRegistry = new AgentResourceRegistry();
+  registerServerInstanceAgentResources(
     {
-      agentTool(definition, execute) {
-        return toolRegistry.register(
+      agentResource(definition, read) {
+        return resourceRegistry.register(
           "test.server-instance-manager",
           { type: "global", id: "global" },
           definition,
-          execute,
+          read,
         ).id;
       },
     },
@@ -309,7 +446,8 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
   const runtime = new AgentRuntime({
     userDataRoot,
     modelCatalog: catalog,
-    toolSource: toolRegistry,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: resourceRegistry,
   });
   await runtime.initialize();
   context.after(() => runtime.dispose());
@@ -327,6 +465,9 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
     [false, false],
   );
   assert.deepEqual(requests[0]?.include, ["reasoning.encrypted_content"]);
+  const upstreamToolMetadata = JSON.stringify(requests[0]?.tools);
+  assert.match(upstreamToolMetadata, /server:\/\/instances/u);
+  assert.match(upstreamToolMetadata, /已登记的服务器实例/u);
 
   const secondInput = requests[1]?.input;
   assert(Array.isArray(secondInput));
@@ -342,13 +483,13 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
     },
     {
       type: "function_call",
-      call_id: "server-list-1",
-      name: "server_list",
-      arguments: "{}",
+      call_id: "server-read-1",
+      name: "read",
+      arguments: '{"path":"server://instances"}',
     },
   ]);
   assert.equal(continuation[2]?.type, "function_call_output");
-  assert.equal(continuation[2]?.call_id, "server-list-1");
+  assert.equal(continuation[2]?.call_id, "server-read-1");
   assert.equal(typeof continuation[2]?.output, "string");
   assert.deepEqual(JSON.parse(continuation[2]?.output as string), expectedToolOutput);
 });
@@ -384,9 +525,9 @@ function openAiResponseEvents(requestNumber: number): readonly Record<string, un
     const call = {
       type: "function_call",
       id: "function-call-1",
-      call_id: "server-list-1",
-      name: "server_list",
-      arguments: "{}",
+      call_id: "server-read-1",
+      name: "read",
+      arguments: '{"path":"server://instances"}',
     };
     return [
       { type: "response.created", response },

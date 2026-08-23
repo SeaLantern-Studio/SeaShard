@@ -67,6 +67,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
           createAgentRuntimeModule({
             userDataRoot,
             toolSource: kernel.agentTools,
+            resourceSource: kernel.agentResources,
             reportError: (error) => console.error("Agent Runtime failed", error),
           }),
       },

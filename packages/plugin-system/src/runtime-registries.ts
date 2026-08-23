@@ -1,4 +1,9 @@
 import type {
+  AgentResourceDefinition,
+  AgentResourceExecutionContext,
+  AgentResourceHandler,
+  AgentResourceReadResult,
+  AgentResourceUri,
   AgentToolDefinition,
   AgentToolExecutionContext,
   AgentToolHandler,
@@ -46,6 +51,37 @@ export interface AgentToolSnapshot {
   readonly name: string;
   readonly definition: AgentToolDefinition;
   execute(input: JsonValue, context: AgentToolExecutionContext): Promise<JsonValue>;
+}
+
+interface CompiledAgentResourcePattern {
+  readonly scheme: string;
+  readonly segments: readonly AgentResourcePatternSegment[];
+  readonly shape: string;
+  readonly staticSegmentCount: number;
+}
+
+type AgentResourcePatternSegment =
+  | { readonly type: "static"; readonly value: string }
+  | { readonly type: "parameter"; readonly name: string };
+
+interface AgentResourceRegistration {
+  readonly id: string;
+  readonly runtimeId: string;
+  readonly scope: ScopeAddress;
+  readonly definition: AgentResourceDefinition;
+  readonly handler: AgentResourceHandler;
+  readonly route: CompiledAgentResourcePattern;
+  active: boolean;
+}
+
+export interface AgentResourceReadOptions extends AgentResourceExecutionContext {
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface AgentResourceRegistrySnapshot {
+  readonly definitions: readonly AgentResourceDefinition[];
+  read(path: string, options?: AgentResourceReadOptions): Promise<AgentResourceReadResult>;
 }
 export interface ContributionSnapshot {
   id: string;
@@ -245,6 +281,91 @@ export class AgentToolRegistry {
   }
 }
 
+/**
+ * Agent 资源注册表编译 URI 模式并生成 Invocation 级路由快照。
+ * 快照固定路由集合；声明组件停止后，既有快照也会拒绝继续读取其资源。
+ */
+export class AgentResourceRegistry {
+  private readonly registrations = new Map<string, AgentResourceRegistration>();
+  private counter = 0;
+
+  register(
+    runtimeId: string,
+    scope: ScopeAddress,
+    definition: AgentResourceDefinition,
+    handler: AgentResourceHandler,
+  ): { id: string; dispose: () => void } {
+    if (typeof handler !== "function") throw new TypeError("Agent 资源处理器必须是函数");
+    const normalized = normalizeAgentResourceDefinition(definition);
+    const route = compileAgentResourcePattern(normalized.pattern);
+    const existing = this.registrations.get(route.shape);
+    if (existing) {
+      throw new Error(
+        `Agent 资源 ${normalized.pattern} 与 ${existing.definition.pattern} 路由冲突`,
+      );
+    }
+
+    const registration: AgentResourceRegistration = {
+      id: `${runtimeId}:agent-resource:${++this.counter}`,
+      runtimeId,
+      scope: { ...scope },
+      definition: normalized,
+      handler,
+      route,
+      active: true,
+    };
+    this.registrations.set(route.shape, registration);
+    return {
+      id: registration.id,
+      dispose: () => this.remove(registration),
+    };
+  }
+
+  /** 每次 Invocation 开始时读取一次，防止一次工具闭环内的路由集合漂移。 */
+  snapshot(): AgentResourceRegistrySnapshot {
+    const registrations = [...this.registrations.values()].sort(compareAgentResourceRoutes);
+    return {
+      definitions: registrations.map(({ definition }) => definition),
+      read: async (path, options = {}) => {
+        const uri = parseAgentResourceUri(path);
+        const matched = matchAgentResourceRegistration(registrations, uri);
+        if (!matched) throw new Error(`Agent 资源不存在：${uri.href}`);
+        if (!matched.registration.active) {
+          throw new Error(`Agent 资源已停止：${matched.registration.definition.pattern}`);
+        }
+        const result = await matched.registration.handler(
+          { uri, params: matched.params },
+          { signal: options.signal },
+        );
+        return paginateAgentResourceResult(result, options);
+      },
+    };
+  }
+
+  removeRuntime(runtimeId: string): void {
+    for (const registration of this.registrations.values()) {
+      if (registration.runtimeId === runtimeId) this.remove(registration);
+    }
+  }
+
+  countRuntime(runtimeId?: string): number {
+    if (!runtimeId) return this.registrations.size;
+    let count = 0;
+    for (const registration of this.registrations.values()) {
+      if (registration.runtimeId === runtimeId) count += 1;
+    }
+    return count;
+  }
+
+  private remove(registration: AgentResourceRegistration): void {
+    if (!registration.active) return;
+    registration.active = false;
+    if (this.registrations.get(registration.route.shape) === registration) {
+      this.registrations.delete(registration.route.shape);
+    }
+  }
+}
+
 export class ContributionRegistry {
   private readonly registrations = new Map<string, ContributionRegistration>();
   private counter = 0;
@@ -323,6 +444,222 @@ function validateContract(value: string): void {
   if (!/^[a-z0-9][a-z0-9.*:-]*$/.test(value)) {
     throw new TypeError(`invalid contract identifier: ${value}`);
   }
+}
+
+function normalizeAgentResourceDefinition(
+  definition: AgentResourceDefinition,
+): AgentResourceDefinition {
+  if (!definition || typeof definition !== "object") {
+    throw new TypeError("Agent 资源定义必须是对象");
+  }
+  const pattern = requireAgentResourceText(definition.pattern, "路径模式");
+  const description = requireAgentResourceText(definition.description, "描述");
+  const help =
+    definition.help === undefined
+      ? undefined
+      : requireAgentResourceText(definition.help, "详细说明");
+  compileAgentResourcePattern(pattern);
+  return {
+    pattern,
+    description,
+    ...(help === undefined ? {} : { help }),
+  };
+}
+
+function compileAgentResourcePattern(pattern: string): CompiledAgentResourcePattern {
+  const uri = parseAgentResourceUri(pattern);
+  if (Object.keys(uri.query).length) {
+    throw new TypeError(`Agent 资源路径模式不能包含查询参数：${pattern}`);
+  }
+  const segments: AgentResourcePatternSegment[] = [];
+  for (const segment of splitAgentResourcePath(uri.path)) {
+    const parameter = /^\{([A-Za-z][A-Za-z0-9]*)\}$/u.exec(segment);
+    if (parameter) {
+      segments.push({ type: "parameter", name: parameter[1]! });
+      continue;
+    }
+    if (segment.includes("{") || segment.includes("}")) {
+      throw new TypeError(`Agent 资源路径参数必须占据完整路径段：${pattern}`);
+    }
+    segments.push({ type: "static", value: segment });
+  }
+  const shape = `${uri.scheme}://${segments
+    .map((segment) => (segment.type === "static" ? `s:${segment.value}` : "p:{}"))
+    .join("/")}`;
+  return {
+    scheme: uri.scheme,
+    segments,
+    shape,
+    staticSegmentCount: segments.filter(({ type }) => type === "static").length,
+  };
+}
+
+function parseAgentResourceUri(value: string): AgentResourceUri {
+  if (typeof value !== "string" || !value || value !== value.trim()) {
+    throw new TypeError(`Agent 资源 URI 不合法：${String(value)}`);
+  }
+  const matched = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^#]*)$/u.exec(value);
+  if (!matched) throw new TypeError(`Agent 资源 URI 不合法：${value}`);
+  const scheme = matched[1]!.toLowerCase();
+  const remainder = matched[2]!;
+  const queryIndex = remainder.indexOf("?");
+  const encodedPath = queryIndex === -1 ? remainder : remainder.slice(0, queryIndex);
+  const encodedQuery = queryIndex === -1 ? "" : remainder.slice(queryIndex + 1);
+  if (encodedPath.startsWith("/") || encodedPath.endsWith("/") || encodedPath.includes("//")) {
+    throw new TypeError(`Agent 资源 URI 路径不合法：${value}`);
+  }
+
+  const decodedSegments = encodedPath
+    ? encodedPath.split("/").map((segment) => decodeAgentResourcePart(segment, value))
+    : [];
+  if (
+    decodedSegments.some(
+      (segment) =>
+        !segment ||
+        segment.includes("/") ||
+        segment.includes("\\") ||
+        segment.includes("\0") ||
+        segment === "." ||
+        segment === "..",
+    )
+  ) {
+    throw new TypeError(`Agent 资源 URI 路径不合法：${value}`);
+  }
+
+  const query: Record<string, string> = Object.create(null) as Record<string, string>;
+  const parameters = new URLSearchParams(encodedQuery);
+  for (const [key, queryValue] of parameters) {
+    if (!key || Object.hasOwn(query, key)) {
+      throw new TypeError(`Agent 资源 URI 查询参数不合法：${value}`);
+    }
+    query[key] = queryValue;
+  }
+  return {
+    href: value,
+    scheme,
+    path: decodedSegments.join("/"),
+    query,
+  };
+}
+
+function decodeAgentResourcePart(value: string, uri: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new TypeError(`Agent 资源 URI 包含无效编码：${uri}`);
+  }
+}
+
+function splitAgentResourcePath(path: string): readonly string[] {
+  return path ? path.split("/") : [];
+}
+
+function compareAgentResourceRoutes(
+  left: AgentResourceRegistration,
+  right: AgentResourceRegistration,
+): number {
+  return (
+    right.route.staticSegmentCount - left.route.staticSegmentCount ||
+    right.route.segments.length - left.route.segments.length ||
+    left.definition.pattern.localeCompare(right.definition.pattern)
+  );
+}
+
+function matchAgentResourceRegistration(
+  registrations: readonly AgentResourceRegistration[],
+  uri: AgentResourceUri,
+):
+  | {
+      readonly registration: AgentResourceRegistration;
+      readonly params: Readonly<Record<string, string>>;
+    }
+  | undefined {
+  const pathSegments = splitAgentResourcePath(uri.path);
+  for (const registration of registrations) {
+    if (
+      registration.route.scheme !== uri.scheme ||
+      registration.route.segments.length !== pathSegments.length
+    ) {
+      continue;
+    }
+    const params: Record<string, string> = Object.create(null) as Record<string, string>;
+    let matched = true;
+    for (const [index, segment] of registration.route.segments.entries()) {
+      const value = pathSegments[index]!;
+      if (segment.type === "static") {
+        if (segment.value !== value) {
+          matched = false;
+          break;
+        }
+      } else {
+        params[segment.name] = value;
+      }
+    }
+    if (matched) return { registration, params };
+  }
+  return undefined;
+}
+
+function paginateAgentResourceResult(
+  value: AgentResourceReadResult,
+  options: AgentResourceReadOptions,
+): AgentResourceReadResult {
+  if (!value || typeof value !== "object") {
+    throw new TypeError("Agent 资源读取结果必须是对象");
+  }
+  const mimeType = requireAgentResourceText(value.mimeType, "MIME 类型");
+  if (typeof value.content !== "string") {
+    throw new TypeError("Agent 资源内容必须是字符串");
+  }
+  const offset = validateAgentResourcePageNumber(options.offset, "offset") ?? 1;
+  const limit = validateAgentResourcePageNumber(options.limit, "limit");
+  const lines = value.content ? value.content.split(/\r\n|\n|\r/u) : [];
+  const reportedTotal =
+    value.totalLines === undefined
+      ? lines.length
+      : validateAgentResourceNonNegativeInteger(value.totalLines, "totalLines");
+  if (reportedTotal < lines.length) {
+    throw new TypeError("Agent 资源 totalLines 不能小于当前内容行数");
+  }
+  if (value.truncated !== undefined && typeof value.truncated !== "boolean") {
+    throw new TypeError("Agent 资源 truncated 必须是布尔值");
+  }
+  const start = Math.min(offset - 1, lines.length);
+  const end = limit === undefined ? lines.length : Math.min(start + limit, lines.length);
+  const unpaginated = options.offset === undefined && options.limit === undefined;
+  const truncated =
+    value.truncated === true || start > 0 || end < lines.length || reportedTotal > lines.length;
+  return {
+    mimeType,
+    content: unpaginated ? value.content : lines.slice(start, end).join("\n"),
+    totalLines: reportedTotal,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+function validateAgentResourcePageNumber(
+  value: number | undefined,
+  label: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`Agent 资源 ${label} 必须是正整数`);
+  }
+  return value;
+}
+
+function validateAgentResourceNonNegativeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`Agent 资源 ${label} 必须是非负整数`);
+  }
+  return value;
+}
+
+function requireAgentResourceText(value: string, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`Agent 资源${label}不能为空`);
+  }
+  return value.trim();
 }
 
 function normalizeAgentToolDefinition(definition: AgentToolDefinition): AgentToolDefinition {

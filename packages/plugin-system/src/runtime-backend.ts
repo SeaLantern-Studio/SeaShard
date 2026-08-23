@@ -1,5 +1,7 @@
 import type { PreparedPlugin, RunningPlugin } from "./runtime";
 import type {
+  AgentResourceReadRequest,
+  AgentResourceReadResult,
   ExecutionContext,
   JsonValue,
   PluginContext,
@@ -13,6 +15,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
+  AgentCallCancellationPayload,
+  AgentResourceReadPayload,
+  AgentResourceReadResponsePayload,
+  AgentResourceRegistrationPayload,
   AgentToolInvocationPayload,
   AgentToolRegistrationPayload,
   ContributionRegistrationPayload,
@@ -32,6 +38,7 @@ import type {
 } from "./host-protocol";
 import { PluginRegistry } from "./registry";
 import {
+  AgentResourceRegistry,
   AgentToolRegistry,
   ContributionRegistry,
   PluginEventBus,
@@ -42,6 +49,7 @@ import type { ResolvedEntry } from "./types";
 interface RuntimeRegistries {
   services: ServiceRegistry;
   agentTools: AgentToolRegistry;
+  agentResources: AgentResourceRegistry;
   contributions: ContributionRegistry;
   events: PluginEventBus;
   storage: PluginStorageBroker;
@@ -209,6 +217,7 @@ class PluginHostSession {
   >();
   private readonly registrationDisposers = new Map<string, () => void>();
   private requestCounter = 0;
+  private agentCallCounter = 0;
   private expectedExit = false;
   private closeTask?: Promise<void>;
 
@@ -249,6 +258,51 @@ class PluginHostSession {
       }, 30_000);
       this.pending.set(id, { resolve, reject, timer });
       this.send({ type: "request", id, command, payload: payload as JsonValue });
+    });
+  }
+
+  private async readExternalAgentResource(
+    registrationId: string,
+    request: AgentResourceReadRequest,
+    signal?: AbortSignal,
+  ): Promise<AgentResourceReadResult> {
+    if (signal?.aborted) throw createAbortError("Agent 资源读取已取消");
+    const callId = `agent-resource:${++this.agentCallCounter}`;
+    const task = this.request("read-agent-resource", {
+      callId,
+      registrationId,
+      request,
+    } satisfies AgentResourceReadPayload).then((result) => {
+      if (result === undefined) {
+        throw new Error(`external Agent resource returned no result: ${registrationId}`);
+      }
+      return result as unknown as AgentResourceReadResponsePayload;
+    });
+    if (!signal) return task;
+
+    return new Promise<AgentResourceReadResult>((resolve, reject) => {
+      let settled = false;
+      const finish = (complete: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        complete();
+      };
+      const abort = () => {
+        if (this.child.connected) {
+          this.send({
+            type: "notification",
+            event: "agent-call-cancel",
+            payload: { callId } satisfies AgentCallCancellationPayload,
+          });
+        }
+        finish(() => reject(createAbortError("Agent 资源读取已取消")));
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      void task.then(
+        (result) => finish(() => resolve(result)),
+        (error: unknown) => finish(() => reject(error)),
+      );
     });
   }
 
@@ -331,6 +385,7 @@ class PluginHostSession {
       case "contribution-unregister":
       case "event-unregister":
       case "agent-tool-unregister":
+      case "agent-resource-unregister":
         this.removeRegistration(payload as unknown as ServiceUnregistrationPayload);
         break;
       case "contribution-register":
@@ -341,6 +396,9 @@ class PluginHostSession {
         break;
       case "agent-tool-register":
         this.registerAgentTool(payload as unknown as AgentToolRegistrationPayload);
+        break;
+      case "agent-resource-register":
+        this.registerAgentResource(payload as unknown as AgentResourceRegistrationPayload);
         break;
       default:
         throw new Error(`unknown plugin host notification: ${event}`);
@@ -409,6 +467,17 @@ class PluginHostSession {
         }
         return result;
       },
+    );
+    this.registrationDisposers.set(payload.registrationId, registration.dispose);
+  }
+
+  private registerAgentResource(payload: AgentResourceRegistrationPayload): void {
+    const registration = this.registries.agentResources.register(
+      this.entry.runtimeId,
+      scopeFor(this.entry),
+      payload.definition,
+      (request, context) =>
+        this.readExternalAgentResource(payload.registrationId, request, context.signal),
     );
     this.registrationDisposers.set(payload.registrationId, registration.dispose);
   }
@@ -506,6 +575,16 @@ function createLocalPluginContext(
       );
       return registration.id;
     },
+    agentResource(definition, read) {
+      const registration = registries.agentResources.register(
+        entry.runtimeId,
+        scope,
+        definition,
+        read,
+      );
+      cordisContext.effect(() => registration.dispose, `Agent resource ${definition.pattern}`);
+      return registration.id;
+    },
     on(event, handler) {
       cordisContext.effect(
         () => registries.events.on(event, entry.runtimeId, scope, handler),
@@ -542,6 +621,7 @@ function removeRuntimeRegistrations(registries: RuntimeRegistries, runtimeId: st
   registries.contributions.removeRuntime(runtimeId);
   registries.events.removeRuntime(runtimeId);
   registries.agentTools.removeRuntime(runtimeId);
+  registries.agentResources.removeRuntime(runtimeId);
 }
 
 function validatePluginModule(value: unknown): PluginModule {
@@ -572,6 +652,12 @@ function validateContracts(values: readonly string[], exportName: string): strin
     throw new TypeError(`plugin ${exportName} contains an invalid contract identifier`);
   }
   return result.sort((left, right) => left.localeCompare(right));
+}
+
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
 
 function formatError(error: unknown): string {

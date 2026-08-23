@@ -1,4 +1,7 @@
 import type {
+  AgentResourceDefinition,
+  AgentResourceReadRequest,
+  AgentResourceReadResult,
   AgentToolDefinition,
   ExecutionContext,
   JsonValue,
@@ -70,6 +73,23 @@ export interface AgentToolRegistrationPayload {
 export interface AgentToolInvocationPayload {
   registrationId: string;
   input: JsonValue;
+}
+
+export interface AgentResourceRegistrationPayload {
+  registrationId: string;
+  definition: AgentResourceDefinition;
+}
+
+export interface AgentResourceReadPayload {
+  callId: string;
+  registrationId: string;
+  request: AgentResourceReadRequest;
+}
+
+export type AgentResourceReadResponsePayload = AgentResourceReadResult;
+
+export interface AgentCallCancellationPayload {
+  callId: string;
 }
 
 export interface ServiceCallPayload {

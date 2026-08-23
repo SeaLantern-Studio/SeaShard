@@ -56,6 +56,12 @@ export async function verifySmokeRuntime(
       await pluginKernel.callService(serverInstanceManagerContract, "list", []),
     );
     console.log(`SEASHARD_SMOKE_SERVER_INSTANCES count=${instances.length}`);
+    const resource = await pluginKernel.agentResources.snapshot().read("server://instances");
+    const resourceInstances = expectServerInstances(JSON.parse(resource.content) as unknown);
+    if (resource.mimeType !== "application/json" || resourceInstances.length !== instances.length) {
+      throw new Error("server instance Agent resource returned an unexpected projection");
+    }
+    console.log(`SEASHARD_SMOKE_AGENT_SERVER_RESOURCE count=${resourceInstances.length}`);
   }
   if (process.env.SEASHARD_SMOKE_EXPECT_PLUGIN === "1") {
     const echo = await pluginKernel.callService("seashard.smoke.echo", "echo", ["probe"]);
@@ -69,9 +75,22 @@ export async function verifySmokeRuntime(
       "activationCount",
       [],
     );
+    const resourcesBeforeReload = pluginKernel.agentResources.snapshot();
+    const resourceBeforeReload = await resourcesBeforeReload.read(
+      "smoke://state/probe?format=detail",
+    );
     const before = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
     await pluginKernel.reload("smoke.external-plugin");
     const after = activePlugin(pluginKernel.runtimeSnapshot(), "smoke.external-plugin");
+    let staleResourceRejected = false;
+    try {
+      await resourcesBeforeReload.read("smoke://state/stale");
+    } catch (error) {
+      staleResourceRejected = error instanceof Error && error.message.includes("Agent 资源已停止");
+    }
+    const resourceAfterReload = await pluginKernel.agentResources
+      .snapshot()
+      .read("smoke://state/reload");
     const reloadedEcho = await pluginKernel.callService("seashard.smoke.echo", "echo", ["reload"]);
     const activationAfter = await pluginKernel.callService(
       "seashard.smoke.echo",
@@ -86,7 +105,10 @@ export async function verifySmokeRuntime(
       typeof activationBefore !== "number" ||
       typeof activationAfter !== "number" ||
       activationAfter !== activationBefore + 1 ||
-      pluginKernel.diagnostics().contributions !== 1
+      pluginKernel.diagnostics().contributions !== 1 ||
+      resourceBeforeReload.content !== "core-smoke:probe:detail" ||
+      resourceAfterReload.content !== "core-smoke:reload:plain" ||
+      !staleResourceRejected
     ) {
       throw new Error("external plugin reload did not produce an active plugin");
     }
@@ -94,6 +116,9 @@ export async function verifySmokeRuntime(
     console.log(`SEASHARD_PLUGIN_SMOKE_RELOADED version=${after.pluginVersion}`);
     console.log(
       `SEASHARD_PLUGIN_SMOKE_STORAGE before=${activationBefore} after=${activationAfter}`,
+    );
+    console.log(
+      `SEASHARD_PLUGIN_SMOKE_RESOURCE before=${resourceBeforeReload.content} after=${resourceAfterReload.content}`,
     );
   }
 }

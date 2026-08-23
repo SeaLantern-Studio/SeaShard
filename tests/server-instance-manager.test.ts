@@ -16,7 +16,7 @@ import type {
 import {
   ServerInstanceManager,
   SQLiteServerInstanceRegistry,
-  registerServerInstanceAgentTools,
+  registerServerInstanceAgentResources,
   createShortRandomId,
   portableInstanceMetadataDirectoryName,
   portableSeaShardInstanceFileName,
@@ -28,7 +28,7 @@ import {
   type PortableSeaShardInstanceManifest,
   type PortableServerInformationManifest,
 } from "../components/server/instance-manager/src/index.ts";
-import { AgentToolRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
+import { AgentResourceRegistry } from "../packages/plugin-system/src/runtime-registries.ts";
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,16 +38,16 @@ import test from "node:test";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
-await test("server instance component owns its Agent tool projection", async () => {
-  const registry = new AgentToolRegistry();
-  registerServerInstanceAgentTools(
+await test("server instance component owns its Agent resource projection", async () => {
+  const registry = new AgentResourceRegistry();
+  registerServerInstanceAgentResources(
     {
-      agentTool(definition, execute) {
+      agentResource(definition, read) {
         return registry.register(
           "test.server-instance-manager",
           { type: "global", id: "global" },
           definition,
-          execute,
+          read,
         ).id;
       },
     },
@@ -71,9 +71,17 @@ await test("server instance component owns its Agent tool projection", async () 
       ],
     },
   );
-  const [tool] = registry.snapshot();
-  assert.equal(tool?.name, "server_list");
-  assert.deepEqual(await tool?.execute({}, {}), [
+  const snapshot = registry.snapshot();
+  assert.deepEqual(snapshot.definitions, [
+    {
+      pattern: "server://instances",
+      description:
+        "读取 SeaShard 已登记的服务器实例，包括名称、核心类型、Minecraft 版本、存储方式、来源和最近启动时间；结果不包含宿主文件路径。",
+    },
+  ]);
+  const result = await snapshot.read("server://instances");
+  assert.equal(result.mimeType, "application/json");
+  assert.deepEqual(JSON.parse(result.content), [
     {
       id: "server-1",
       name: "Paper",
@@ -87,6 +95,7 @@ await test("server instance component owns its Agent tool projection", async () 
       lastStartedAt: "2026-08-21T00:30:00.000Z",
     },
   ]);
+  assert.doesNotMatch(result.content, /rootPath|coreJarPath|iconPath|SeaShard\/servers/u);
 });
 
 await test("resource source index keeps valid unknown origins and ignores malformed records", () => {

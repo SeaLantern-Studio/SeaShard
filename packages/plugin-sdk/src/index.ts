@@ -130,6 +130,41 @@ export type AgentToolHandler = (
   context: AgentToolExecutionContext,
 ) => Awaitable<JsonValue>;
 
+/** Agent 资源声明只包含可序列化的路由元数据，读取处理器由所属运行时持有。 */
+export interface AgentResourceDefinition {
+  readonly pattern: string;
+  readonly description: string;
+  readonly help?: string;
+}
+
+export interface AgentResourceUri {
+  readonly href: string;
+  readonly scheme: string;
+  readonly path: string;
+  readonly query: Readonly<Record<string, string>>;
+}
+
+export interface AgentResourceReadRequest {
+  readonly uri: AgentResourceUri;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+export interface AgentResourceReadResult {
+  readonly mimeType: string;
+  readonly content: string;
+  readonly totalLines?: number;
+  readonly truncated?: boolean;
+}
+
+export interface AgentResourceExecutionContext {
+  readonly signal?: AbortSignal;
+}
+
+export type AgentResourceHandler = (
+  request: AgentResourceReadRequest,
+  context: AgentResourceExecutionContext,
+) => Awaitable<AgentResourceReadResult>;
+
 export interface PluginContext {
   readonly execution: ExecutionContext;
   readonly runtimeId: string;
@@ -139,6 +174,7 @@ export interface PluginContext {
   service<T extends object>(contract: string): T;
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;
+  agentResource(definition: AgentResourceDefinition, read: AgentResourceHandler): string;
   on(event: string, handler: (payload: JsonValue) => Awaitable<void>): void;
   emit(event: string, payload: JsonValue): Promise<void>;
 }

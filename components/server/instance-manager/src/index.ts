@@ -7,7 +7,7 @@ import {
 } from "@seashard/server-core-source";
 import { ServerInstanceManager } from "./manager";
 import { serverInstanceDataCapsule, SQLiteServerInstanceRegistry } from "./registry";
-import { registerServerInstanceAgentTools } from "./agent-tools";
+import { registerServerInstanceAgentResources } from "./agent-resources";
 
 export interface ServerInstanceManagerModuleOptions {
   readonly database: DatabaseService;
@@ -51,7 +51,7 @@ export function createServerInstanceManagerModule(
         coreSource,
         ...(options.reportError ? { reportError: options.reportError } : {}),
       });
-      registerServerInstanceAgentTools(ctx, {
+      registerServerInstanceAgentResources(ctx, {
         listInstances: () => manager.list(),
       });
       ctx.provide(serverInstanceManagerContract, {
@@ -132,7 +132,7 @@ function asJsonValue(value: unknown): JsonValue {
   return value as JsonValue;
 }
 
-export * from "./agent-tools";
+export * from "./agent-resources";
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";
