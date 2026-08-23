@@ -1,0 +1,13 @@
+{
+  "name": "@seashard/agent-ui-shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "vue": "3.5.41"
+  }
+}

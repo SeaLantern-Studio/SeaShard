@@ -1,3 +1,4 @@
+import { agentRuntimeManifest, createAgentRuntimeModule } from "@seashard/agent-runtime";
 import { serverDownloadConnectionLimits, type ServerConsoleLine } from "@seashard/contracts";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
@@ -36,6 +37,7 @@ interface HostFeatureOptions {
   readonly kernel: PluginKernel;
   readonly root: Context;
   readonly dataRoot: string;
+  readonly userDataRoot: string;
   readonly seaShardVersion: string;
   readonly startedAt: string;
   readonly isStopping: () => boolean;
@@ -50,11 +52,35 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
     kernel,
     root,
     dataRoot,
+    userDataRoot,
     seaShardVersion,
     startedAt,
     isStopping,
     publishServerConsoleLine,
   } = options;
+  // Agent Session 和模型配置属于用户级数据，必须位于 Electron userData 而非 core 数据目录。
+  await kernel.registerBuiltIn({
+    manifest: agentRuntimeManifest,
+    loaders: {
+      "agent-runtime.host": {
+        load: async () =>
+          createAgentRuntimeModule({
+            userDataRoot,
+            reportError: (error) => console.error("Agent Runtime failed", error),
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.agent-runtime",
+        entryId: "agent-runtime.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // 公共下载组件集中管理所有文件任务；业务组件通过 Service 注入复用，不各自实现传输层。
   await kernel.registerBuiltIn({
     manifest: downloadManifest,

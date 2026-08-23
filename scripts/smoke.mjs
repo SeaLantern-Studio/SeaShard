@@ -1,7 +1,7 @@
 import electron from "electron";
 import { zipSync } from "fflate";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,13 +11,16 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const entry = fileURLToPath(new URL("../apps/desktop/dist/main/index.js", import.meta.url));
 const pluginSource = fileURLToPath(new URL("../fixtures/plugins/smoke", import.meta.url));
 const dataRoot = await mkdtemp(join(tmpdir(), "seashard-smoke-"));
+const userDataRoot = join(dataRoot, "electron-user-data");
 const archivePath = join(dataRoot, "smoke.seashard-plugin");
 await writePluginArchive(archivePath);
+await mkdir(userDataRoot, { recursive: true });
 
 try {
   await runElectron("install", { SEASHARD_SMOKE_PLUGIN_ARCHIVE: archivePath });
   await runElectron("recovery", {});
   verifyPersistedState(join(dataRoot, "seashard.sqlite3"));
+  await verifyAgentModels(join(userDataRoot, "agent", "models.yml"));
   console.log("SEASHARD_SMOKE_OK");
 } finally {
   await rm(dataRoot, { recursive: true, force: true });
@@ -46,6 +49,7 @@ async function runElectron(label, extraEnvironment) {
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
       SEASHARD_DATA_DIR: dataRoot,
       SEASHARD_SMOKE: "1",
+      SEASHARD_SMOKE_USER_DATA_DIR: userDataRoot,
       SEASHARD_SMOKE_EXPECT_PLUGIN: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -70,7 +74,7 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_PLUGIN_SMOKE_ECHO core-smoke:probe",
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
     "SEASHARD_PLUGIN_SMOKE_STORAGE",
-    "SEASHARD_SMOKE_READY components=11",
+    "SEASHARD_SMOKE_READY components=12",
     "SEASHARD_SMOKE_SERVER_INSTANCES count=0",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
     "SEASHARD_PLUGIN_HOST_DISPOSED runtime=smoke.external-plugin",
@@ -85,6 +89,14 @@ async function runElectron(label, extraEnvironment) {
   }
 }
 
+async function verifyAgentModels(modelsPath) {
+  const source = await readFile(modelsPath, "utf8");
+  if (!source.includes("providers: {}")) {
+    throw new Error(`unexpected Agent model configuration: ${modelsPath}`);
+  }
+  console.log("SEASHARD_SMOKE_AGENT_MODELS_OK");
+}
+
 function verifyPersistedState(databasePath) {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
@@ -92,7 +104,7 @@ function verifyPersistedState(databasePath) {
     const bindings = database.prepare("SELECT COUNT(*) AS count FROM plugin_bindings").get();
     const packageCount = Number(packages.count);
     const bindingCount = Number(bindings.count);
-    if (packageCount !== 28 || bindingCount !== 28) {
+    if (packageCount !== 30 || bindingCount !== 30) {
       throw new Error(
         `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}`,
       );

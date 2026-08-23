@@ -1,4 +1,5 @@
 import { aboutUiManifest } from "@seashard/about-ui";
+import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import type { PluginKernel } from "@seashard/plugin-system";
@@ -19,6 +20,21 @@ import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
 /** 注册只发布 Renderer Client Entry 的内置功能。 */
 export async function registerClientFeatures(kernel: PluginKernel): Promise<void> {
+  // Agent 对话页独立发布，与侧栏通过专用 shared 包共享 Session 选择状态。
+  await kernel.registerBuiltIn({
+    manifest: agentConversationUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.agent-conversation.ui",
+        entryId: "agent-conversation.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // “关于”作为可独立启停的内置 Client UI 功能，进入统一设置导航。
   await kernel.registerBuiltIn({
     manifest: aboutUiManifest,

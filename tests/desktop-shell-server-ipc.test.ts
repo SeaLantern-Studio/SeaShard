@@ -30,6 +30,44 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   const { runtime, shell, saveAsRequest } = harness;
   await shell.service.openPrimary();
   const first = runtime.windows[0]!;
+  assert.deepEqual(await runtime.invoke(desktopChannels.agentModelsList, 1), []);
+  assert.deepEqual(await runtime.invoke(desktopChannels.agentSessionsList, 1), []);
+  assert.equal(
+    (
+      (await runtime.invoke(desktopChannels.agentSessionGet, 1, "agent-session")) as {
+        title: string;
+      }
+    ).title,
+    "新对话",
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.agentSessionStart, 1, {
+      initialMessage: { text: "hello" },
+      model: { connectionId: "test", modelId: "test-model" },
+    }),
+    { sessionId: "agent-session", invocationId: "agent-invocation" },
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.agentMessageSend, 1, {
+      sessionId: "agent-session",
+      message: { text: "continue" },
+      model: { connectionId: "test", modelId: "test-model" },
+    }),
+    { sessionId: "agent-session", invocationId: "agent-invocation" },
+  );
+  assert.equal(
+    (
+      (await runtime.invoke(desktopChannels.agentInvocationGet, 1, "agent-invocation")) as {
+        text: string;
+      }
+    ).text,
+    "done",
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.agentSessionStart, 1, { initialMessage: { text: "" } }),
+    /non-empty string/,
+  );
+  await assert.rejects(runtime.invoke(desktopChannels.agentModelsList, 999), /request rejected/);
   assert.equal(
     await runtime.invoke(desktopChannels.dialogSelectDirectory, 1),
     runtime.directorySelection,

@@ -1,4 +1,6 @@
 import type {
+  AgentInvocationService,
+  AgentSessionService,
   ClientEntryPublication,
   FileDownloadClientService,
   FileDownloadTaskSnapshot,
@@ -103,6 +105,16 @@ export interface DesktopShellConfig {
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
+  listAgentModels(): ReturnType<AgentSessionService["listModels"]>;
+  listAgentSessions(): ReturnType<AgentSessionService["listSessions"]>;
+  readAgentSession(sessionId: string): ReturnType<AgentSessionService["getSession"]>;
+  startAgentSession(
+    input: Parameters<AgentSessionService["startSession"]>[0],
+  ): ReturnType<AgentSessionService["startSession"]>;
+  sendAgentMessage(
+    input: Parameters<AgentSessionService["sendMessage"]>[0],
+  ): ReturnType<AgentSessionService["sendMessage"]>;
+  readAgentInvocation(invocationId: string): ReturnType<AgentInvocationService["getInvocation"]>;
   onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
   readServerCoreTypes(): ReturnType<ServerCoreSourceClientService["listTypes"]>;
   readServerCoreVersions(

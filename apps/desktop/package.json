@@ -6,6 +6,9 @@
   "main": "dist/main/index.js",
   "dependencies": {
     "@seashard/about-ui": "workspace:*",
+    "@seashard/agent-conversation-ui": "workspace:*",
+    "@seashard/agent-runtime": "workspace:*",
+    "@seashard/agent-ui-shared": "workspace:*",
     "@seashard/bootstrap-runtime": "workspace:*",
     "@seashard/contracts": "workspace:*",
     "@seashard/database-sqlite": "workspace:*",

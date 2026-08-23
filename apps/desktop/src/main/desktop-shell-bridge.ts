@@ -1,4 +1,6 @@
 import {
+  agentInvocationContract,
+  agentSessionContract,
   javaRuntimeManagerContract,
   serverConfigurationContract,
   serverRuntimeContract,
@@ -25,6 +27,11 @@ import { serverInstanceManagerContract } from "@seashard/server-instance-manager
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { isAbsolute, join } from "node:path";
 import {
+  expectAgentInvocation,
+  expectAgentInvocationReference,
+  expectAgentModels,
+  expectAgentSession,
+  expectAgentSessions,
   expectFileDownloadTasks,
   expectJavaInstallation,
   expectJavaInstallations,
@@ -133,6 +140,32 @@ export async function registerDesktopShellBridge(
             onClientEntriesChanged: (listener) =>
               kernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
+              ),
+            listAgentModels: async () =>
+              expectAgentModels(await kernel.callService(agentSessionContract, "listModels", [])),
+            listAgentSessions: async () =>
+              expectAgentSessions(
+                await kernel.callService(agentSessionContract, "listSessions", []),
+              ),
+            readAgentSession: async (sessionId) =>
+              expectAgentSession(
+                await kernel.callService(agentSessionContract, "getSession", [sessionId]),
+              ),
+            startAgentSession: async (input) =>
+              expectAgentInvocationReference(
+                await kernel.callService(agentSessionContract, "startSession", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            sendAgentMessage: async (input) =>
+              expectAgentInvocationReference(
+                await kernel.callService(agentSessionContract, "sendMessage", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            readAgentInvocation: async (invocationId) =>
+              expectAgentInvocation(
+                await kernel.callService(agentInvocationContract, "getInvocation", [invocationId]),
               ),
             readServerCoreTypes: async () =>
               expectServerCoreTypes(

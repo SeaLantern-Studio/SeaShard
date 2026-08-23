@@ -8,6 +8,13 @@ import {
   serverModSearchLimits,
   serverModLoaders,
   isServerModSource,
+  type AgentConfiguredModel,
+  type AgentInvocationReference,
+  type AgentInvocationSnapshot,
+  type AgentMessageSnapshot,
+  type AgentModelSelection,
+  type AgentSessionSnapshot,
+  type AgentSessionSummary,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type JavaInstallationSource,
@@ -1194,4 +1201,143 @@ export function expectServerConsoleLines(value: unknown): ServerConsoleLine[] {
     throw new Error("server runtime returned invalid console lines");
   }
   return value.map(expectServerConsoleLine);
+}
+
+export function expectAgentModels(value: unknown): AgentConfiguredModel[] {
+  if (!Array.isArray(value)) throw new Error("Agent Runtime returned invalid models");
+  return value.map((model, index) => {
+    const record = expectAgentRecord(model, `model ${index}`);
+    const selection = expectAgentModelSelection(record, `model ${index}`);
+    if (
+      typeof record.name !== "string" ||
+      !record.name ||
+      ![
+        "openai-completions",
+        "openai-responses",
+        "anthropic-messages",
+        "google-generative-ai",
+      ].includes(String(record.api))
+    ) {
+      throw new Error(`Agent Runtime returned invalid model ${index}`);
+    }
+    return { ...selection, name: record.name, api: record.api as AgentConfiguredModel["api"] };
+  });
+}
+
+export function expectAgentSessions(value: unknown): AgentSessionSummary[] {
+  if (!Array.isArray(value)) throw new Error("Agent Runtime returned invalid sessions");
+  return value.map((session, index) => expectAgentSessionSummary(session, `session ${index}`));
+}
+
+export function expectAgentSession(value: unknown): AgentSessionSnapshot {
+  const summary = expectAgentSessionSummary(value, "session");
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.messages)) throw new Error("Agent Runtime returned invalid messages");
+  const messages = record.messages.map((message, index): AgentMessageSnapshot => {
+    const item = expectAgentRecord(message, `message ${index}`);
+    if (
+      typeof item.id !== "string" ||
+      !item.id ||
+      typeof item.invocationId !== "string" ||
+      !item.invocationId ||
+      (item.role !== "user" && item.role !== "assistant") ||
+      typeof item.content !== "string" ||
+      typeof item.timestamp !== "string" ||
+      !isIsoTimestamp(item.timestamp)
+    ) {
+      throw new Error(`Agent Runtime returned invalid message ${index}`);
+    }
+    return {
+      id: item.id,
+      invocationId: item.invocationId,
+      role: item.role,
+      content: item.content,
+      timestamp: item.timestamp,
+    };
+  });
+  return { ...summary, messages };
+}
+
+export function expectAgentInvocationReference(value: unknown): AgentInvocationReference {
+  const record = expectAgentRecord(value, "invocation reference");
+  if (
+    typeof record.sessionId !== "string" ||
+    !record.sessionId ||
+    typeof record.invocationId !== "string" ||
+    !record.invocationId
+  ) {
+    throw new Error("Agent Runtime returned invalid invocation reference");
+  }
+  return { sessionId: record.sessionId, invocationId: record.invocationId };
+}
+
+export function expectAgentInvocation(value: unknown): AgentInvocationSnapshot {
+  const record = expectAgentRecord(value, "invocation");
+  if (
+    typeof record.id !== "string" ||
+    !record.id ||
+    typeof record.sessionId !== "string" ||
+    !record.sessionId ||
+    !["running", "completed", "cancelled", "failed"].includes(String(record.state)) ||
+    typeof record.startedAt !== "string" ||
+    !isIsoTimestamp(record.startedAt) ||
+    typeof record.text !== "string" ||
+    (record.finishedAt !== undefined && !isIsoTimestamp(record.finishedAt)) ||
+    (record.error !== undefined && typeof record.error !== "string")
+  ) {
+    throw new Error("Agent Runtime returned invalid invocation");
+  }
+  return {
+    id: record.id,
+    sessionId: record.sessionId,
+    state: record.state as AgentInvocationSnapshot["state"],
+    model: expectAgentModelSelection(record.model, "invocation model"),
+    startedAt: record.startedAt,
+    text: record.text,
+    ...(typeof record.finishedAt === "string" ? { finishedAt: record.finishedAt } : {}),
+    ...(typeof record.error === "string" ? { error: record.error } : {}),
+  };
+}
+
+function expectAgentSessionSummary(value: unknown, label: string): AgentSessionSummary {
+  const record = expectAgentRecord(value, label);
+  if (
+    typeof record.id !== "string" ||
+    !record.id ||
+    typeof record.title !== "string" ||
+    !record.title ||
+    typeof record.createdAt !== "string" ||
+    !isIsoTimestamp(record.createdAt) ||
+    typeof record.updatedAt !== "string" ||
+    !isIsoTimestamp(record.updatedAt)
+  ) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
+  return {
+    id: record.id,
+    title: record.title,
+    model: expectAgentModelSelection(record.model, `${label} model`),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function expectAgentModelSelection(value: unknown, label: string): AgentModelSelection {
+  const record = expectAgentRecord(value, label);
+  if (
+    typeof record.connectionId !== "string" ||
+    !record.connectionId ||
+    typeof record.modelId !== "string" ||
+    !record.modelId
+  ) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
+  return { connectionId: record.connectionId, modelId: record.modelId };
+}
+
+function expectAgentRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Agent Runtime returned invalid ${label}`);
+  }
+  return value as Record<string, unknown>;
 }

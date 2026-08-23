@@ -344,6 +344,16 @@
   color: var(--sl-text-secondary);
 }
 
+.workspace-chat-row.active {
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+  font-weight: 600;
+}
+
+.workspace-chat-row.active svg {
+  color: var(--sl-primary);
+}
+
 .nav-item {
   display: flex;
   width: 100%;

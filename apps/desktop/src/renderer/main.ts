@@ -1,4 +1,6 @@
 import {
+  agentInvocationContract,
+  agentSessionContract,
   javaRuntimeManagerContract,
   runtimeDiagnosticsContract,
   serverCoreSourceContract,
@@ -23,6 +25,8 @@ const runtime = new ClientUiRuntime({
   router,
   loaders: builtInClientModuleLoaders,
   services: {
+    [agentSessionContract]: window.seashard.agent,
+    [agentInvocationContract]: window.seashard.agent,
     [runtimeDiagnosticsContract]: window.seashard.runtime,
     [serverCoreSourceContract]: window.seashard.serverCore,
     [serverCoreDownloadContract]: window.seashard.serverCoreDownload,
@@ -76,7 +80,11 @@ async function applyBootstrap(
 
   await runtime.reconcile(snapshot);
   const currentRoute = router.currentRoute.value;
-  if (currentRoute.path === "/") return;
+  if (currentRoute.path === "/") {
+    const agentPage = runtime.pages.value.find((page) => page.id === "agent-conversation");
+    if (agentPage) await router.replace(agentPage.path);
+    return;
+  }
   const currentPage = runtime.pages.value.find((page) => page.path === currentRoute.path);
   if (!currentPage) {
     await router.replace("/");

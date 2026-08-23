@@ -3,6 +3,8 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   serverModSearchLimits,
+  type AgentModelSelection,
+  type AgentSessionService,
   type ServerConfigurationWriteRequest,
   type ServerCoreSaveAsRequest,
   type ServerModDownloadableResourceType,
@@ -276,5 +278,44 @@ export function expectServerConfigurationWriteRequest(
       record.expectedRevision,
       "server configuration revision",
     ),
+  };
+}
+
+export function expectAgentStartSessionInput(
+  value: unknown,
+): Parameters<AgentSessionService["startSession"]>[0] {
+  const record = expectRecord(value, "Agent start session request");
+  return {
+    initialMessage: {
+      text: expectNonEmptyString(
+        expectRecord(record.initialMessage, "Agent initial message").text,
+        "Agent initial message text",
+      ),
+    },
+    ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
+  };
+}
+
+export function expectAgentSendMessageInput(
+  value: unknown,
+): Parameters<AgentSessionService["sendMessage"]>[0] {
+  const record = expectRecord(value, "Agent send message request");
+  return {
+    sessionId: expectNonEmptyString(record.sessionId, "Agent session ID"),
+    message: {
+      text: expectNonEmptyString(
+        expectRecord(record.message, "Agent message").text,
+        "Agent message text",
+      ),
+    },
+    ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
+  };
+}
+
+function expectAgentModelSelection(value: unknown): AgentModelSelection {
+  const record = expectRecord(value, "Agent model selection");
+  return {
+    connectionId: expectNonEmptyString(record.connectionId, "Agent connection ID"),
+    modelId: expectNonEmptyString(record.modelId, "Agent model ID"),
   };
 }

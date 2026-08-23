@@ -1,5 +1,6 @@
 import {
   desktopChannels,
+  type AgentClientService,
   type DesktopClientBootstrap,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
@@ -19,6 +20,18 @@ import { contextBridge, ipcRenderer } from "electron";
 const api: SeaShardDesktopApi = Object.freeze({
   runtime: Object.freeze({
     getSnapshot: () => ipcRenderer.invoke(desktopChannels.runtimeSnapshot),
+  }),
+  agent: Object.freeze({
+    listModels: () => ipcRenderer.invoke(desktopChannels.agentModelsList),
+    listSessions: () => ipcRenderer.invoke(desktopChannels.agentSessionsList),
+    getSession: (sessionId: string) =>
+      ipcRenderer.invoke(desktopChannels.agentSessionGet, sessionId),
+    startSession: (input: Parameters<AgentClientService["startSession"]>[0]) =>
+      ipcRenderer.invoke(desktopChannels.agentSessionStart, input),
+    sendMessage: (input: Parameters<AgentClientService["sendMessage"]>[0]) =>
+      ipcRenderer.invoke(desktopChannels.agentMessageSend, input),
+    getInvocation: (invocationId: string) =>
+      ipcRenderer.invoke(desktopChannels.agentInvocationGet, invocationId),
   }),
   serverCore: Object.freeze({
     listTypes: () => ipcRenderer.invoke(desktopChannels.serverCoreTypes),

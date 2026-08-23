@@ -63,6 +63,12 @@ export const desktopChannels = {
   javaRuntimeAdd: "seashard.java-runtime.add",
   javaRuntimeRemove: "seashard.java-runtime.remove",
   javaRuntimeSetDisabled: "seashard.java-runtime.set-disabled",
+  agentModelsList: "seashard.agent.models-list",
+  agentSessionsList: "seashard.agent.sessions-list",
+  agentSessionGet: "seashard.agent.session-get",
+  agentSessionStart: "seashard.agent.session-start",
+  agentMessageSend: "seashard.agent.message-send",
+  agentInvocationGet: "seashard.agent.invocation-get",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -91,6 +97,101 @@ export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
 export const desktopShellContract = "seashard.desktop-shell";
+/** Agent Session 的创建、读取与续写 Contract。 */
+export const agentSessionContract = "seashard.agent-session";
+/** Agent Invocation 的运行状态读取与取消 Contract。 */
+export const agentInvocationContract = "seashard.agent-invocation";
+
+export type AgentModelApi =
+  | "openai-completions"
+  | "openai-responses"
+  | "anthropic-messages"
+  | "google-generative-ai";
+
+export interface AgentModelSelection {
+  readonly connectionId: string;
+  readonly modelId: string;
+}
+
+export interface AgentConfiguredModel extends AgentModelSelection {
+  readonly name: string;
+  readonly api: AgentModelApi;
+}
+
+export interface AgentUserMessage {
+  readonly text: string;
+}
+
+export interface AgentInvocationReference {
+  readonly sessionId: string;
+  readonly invocationId: string;
+}
+
+export type AgentInvocationState = "running" | "completed" | "cancelled" | "failed";
+
+export interface AgentMessageSnapshot {
+  readonly id: string;
+  readonly invocationId: string;
+  readonly role: "user" | "assistant";
+  readonly content: string;
+  readonly timestamp: string;
+}
+
+export interface AgentSessionSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly model: AgentModelSelection;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AgentSessionSnapshot extends AgentSessionSummary {
+  readonly messages: readonly AgentMessageSnapshot[];
+}
+
+export interface AgentInvocationSummary {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly state: AgentInvocationState;
+  readonly model: AgentModelSelection;
+  readonly startedAt: string;
+  readonly finishedAt?: string;
+  readonly error?: string;
+}
+
+export interface AgentInvocationSnapshot extends AgentInvocationSummary {
+  readonly text: string;
+}
+
+export interface AgentSessionService {
+  listModels(): Promise<readonly AgentConfiguredModel[]>;
+  startSession(input: {
+    initialMessage: AgentUserMessage;
+    model?: AgentModelSelection;
+  }): Promise<AgentInvocationReference>;
+  sendMessage(input: {
+    sessionId: string;
+    message: AgentUserMessage;
+    model?: AgentModelSelection;
+  }): Promise<AgentInvocationReference>;
+  listSessions(): Promise<readonly AgentSessionSummary[]>;
+  getSession(sessionId: string): Promise<AgentSessionSnapshot>;
+  renameSession(sessionId: string, title: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<void>;
+}
+
+export interface AgentInvocationService {
+  getInvocation(invocationId: string): Promise<AgentInvocationSnapshot>;
+  cancelInvocation(invocationId: string): Promise<void>;
+}
+
+export interface AgentClientService
+  extends
+    Pick<
+      AgentSessionService,
+      "listModels" | "startSession" | "sendMessage" | "listSessions" | "getSession"
+    >,
+    Pick<AgentInvocationService, "getInvocation"> {}
 
 /** 面向客户端的单个插件运行视图。 */
 export type ComponentSnapshot = {
@@ -892,6 +993,7 @@ export interface SeaShardDesktopApi {
   runtime: {
     getSnapshot(): Promise<RuntimeSnapshot>;
   };
+  agent: AgentClientService;
   serverCore: ServerCoreSourceClientService;
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;

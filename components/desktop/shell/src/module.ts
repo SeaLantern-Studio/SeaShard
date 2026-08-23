@@ -12,6 +12,8 @@ import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { BrowserWindow } from "electron";
 import type { DesktopShellConfig } from "./types";
 import {
+  expectAgentSendMessageInput,
+  expectAgentStartSessionInput,
   expectNonEmptyString,
   expectServerInstanceStartupSettings,
   expectSafeInteger,
@@ -234,6 +236,32 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         });
         config.runtime.handle(desktopChannels.windowClose, (event) => {
           ownedWindow(event.sender.id).close();
+        });
+        config.runtime.handle(desktopChannels.agentModelsList, (event) => {
+          ownedWindow(event.sender.id);
+          return config.listAgentModels();
+        });
+        config.runtime.handle(desktopChannels.agentSessionsList, (event) => {
+          ownedWindow(event.sender.id);
+          return config.listAgentSessions();
+        });
+        config.runtime.handle(desktopChannels.agentSessionGet, (event, sessionId) => {
+          ownedWindow(event.sender.id);
+          return config.readAgentSession(expectNonEmptyString(sessionId, "Agent session ID"));
+        });
+        config.runtime.handle(desktopChannels.agentSessionStart, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.startAgentSession(expectAgentStartSessionInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentMessageSend, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.sendAgentMessage(expectAgentSendMessageInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentInvocationGet, (event, invocationId) => {
+          ownedWindow(event.sender.id);
+          return config.readAgentInvocation(
+            expectNonEmptyString(invocationId, "Agent invocation ID"),
+          );
         });
         config.runtime.handle(desktopChannels.dialogSelectDirectory, async (event) => {
           const window = ownedWindow(event.sender.id);
@@ -783,6 +811,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadCancel);
           config.runtime.removeHandler(desktopChannels.fileDownloadListTasks);
           config.runtime.removeHandler(desktopChannels.fileDownloadCancel);
+          config.runtime.removeHandler(desktopChannels.agentModelsList);
+          config.runtime.removeHandler(desktopChannels.agentSessionsList);
+          config.runtime.removeHandler(desktopChannels.agentSessionGet);
+          config.runtime.removeHandler(desktopChannels.agentSessionStart);
+          config.runtime.removeHandler(desktopChannels.agentMessageSend);
+          config.runtime.removeHandler(desktopChannels.agentInvocationGet);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

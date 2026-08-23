@@ -594,6 +594,33 @@ export async function createDesktopShellHarness(
         readySnapshots.push(value);
       },
       readClientEntryPublication: () => clientEntries,
+      listAgentModels: async () => [],
+      listAgentSessions: async () => [],
+      readAgentSession: async (sessionId) => ({
+        id: sessionId,
+        title: "新对话",
+        model: { connectionId: "test", modelId: "test-model" },
+        createdAt: "2026-08-17T12:00:00.000Z",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+        messages: [],
+      }),
+      startAgentSession: async () => ({
+        sessionId: "agent-session",
+        invocationId: "agent-invocation",
+      }),
+      sendAgentMessage: async (input) => ({
+        sessionId: input.sessionId,
+        invocationId: "agent-invocation",
+      }),
+      readAgentInvocation: async (invocationId) => ({
+        id: invocationId,
+        sessionId: "agent-session",
+        state: "completed",
+        model: { connectionId: "test", modelId: "test-model" },
+        startedAt: "2026-08-17T12:00:00.000Z",
+        finishedAt: "2026-08-17T12:00:01.000Z",
+        text: "done",
+      }),
       readServerCoreTypes: async () => serverCoreTypes,
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>

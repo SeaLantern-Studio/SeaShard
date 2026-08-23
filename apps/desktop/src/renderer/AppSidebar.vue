@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { agentWorkspace } from "@seashard/agent-ui-shared";
 import { useClientUiRuntime } from "@seashard/ui-runtime";
 import type { SettingsNavigationGroup } from "@seashard/ui-sdk";
 import {
@@ -75,7 +76,6 @@ const sidebarMenuKey = computed(() => {
 });
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
-const agentChats = ["Agent 工作区", "服务器启动流程"] as const;
 const instancePrimaryItems = [
   { id: "launch", label: "启动", icon: Play },
   { id: "download", label: "下载", icon: Download },
@@ -125,6 +125,20 @@ const sidebarMenuItemSelector = [
 
 function navigate(path: string): void {
   void router.push(path);
+}
+
+function createAgentConversation(): void {
+  agentWorkspace.createDraft();
+  navigate("/agent/chat");
+}
+
+function selectAgentConversation(conversationId: string): void {
+  agentWorkspace.select(conversationId);
+  navigate("/agent/chat");
+}
+
+function isAgentConversationActive(conversationId: string): boolean {
+  return agentWorkspace.activeConversationId.value === conversationId;
 }
 
 function isActive(path: string): boolean {
@@ -391,7 +405,7 @@ onUnmounted(() => {
           </div>
 
           <div v-else-if="props.workspace === 'agent'" class="agent-workspace-nav">
-            <button type="button" class="workspace-action">
+            <button type="button" class="workspace-action" @click="createAgentConversation">
               <SquarePen :size="16" :stroke-width="1.8" />
               <span>新建对话</span>
             </button>
@@ -444,13 +458,16 @@ onUnmounted(() => {
                 <span class="workspace-section-title-text">对话</span>
               </h3>
               <button
-                v-for="chat in agentChats"
-                :key="chat"
+                v-for="chat in agentWorkspace.conversations.value"
+                :key="chat.id"
                 type="button"
                 class="workspace-row workspace-chat-row"
+                :class="{ active: isAgentConversationActive(chat.id) }"
+                :aria-current="isAgentConversationActive(chat.id) ? 'page' : undefined"
+                @click="selectAgentConversation(chat.id)"
               >
                 <MessageSquare :size="14" :stroke-width="1.8" />
-                <span>{{ chat }}</span>
+                <span>{{ chat.title }}</span>
               </button>
             </section>
           </div>

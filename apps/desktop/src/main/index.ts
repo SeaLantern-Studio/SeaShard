@@ -27,6 +27,13 @@ const developmentUrl = resolveDevelopmentUrl();
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const startedAt = new Date().toISOString();
 const seaShardVersion = "0.0.0";
+if (smokeMode) {
+  const smokeUserDataRoot = process.env.SEASHARD_SMOKE_USER_DATA_DIR;
+  if (!smokeUserDataRoot) {
+    throw new Error("SEASHARD_SMOKE_USER_DATA_DIR must isolate Electron smoke data");
+  }
+  app.setPath("userData", smokeUserDataRoot);
+}
 
 if (developmentUrl) installDevelopmentControl();
 
@@ -61,7 +68,8 @@ function installDevelopmentControl(): void {
 async function bootstrap(): Promise<void> {
   await app.whenReady();
   const host = resolveHost();
-  const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(app.getPath("userData"), "core");
+  const userDataRoot = app.getPath("userData");
+  const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
   const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
   const root = new Context();
   bootstrapLoader = new BootstrapLoader(root);
@@ -102,6 +110,7 @@ async function bootstrap(): Promise<void> {
     kernel: activeKernel,
     root,
     dataRoot,
+    userDataRoot,
     seaShardVersion,
     startedAt,
     isStopping: () => stopping,
