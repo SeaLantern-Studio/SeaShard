@@ -34,8 +34,11 @@ import {
   type ToolSet,
 } from "ai";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { AgentModelCatalog, type ResolvedAgentModel } from "./model-config";
 import { AgentSessionJournal, type LoadedAgentSession } from "./session-journal";
+import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
+import { AgentOutputCollector } from "./output-collector";
 
 const maximumUserMessageLength = 100_000;
 const maximumAgentSteps = 6;
@@ -234,7 +237,11 @@ export class AgentRuntime {
     const active = this.activeBySession.get(session.header.id);
     if (active) throw new Error(`当前对话已有正在运行的请求：${active}`);
     const toolDefinitions = indexToolDefinitions(this.toolSource.snapshot());
-    const resources = this.resourceSource.snapshot();
+    const localStore = new AgentSessionLocalStore(
+      join(this.journal.sessionsRoot, session.storageKey),
+    );
+    const resources = bindAgentLocalResource(this.resourceSource.snapshot(), localStore);
+    const outputCollector = new AgentOutputCollector(localStore);
 
     const invocationId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -261,7 +268,7 @@ export class AgentRuntime {
     };
     let running!: RunningInvocation;
     const controller = new AbortController();
-    const tools = createToolSet(toolDefinitions.values(), resources, {
+    const tools = createToolSet(toolDefinitions.values(), resources, outputCollector, {
       start: (call) => this.startToolCall(running, call),
       updatePresentation: (toolCallId, presentation) =>
         this.updateToolCallPresentation(running, toolCallId, presentation),
@@ -606,6 +613,7 @@ interface AgentResourceToolLifecycle {
 function createToolSet(
   definitions: Iterable<AgentRuntimeTool>,
   resources: AgentRuntimeResourceSnapshot,
+  outputCollector: AgentOutputCollector,
   resourceLifecycle: AgentResourceToolLifecycle,
 ): ToolSet {
   const tools: ToolSet = {};
@@ -664,14 +672,9 @@ function createToolSet(
           );
           presentation =
             resultPayload === undefined ? presentation : { ...presentation, resultPayload };
-          await resourceLifecycle.finish(
-            toolCallId,
-            "completed",
-            result.content,
-            undefined,
-            presentation,
-          );
-          return result.content;
+          const output = await outputCollector.collect(result.content, toolCallId, abortSignal);
+          await resourceLifecycle.finish(toolCallId, "completed", output, undefined, presentation);
+          return output;
         } catch (error) {
           const cancelled = abortSignal?.aborted || isAbortError(error);
           await resourceLifecycle.finish(
@@ -691,10 +694,12 @@ function createToolSet(
       title: entry.definition.title,
       description: entry.definition.description,
       inputSchema: jsonSchema<JsonValue>(entry.definition.inputSchema as JSONSchema7),
-      execute: async (input, { abortSignal }) =>
-        entry.execute(requireJsonValue(input, `工具 ${entry.name} 输入`), {
+      execute: async (input, { abortSignal, toolCallId }) => {
+        const output = await entry.execute(requireJsonValue(input, `工具 ${entry.name} 输入`), {
           signal: abortSignal,
-        }),
+        });
+        return outputCollector.collect(output, toolCallId, abortSignal);
+      },
     });
   }
   return tools;

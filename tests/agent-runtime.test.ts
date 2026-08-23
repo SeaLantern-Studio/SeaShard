@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import {
   AgentModelCatalog,
+  AgentOutputCollector,
   AgentRuntime,
   AgentSessionJournal,
+  AgentSessionLocalStore,
+  bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
 import { registerServerInstanceAgentResources } from "../components/server/instance-manager/src/index.ts";
@@ -96,6 +99,280 @@ await test("Agent Session Journal 保留新对话标题并投影最近使用的�
 
   await journal.rename(created.header.id, "服务端规划");
   assert.equal((await journal.snapshot(created.header.id)).title, "服务端规划");
+});
+
+await test("Agent local:// 只读取当前 Session 并拒绝路径逃逸", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-local-resource-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const journal = new AgentSessionJournal(userDataRoot);
+  await journal.initialize();
+  const session = await journal.create({ connectionId: "test", modelId: "local-resource" });
+  const sessionDirectory = join(journal.sessionsRoot, session.storageKey);
+  await mkdir(join(sessionDirectory, "notes"));
+  await writeFile(join(sessionDirectory, "a.txt"), "alpha", "utf8");
+  const fileLines = Array.from({ length: 800 }, (_, index) => `line-${index + 1}`);
+  await writeFile(join(sessionDirectory, "notes", "lines.txt"), fileLines.join("\n"), "utf8");
+
+  const resources = bindAgentLocalResource(
+    new AgentResourceRegistry().snapshot(),
+    new AgentSessionLocalStore(sessionDirectory),
+  );
+  assert.deepEqual(
+    resources.definitions.map(({ pattern }) => pattern),
+    ["local://"],
+  );
+  const rootRead = resources.prepare("local://", {});
+  assert.equal(rootRead.definition.presentation?.title, "读取local://");
+  assert.equal(await rootRead.presentRequest(), undefined);
+  const rootResult = await rootRead.read();
+  assert.deepEqual(rootResult.content, {
+    entries: [
+      { name: "a.txt", kind: "file" },
+      { name: "notes", kind: "directory" },
+    ],
+    pagination: {
+      offset: 1,
+      limit: 2,
+      totalEntries: 2,
+      hasMore: false,
+    },
+  });
+  assert.deepEqual(await rootRead.presentResult(rootResult), [{ value: "2", unit: "个结果" }]);
+
+  const rangedRead = resources.prepare("local://notes/lines.txt", {
+    ranges: [
+      { start: 1, length: 10 },
+      { start: 500, length: 11 },
+      { start: 700, length: 1 },
+    ],
+  });
+  assert.equal(
+    rangedRead.definition.presentation?.title,
+    "读取local://notes/lines.txt第1~10行，第500~510行，第700行",
+  );
+  const rangedResult = await rangedRead.read();
+  assert.equal(
+    rangedResult.content,
+    [
+      "[Lines 1-10]",
+      ...fileLines.slice(0, 10),
+      "",
+      "[Lines 500-510]",
+      ...fileLines.slice(499, 510),
+      "",
+      "[Line 700]",
+      fileLines[699],
+    ].join("\n"),
+  );
+  assert.equal(await rangedRead.presentResult(rangedResult), undefined);
+  assert.throws(
+    () => resources.prepare("local://notes/lines.txt", { offset: 1, limit: 10 }),
+    /input 包含未知参数/u,
+  );
+  await assert.rejects(
+    resources.prepare("local://notes", { ranges: [{ start: 1, length: 1 }] }).read(),
+    /目录不支持 ranges/u,
+  );
+  assert.throws(
+    () => resources.prepare("local://%2E%2E/secret.txt", {}),
+    /local:\/\/ 路径段不合法/u,
+  );
+  assert.throws(() => resources.prepare("local://C:%5Csecret.txt", {}), /local:\/\/ 路径段不合法/u);
+
+  const outsideDirectory = join(userDataRoot, "outside");
+  await mkdir(outsideDirectory);
+  await writeFile(join(outsideDirectory, "secret.txt"), "secret", "utf8");
+  await symlink(
+    outsideDirectory,
+    join(sessionDirectory, "escape"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  await assert.rejects(
+    resources.prepare("local://escape/secret.txt", {}).read(),
+    /禁止读取符号链接或 Junction/u,
+  );
+});
+
+await test("Agent local:// 读取持久化前端卡片 payload", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-local-presentation-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  const model = new MockLanguageModelV4({
+    doStream: [
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            {
+              type: "tool-call",
+              toolCallId: "local-read-1",
+              toolName: "read",
+              input: '{"path":"local://","input":{}}',
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "会话目录为空。" },
+            { type: "text-end", id: "answer" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            {
+              type: "tool-call",
+              toolCallId: "local-read-2",
+              toolName: "read",
+              input:
+                '{"path":"local://111.txt","input":{"ranges":[{"start":1,"length":10},{"start":500,"length":11},{"start":700,"length":1}]}}',
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer-2" },
+            { type: "text-delta", id: "answer-2", delta: "已读取多个范围。" },
+            { type: "text-end", id: "answer-2" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+    ],
+  });
+  const modelSource: AgentModelSource = {
+    initialize: async () => {},
+    list: async () => [],
+    resolve: async () => ({
+      selection: { connectionId: "test", modelId: "local-presentation" },
+      languageModel: model,
+    }),
+  };
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "查看当前会话目录。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.deepEqual(invocation.toolCalls[0]?.presentation, {
+    title: "读取local://",
+    resultPayload: [{ value: "0", unit: "个结果" }],
+  });
+
+  const session = await runtime.journal.get(reference.sessionId);
+  const fileLines = Array.from({ length: 800 }, (_, index) => `line-${index + 1}`);
+  await writeFile(
+    join(runtime.journal.sessionsRoot, session.storageKey, "111.txt"),
+    fileLines.join("\n"),
+  );
+  const fileReference = await runtime.sendMessage({
+    sessionId: reference.sessionId,
+    message: { text: "一次读取第 1～10、500～510 和 700 行。" },
+    mode: "agent",
+  });
+  const fileInvocation = await waitForInvocation(runtime, fileReference.invocationId);
+  assert.deepEqual(fileInvocation.toolCalls[0]?.presentation, {
+    title: "读取local://111.txt第1~10行，第500~510行，第700行",
+  });
+  assert.equal(
+    typeof fileInvocation.toolCalls[0]?.output === "string" &&
+      fileInvocation.toolCalls[0].output.includes("[Lines 500-510]"),
+    true,
+  );
+  assert.equal((await runtime.getSession(reference.sessionId)).toolCalls.length, 2);
+});
+
+await test("Agent Output Collector 保存长文本和结构化输出", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-output-collector-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const journal = new AgentSessionJournal(userDataRoot);
+  await journal.initialize();
+  const session = await journal.create({ connectionId: "test", modelId: "output-collector" });
+  const store = new AgentSessionLocalStore(join(journal.sessionsRoot, session.storageKey));
+  const collector = new AgentOutputCollector(store);
+
+  const text = Array.from({ length: 240 }, (_, index) => `${index + 1}: ${"x".repeat(500)}`).join(
+    "\n",
+  );
+  const textSummary = await collector.collect(text, "large-text");
+  assert.equal(typeof textSummary, "string");
+  assert.equal((textSummary as string).startsWith("1: "), true);
+  assert.equal((textSummary as string).includes("240: "), false);
+  assert.equal(
+    (textSummary as string).endsWith(
+      'Content is too long. Use read with path "local://tool-output/call-large-text.txt" to view the complete output.',
+    ),
+    true,
+  );
+  assert.equal(
+    await readFile(join(store.sessionDirectory, "tool-output", "call-large-text.txt"), "utf8"),
+    text,
+  );
+
+  const structured = { items: [text, text] };
+  const structuredSummary = await collector.collect(structured, "large-json");
+  assert.equal(typeof structuredSummary, "string");
+  assert.equal((structuredSummary as string).startsWith('{\n  "items": ['), true);
+  assert.equal(
+    (structuredSummary as string).endsWith(
+      'Content is too long. Use read with path "local://tool-output/call-large-json.json" to view the complete output.',
+    ),
+    true,
+  );
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(join(store.sessionDirectory, "tool-output", "call-large-json.json"), "utf8"),
+    ),
+    structured,
+  );
+  assert.deepEqual(await collector.collect({ ok: true }, "small-json"), { ok: true });
 });
 
 await test("Agent Session Journal 为无展示字段的读取记录补默认标题", async (context) => {
@@ -525,7 +802,7 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
   assert.equal(model.doStreamCalls.length, 2);
   assert.deepEqual(
     model.doStreamCalls[0]?.tools?.map(({ name }) => name),
-    ["test_echo"],
+    ["read", "test_echo"],
   );
   assert.deepEqual(invocation.toolCalls, [
     {
@@ -550,6 +827,111 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       { role: "assistant", content: "回显完成。" },
     ],
   );
+});
+
+await test("Agent 工具长输出以前缀和英文 local 指令进入模型上下文", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-bounded-tool-output-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  };
+  const model = new MockLanguageModelV4({
+    doStream: [
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            {
+              type: "tool-call",
+              toolCallId: "large-1",
+              toolName: "test_large",
+              input: "{}",
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "长输出已保存。" },
+            { type: "text-end", id: "answer" },
+            {
+              type: "finish",
+              finishReason: { unified: "stop", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+    ],
+  });
+  const modelSource: AgentModelSource = {
+    initialize: async () => {},
+    list: async () => [],
+    resolve: async () => ({
+      selection: { connectionId: "test", modelId: "bounded-output" },
+      languageModel: model,
+    }),
+  };
+  const largeOutput = Array.from(
+    { length: 240 },
+    (_, index) => `${index + 1}: ${"z".repeat(500)}`,
+  ).join("\n");
+  const tools = new AgentToolRegistry();
+  tools.register(
+    "test.large",
+    { type: "global", id: "global" },
+    {
+      namespace: "test",
+      name: "large",
+      title: "生成长输出",
+      description: "生成用于边界验证的长文本。",
+      inputSchema: { type: "object", additionalProperties: false },
+    },
+    async () => largeOutput,
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: tools,
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "生成长输出。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  const output = invocation.toolCalls[0]?.output;
+  assert.equal(typeof output, "string");
+  assert.equal((output as string).startsWith("1: "), true);
+  assert.equal(
+    (output as string).endsWith(
+      'Content is too long. Use read with path "local://tool-output/call-large-1.txt" to view the complete output.',
+    ),
+    true,
+  );
+  const session = await runtime.journal.get(reference.sessionId);
+  assert.equal(
+    await readFile(
+      join(runtime.journal.sessionsRoot, session.storageKey, "tool-output", "call-large-1.txt"),
+      "utf8",
+    ),
+    largeOutput,
+  );
+  assert.match(JSON.stringify(model.doStreamCalls[1]), /local:\/\/tool-output\/call-large-1\.txt/u);
 });
 
 await test("OpenAI Responses 工具结果会触发第二次上游请求", async (context) => {

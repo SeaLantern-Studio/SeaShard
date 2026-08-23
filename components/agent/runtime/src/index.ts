@@ -141,5 +141,7 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./model-config";
+export * from "./local-resource";
+export * from "./output-collector";
 export * from "./runtime";
 export * from "./session-journal";
