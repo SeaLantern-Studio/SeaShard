@@ -1,7 +1,7 @@
 import type {
   ExecutionContext,
   JsonValue,
-  PluginBinding,
+  GlobalPluginBindingInput,
   PluginStorageBroker,
   RuntimeControlSnapshot,
   ScopeAddress,
@@ -126,8 +126,8 @@ export class PluginKernel {
     return this.installer.prepareArchive(archivePath);
   }
 
-  upsertBinding(binding: PluginBinding): Promise<void> {
-    return this.registry.upsertBinding(binding);
+  upsertBinding(binding: GlobalPluginBindingInput): Promise<void> {
+    return this.registry.upsertGlobalBinding(binding);
   }
 
   deleteBinding(bindingId: string): Promise<void> {

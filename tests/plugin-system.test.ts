@@ -85,6 +85,76 @@ await test("plugin system starts from the current package and Binding schema", a
   }
 });
 
+await test("third-party bindings are global without changing internal scope support", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-binding-scope-"));
+  const broker = await SQLiteDatabaseBroker.create({
+    databasePath: join(directory, "seashard.sqlite3"),
+    workerEntry: databaseWorkerEntry,
+    readWorkers: 1,
+  });
+
+  try {
+    const store = await PluginStore.create(broker, "0.0.0");
+    const registry = new PluginRegistry(store, "0.0.0");
+    await registry.registerBuiltIn({
+      manifest: {
+        ...validManifest,
+        entries: [
+          {
+            ...validManifest.entries[0]!,
+            activationScopes: ["global", "server"],
+          },
+        ],
+      },
+      loaders: {
+        "example.host": { load: async () => ({}) },
+      },
+      bindings: [],
+    });
+
+    await registry.upsertGlobalBinding({
+      id: "external.global",
+      pluginId: validManifest.id,
+      entryId: "example.host",
+      enabled: true,
+      config: null,
+    });
+    await registry.upsertBinding({
+      id: "internal.server",
+      pluginId: validManifest.id,
+      entryId: "example.host",
+      scopeType: "server",
+      scopeId: "server-a",
+      enabled: true,
+      config: null,
+    });
+
+    assert.deepEqual(await registry.listBindings(validManifest.id), [
+      {
+        id: "external.global",
+        pluginId: validManifest.id,
+        entryId: "example.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+      {
+        id: "internal.server",
+        pluginId: validManifest.id,
+        entryId: "example.host",
+        scopeType: "server",
+        scopeId: "server-a",
+        enabled: true,
+        config: null,
+      },
+    ]);
+  } finally {
+    await broker.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test("built-in inventory removes retired packages and bindings before reconciliation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-builtins-"));
   const broker = await SQLiteDatabaseBroker.create({

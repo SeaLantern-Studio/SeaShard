@@ -94,7 +94,6 @@ export interface PrepareRuntimePayload {
 }
 
 export interface PreparedRuntimePayload {
-  dependencies: string[];
   provides: string[];
 }
 

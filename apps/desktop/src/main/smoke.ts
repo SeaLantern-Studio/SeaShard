@@ -42,8 +42,6 @@ export async function registerSmokePlugin(pluginKernel: PluginKernel): Promise<v
     id: "smoke.external-plugin",
     pluginId: record.manifest.id,
     entryId: entry.id,
-    scopeType: "global",
-    scopeId: "global",
     enabled: true,
     config: { marker: "smoke" },
   });

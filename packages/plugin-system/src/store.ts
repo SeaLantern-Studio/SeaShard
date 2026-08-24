@@ -12,7 +12,7 @@ import type {
   PluginTrustLevel,
 } from "@seashard/plugin-sdk";
 import { pluginSystemDataCapsule } from "./data-capsule";
-import { parsePluginManifest } from "./manifest";
+import { parseInternalPluginManifest } from "./manifest";
 import type { PluginPackageRecord } from "./types";
 
 interface PackageRow extends DatabaseRow {
@@ -173,7 +173,7 @@ export class PluginStore {
 
   private decodePackage(row: PackageRow): PluginPackageRecord {
     return {
-      manifest: parsePluginManifest(JSON.parse(row.manifest_json), this.seaShardVersion),
+      manifest: parseInternalPluginManifest(JSON.parse(row.manifest_json), this.seaShardVersion),
       digest: row.digest,
       rootPath: row.root_path,
       source: row.source_kind,

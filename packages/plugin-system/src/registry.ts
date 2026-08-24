@@ -1,13 +1,14 @@
 import type {
   ClientTarget,
   CpuArchitecture,
+  GlobalPluginBindingInput,
   HostProfile,
   OperatingSystem,
   PluginBinding,
   PluginManifest,
 } from "@seashard/plugin-sdk";
 import { createHash } from "node:crypto";
-import { parsePluginManifest } from "./manifest";
+import { parseInternalPluginManifest } from "./manifest";
 import { PluginStore } from "./store";
 import type {
   BuiltInModuleLoader,
@@ -36,7 +37,7 @@ export class PluginRegistry {
   ) {}
 
   async registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
-    const manifest = parsePluginManifest(registration.manifest, this.seaShardVersion);
+    const manifest = parseInternalPluginManifest(registration.manifest, this.seaShardVersion);
     for (const entry of manifest.entries) {
       if (entry.runtime === "host" && !registration.loaders[entry.id]) {
         throw new Error(`missing built-in loader: ${manifest.id}/${entry.id}`);
@@ -107,6 +108,18 @@ export class PluginRegistry {
 
   clearPackageSelection(pluginId: string): Promise<void> {
     return this.store.clearCurrentVersion(pluginId);
+  }
+
+  /**
+   * 第三方管理入口不接收 Scope；内部统一补成全局 Binding。
+   * 内建组件继续通过 upsertBinding 使用原有范围模型。
+   */
+  upsertGlobalBinding(binding: GlobalPluginBindingInput): Promise<void> {
+    return this.upsertBinding({
+      ...binding,
+      scopeType: "global",
+      scopeId: "global",
+    });
   }
 
   async upsertBinding(binding: PluginBinding): Promise<void> {

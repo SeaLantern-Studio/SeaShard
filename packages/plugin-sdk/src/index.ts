@@ -28,6 +28,12 @@ export interface PluginCompatibility {
   seaShard: string;
   clientProtocol?: string;
 }
+/**
+ * Entry 通过 SeaShard Contract 可能调用的方法集合。
+ *
+ * 第三方插件必须在包清单中完整声明；内部组件仍可继续使用现有运行元数据。
+ */
+export type ContractMethodUses = Readonly<Record<string, readonly string[]>>;
 
 export interface PluginEntryManifest {
   id: string;
@@ -35,6 +41,7 @@ export interface PluginEntryManifest {
   module: string;
   hostProfiles?: HostProfile[];
   targets?: ClientTarget[];
+  uses?: ContractMethodUses;
   activationScopes: ActivationScope[];
   permissions: string[];
   os?: OperatingSystem[];
@@ -49,6 +56,20 @@ export interface PluginManifest {
   entries: PluginEntryManifest[];
   compatibility: PluginCompatibility;
 }
+/**
+ * 第三方插件包使用的公开清单形状。Scope 与内部权限元数据由宿主补全，
+ * 插件包只能声明各 Entry 使用的 Contract 方法。
+ */
+export interface PluginPackageEntryManifest extends Omit<
+  PluginEntryManifest,
+  "activationScopes" | "permissions" | "uses"
+> {
+  uses: ContractMethodUses;
+}
+
+export interface PluginPackageManifest extends Omit<PluginManifest, "entries"> {
+  entries: PluginPackageEntryManifest[];
+}
 
 export interface PluginBinding {
   id: string;
@@ -59,6 +80,8 @@ export interface PluginBinding {
   enabled: boolean;
   config: JsonValue;
 }
+/** 第三方插件管理入口只能创建全局 Binding。 */
+export type GlobalPluginBindingInput = Omit<PluginBinding, "scopeType" | "scopeId">;
 
 export interface ScopeAddress {
   type: ActivationScope;

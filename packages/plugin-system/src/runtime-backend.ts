@@ -154,7 +154,7 @@ export class PluginRuntimeBackend {
       } satisfies PrepareRuntimePayload)) as unknown as PreparedRuntimePayload;
       let consumed = false;
       return {
-        dependencies: prepared.dependencies,
+        dependencies: Object.keys(entry.entry.uses ?? {}),
         provides: prepared.provides,
         start: async () => {
           if (consumed) throw new Error(`prepared runtime already consumed: ${entry.runtimeId}`);

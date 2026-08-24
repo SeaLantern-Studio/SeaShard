@@ -8,8 +8,9 @@
       "runtime": "host",
       "module": "./dist/host.js",
       "hostProfiles": ["electron", "node", "docker"],
-      "activationScopes": ["global"],
-      "permissions": ["seashard.smoke.marker"]
+      "uses": {
+        "seashard.smoke.marker": ["prefix"]
+      }
     }
   ],
   "compatibility": {

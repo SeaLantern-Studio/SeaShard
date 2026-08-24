@@ -13,9 +13,11 @@ import { satisfies, valid, validRange } from "semver";
 const pluginIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
 const entryIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
 const permissionPattern = /^[a-z0-9](?:[a-z0-9.*:-]{0,126}[a-z0-9*])?$/;
+const contractPattern = /^[a-z0-9](?:[a-z0-9.:-]{0,126}[a-z0-9])?$/;
+const methodPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const hostProfiles = ["electron", "node", "docker"] as const satisfies readonly HostProfile[];
 const clientTargets = ["desktop", "web", "mobile"] as const satisfies readonly ClientTarget[];
-const activationScopes = [
+const activationScopeValues = [
   "global",
   "workspace",
   "server",
@@ -41,6 +43,8 @@ const architectures = [
   "s390x",
 ] as const satisfies readonly CpuArchitecture[];
 
+type ManifestParseMode = "package" | "internal";
+
 export class PluginManifestError extends TypeError {
   readonly name = "PluginManifestError";
 
@@ -49,7 +53,24 @@ export class PluginManifestError extends TypeError {
   }
 }
 
+/** 解析第三方插件包清单；公开格式不接受 Scope 与内部权限字段。 */
 export function parsePluginManifest(input: unknown, seaShardVersion: string): PluginManifest {
+  return parseManifest(input, seaShardVersion, "package");
+}
+
+/** 解析宿主持有的内建或已规范化清单，保留现有 Scope 元数据。 */
+export function parseInternalPluginManifest(
+  input: unknown,
+  seaShardVersion: string,
+): PluginManifest {
+  return parseManifest(input, seaShardVersion, "internal");
+}
+
+function parseManifest(
+  input: unknown,
+  seaShardVersion: string,
+  mode: ManifestParseMode,
+): PluginManifest {
   const issues: string[] = [];
   const root = objectAt(input, "manifest", issues);
   rejectUnknown(
@@ -66,7 +87,7 @@ export function parsePluginManifest(input: unknown, seaShardVersion: string): Pl
   const atomic = optionalBoolean(root.atomic, "manifest.atomic", issues);
   const compatibility = parseCompatibility(root.compatibility, seaShardVersion, issues);
   const entriesInput = arrayAt(root.entries, "manifest.entries", issues);
-  const entries = entriesInput.map((entry, index) => parseEntry(entry, index, issues));
+  const entries = entriesInput.map((entry, index) => parseEntry(entry, index, mode, issues));
 
   if (entries.length === 0) issues.push("manifest.entries must contain at least one entry");
   assertUnique(
@@ -111,22 +132,18 @@ function parseCompatibility(
   return { seaShard, ...(clientProtocol === undefined ? {} : { clientProtocol }) };
 }
 
-function parseEntry(input: unknown, index: number, issues: string[]): PluginEntryManifest {
+function parseEntry(
+  input: unknown,
+  index: number,
+  mode: ManifestParseMode,
+  issues: string[],
+): PluginEntryManifest {
   const path = `manifest.entries[${index}]`;
   const value = objectAt(input, path, issues);
+  const publicFields = ["id", "runtime", "module", "hostProfiles", "targets", "uses", "os", "arch"];
   rejectUnknown(
     value,
-    [
-      "id",
-      "runtime",
-      "module",
-      "hostProfiles",
-      "targets",
-      "activationScopes",
-      "permissions",
-      "os",
-      "arch",
-    ],
+    mode === "internal" ? [...publicFields, "activationScopes", "permissions"] : publicFields,
     path,
     issues,
   );
@@ -138,19 +155,34 @@ function parseEntry(input: unknown, index: number, issues: string[]): PluginEntr
     issues.push(`${path}.module must be a relative ESM .js or .mjs path without traversal`);
   }
 
-  const scopes = optionalEnumArray(
-    value.activationScopes,
-    `${path}.activationScopes`,
-    activationScopes,
-    issues,
-  ) ?? ["global"];
+  const uses =
+    value.uses === undefined && mode === "internal"
+      ? undefined
+      : contractUsesAt(value.uses, `${path}.uses`, issues);
+  const scopes =
+    mode === "package"
+      ? (["global"] as const)
+      : (optionalEnumArray(
+          value.activationScopes,
+          `${path}.activationScopes`,
+          activationScopeValues,
+          issues,
+        ) ?? ["global"]);
   const permissions =
-    optionalPatternArray(value.permissions, `${path}.permissions`, permissionPattern, issues) ?? [];
+    mode === "package"
+      ? Object.keys(uses ?? {})
+      : (optionalPatternArray(
+          value.permissions,
+          `${path}.permissions`,
+          permissionPattern,
+          issues,
+        ) ?? []);
   const entry: PluginEntryManifest = {
     id,
     runtime,
     module,
-    activationScopes: scopes,
+    ...(uses === undefined ? {} : { uses }),
+    activationScopes: [...scopes],
     permissions,
   };
 
@@ -276,6 +308,25 @@ function optionalPatternArray(
   );
   assertUnique(result, path, issues);
   return result;
+}
+
+function contractUsesAt(input: unknown, path: string, issues: string[]): Record<string, string[]> {
+  const value = objectAt(input, path, issues);
+  const uses: Record<string, string[]> = {};
+  for (const [contract, rawMethods] of Object.entries(value)) {
+    if (!contractPattern.test(contract)) {
+      issues.push(`${path}.${contract} has an invalid contract identifier`);
+    }
+    const methods = arrayAt(rawMethods, `${path}.${contract}`, issues).map((method, index) =>
+      patternedString(method, `${path}.${contract}[${index}]`, methodPattern, issues),
+    );
+    if (methods.length === 0) {
+      issues.push(`${path}.${contract} must contain at least one method`);
+    }
+    assertUnique(methods, `${path}.${contract}`, issues);
+    if (contractPattern.test(contract)) uses[contract] = methods;
+  }
+  return uses;
 }
 
 function assertUnique(values: readonly string[], path: string, issues: string[]): void {

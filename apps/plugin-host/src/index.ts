@@ -149,7 +149,6 @@ async function prepare(payload: PrepareRuntimePayload): Promise<JsonValue> {
     throw new TypeError("plugin module must export apply(ctx, config)");
   const module = imported as PluginModule;
   const config = await validateConfig(module, payload.config);
-  const dependencies = validateContracts(module.inject ?? [], "inject");
   const provides = validateContracts(module.provides ?? [], "provides");
   prepared = {
     module,
@@ -158,7 +157,7 @@ async function prepare(payload: PrepareRuntimePayload): Promise<JsonValue> {
     execution: payload.execution,
   };
 
-  return { dependencies, provides };
+  return { provides };
 }
 
 async function start(): Promise<void> {
