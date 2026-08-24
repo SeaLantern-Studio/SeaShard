@@ -248,7 +248,6 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
                 contract,
                 method: property,
                 args,
-                execution: state.execution,
               } satisfies ServiceCallPayload);
           },
         },

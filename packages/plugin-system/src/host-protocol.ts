@@ -163,7 +163,6 @@ export interface ServiceCallPayload {
   contract: string;
   method: string;
   args: JsonValue[];
-  execution: ExecutionContext;
 }
 
 export interface ProviderInvocationPayload {

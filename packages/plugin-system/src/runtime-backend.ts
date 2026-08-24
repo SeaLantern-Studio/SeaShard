@@ -372,12 +372,12 @@ class PluginHostSession {
     try {
       let value: JsonValue | undefined;
       if (message.command === "call-service") {
-        const payload = message.payload as unknown as ServiceCallPayload;
+        const call = authorizeExternalServiceCall(this.entry, this.execution, message.payload);
         const result = await this.registries.services.call(
-          payload.contract,
-          payload.method,
-          payload.args,
-          payload.execution,
+          call.contract,
+          call.method,
+          call.args,
+          call.execution,
         );
         value = result === undefined ? undefined : result;
       } else if (message.command === "emit-event") {
@@ -586,6 +586,45 @@ class PluginHostSession {
       }
     });
   }
+}
+
+/**
+ * 外部 Plugin Host 只能调用清单中声明的方法。执行身份始终取自主进程持有的
+ * Session，子进程即使在载荷中夹带同名字段也不会参与授权。
+ */
+export function authorizeExternalServiceCall(
+  entry: ResolvedEntry,
+  execution: ExecutionContext,
+  payload: JsonValue,
+): ServiceCallPayload & { readonly execution: ExecutionContext } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new TypeError("external service call payload must be an object");
+  }
+  const input = payload as Partial<ServiceCallPayload>;
+  if (typeof input.contract !== "string" || !input.contract) {
+    throw new TypeError("external service call contract must be a non-empty string");
+  }
+  if (typeof input.method !== "string" || !input.method) {
+    throw new TypeError("external service call method must be a non-empty string");
+  }
+  if (!Array.isArray(input.args)) {
+    throw new TypeError("external service call args must be an array");
+  }
+
+  const uses = entry.entry.uses;
+  const methods = uses && Object.hasOwn(uses, input.contract) ? uses[input.contract] : undefined;
+  if (!methods?.includes(input.method)) {
+    throw new Error(
+      `plugin ${entry.package.manifest.id}/${entry.entry.id} did not declare ${input.contract}.${input.method}`,
+    );
+  }
+
+  return {
+    contract: input.contract,
+    method: input.method,
+    args: input.args,
+    execution,
+  };
 }
 
 function createLocalPluginContext(

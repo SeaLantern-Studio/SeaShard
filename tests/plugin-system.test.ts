@@ -11,10 +11,12 @@ import type {
   JsonValue,
   ServiceResultValidator,
 } from "../packages/plugin-sdk/src/index.ts";
+import type { ResolvedEntry } from "../packages/plugin-system/src/types.ts";
 import {
   deserializeProtocolError,
   serializeProtocolError,
 } from "../packages/plugin-system/src/host-protocol.ts";
+import { authorizeExternalServiceCall } from "../packages/plugin-system/src/runtime-backend.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
   AgentProviderTypeRegistry,
@@ -153,6 +155,100 @@ await test("third-party bindings are global without changing internal scope supp
     await broker.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+await test("external service calls use Main identity and method declarations", () => {
+  const manifest = {
+    ...validManifest,
+    entries: [
+      {
+        ...validManifest.entries[0]!,
+        uses: {
+          "example.echo": ["read"],
+        },
+      },
+    ],
+  };
+  const entry: ResolvedEntry = {
+    package: {
+      manifest,
+      digest: "a".repeat(64),
+      rootPath: "C:/plugins/example.plugin",
+      source: "installed",
+      trust: "package-full-trust",
+      installedAt: "2026-08-24T00:00:00.000Z",
+    },
+    entry: manifest.entries[0]!,
+    binding: {
+      id: "external.example",
+      pluginId: manifest.id,
+      entryId: manifest.entries[0]!.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: null,
+    },
+    runtimeId: "external.example",
+    host: "node-plugin-host",
+  };
+  const trustedExecution: ExecutionContext = {
+    actorType: "plugin",
+    actorId: manifest.id,
+    runtimeId: entry.runtimeId,
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: ["example.echo"],
+    permissionRevision: 1,
+  };
+  const forgedExecution: ExecutionContext = {
+    actorType: "core",
+    actorId: "seashard.core",
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: ["*"],
+    permissionRevision: 999,
+  };
+
+  const authorized = authorizeExternalServiceCall(entry, trustedExecution, {
+    contract: "example.echo",
+    method: "read",
+    args: [],
+    execution: forgedExecution,
+  } as unknown as JsonValue);
+  assert.equal(authorized.execution, trustedExecution);
+  assert.deepEqual(
+    {
+      contract: authorized.contract,
+      method: authorized.method,
+      args: authorized.args,
+    },
+    {
+      contract: "example.echo",
+      method: "read",
+      args: [],
+    },
+  );
+
+  assert.throws(
+    () =>
+      authorizeExternalServiceCall(entry, trustedExecution, {
+        contract: "example.echo",
+        method: "write",
+        args: [],
+      }),
+    /did not declare example\.echo\.write/,
+  );
+  assert.throws(
+    () =>
+      authorizeExternalServiceCall(entry, trustedExecution, {
+        contract: "example.admin",
+        method: "deleteAll",
+        args: [],
+      }),
+    /did not declare example\.admin\.deleteAll/,
+  );
 });
 
 await test("built-in inventory removes retired packages and bindings before reconciliation", async () => {
