@@ -56,6 +56,11 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
         navigation: false,
         placement: "settings",
       });
+      ctx.contribute("workspace.sidebar", {
+        id: "test-sidebar",
+        workspaceId: "test",
+        component: pageComponent,
+      });
     },
   };
   const runtime = new ClientUiRuntime({
@@ -74,11 +79,21 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   assert.equal(runtime.pages.value[0]?.navigation, false);
   assert.equal(runtime.pages.value[0]?.placement, "settings");
   assert.equal(router.hasRoute("ui:test.runtime:test-page"), true);
+  assert.deepEqual(
+    runtime.workspaceSidebars.value.map((sidebar) => ({
+      id: sidebar.id,
+      runtimeId: sidebar.runtimeId,
+      workspaceId: sidebar.workspaceId,
+    })),
+    [{ id: "test-sidebar", runtimeId: "test.runtime", workspaceId: "test" }],
+  );
+  assert.equal(runtime.workspaceSidebars.value[0]?.component, pageComponent);
 
   await runtime.reconcile({ revision: 2, entries: [] });
   assert.equal(disposed, 1);
   assert.equal(runtime.pages.value.length, 0);
   assert.equal(router.hasRoute("ui:test.runtime:test-page"), false);
+  assert.equal(runtime.workspaceSidebars.value.length, 0);
   await runtime.dispose();
 });
 

@@ -11,7 +11,7 @@ export interface AgentConversationListItem {
 type AgentWorkspaceService = Pick<AgentSessionService, "listSessions">;
 
 /**
- * Desktop Shell 侧栏与独立对话 Client Entry 共享的最小状态。
+ * Agent 对话页与同一 Client Entry 发布的侧栏共享最小状态。
  * Host Session 仍是事实来源；尚未发送首条消息的新对话仅作为 Renderer 草稿存在。
  */
 class AgentWorkspaceState {

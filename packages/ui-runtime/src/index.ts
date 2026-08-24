@@ -1,6 +1,11 @@
 import type { ClientEntryDescriptor, ClientEntryPublication } from "@seashard/contracts";
 import type { Disposable } from "@seashard/plugin-sdk";
-import type { ClientUiContext, ClientUiModule, NavigationPageContribution } from "@seashard/ui-sdk";
+import type {
+  ClientUiContext,
+  ClientUiModule,
+  NavigationPageContribution,
+  WorkspaceSidebarContribution,
+} from "@seashard/ui-sdk";
 import {
   computed,
   effectScope,
@@ -28,6 +33,10 @@ export interface RegisteredNavigationPage extends NavigationPageContribution {
   routeName: string;
 }
 
+export interface RegisteredWorkspaceSidebar extends WorkspaceSidebarContribution {
+  runtimeId: string;
+}
+
 export interface ClientUiFailure {
   runtimeId: string;
   stage: "activation" | "bootstrap" | "render" | "teardown";
@@ -51,12 +60,16 @@ const contributionIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
 export class ClientUiRuntime {
   readonly ready = shallowRef(false);
   readonly pages: ComputedRef<readonly RegisteredNavigationPage[]>;
+  readonly workspaceSidebars: ComputedRef<readonly RegisteredWorkspaceSidebar[]>;
   readonly failures: ComputedRef<readonly ClientUiFailure[]>;
 
   private readonly active = new Map<string, ActiveClientEntry>();
   private readonly pagesById = new Map<string, RegisteredNavigationPage>();
   private readonly pageIdsByPath = new Map<string, string>();
   private readonly pageVersion = shallowRef(0);
+  private readonly workspaceSidebarsById = new Map<string, RegisteredWorkspaceSidebar>();
+  private readonly workspaceSidebarIdsByWorkspace = new Map<string, string>();
+  private readonly workspaceSidebarVersion = shallowRef(0);
   private readonly failuresByRuntime = new Map<string, ClientUiFailure>();
   private readonly failureVersion = shallowRef(0);
   private reconcileQueue: Promise<void> = Promise.resolve();
@@ -68,6 +81,12 @@ export class ClientUiRuntime {
       return [...this.pagesById.values()].sort(
         (left, right) =>
           (left.order ?? 0) - (right.order ?? 0) || left.label.localeCompare(right.label),
+      );
+    });
+    this.workspaceSidebars = computed(() => {
+      void this.workspaceSidebarVersion.value;
+      return [...this.workspaceSidebarsById.values()].sort((left, right) =>
+        left.workspaceId.localeCompare(right.workspaceId),
       );
     });
     this.failures = computed(() => {
@@ -176,12 +195,17 @@ export class ClientUiRuntime {
           if (cleanup) disposers.push(cleanup);
         },
         contribute: (kind, value) => {
-          if (kind !== "navigation.page") {
-            throw new Error("unsupported client UI contribution");
+          if (kind === "navigation.page") {
+            const page = value as NavigationPageContribution;
+            disposers.push(this.registerPage(descriptor.runtimeId, page));
+            return `${descriptor.runtimeId}:${kind}:${page.id}`;
           }
-          const page = value as NavigationPageContribution;
-          disposers.push(this.registerPage(descriptor.runtimeId, page));
-          return `${descriptor.runtimeId}:${kind}:${page.id}`;
+          if (kind === "workspace.sidebar") {
+            const sidebar = value as WorkspaceSidebarContribution;
+            disposers.push(this.registerWorkspaceSidebar(descriptor.runtimeId, sidebar));
+            return `${descriptor.runtimeId}:${kind}:${sidebar.id}`;
+          }
+          throw new Error("unsupported client UI contribution");
         },
       };
 
@@ -249,6 +273,51 @@ export class ClientUiRuntime {
         this.pageIdsByPath.delete(contribution.path);
         this.pageVersion.value += 1;
       }
+    };
+  }
+
+  /**
+   * 工作区侧栏按 workspaceId 独占注册。
+   * 侧栏与声明它的 Client Entry 共用 disposer，避免 Shell 留下已经失去 Service 的孤立界面。
+   */
+  private registerWorkspaceSidebar(
+    runtimeId: string,
+    contribution: WorkspaceSidebarContribution,
+  ): Disposable {
+    if (!contributionIdPattern.test(contribution.id)) {
+      throw new TypeError(`invalid workspace sidebar id: ${contribution.id}`);
+    }
+    if (!contributionIdPattern.test(contribution.workspaceId)) {
+      throw new TypeError(`invalid workspace id: ${contribution.workspaceId}`);
+    }
+    const existingId = this.workspaceSidebarsById.get(contribution.id);
+    if (existingId) {
+      throw new Error(`workspace sidebar id is already registered: ${contribution.id}`);
+    }
+    const existingWorkspace = this.workspaceSidebarIdsByWorkspace.get(contribution.workspaceId);
+    if (existingWorkspace) {
+      throw new Error(
+        `workspace sidebar is already registered: ${contribution.workspaceId} by ${existingWorkspace}`,
+      );
+    }
+
+    const sidebar: RegisteredWorkspaceSidebar = {
+      ...contribution,
+      component: markRaw(contribution.component),
+      runtimeId,
+    };
+    this.workspaceSidebarsById.set(contribution.id, sidebar);
+    this.workspaceSidebarIdsByWorkspace.set(contribution.workspaceId, contribution.id);
+    this.workspaceSidebarVersion.value += 1;
+
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      if (this.workspaceSidebarsById.get(contribution.id)?.runtimeId !== runtimeId) return;
+      this.workspaceSidebarsById.delete(contribution.id);
+      this.workspaceSidebarIdsByWorkspace.delete(contribution.workspaceId);
+      this.workspaceSidebarVersion.value += 1;
     };
   }
 

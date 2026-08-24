@@ -45,9 +45,17 @@ export interface NavigationPageContribution {
   component: Component;
 }
 
+/** 一个 Client Entry 为指定工作区提供的完整左侧栏内容。 */
+export interface WorkspaceSidebarContribution {
+  id: string;
+  workspaceId: string;
+  component: Component;
+}
+
 /** 可由 UI SDK 扩展的固定 Contribution 类型表。 */
 export interface ClientUiContributionMap {
   "navigation.page": NavigationPageContribution;
+  "workspace.sidebar": WorkspaceSidebarContribution;
 }
 
 /** Renderer 本地 Entry Context；不暴露 Main Context、Node 或 Electron 对象。 */

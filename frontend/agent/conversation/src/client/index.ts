@@ -8,12 +8,13 @@ import {
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { defineComponent, h } from "vue";
 import AgentConversationPage from "./AgentConversationPage.vue";
+import AgentWorkspaceSidebar from "./AgentWorkspaceSidebar.vue";
 
 export default defineClientUiModule({
   apply(context) {
     const sessions = context.service<AgentSessionService>(agentSessionContract);
     const invocations = context.service<AgentInvocationService>(agentInvocationContract);
-    context.effect(() => agentWorkspace.bind(sessions), "Agent sidebar session binding");
+    context.effect(() => agentWorkspace.bind(sessions), "Agent workspace session binding");
 
     const page = defineComponent({
       name: "AgentConversationFeaturePage",
@@ -32,6 +33,11 @@ export default defineClientUiModule({
       navigation: false,
       placement: "main",
       component: page,
+    });
+    context.contribute("workspace.sidebar", {
+      id: "agent-conversation-sidebar",
+      workspaceId: "agent",
+      component: AgentWorkspaceSidebar,
     });
   },
 });
