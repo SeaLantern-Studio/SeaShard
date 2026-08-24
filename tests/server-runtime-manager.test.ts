@@ -63,13 +63,20 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     onConsoleLine: (line) => emittedLines.push(`${line.stream}:${line.text}`),
   });
 
-  const started = await manager.start(vanillaInstance.id);
+  const startReceipt = await manager.startWithReceipt(vanillaInstance.id);
+  const started = startReceipt.snapshot;
   assert.deepEqual(started, {
     instanceId: vanillaInstance.id,
     state: "running",
     pid: 4_242,
     startedAt: "2026-08-17T13:00:00.000Z",
   });
+  assert.equal(
+    manager
+      .getLogs(vanillaInstance.id)
+      .find(({ sequence }) => sequence === startReceipt.startedLogSequence)?.stream,
+    "system",
+  );
   assert.deepEqual(recordedStartTimes, [
     {
       instanceId: vanillaInstance.id,
@@ -112,8 +119,14 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   child.stdout.write("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8\n");
   child.stderr.write("0% [        ]\r50% [====    ]\r100% [========]\n");
   child.stderr.write("warning from java\n");
-  await manager.sendCommand(vanillaInstance.id, "list");
+  const commandReceipt = await manager.sendCommandWithReceipt(vanillaInstance.id, "list");
   assert.equal((child.stdin as PassThrough).read()?.toString(), "list\n");
+  assert.equal(
+    manager
+      .getLogs(vanillaInstance.id)
+      .find(({ sequence }) => sequence === commandReceipt.commandLogSequence)?.text,
+    "> list",
+  );
   assert.deepEqual(
     manager
       .getLogs(vanillaInstance.id)
@@ -130,8 +143,15 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     ],
   );
 
-  const stopping = await manager.stop(vanillaInstance.id);
+  const stopReceipt = await manager.stopWithReceipt(vanillaInstance.id);
+  const stopping = stopReceipt.snapshot;
   assert.equal(stopping.state, "stopping");
+  assert.equal(
+    manager
+      .getLogs(vanillaInstance.id)
+      .find(({ sequence }) => sequence === stopReceipt.stopCommandLogSequence)?.text,
+    "> stop",
+  );
   assert.equal((child.stdin as PassThrough).read()?.toString(), "stop\n");
   assert.equal((await manager.stop(vanillaInstance.id)).state, "stopping");
   child.emitExit(0, null);

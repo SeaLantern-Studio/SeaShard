@@ -11,6 +11,7 @@ import {
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import { ServerRuntimeManager, type ServerRuntimeManagerOptions } from "./manager";
+import { registerServerRuntimeAgentIntegration } from "./agent-integration";
 
 export interface ServerRuntimeModuleOptions {
   onConsoleLine?(line: ServerConsoleLine): void;
@@ -68,6 +69,15 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
           ? { reportError: (error: unknown) => options.reportError!(error) }
           : {}),
         ...options.managerOptions,
+      });
+
+      registerServerRuntimeAgentIntegration(ctx, {
+        listInstances: () => instances.list(),
+        getRuntime: (instanceId) => manager.get(instanceId),
+        getLogs: (instanceId) => manager.getLogs(instanceId),
+        start: (instanceId) => manager.startWithReceipt(instanceId),
+        stop: (instanceId) => manager.stopWithReceipt(instanceId),
+        sendCommand: (instanceId, command) => manager.sendCommandWithReceipt(instanceId, command),
       });
 
       ctx.provide(serverRuntimeContract, {

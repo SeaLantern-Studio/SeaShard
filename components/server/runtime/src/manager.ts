@@ -46,6 +46,24 @@ export interface ServerRuntimeManagerOptions {
   stopGracePeriodMs?: number;
 }
 
+/** 启动回执把领域状态与对应的 system 日志序号绑定，调用方无需按文本反查日志。 */
+export interface ServerRuntimeStartReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+  readonly startedLogSequence: number;
+}
+
+/** 安全停止回执指向实际写入核心进程的结束命令。 */
+export interface ServerRuntimeStopReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+  readonly stopCommandLogSequence: number;
+}
+
+/** 控制台命令回执只在 stdin 写入成功并记录 input 日志后生成。 */
+export interface ServerRuntimeCommandReceipt {
+  readonly accepted: true;
+  readonly commandLogSequence: number;
+}
+
 interface ConsoleLogState {
   nextSequence: number;
   lines: ServerConsoleLine[];
@@ -61,6 +79,7 @@ interface ActiveSession {
   snapshot: ServerRuntimeSnapshot;
   forceStopTimer?: ReturnType<typeof setTimeout>;
   stdinFailure?: Error;
+  stopCommandLogSequence?: number;
 }
 
 /** 单个实例保存的是完整设置组；存在时整体映射到运行组件现有的全局设置结构。 */
@@ -150,6 +169,14 @@ export class ServerRuntimeManager {
   }
 
   async start(value: unknown): Promise<ServerRuntimeSnapshot> {
+    return (await this.startWithReceipt(value)).snapshot;
+  }
+
+  /**
+   * 执行一次完整启动并返回可继续追踪日志的稳定序号。
+   * 普通 Service 仍只投影 snapshot，Agent 等需要关联日志的调用方使用该回执。
+   */
+  async startWithReceipt(value: unknown): Promise<ServerRuntimeStartReceipt> {
     this.ensureActive();
     const instanceId = expectInstanceId(value);
     const current = this.snapshots.get(instanceId);
@@ -205,7 +232,7 @@ export class ServerRuntimeManager {
       };
       session.snapshot = runningSnapshot;
       this.snapshots.set(instanceId, runningSnapshot);
-      this.appendLine(
+      const startedLine = this.appendLine(
         instanceId,
         "system",
         `[SeaShard] ${plan.displayName} 服务器进程已启动（Java ${java.version}）。`,
@@ -215,7 +242,10 @@ export class ServerRuntimeManager {
       } catch (error) {
         this.options.reportError?.(error);
       }
-      return { ...runningSnapshot };
+      return {
+        snapshot: { ...runningSnapshot },
+        startedLogSequence: startedLine.sequence,
+      };
     } catch (error) {
       const session = child ? this.sessions.get(instanceId) : undefined;
       if (child && session?.child === child) {
@@ -236,19 +266,32 @@ export class ServerRuntimeManager {
   }
 
   async stop(value: unknown): Promise<ServerRuntimeSnapshot> {
-    this.ensureActive();
-    const instanceId = expectInstanceId(value);
-    const session = this.sessions.get(instanceId);
-    if (!session || !isActiveState(session.snapshot.state)) {
-      throw new Error(`server instance ${instanceId} is not running`);
-    }
-    if (session.snapshot.state === "stopping") return { ...session.snapshot };
+    return (await this.requestStop(value)).snapshot;
+  }
 
-    await this.requestSafeStop(instanceId, session);
-    return this.get(instanceId);
+  /** 返回安全停止命令对应的 input 日志序号，避免并发输出造成反查错位。 */
+  async stopWithReceipt(value: unknown): Promise<ServerRuntimeStopReceipt> {
+    const result = await this.requestStop(value);
+    if (result.stopCommandLogSequence === undefined) {
+      throw new Error(
+        `server instance ${result.snapshot.instanceId} has no safe stop command receipt`,
+      );
+    }
+    return {
+      snapshot: result.snapshot,
+      stopCommandLogSequence: result.stopCommandLogSequence,
+    };
   }
 
   async sendCommand(instanceValue: unknown, commandValue: unknown): Promise<void> {
+    await this.sendCommandWithReceipt(instanceValue, commandValue);
+  }
+
+  /** 命令写入与 input 日志在同一调用内完成，回执序号可直接作为后续日志游标。 */
+  async sendCommandWithReceipt(
+    instanceValue: unknown,
+    commandValue: unknown,
+  ): Promise<ServerRuntimeCommandReceipt> {
     this.ensureActive();
     const instanceId = expectInstanceId(instanceValue);
     const command = expectCommand(commandValue);
@@ -257,9 +300,11 @@ export class ServerRuntimeManager {
       throw new Error(`server instance ${instanceId} is not accepting commands`);
     }
     await this.writeCommand(instanceId, session, command);
-    if (this.sessions.get(instanceId)?.child === session.child) {
-      this.appendLine(instanceId, "input", `> ${command}`);
-    }
+    const commandLine = this.appendLine(instanceId, "input", `> ${command}`);
+    return {
+      accepted: true,
+      commandLogSequence: commandLine.sequence,
+    };
   }
 
   /** 组件卸载必须等待运行进程安全停止，并终止仍在执行的安装器。 */
@@ -286,6 +331,27 @@ export class ServerRuntimeManager {
     await Promise.all(pendingSessions);
   }
 
+  private async requestStop(value: unknown): Promise<{
+    readonly snapshot: ServerRuntimeSnapshot;
+    readonly stopCommandLogSequence?: number;
+  }> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(value);
+    const session = this.sessions.get(instanceId);
+    if (!session || !isActiveState(session.snapshot.state)) {
+      throw new Error(`server instance ${instanceId} is not running`);
+    }
+    if (session.snapshot.state !== "stopping") {
+      await this.requestSafeStop(instanceId, session);
+    }
+    return {
+      snapshot: this.get(instanceId),
+      ...(session.stopCommandLogSequence === undefined
+        ? {}
+        : { stopCommandLogSequence: session.stopCommandLogSequence }),
+    };
+  }
+
   private async requestSafeStop(instanceId: string, session: ActiveSession): Promise<void> {
     const stoppingSnapshot: ServerRuntimeSnapshot = {
       ...session.snapshot,
@@ -300,7 +366,8 @@ export class ServerRuntimeManager {
       throw error;
     }
     if (this.sessions.get(instanceId)?.child !== session.child) return;
-    this.appendLine(instanceId, "input", `> ${session.stopCommand}`);
+    const stopCommandLine = this.appendLine(instanceId, "input", `> ${session.stopCommand}`);
+    session.stopCommandLogSequence = stopCommandLine.sequence;
     this.appendLine(instanceId, "system", "[SeaShard] 已请求服务器安全停止。");
     this.armForceStop(instanceId, session);
   }
@@ -514,7 +581,11 @@ export class ServerRuntimeManager {
     });
   }
 
-  private appendLine(instanceId: string, stream: ServerConsoleStream, text: string): void {
+  private appendLine(
+    instanceId: string,
+    stream: ServerConsoleStream,
+    text: string,
+  ): ServerConsoleLine {
     const state = this.logs.get(instanceId) ?? { nextSequence: 1, lines: [] };
     const line: ServerConsoleLine = {
       sequence: state.nextSequence++,
@@ -533,6 +604,7 @@ export class ServerRuntimeManager {
     } catch (error) {
       this.options.reportError?.(error);
     }
+    return line;
   }
 
   private ensureActive(): void {
