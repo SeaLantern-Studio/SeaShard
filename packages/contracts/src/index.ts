@@ -72,6 +72,8 @@ export const desktopChannels = {
   agentModelsList: "seashard.agent.models-list",
   agentSessionsList: "seashard.agent.sessions-list",
   agentSessionGet: "seashard.agent.session-get",
+  agentSessionCopy: "seashard.agent.session-copy",
+  agentSessionDelete: "seashard.agent.session-delete",
   agentSessionStart: "seashard.agent.session-start",
   agentMessageSend: "seashard.agent.message-send",
   agentInvocationGet: "seashard.agent.invocation-get",
@@ -304,6 +306,7 @@ export interface AgentSessionService {
   }): Promise<AgentInvocationReference>;
   listSessions(): Promise<readonly AgentSessionSummary[]>;
   getSession(sessionId: string): Promise<AgentSessionSnapshot>;
+  copySession(sessionId: string): Promise<AgentSessionSummary>;
   renameSession(sessionId: string, title: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
 }
@@ -317,7 +320,13 @@ export interface AgentClientService
   extends
     Pick<
       AgentSessionService,
-      "listModels" | "startSession" | "sendMessage" | "listSessions" | "getSession"
+      | "listModels"
+      | "startSession"
+      | "sendMessage"
+      | "listSessions"
+      | "getSession"
+      | "copySession"
+      | "deleteSession"
     >,
     AgentInvocationService {}
 

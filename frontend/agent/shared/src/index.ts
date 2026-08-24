@@ -8,7 +8,10 @@ export interface AgentConversationListItem {
   readonly updatedAt: string;
 }
 
-type AgentWorkspaceService = Pick<AgentSessionService, "listSessions">;
+type AgentWorkspaceService = Pick<
+  AgentSessionService,
+  "listSessions" | "copySession" | "deleteSession"
+>;
 
 /**
  * Agent 对话页与同一 Client Entry 发布的侧栏共享最小状态。
@@ -46,12 +49,12 @@ class AgentWorkspaceState {
     this.persistedSessions.value = await service.listSessions();
   }
 
-  createDraft(): string {
+  createDraft(title = "新对话"): string {
     const id = `draft:${crypto.randomUUID()}`;
     this.drafts.value = [
       {
         id,
-        title: "新对话",
+        title,
         draft: true,
         updatedAt: new Date().toISOString(),
       },
@@ -63,6 +66,35 @@ class AgentWorkspaceState {
 
   select(conversationId: string): void {
     this.activeConversationId.value = conversationId;
+  }
+  async copyConversation(conversationId: string): Promise<string> {
+    const conversation = this.conversations.value.find(({ id }) => id === conversationId);
+    if (!conversation) throw new Error(`Agent 对话不存在：${conversationId}`);
+    if (conversation.draft) return this.createDraft(conversation.title);
+
+    const service = this.service;
+    if (!service) throw new Error("Agent 对话服务尚未就绪");
+    const copy = await service.copySession(conversationId);
+    await this.refresh();
+    this.activeConversationId.value = copy.id;
+    return copy.id;
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    const conversation = this.conversations.value.find(({ id }) => id === conversationId);
+    if (!conversation) throw new Error(`Agent 对话不存在：${conversationId}`);
+    const wasActive = this.activeConversationId.value === conversationId;
+
+    if (conversation.draft) {
+      this.drafts.value = this.drafts.value.filter(({ id }) => id !== conversationId);
+    } else {
+      const service = this.service;
+      if (!service) throw new Error("Agent 对话服务尚未就绪");
+      await service.deleteSession(conversationId);
+      await this.refresh();
+    }
+
+    if (wasActive) this.activeConversationId.value = this.conversations.value[0]?.id;
   }
 
   isDraft(conversationId: string | undefined): boolean {

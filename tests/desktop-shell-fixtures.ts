@@ -638,6 +638,14 @@ export async function createDesktopShellHarness(
         messages: [],
         toolCalls: [],
       }),
+      copyAgentSession: async (sessionId) => ({
+        id: `${sessionId}-copy`,
+        title: "新对话",
+        model: { connectionId: "test", modelId: "test-model" },
+        createdAt: "2026-08-17T12:00:01.000Z",
+        updatedAt: "2026-08-17T12:00:01.000Z",
+      }),
+      deleteAgentSession: async () => {},
       startAgentSession: async () => ({
         sessionId: "agent-session",
         invocationId: "agent-invocation",

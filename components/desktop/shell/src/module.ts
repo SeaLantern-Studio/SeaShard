@@ -260,6 +260,14 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.readAgentSession(expectNonEmptyString(sessionId, "Agent session ID"));
         });
+        config.runtime.handle(desktopChannels.agentSessionCopy, (event, sessionId) => {
+          ownedWindow(event.sender.id);
+          return config.copyAgentSession(expectNonEmptyString(sessionId, "Agent session ID"));
+        });
+        config.runtime.handle(desktopChannels.agentSessionDelete, (event, sessionId) => {
+          ownedWindow(event.sender.id);
+          return config.deleteAgentSession(expectNonEmptyString(sessionId, "Agent session ID"));
+        });
         config.runtime.handle(desktopChannels.agentSessionStart, (event, input) => {
           ownedWindow(event.sender.id);
           return config.startAgentSession(expectAgentStartSessionInput(input));
@@ -865,6 +873,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.agentModelsList);
           config.runtime.removeHandler(desktopChannels.agentSessionsList);
           config.runtime.removeHandler(desktopChannels.agentSessionGet);
+          config.runtime.removeHandler(desktopChannels.agentSessionCopy);
+          config.runtime.removeHandler(desktopChannels.agentSessionDelete);
           config.runtime.removeHandler(desktopChannels.agentSessionStart);
           config.runtime.removeHandler(desktopChannels.agentMessageSend);
           config.runtime.removeHandler(desktopChannels.agentInvocationGet);

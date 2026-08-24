@@ -50,6 +50,8 @@ export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginMo
         listSessions: async () => asJsonValue(await runtime.listSessions()),
         getSession: async (sessionId) =>
           asJsonValue(await runtime.getSession(requireString(sessionId, "sessionId"))),
+        copySession: async (sessionId) =>
+          asJsonValue(await runtime.copySession(requireString(sessionId, "sessionId"))),
         renameSession: async (sessionId, title) => {
           await runtime.renameSession(
             requireString(sessionId, "sessionId"),

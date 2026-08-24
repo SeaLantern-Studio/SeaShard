@@ -109,6 +109,8 @@ export interface DesktopShellConfig {
   listAgentModels(): ReturnType<AgentSessionService["listModels"]>;
   listAgentSessions(): ReturnType<AgentSessionService["listSessions"]>;
   readAgentSession(sessionId: string): ReturnType<AgentSessionService["getSession"]>;
+  copyAgentSession(sessionId: string): ReturnType<AgentSessionService["copySession"]>;
+  deleteAgentSession(sessionId: string): ReturnType<AgentSessionService["deleteSession"]>;
   startAgentSession(
     input: Parameters<AgentSessionService["startSession"]>[0],
   ): ReturnType<AgentSessionService["startSession"]>;

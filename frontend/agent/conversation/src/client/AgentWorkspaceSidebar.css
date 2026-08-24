@@ -130,6 +130,98 @@
   margin-left: 10px;
 }
 
+.workspace-chat-entry {
+  position: relative;
+}
+
+.workspace-chat-row {
+  padding-right: 40px;
+}
+
+.workspace-chat-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--sl-radius-sm);
+  background: color-mix(in srgb, var(--sl-bg-tertiary) 88%, transparent);
+  color: var(--sl-text-tertiary);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition:
+    opacity var(--sl-transition-fast),
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.workspace-chat-entry:hover .workspace-chat-actions,
+.workspace-chat-entry:focus-within .workspace-chat-actions,
+.workspace-chat-entry.menu-open .workspace-chat-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workspace-chat-actions:hover {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.workspace-chat-actions:focus-visible,
+.agent-conversation-menu button:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: 1px;
+}
+
+.workspace-chat-actions:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.agent-conversation-menu {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  width: 148px;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+}
+
+.agent-conversation-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: var(--sl-radius-sm);
+  color: var(--sl-text-secondary);
+  font-size: 0.8125rem;
+  text-align: left;
+  transition:
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.agent-conversation-menu button:hover {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.agent-conversation-menu button.danger {
+  color: var(--sl-error);
+}
+
+.agent-conversation-menu button.danger:hover {
+  background: var(--sl-error-bg);
+}
+
 .workspace-chat-row {
   color: var(--sl-text-secondary);
 }

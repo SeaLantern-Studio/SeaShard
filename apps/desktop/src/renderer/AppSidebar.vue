@@ -476,6 +476,7 @@ onUnmounted(() => {
 
           <div v-if="!props.settingsMode && !props.downloadMode" class="nav-group lower-side">
             <button
+              v-if="props.workspace === 'agent'"
               type="button"
               class="nav-item"
               :class="{ active: agentSettingsPath && isActive(agentSettingsPath) }"

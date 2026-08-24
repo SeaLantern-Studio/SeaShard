@@ -131,6 +131,8 @@ export async function registerDesktopShellBridge(
             listAgentModels: async () => await agentSessions.listModels(),
             listAgentSessions: async () => await agentSessions.listSessions(),
             readAgentSession: async (sessionId) => await agentSessions.getSession(sessionId),
+            copyAgentSession: async (sessionId) => await agentSessions.copySession(sessionId),
+            deleteAgentSession: async (sessionId) => await agentSessions.deleteSession(sessionId),
             startAgentSession: async (input) => await agentSessions.startSession(input),
             sendAgentMessage: async (input) => await agentSessions.sendMessage(input),
             readAgentInvocation: async (invocationId) =>

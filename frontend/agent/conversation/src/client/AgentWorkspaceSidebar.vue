@@ -1,10 +1,20 @@
 <script setup lang="ts">
 import { agentWorkspace } from "@seashard/agent-ui-shared";
-import { ChevronDown, Folder, MessageSquare, SquarePen } from "lucide-vue-next";
+import { useToast } from "cmzya-modern-ui";
+import {
+  ChevronDown,
+  Copy,
+  Ellipsis,
+  Folder,
+  MessageSquare,
+  SquarePen,
+  Trash2,
+} from "lucide-vue-next";
 import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const toast = useToast();
 const scrollViewport = ref<HTMLElement>();
 const scrollContent = ref<HTMLElement>();
 const scrollbarTrack = ref<HTMLElement>();
@@ -17,9 +27,16 @@ interface ScrollbarDrag {
   readonly startClientY: number;
   readonly startScrollTop: number;
 }
+interface ConversationMenu {
+  readonly conversationId: string;
+  readonly x: number;
+  readonly y: number;
+}
 
 let scrollbarDrag: ScrollbarDrag | undefined;
 let scrollbarFrame: number | undefined;
+const conversationMenu = ref<ConversationMenu>();
+const conversationActionId = ref<string>();
 let scrollbarResizeObserver: ResizeObserver | undefined;
 
 function navigateToConversation(): void {
@@ -32,6 +49,7 @@ function createConversation(): void {
 }
 
 function selectConversation(conversationId: string): void {
+  closeConversationMenu();
   agentWorkspace.select(conversationId);
   navigateToConversation();
 }
@@ -52,6 +70,75 @@ function toggleProject(name: string): void {
     next.add(name);
   }
   expandedProjects.value = next;
+}
+function openConversationMenu(event: MouseEvent, conversationId: string): void {
+  if (conversationMenu.value?.conversationId === conversationId) {
+    closeConversationMenu();
+    return;
+  }
+  const trigger = event.currentTarget as HTMLElement;
+  const bounds = trigger.getBoundingClientRect();
+  const menuWidth = 148;
+  const menuHeight = 76;
+  const viewportPadding = 8;
+  const x = Math.min(
+    window.innerWidth - menuWidth - viewportPadding,
+    Math.max(viewportPadding, bounds.right - menuWidth),
+  );
+  const below = bounds.bottom + 4;
+  const y =
+    below + menuHeight <= window.innerHeight - viewportPadding
+      ? below
+      : Math.max(viewportPadding, bounds.top - menuHeight - 4);
+  conversationMenu.value = { conversationId, x, y };
+}
+
+function closeConversationMenu(): void {
+  conversationMenu.value = undefined;
+}
+
+function handleWindowKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") closeConversationMenu();
+}
+
+async function copyConversation(): Promise<void> {
+  const conversationId = conversationMenu.value?.conversationId;
+  if (!conversationId || conversationActionId.value) return;
+  closeConversationMenu();
+  conversationActionId.value = conversationId;
+  try {
+    await agentWorkspace.copyConversation(conversationId);
+    navigateToConversation();
+    toast.success({ title: "对话已复制" });
+  } catch (error) {
+    toast.error({ title: "复制对话失败", description: errorMessage(error) });
+  } finally {
+    conversationActionId.value = undefined;
+  }
+}
+
+async function deleteConversation(): Promise<void> {
+  const conversationId = conversationMenu.value?.conversationId;
+  if (!conversationId || conversationActionId.value) return;
+  closeConversationMenu();
+  conversationActionId.value = conversationId;
+  try {
+    await agentWorkspace.deleteConversation(conversationId);
+    toast.success({ title: "对话已删除" });
+  } catch (error) {
+    toast.error({ title: "删除对话失败", description: errorMessage(error) });
+  } finally {
+    conversationActionId.value = undefined;
+  }
+}
+
+function handleConversationScroll(): void {
+  closeConversationMenu();
+  scheduleScrollbar();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** 原生区域承担滚动语义；代理轨道只投影尺寸与位置，不建立第二份滚动状态。 */
@@ -152,12 +239,16 @@ function endScrollbarDrag(event: PointerEvent): void {
 onMounted(() => {
   void nextTick(connectScrollbarObserver);
   window.addEventListener("resize", scheduleScrollbar);
+  window.addEventListener("pointerdown", closeConversationMenu);
+  window.addEventListener("keydown", handleWindowKeydown);
 });
 
 onUnmounted(() => {
   if (scrollbarFrame !== undefined) cancelAnimationFrame(scrollbarFrame);
   scrollbarResizeObserver?.disconnect();
   window.removeEventListener("resize", scheduleScrollbar);
+  window.removeEventListener("pointerdown", closeConversationMenu);
+  window.removeEventListener("keydown", handleWindowKeydown);
 });
 </script>
 
@@ -169,7 +260,11 @@ onUnmounted(() => {
     </button>
 
     <div class="agent-workspace-scroll-shell">
-      <div ref="scrollViewport" class="agent-workspace-scroll" @scroll.passive="scheduleScrollbar">
+      <div
+        ref="scrollViewport"
+        class="agent-workspace-scroll"
+        @scroll.passive="handleConversationScroll"
+      >
         <div ref="scrollContent" class="agent-workspace-scroll-content">
           <section class="workspace-section" aria-labelledby="projects-label">
             <h3 id="projects-label" class="workspace-section-title">
@@ -218,18 +313,35 @@ onUnmounted(() => {
             <h3 id="chats-label" class="workspace-section-title">
               <span class="workspace-section-title-text">对话</span>
             </h3>
-            <button
+            <div
               v-for="chat in agentWorkspace.conversations.value"
               :key="chat.id"
-              type="button"
-              class="workspace-row workspace-chat-row"
-              :class="{ active: isConversationActive(chat.id) }"
-              :aria-current="isConversationActive(chat.id) ? 'page' : undefined"
-              @click="selectConversation(chat.id)"
+              class="workspace-chat-entry"
+              :class="{ 'menu-open': conversationMenu?.conversationId === chat.id }"
             >
-              <MessageSquare :size="14" :stroke-width="1.8" />
-              <span>{{ chat.title }}</span>
-            </button>
+              <button
+                type="button"
+                class="workspace-row workspace-chat-row"
+                :class="{ active: isConversationActive(chat.id) }"
+                :aria-current="isConversationActive(chat.id) ? 'page' : undefined"
+                @click="selectConversation(chat.id)"
+              >
+                <MessageSquare :size="14" :stroke-width="1.8" />
+                <span>{{ chat.title }}</span>
+              </button>
+              <button
+                type="button"
+                class="workspace-chat-actions"
+                :disabled="conversationActionId === chat.id"
+                :aria-label="`${chat.title}的对话操作`"
+                aria-haspopup="menu"
+                :aria-expanded="conversationMenu?.conversationId === chat.id"
+                @pointerdown.stop
+                @click.stop="openConversationMenu($event, chat.id)"
+              >
+                <Ellipsis :size="17" :stroke-width="2" />
+              </button>
+            </div>
           </section>
         </div>
       </div>
@@ -248,6 +360,22 @@ onUnmounted(() => {
           @pointercancel="endScrollbarDrag"
         ></div>
       </div>
+    </div>
+    <div
+      v-if="conversationMenu"
+      class="agent-conversation-menu"
+      role="menu"
+      :style="{ left: `${conversationMenu.x}px`, top: `${conversationMenu.y}px` }"
+      @pointerdown.stop
+    >
+      <button type="button" role="menuitem" @click="copyConversation">
+        <Copy :size="15" :stroke-width="1.8" />
+        <span>复制</span>
+      </button>
+      <button type="button" class="danger" role="menuitem" @click="deleteConversation">
+        <Trash2 :size="15" :stroke-width="1.8" />
+        <span>删除</span>
+      </button>
     </div>
   </div>
 </template>

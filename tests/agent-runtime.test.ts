@@ -488,6 +488,123 @@ await test("Agent Session Journal 保留新对话标题并投影最近使用的�
   await journal.rename(created.header.id, "服务端规划");
   assert.equal((await journal.snapshot(created.header.id)).title, "服务端规划");
 });
+await test("Agent Session Journal 复制完整历史并重新分配记录身份", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-session-copy-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const journal = new AgentSessionJournal(userDataRoot);
+  await journal.initialize();
+  const source = await journal.create({ connectionId: "openai", modelId: "gpt-copy" });
+  await journal.rename(source.header.id, "分支起点");
+  await journal.appendInvocation(source.header.id, {
+    id: "invocation-source",
+    state: "completed",
+    model: { connectionId: "openai", modelId: "gpt-copy" },
+    text: "assistant answer",
+  });
+  await journal.appendMessage({
+    sessionId: source.header.id,
+    invocationId: "invocation-source",
+    role: "user",
+    content: "same question",
+  });
+  await journal.appendMessage({
+    sessionId: source.header.id,
+    invocationId: "invocation-source",
+    role: "assistant",
+    content: "assistant answer",
+  });
+  await journal.appendToolCall(source.header.id, {
+    id: "tool-call-source",
+    invocationId: "invocation-source",
+    toolName: "read",
+    presentation: { title: "读取分支资料" },
+    state: "running",
+    input: { path: "local://notes/branch.txt" },
+    startedAt: "2026-08-23T10:00:00.000Z",
+  });
+  await journal.appendToolCall(source.header.id, {
+    id: "tool-call-source",
+    invocationId: "invocation-source",
+    toolName: "read",
+    presentation: { title: "读取分支资料" },
+    state: "completed",
+    input: { path: "local://notes/branch.txt" },
+    output: { content: "branch context" },
+    startedAt: "2026-08-23T10:00:00.000Z",
+    finishedAt: "2026-08-23T10:00:01.000Z",
+  });
+  const sourceDirectory = join(journal.sessionsRoot, source.storageKey);
+  await mkdir(join(sourceDirectory, "notes"));
+  await writeFile(join(sourceDirectory, "notes", "branch.txt"), "branch context", "utf8");
+
+  const copied = await journal.copy(source.header.id);
+  const sourceLoaded = await journal.get(source.header.id);
+  const copiedLoaded = await journal.get(copied.id);
+  assert.notEqual(copied.id, source.header.id);
+  assert.equal(copied.title, "分支起点");
+  assert.deepEqual(
+    copiedLoaded.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })),
+    sourceLoaded.messages.map(({ role, content, timestamp }) => ({ role, content, timestamp })),
+  );
+  assert.deepEqual(
+    copiedLoaded.invocations.map(({ state, model, text, error, timestamp }) => ({
+      state,
+      model,
+      text,
+      error,
+      timestamp,
+    })),
+    sourceLoaded.invocations.map(({ state, model, text, error, timestamp }) => ({
+      state,
+      model,
+      text,
+      error,
+      timestamp,
+    })),
+  );
+  assert.notEqual(copiedLoaded.messages[0]?.id, sourceLoaded.messages[0]?.id);
+  assert.notEqual(copiedLoaded.invocations[0]?.id, sourceLoaded.invocations[0]?.id);
+  assert.equal(copiedLoaded.messages[0]?.invocationId, copiedLoaded.invocations[0]?.id);
+  assert.equal(copiedLoaded.toolCalls.length, 1);
+  assert.notEqual(copiedLoaded.toolCalls[0]?.id, sourceLoaded.toolCalls[0]?.id);
+  assert.equal(copiedLoaded.toolCalls[0]?.invocationId, copiedLoaded.invocations[0]?.id);
+  assert.deepEqual(
+    {
+      toolName: copiedLoaded.toolCalls[0]?.toolName,
+      presentation: copiedLoaded.toolCalls[0]?.presentation,
+      input: copiedLoaded.toolCalls[0]?.input,
+      output: copiedLoaded.toolCalls[0]?.output,
+      state: copiedLoaded.toolCalls[0]?.state,
+    },
+    {
+      toolName: sourceLoaded.toolCalls[0]?.toolName,
+      presentation: sourceLoaded.toolCalls[0]?.presentation,
+      input: sourceLoaded.toolCalls[0]?.input,
+      output: sourceLoaded.toolCalls[0]?.output,
+      state: sourceLoaded.toolCalls[0]?.state,
+    },
+  );
+  assert.equal(
+    await readFile(
+      join(journal.sessionsRoot, copiedLoaded.storageKey, "notes", "branch.txt"),
+      "utf8",
+    ),
+    "branch context",
+  );
+
+  await journal.delete(source.header.id);
+  assert.equal(
+    await readFile(
+      join(journal.sessionsRoot, copiedLoaded.storageKey, "notes", "branch.txt"),
+      "utf8",
+    ),
+    "branch context",
+  );
+});
 
 await test("Agent local:// 只读取当前 Session 并拒绝路径逃逸", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-local-resource-"));

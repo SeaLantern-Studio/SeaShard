@@ -32,6 +32,15 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     ).title,
     "新对话",
   );
+  assert.equal(
+    (
+      (await runtime.invoke(desktopChannels.agentSessionCopy, 1, "agent-session")) as {
+        id: string;
+      }
+    ).id,
+    "agent-session-copy",
+  );
+  await runtime.invoke(desktopChannels.agentSessionDelete, 1, "agent-session");
   assert.deepEqual(
     await runtime.invoke(desktopChannels.agentSessionStart, 1, {
       initialMessage: { text: "hello" },

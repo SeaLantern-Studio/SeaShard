@@ -312,6 +312,12 @@ export class AgentRuntime {
     this.assertAvailable();
     return this.journal.snapshot(validateIdentifier(sessionId, "sessionId"));
   }
+  async copySession(sessionId: string): Promise<AgentSessionSummary> {
+    this.assertAvailable();
+    const id = validateIdentifier(sessionId, "sessionId");
+    if (this.activeBySession.has(id)) throw new Error("运行中的对话不能复制");
+    return this.journal.copy(id);
+  }
 
   async renameSession(sessionId: string, title: string): Promise<void> {
     this.assertAvailable();

@@ -12,7 +12,7 @@ import {
 } from "@seashard/plugin-sdk";
 import type { AgentActivityPresentationField, JsonValue } from "@seashard/plugin-sdk";
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const titleSlotBytes = 256;
@@ -99,6 +99,55 @@ export class AgentSessionJournal {
       toolCalls: [],
       updatedAt: timestamp,
     };
+  }
+  /**
+   * 复制 Session 时保留消息、模型调用、工具活动与 local:// 文件，
+   * 同时重新分配所有结构性 ID，避免两条分支共享 Invocation/Tool Call 身份。
+   */
+  async copy(sessionId: string): Promise<AgentSessionSummary> {
+    const source = await this.get(sessionId);
+    const timestamp = new Date().toISOString();
+    const id = uuidV7();
+    const storageKey = `${timestamp.replace(/[:.]/g, "-")}_${id}`;
+    const sourceBytes = await readFile(join(this.sessionsRoot, `${source.storageKey}.jsonl`));
+    const lines = sourceBytes.subarray(titleSlotBytes).toString("utf8").trim().split("\n");
+    lines.shift();
+    const records = cloneSessionRecords(lines.filter(Boolean).map(parseRecord));
+    const header: SessionHeaderRecord = {
+      type: "session",
+      version: sessionVersion,
+      id,
+      timestamp,
+      title: source.title,
+      model: { ...source.header.model },
+    };
+    const targetDirectory = join(this.sessionsRoot, storageKey);
+    const targetFile = join(this.sessionsRoot, `${storageKey}.jsonl`);
+
+    try {
+      await cp(join(this.sessionsRoot, source.storageKey), targetDirectory, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+      });
+      await writeFile(
+        targetFile,
+        Buffer.concat([
+          encodeTitleSlot(source.title, timestamp),
+          Buffer.from(
+            `${JSON.stringify(header)}\n${records.map((record) => `${JSON.stringify(record)}\n`).join("")}`,
+            "utf8",
+          ),
+        ]),
+        { flag: "wx", mode: 0o600 },
+      );
+    } catch (error) {
+      await rm(targetFile, { force: true });
+      await rm(targetDirectory, { recursive: true, force: true });
+      throw error;
+    }
+
+    return projectSummary(await this.readByFileName(`${storageKey}.jsonl`));
   }
 
   async list(): Promise<readonly AgentSessionSummary[]> {
@@ -219,7 +268,10 @@ export class AgentSessionJournal {
     const messages: MessageRecord[] = [];
     const invocations: InvocationRecord[] = [];
     const toolCallRecords: ToolCallRecord[] = [];
-    let updatedAt = header.timestamp;
+    let updatedAt = latestTimestamp(
+      header.timestamp,
+      typeof titleRecord.updatedAt === "string" ? titleRecord.updatedAt : undefined,
+    );
     for (const line of lines) {
       if (!line) continue;
       const record = parseRecord(line);
@@ -229,7 +281,9 @@ export class AgentSessionJournal {
         const toolCall = tryParseToolCall(record, fileName);
         if (toolCall) toolCallRecords.push(toolCall);
       }
-      if (typeof record.timestamp === "string") updatedAt = record.timestamp;
+      if (typeof record.timestamp === "string") {
+        updatedAt = latestTimestamp(updatedAt, record.timestamp);
+      }
     }
     const title =
       titleRecord.type === "title" && typeof titleRecord.title === "string"
@@ -245,6 +299,50 @@ export class AgentSessionJournal {
       updatedAt,
     };
   }
+}
+function cloneSessionRecords(
+  records: readonly Record<string, unknown>[],
+): readonly Record<string, unknown>[] {
+  const invocationIds = new Map<string, string>();
+  const messageIds = new Map<string, string>();
+  const toolCallIds = new Map<string, string>();
+
+  return records.map((record) => {
+    if (record.type === "invocation") {
+      return {
+        ...record,
+        id: remapIdentifier(invocationIds, record.id),
+      };
+    }
+    if (record.type === "message") {
+      return {
+        ...record,
+        id: remapIdentifier(messageIds, record.id),
+        invocationId: remapIdentifier(invocationIds, record.invocationId),
+      };
+    }
+    if (record.type === "tool-call") {
+      return {
+        ...record,
+        id: remapIdentifier(toolCallIds, record.id),
+        invocationId: remapIdentifier(invocationIds, record.invocationId),
+      };
+    }
+    return { ...record };
+  });
+}
+
+function remapIdentifier(identifiers: Map<string, string>, value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const existing = identifiers.get(value);
+  if (existing) return existing;
+  const id = uuidV7();
+  identifiers.set(value, id);
+  return id;
+}
+
+function latestTimestamp(current: string, candidate: string | undefined): string {
+  return candidate && candidate > current ? candidate : current;
 }
 
 function projectSummary(session: LoadedAgentSession): AgentSessionSummary {

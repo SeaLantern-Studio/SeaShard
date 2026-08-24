@@ -27,6 +27,10 @@ const api: SeaShardDesktopApi = Object.freeze({
     listSessions: () => ipcRenderer.invoke(desktopChannels.agentSessionsList),
     getSession: (sessionId: string) =>
       ipcRenderer.invoke(desktopChannels.agentSessionGet, sessionId),
+    copySession: (sessionId: string) =>
+      ipcRenderer.invoke(desktopChannels.agentSessionCopy, sessionId),
+    deleteSession: (sessionId: string) =>
+      ipcRenderer.invoke(desktopChannels.agentSessionDelete, sessionId),
     startSession: (input: Parameters<AgentClientService["startSession"]>[0]) =>
       ipcRenderer.invoke(desktopChannels.agentSessionStart, input),
     sendMessage: (input: Parameters<AgentClientService["sendMessage"]>[0]) =>
