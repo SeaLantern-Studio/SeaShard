@@ -275,6 +275,9 @@ importers:
 
   components/network/download:
     dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk

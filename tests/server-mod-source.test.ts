@@ -86,6 +86,10 @@ class FakeDownloadService implements DownloadService {
     return [...this.tasks.values()];
   }
 
+  async listUserVisibleTasks(): Promise<readonly []> {
+    return [];
+  }
+
   async cancel(): Promise<boolean> {
     return false;
   }
@@ -100,6 +104,7 @@ function instanceService(
       throw new Error("not implemented in fixture");
     },
     list: async () => instances,
+    listForClient: async () => instances,
     contentCounts: async () => ({ mods: 0, plugins: 0 }),
     listMods: async () => [],
     setModDisabled: async () => {

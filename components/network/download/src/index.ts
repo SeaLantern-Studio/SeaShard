@@ -1,6 +1,7 @@
+import type { FileDownloadTaskSnapshot } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import { DownloadManager } from "./download-manager";
-import { downloadContract, type DownloadManagerOptions } from "./types";
+import { downloadContract, type DownloadManagerOptions, type DownloadTaskSnapshot } from "./types";
 
 export interface DownloadModuleOptions extends DownloadManagerOptions {}
 
@@ -35,6 +36,8 @@ export function createDownloadModule(options: DownloadModuleOptions = {}): Plugi
         wait: async (taskId) =>
           asJsonValue((await manager.wait(expectString(taskId, "taskId"))) ?? null),
         listTasks: () => asJsonValue(manager.listTasks()),
+        listUserVisibleTasks: () =>
+          asJsonValue(projectUserVisibleDownloadTasks(manager.listTasks())),
         cancel: (taskId) => manager.cancel(expectString(taskId, "taskId")),
       });
       return () => manager.dispose();
@@ -47,6 +50,39 @@ function expectString(value: JsonValue, field: string): string {
     throw new TypeError(`download ${field} must be a non-empty string`);
   }
   return value;
+}
+
+/**
+ * Client 投影由下载组件自己维护。Gateway 只消费公开 DTO，不再复制领域结构校验。
+ */
+export function projectUserVisibleDownloadTasks(
+  tasks: readonly DownloadTaskSnapshot[],
+): readonly FileDownloadTaskSnapshot[] {
+  return tasks.flatMap((task) => {
+    const metadata = task.metadata;
+    if (
+      !metadata ||
+      typeof metadata !== "object" ||
+      Array.isArray(metadata) ||
+      metadata.userVisible !== true
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: task.id,
+        destinationPath: task.destinationPath,
+        state: task.state,
+        downloadedBytes: task.downloadedBytes,
+        totalBytes: task.totalBytes,
+        connections: task.connections,
+        progress: task.progress,
+        createdAt: task.createdAt,
+        ...(task.finishedAt === undefined ? {} : { finishedAt: task.finishedAt }),
+        ...(task.error === undefined ? {} : { error: task.error }),
+      },
+    ];
+  });
 }
 
 /** DownloadManager 的快照只包含普通 JSON 字段，此处补足 SDK 服务边界类型。 */

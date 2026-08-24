@@ -17,6 +17,7 @@ import {
   ServerInstanceManager,
   SQLiteServerInstanceRegistry,
   registerServerInstanceAgentResources,
+  projectServerInstanceForClient,
   createShortRandomId,
   portableInstanceMetadataDirectoryName,
   portableSeaShardInstanceFileName,
@@ -38,6 +39,26 @@ import test from "node:test";
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
 const iconHash = "b".repeat(64);
+await test("server instance client projection preserves custom icon URLs without host paths", () => {
+  const projection = projectServerInstanceForClient({
+    id: "instance-paper",
+    name: "Paper",
+    rootPath: "C:/SeaShard/servers/instance-paper",
+    coreJarPath: "C:/SeaShard/servers/instance-paper/server.jar",
+    iconPath: "C:/SeaShard/servers/instance-paper/.seashard/icon.png",
+    storageMode: "managed",
+    source: "downloaded",
+    modLoader: null,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    updatedAt: "2026-08-23T00:00:00.000Z",
+    resourceSources: {},
+  });
+
+  assert.equal(projection.iconUrl, `${serverCoreIconScheme}://server-instance-icon/instance-paper`);
+  assert.equal("iconPath" in projection, false);
+  assert.equal("resourceSources" in projection, false);
+});
+
 await test("server instance component owns pagination, projection and card presentation", async () => {
   const registry = new AgentResourceRegistry();
   registerServerInstanceAgentResources(

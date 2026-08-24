@@ -3,14 +3,6 @@ import {
   desktopChannels,
   type ServerConfigurationWriteRequest,
 } from "../packages/contracts/src/index.ts";
-import {
-  expectFileDownloadTasks,
-  expectAgentInvocation,
-  expectServerModFilters,
-  expectServerModSearchResult,
-  expectServerWorldDatapack,
-  expectServerWorldStorageSnapshot,
-} from "../apps/desktop/src/main/contract-validation.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserWindow } from "electron";
@@ -22,49 +14,8 @@ import {
   serverInstances,
   serverInstanceStartupSettings,
   serverInstanceContentCounts,
-  serverModFilters,
-  serverModSearchResult,
   updatedServerStartupSettings,
 } from "./desktop-shell-fixtures.ts";
-
-await test("desktop Agent 投影保留受信任的工具卡片图标", () => {
-  const invocation = {
-    id: "agent-invocation",
-    sessionId: "agent-session",
-    state: "completed",
-    model: { connectionId: "test", modelId: "test-model" },
-    startedAt: "2026-08-17T12:00:00.000Z",
-    finishedAt: "2026-08-17T12:00:01.000Z",
-    text: "done",
-    toolCalls: [
-      {
-        id: "help-read-1",
-        invocationId: "agent-invocation",
-        toolName: "read",
-        presentation: { title: "获取帮助: server", icon: "help" },
-        state: "completed",
-        input: { path: "help://resource/server", input: {} },
-        output: "# `server://` 资源",
-        startedAt: "2026-08-17T12:00:00.000Z",
-        finishedAt: "2026-08-17T12:00:01.000Z",
-      },
-    ],
-  };
-  assert.equal(expectAgentInvocation(invocation).toolCalls[0]?.presentation.icon, "help");
-  assert.throws(
-    () =>
-      expectAgentInvocation({
-        ...invocation,
-        toolCalls: [
-          {
-            ...invocation.toolCalls[0],
-            presentation: { title: "获取帮助: server", icon: "untrusted" },
-          },
-        ],
-      }),
-    /Agent Runtime returned invalid invocation tool call 0 presentation/u,
-  );
-});
 
 await test("desktop shell routes settings, downloads, instances, and configuration IPC", async () => {
   const harness = await createDesktopShellHarness();
@@ -492,125 +443,4 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     /must be a string/,
   );
   await shell.dispose();
-});
-
-await test("desktop shell projects only user-visible file downloads", () => {
-  const commonTask = {
-    id: "mod-task-1",
-    url: "https://cdn.modrinth.com/data/project/version/mod.jar",
-    destinationPath: "C:/SeaShard/resources/mod.jar",
-    state: "completed",
-    downloadedBytes: 1_024,
-    totalBytes: 1_024,
-    connections: 8,
-    progress: 100,
-    createdAt: "2026-08-17T12:00:00.000Z",
-    finishedAt: "2026-08-17T12:00:01.000Z",
-  } as const;
-  assert.deepEqual(
-    expectFileDownloadTasks([
-      {
-        ...commonTask,
-        metadata: { kind: "server-mod", userVisible: true },
-      },
-      {
-        ...commonTask,
-        id: "icon-task-1",
-        metadata: { kind: "server-core-icon" },
-      },
-    ]),
-    [
-      {
-        id: commonTask.id,
-        destinationPath: commonTask.destinationPath,
-        state: commonTask.state,
-        downloadedBytes: commonTask.downloadedBytes,
-        totalBytes: commonTask.totalBytes,
-        connections: commonTask.connections,
-        progress: commonTask.progress,
-        createdAt: commonTask.createdAt,
-        finishedAt: commonTask.finishedAt,
-      },
-    ],
-  );
-});
-
-await test("desktop shell accepts Modrinth optional-server modpack environments", () => {
-  const result = expectServerModSearchResult({
-    ...serverModSearchResult,
-    items: [
-      {
-        ...serverModSearchResult.items[0],
-        resourceType: "modpack",
-        environment: ["client_only_server_optional"],
-      },
-    ],
-  });
-
-  assert.deepEqual(result.items[0]?.environment, ["client_only_server_optional"]);
-});
-
-await test("desktop shell validates unavailable source results", () => {
-  const unavailableReason = "CurseForge 暂时不可用，请稍后重试";
-  assert.deepEqual(expectServerModFilters({ ...serverModFilters, unavailableReason }), {
-    ...serverModFilters,
-    unavailableReason,
-  });
-  assert.deepEqual(
-    expectServerModSearchResult({
-      ...serverModSearchResult,
-      items: [],
-      limit: 0,
-      total: 0,
-      unavailableReason,
-    }),
-    {
-      items: [],
-      offset: serverModSearchResult.offset,
-      limit: 0,
-      total: 0,
-      unavailableReason,
-    },
-  );
-});
-
-await test("desktop shell preserves unknown resource origins in world projections", () => {
-  const resourceSource = {
-    source: "github",
-    id: "owner-repo",
-    version: "v1.4.0",
-    iconUrl: "https://github.com/owner/repo/icon.png",
-  };
-  const storage = expectServerWorldStorageSnapshot({
-    instanceId: "instance-paper",
-    mode: "unified",
-    saves: [
-      {
-        id: "world",
-        groupId: "world",
-        name: "World",
-        dimension: "overworld",
-        current: false,
-        resourceSource,
-        iconDataUrl: "data:image/gif;base64,R0lGODlh",
-      },
-    ],
-    dimensions: [],
-  });
-  assert.deepEqual(storage.saves[0]?.resourceSource, resourceSource);
-  assert.equal(storage.saves[0]?.iconDataUrl, "data:image/gif;base64,R0lGODlh");
-  const datapack = expectServerWorldDatapack({
-    instanceId: "instance-paper",
-    worldId: "world",
-    fileName: "pack.zip",
-    kind: "archive",
-    disabled: false,
-    description: "服务端数据包",
-    iconDataUrl: "data:image/png;base64,iVBORw0KGgo=",
-    updatedAt: "2026-08-21T00:00:00.000Z",
-    resourceSource,
-  });
-  assert.deepEqual(datapack.resourceSource, resourceSource);
-  assert.equal(datapack.description, "服务端数据包");
-  assert.equal(datapack.iconDataUrl, "data:image/png;base64,iVBORw0KGgo=");
 });

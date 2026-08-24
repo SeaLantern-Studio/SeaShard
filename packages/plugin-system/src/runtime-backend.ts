@@ -16,6 +16,7 @@ import { Context, type Fiber } from "cordis";
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { deserializeProtocolError, serializeProtocolError } from "./host-protocol";
 import type {
   AgentCallCancellationPayload,
   AgentResourcePresentRequestPayload,
@@ -357,7 +358,7 @@ class PluginHostSession {
       this.pending.delete(message.id);
       clearTimeout(request.timer);
       if (message.ok) request.resolve(message.value);
-      else request.reject(new Error(message.error ?? "plugin host request failed"));
+      else request.reject(deserializeProtocolError(message.error));
       return;
     }
     if (message.type === "request") {
@@ -411,7 +412,12 @@ class PluginHostSession {
         ...(value === undefined ? {} : { value }),
       });
     } catch (error) {
-      this.send({ type: "response", id: message.id, ok: false, error: formatError(error) });
+      this.send({
+        type: "response",
+        id: message.id,
+        ok: false,
+        error: serializeProtocolError(error),
+      });
     }
   }
 
@@ -596,9 +602,9 @@ function createLocalPluginContext(
     effect(execute, label) {
       cordisContext.effect(async () => (await execute()) ?? (() => {}), label);
     },
-    provide(contract, provider) {
+    provide(contract, provider, options) {
       cordisContext.effect(
-        () => registries.services.register(contract, entry.runtimeId, scope, provider),
+        () => registries.services.register(contract, entry.runtimeId, scope, provider, options),
         `service ${contract}`,
       );
     },
@@ -727,9 +733,4 @@ function createAbortError(message: string): Error {
   const error = new Error(message);
   error.name = "AbortError";
   return error;
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
-  return String(error);
 }

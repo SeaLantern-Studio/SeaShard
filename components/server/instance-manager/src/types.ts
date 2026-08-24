@@ -26,6 +26,12 @@ export {
 export interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {
   connections: number;
 }
+
+export type ServerInstanceClientProjection = Omit<
+  ServerInstanceSnapshot,
+  "iconPath" | "resourceSources"
+>;
+
 /** 实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。 */
 export interface ServerInstanceManagerService {
   /** 下载服务端核心；校验成功后写入双 JSON，并在 SQLite 登记 seashard.json 路径。 */
@@ -34,13 +40,15 @@ export interface ServerInstanceManagerService {
   ): Promise<ServerCoreManagedDownloadResult>;
   /** 从路径索引读取并合并 server.json 与 seashard.json。 */
   list(): Promise<readonly ServerInstanceSnapshot[]>;
-  /** 持久化实例专属启动参数，并返回更新后的完整实例投影。 */
+  /** 为 Client 生成可展示的图标 URI，并排除宿主图标路径与资源来源索引。 */
+  listForClient(): Promise<readonly ServerInstanceClientProjection[]>;
+  /** 持久化启动参数，并返回可直接交给 Client 的最新实例投影。 */
   setStartupSettings(
     instanceId: string,
     settings: ServerInstanceStartupSettings,
-  ): Promise<ServerInstanceSnapshot>;
-  /** 保存实例自定义图标并返回最新实例投影。 */
-  setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceSnapshot>;
+  ): Promise<ServerInstanceClientProjection>;
+  /** 保存实例自定义图标，并返回可直接交给 Client 的最新实例投影。 */
+  setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceClientProjection>;
   /** 确保实例拥有持久化的世界存储外层目录，并返回最新实例清单。 */
   ensureWorldStorageDirectory(instanceId: string): Promise<ServerInstanceSnapshot>;
   /** 记录已安装资源的来源信息；未知来源保留展示信息，只有已支持来源才允许跳转详情。 */

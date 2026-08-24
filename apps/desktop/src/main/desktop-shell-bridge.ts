@@ -6,64 +6,38 @@ import {
   serverConfigurationContract,
   serverRuntimeContract,
   serverSettingsContract,
-  type ServerConsoleLine,
+  type AgentInvocationService,
+  type AgentModelConfigurationService,
+  type AgentSessionService,
+  type JavaRuntimeManagerService,
+  type ServerConfigurationService,
   type ServerConfigurationWriteRequest,
-  type ServerStartupDefaultsUpdate,
-  type ServerInstanceStartupSettings,
+  type ServerConsoleLine,
   type ServerModSearchRequest,
   type ServerModSource,
   type ServerModrinthResourceType,
+  type ServerRuntimeService,
+  type ServerSettingsClientService,
+  type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import {
   createDesktopShellModule,
   createElectronDesktopShellRuntime,
   desktopShellManifest,
 } from "@seashard/desktop-shell";
-import { downloadContract } from "@seashard/download";
-import type { JsonValue } from "@seashard/plugin-sdk";
+import { downloadContract, type DownloadService } from "@seashard/download";
 import { projectClientEntryPublication, type PluginKernel } from "@seashard/plugin-system";
-import { serverCoreSourceContract } from "@seashard/server-core-source";
-import { serverModSourceContract } from "@seashard/server-mod-source";
-import { serverInstanceManagerContract } from "@seashard/server-instance-manager";
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
-import { isAbsolute, join } from "node:path";
 import {
-  expectAgentInvocation,
-  expectAgentModelConfiguration,
-  expectAgentModelConnectionModels,
-  expectAgentInvocationReference,
-  expectAgentModels,
-  expectAgentSession,
-  expectAgentSessions,
-  expectFileDownloadTasks,
-  expectJavaInstallation,
-  expectJavaInstallations,
-  expectManagedDownloadResult,
-  expectServerConfigurationCatalog,
-  expectServerConfigurationDocument,
-  expectServerConsoleLines,
-  expectServerCoreArtifacts,
-  expectServerCoreDownloadTask,
-  expectServerCoreDownloadTasks,
-  expectServerCoreStrings,
-  expectServerCoreTypes,
-  expectServerModFilters,
-  expectServerModDownloadResult,
-  expectServerInstanceContentCounts,
-  expectServerInstalledMod,
-  expectServerInstalledMods,
-  expectServerWorldBackups,
-  expectServerWorldBackup,
-  expectServerWorldStorageSnapshot,
-  expectServerWorldDatapack,
-  expectServerWorldDatapacks,
-  expectServerModProjectDetails,
-  expectServerModSearchResult,
-  expectServerInstances,
-  expectServerRuntimeSnapshot,
-  expectServerSettingsSnapshot,
-  expectServerLaunchCommandPreview,
-} from "./contract-validation";
+  serverCoreSourceContract,
+  type ServerCoreSourceService,
+} from "@seashard/server-core-source";
+import {
+  serverInstanceManagerContract,
+  type ServerInstanceManagerService,
+} from "@seashard/server-instance-manager";
+import { serverModSourceContract, type ServerModSourceService } from "@seashard/server-mod-source";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { join } from "node:path";
 
 const serverConsoleLineListeners = new Set<(line: ServerConsoleLine) => void>();
 
@@ -84,31 +58,41 @@ interface DesktopShellBridgeOptions {
   readonly smokeMode: boolean;
 }
 
-/** 注册 Electron Shell，并把受校验的 Kernel Contract 适配为 IPC 服务。 */
+/** 注册 Electron Shell，并把 Kernel 中的领域 Contract 适配为 IPC 服务。 */
 export async function registerDesktopShellBridge(
   options: DesktopShellBridgeOptions,
 ): Promise<void> {
   const { kernel, moduleDirectory, developmentUrl, smokeMode } = options;
   let smokeQuitScheduled = false;
-  const listFileDownloadTasks = async () =>
-    expectFileDownloadTasks(await kernel.callService(downloadContract, "listTasks", []));
+  const agentSessions = kernel.service<AgentSessionService>(agentSessionContract);
+  const agentInvocations = kernel.service<AgentInvocationService>(agentInvocationContract);
+  const agentModelConfiguration = kernel.service<AgentModelConfigurationService>(
+    agentModelConfigurationContract,
+  );
+  const downloads = kernel.service<DownloadService>(downloadContract);
+  const javaRuntimes = kernel.service<JavaRuntimeManagerService>(javaRuntimeManagerContract);
+  const serverConfigurations = kernel.service<ServerConfigurationService>(
+    serverConfigurationContract,
+  );
+  const serverCoreSource = kernel.service<ServerCoreSourceService>(serverCoreSourceContract);
+  const serverInstances = kernel.service<ServerInstanceManagerService>(
+    serverInstanceManagerContract,
+  );
+  const serverMods = kernel.service<ServerModSourceService>(serverModSourceContract);
+  const serverRuntime = kernel.service<ServerRuntimeService>(serverRuntimeContract);
+  const serverSettings = kernel.service<ServerSettingsClientService>(serverSettingsContract);
+  const listFileDownloadTasks = () => downloads.listUserVisibleTasks();
   /**
    * Renderer 只能取消已投影到公共下载条的任务，不能借任务 ID 操作图标缓存等内部下载。
    */
   const cancelFileDownload = async (taskId: string): Promise<boolean> => {
     const visibleTasks = await listFileDownloadTasks();
     if (!visibleTasks.some((task) => task.id === taskId)) return false;
-    const cancelled = await kernel.callService(downloadContract, "cancel", [taskId]);
-    if (typeof cancelled !== "boolean") {
-      throw new Error("download service returned an invalid cancellation result");
-    }
-    return cancelled;
+    return downloads.cancel(taskId);
   };
   /** 备份属于磁盘破坏性操作，桥接层统一复核服务端必须已停机。 */
   const ensureServerStoppedForWorldMutation = async (instanceId: string): Promise<void> => {
-    const snapshot = expectServerRuntimeSnapshot(
-      await kernel.callService(serverRuntimeContract, "get", [instanceId]),
-    );
+    const snapshot = await serverRuntime.get(instanceId);
     if (
       snapshot.state === "starting" ||
       snapshot.state === "running" ||
@@ -144,435 +128,134 @@ export async function registerDesktopShellBridge(
               kernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
               ),
-            listAgentModels: async () =>
-              expectAgentModels(await kernel.callService(agentSessionContract, "listModels", [])),
-            listAgentSessions: async () =>
-              expectAgentSessions(
-                await kernel.callService(agentSessionContract, "listSessions", []),
-              ),
-            readAgentSession: async (sessionId) =>
-              expectAgentSession(
-                await kernel.callService(agentSessionContract, "getSession", [sessionId]),
-              ),
-            startAgentSession: async (input) =>
-              expectAgentInvocationReference(
-                await kernel.callService(agentSessionContract, "startSession", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
-            sendAgentMessage: async (input) =>
-              expectAgentInvocationReference(
-                await kernel.callService(agentSessionContract, "sendMessage", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+            listAgentModels: async () => await agentSessions.listModels(),
+            listAgentSessions: async () => await agentSessions.listSessions(),
+            readAgentSession: async (sessionId) => await agentSessions.getSession(sessionId),
+            startAgentSession: async (input) => await agentSessions.startSession(input),
+            sendAgentMessage: async (input) => await agentSessions.sendMessage(input),
             readAgentInvocation: async (invocationId) =>
-              expectAgentInvocation(
-                await kernel.callService(agentInvocationContract, "getInvocation", [invocationId]),
-              ),
-            cancelAgentInvocation: async (invocationId) => {
-              await kernel.callService(agentInvocationContract, "cancelInvocation", [invocationId]);
-            },
+              await agentInvocations.getInvocation(invocationId),
+            cancelAgentInvocation: (invocationId) =>
+              agentInvocations.cancelInvocation(invocationId),
             readAgentModelConfiguration: async () =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "getConfiguration", []),
-              ),
+              await agentModelConfiguration.getConfiguration(),
             mutateAgentModelConnection: async (input) =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "mutateConnection", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+              await agentModelConfiguration.mutateConnection(input),
             removeAgentModelConnection: async (input) =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "removeConnection", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+              await agentModelConfiguration.removeConnection(input),
             resetAgentModelConfiguration: async (input) =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "resetConfiguration", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+              await agentModelConfiguration.resetConfiguration(input),
             discoverAgentModels: async (input) =>
-              expectAgentModelConnectionModels(
-                await kernel.callService(agentModelConfigurationContract, "discoverModels", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+              await agentModelConfiguration.discoverModels(input),
             writeAgentCredential: async (input) =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "writeCredential", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
+              await agentModelConfiguration.writeCredential(input),
             removeAgentCredential: async (input) =>
-              expectAgentModelConfiguration(
-                await kernel.callService(agentModelConfigurationContract, "removeCredential", [
-                  input as unknown as JsonValue,
-                ]),
-              ),
-            openAgentModelConfiguration: async () => {
-              await kernel.callService(
-                agentModelConfigurationContract,
-                "openConfigurationFile",
-                [],
-              );
-            },
-            readServerCoreTypes: async () =>
-              expectServerCoreTypes(
-                await kernel.callService(serverCoreSourceContract, "listTypes", []),
-              ),
+              await agentModelConfiguration.removeCredential(input),
+            openAgentModelConfiguration: () => agentModelConfiguration.openConfigurationFile(),
+            readServerCoreTypes: async () => await serverCoreSource.listTypes(),
             readServerCoreVersions: async (serverType) =>
-              expectServerCoreStrings(
-                await kernel.callService(serverCoreSourceContract, "listVersions", [serverType]),
-                "versions",
-              ),
+              await serverCoreSource.listVersions(serverType),
             readServerCoreArtifacts: async (serverType, gameVersion) =>
-              expectServerCoreArtifacts(
-                await kernel.callService(serverCoreSourceContract, "listArtifacts", [
-                  serverType,
-                  gameVersion,
-                ]),
-              ),
+              await serverCoreSource.listArtifacts(serverType, gameVersion),
             readServerModFilters: async (
               resourceType: ServerModrinthResourceType,
               source: ServerModSource,
-            ) =>
-              expectServerModFilters(
-                await kernel.callService(serverModSourceContract, "getFilters", [
-                  resourceType,
-                  source,
-                ]),
-              ),
+            ) => await serverMods.getFilters(resourceType, source),
             searchServerMods: async (request: ServerModSearchRequest) =>
-              expectServerModSearchResult(
-                await kernel.callService(serverModSourceContract, "search", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
+              await serverMods.search(request),
             readServerModProjectDetails: async (
               resourceType: ServerModrinthResourceType,
               source: ServerModSource,
               projectId,
-            ) =>
-              expectServerModProjectDetails(
-                await kernel.callService(serverModSourceContract, "getProjectDetails", [
-                  resourceType,
-                  source,
-                  projectId,
-                ]),
-              ),
-            installServerMod: async (request) =>
-              expectServerModDownloadResult(
-                await kernel.callService(serverModSourceContract, "installToInstance", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
-            saveServerMod: async (request) =>
-              expectServerModDownloadResult(
-                await kernel.callService(serverModSourceContract, "saveToDirectory", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
-            resolveServerCoreIconPath: async (sha256) => {
-              const path = await kernel.callService(serverCoreSourceContract, "resolveIconPath", [
-                sha256,
-              ]);
-              if (path === null) return undefined;
-              if (typeof path !== "string" || !isAbsolute(path)) {
-                throw new Error("server core source returned an invalid icon cache path");
-              }
-              return path;
-            },
-            resolveServerInstanceIconPath: async (instanceId) => {
-              const path = await kernel.callService(
-                serverInstanceManagerContract,
-                "resolveIconPath",
-                [instanceId],
-              );
-              if (path === null) return undefined;
-              if (typeof path !== "string" || !isAbsolute(path)) {
-                throw new Error("server instance manager returned an invalid icon path");
-              }
-              return path;
-            },
-            readServerSettings: async () =>
-              expectServerSettingsSnapshot(
-                await kernel.callService(serverSettingsContract, "get", []),
-              ),
+            ) => await serverMods.getProjectDetails(resourceType, source, projectId),
+            installServerMod: async (request) => await serverMods.installToInstance(request),
+            saveServerMod: async (request) => await serverMods.saveAs(request),
+            resolveServerCoreIconPath: async (sha256) =>
+              (await serverCoreSource.resolveIconPath(sha256)) ?? undefined,
+            resolveServerInstanceIconPath: async (instanceId) =>
+              (await serverInstances.resolveIconPath(instanceId)) ?? undefined,
+            readServerSettings: async () => await serverSettings.get(),
             writeResourceDownloadDirectory: async (directory) =>
-              expectServerSettingsSnapshot(
-                await kernel.callService(serverSettingsContract, "setResourceDownloadDirectory", [
-                  directory,
-                ]),
-              ),
+              await serverSettings.setResourceDownloadDirectory(directory),
             writeDefaultDownloadConnections: async (connections) =>
-              expectServerSettingsSnapshot(
-                await kernel.callService(serverSettingsContract, "setDefaultDownloadConnections", [
-                  connections,
-                ]),
-              ),
+              await serverSettings.setDefaultDownloadConnections(connections),
             writeServerStartupDefaults: async (update: ServerStartupDefaultsUpdate) =>
-              expectServerSettingsSnapshot(
-                await kernel.callService(serverSettingsContract, "setStartupDefaults", [
-                  update as unknown as JsonValue,
-                ]),
-              ),
-            startServerCoreDownload: async (request) =>
-              expectServerCoreDownloadTask(
-                await kernel.callService(serverCoreSourceContract, "start", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
+              await serverSettings.setStartupDefaults(update),
+            startServerCoreDownload: async (request) => await serverCoreSource.start(request),
             startManagedServerCoreDownload: async (request) =>
-              expectManagedDownloadResult(
-                await kernel.callService(serverInstanceManagerContract, "createManaged", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
-            listServerInstances: async () =>
-              expectServerInstances(
-                await kernel.callService(serverInstanceManagerContract, "list", []),
-              ),
+              await serverInstances.createManaged(request),
+            listServerInstances: async () => await serverInstances.listForClient(),
             readServerInstanceContentCounts: async (instanceId) =>
-              expectServerInstanceContentCounts(
-                await kernel.callService(serverInstanceManagerContract, "contentCounts", [
-                  instanceId,
-                ]),
-              ),
-            listServerMods: async (instanceId) =>
-              expectServerInstalledMods(
-                await kernel.callService(serverInstanceManagerContract, "listMods", [instanceId]),
-              ),
-            setServerModDisabled: async (instanceId, relativePath, disabled) => {
-              const result = await kernel.callService(
-                serverInstanceManagerContract,
-                "setModDisabled",
-                [instanceId, relativePath, disabled],
-              );
-              return expectServerInstalledMod(result, relativePath);
-            },
-            deleteServerMod: async (instanceId, relativePath) => {
-              const result = await kernel.callService(serverInstanceManagerContract, "deleteMod", [
-                instanceId,
-                relativePath,
-              ]);
-              if (result !== null) {
-                throw new Error("server instance manager returned an invalid mod delete result");
-              }
-            },
+              await serverInstances.contentCounts(instanceId),
+            listServerMods: async (instanceId) => await serverInstances.listMods(instanceId),
+            setServerModDisabled: (instanceId, relativePath, disabled) =>
+              serverInstances.setModDisabled(instanceId, relativePath, disabled),
+            deleteServerMod: (instanceId, relativePath) =>
+              serverInstances.deleteMod(instanceId, relativePath),
             readServerWorldStorage: async (instanceId) =>
-              expectServerWorldStorageSnapshot(
-                await kernel.callService(serverInstanceManagerContract, "listWorldStorage", [
-                  instanceId,
-                ]),
-              ),
+              await serverInstances.listWorldStorage(instanceId),
             listServerWorldBackups: async (instanceId, worldId) =>
-              expectServerWorldBackups(
-                await kernel.callService(serverInstanceManagerContract, "listWorldBackups", [
-                  instanceId,
-                  worldId,
-                ]),
-              ),
+              await serverInstances.listWorldBackups(instanceId, worldId),
             listServerWorldDatapacks: async (instanceId, worldId) =>
-              expectServerWorldDatapacks(
-                await kernel.callService(serverInstanceManagerContract, "listWorldDatapacks", [
-                  instanceId,
-                  worldId,
-                ]),
-              ),
+              await serverInstances.listWorldDatapacks(instanceId, worldId),
             setServerWorldDatapackDisabled: async (instanceId, worldId, fileName, disabled) => {
               await ensureServerStoppedForWorldMutation(instanceId);
-              return expectServerWorldDatapack(
-                await kernel.callService(
-                  serverInstanceManagerContract,
-                  "setWorldDatapackDisabled",
-                  [instanceId, worldId, fileName, disabled],
-                ),
+              return serverInstances.setWorldDatapackDisabled(
+                instanceId,
+                worldId,
+                fileName,
+                disabled,
               );
             },
             deleteServerWorldDatapack: async (instanceId, worldId, fileName) => {
               await ensureServerStoppedForWorldMutation(instanceId);
-              const result = await kernel.callService(
-                serverInstanceManagerContract,
-                "deleteWorldDatapack",
-                [instanceId, worldId, fileName],
-              );
-              if (result !== null) {
-                throw new Error(
-                  "server instance manager returned an invalid datapack delete result",
-                );
-              }
+              await serverInstances.deleteWorldDatapack(instanceId, worldId, fileName);
             },
             createServerWorldBackup: async (instanceId, worldId) => {
               await ensureServerStoppedForWorldMutation(instanceId);
-              return expectServerWorldBackup(
-                await kernel.callService(serverInstanceManagerContract, "createWorldBackup", [
-                  instanceId,
-                  worldId,
-                ]),
-              );
+              return await serverInstances.createWorldBackup(instanceId, worldId);
             },
             restoreServerWorldBackup: async (instanceId, worldId, fileName) => {
               await ensureServerStoppedForWorldMutation(instanceId);
-              return expectServerWorldStorageSnapshot(
-                await kernel.callService(serverInstanceManagerContract, "restoreWorldBackup", [
-                  instanceId,
-                  worldId,
-                  fileName,
-                ]),
-              );
+              return await serverInstances.restoreWorldBackup(instanceId, worldId, fileName);
             },
             deleteServerWorldBackup: async (instanceId, worldId, fileName) => {
               await ensureServerStoppedForWorldMutation(instanceId);
-              const result = await kernel.callService(
-                serverInstanceManagerContract,
-                "deleteWorldBackup",
-                [instanceId, worldId, fileName],
-              );
-              if (result !== null) {
-                throw new Error("server instance manager returned an invalid backup delete result");
-              }
+              await serverInstances.deleteWorldBackup(instanceId, worldId, fileName);
             },
             switchServerWorld: async (instanceId, worldId) =>
-              expectServerWorldStorageSnapshot(
-                await kernel.callService(serverInstanceManagerContract, "switchWorld", [
-                  instanceId,
-                  worldId,
-                ]),
-              ),
-            writeServerInstanceStartupSettings: async (
-              instanceId,
-              settings: ServerInstanceStartupSettings,
-            ) => {
-              const [instance] = expectServerInstances([
-                await kernel.callService(serverInstanceManagerContract, "setStartupSettings", [
-                  instanceId,
-                  settings as unknown as JsonValue,
-                ]),
-              ]);
-              if (!instance) {
-                throw new Error("server instance manager returned no updated instance");
-              }
-              return instance;
-            },
-            writeServerInstanceIcon: async (instanceId, iconDataUrl) => {
-              const [instance] = expectServerInstances([
-                await kernel.callService(serverInstanceManagerContract, "setIcon", [
-                  instanceId,
-                  iconDataUrl,
-                ]),
-              ]);
-              if (!instance) {
-                throw new Error("server instance manager returned no updated instance");
-              }
-              return instance;
-            },
-            deleteServerInstance: async (instanceId) => {
-              const result = await kernel.callService(serverInstanceManagerContract, "delete", [
-                instanceId,
-              ]);
-              if (result !== null) {
-                throw new Error("server instance manager returned an invalid delete result");
-              }
-            },
+              await serverInstances.switchWorld(instanceId, worldId),
+            writeServerInstanceStartupSettings: (instanceId, settings) =>
+              serverInstances.setStartupSettings(instanceId, settings),
+            writeServerInstanceIcon: (instanceId, iconDataUrl) =>
+              serverInstances.setIcon(instanceId, iconDataUrl),
+            deleteServerInstance: (instanceId) => serverInstances.delete(instanceId),
             listServerConfigurations: async (instanceId) =>
-              expectServerConfigurationCatalog(
-                await kernel.callService(serverConfigurationContract, "list", [instanceId]),
-              ),
+              await serverConfigurations.list(instanceId),
             readServerConfiguration: async (instanceId, path) =>
-              expectServerConfigurationDocument(
-                await kernel.callService(serverConfigurationContract, "read", [instanceId, path]),
-              ),
+              await serverConfigurations.read(instanceId, path),
             writeServerConfiguration: async (request: ServerConfigurationWriteRequest) =>
-              expectServerConfigurationDocument(
-                await kernel.callService(serverConfigurationContract, "write", [
-                  request as unknown as JsonValue,
-                ]),
-              ),
-            previewServerRuntime: async (instanceId, startupSettings) =>
-              expectServerLaunchCommandPreview(
-                await kernel.callService(
-                  serverRuntimeContract,
-                  "preview",
-                  startupSettings
-                    ? [instanceId, startupSettings as unknown as JsonValue]
-                    : [instanceId],
-                ),
-              ),
-            readServerRuntime: async (instanceId) =>
-              expectServerRuntimeSnapshot(
-                await kernel.callService(serverRuntimeContract, "get", [instanceId]),
-              ),
-            startServerRuntime: async (instanceId) =>
-              expectServerRuntimeSnapshot(
-                await kernel.callService(serverRuntimeContract, "start", [instanceId]),
-              ),
-            stopServerRuntime: async (instanceId) =>
-              expectServerRuntimeSnapshot(
-                await kernel.callService(serverRuntimeContract, "stop", [instanceId]),
-              ),
-            sendServerCommand: async (instanceId, command) => {
-              const result = await kernel.callService(serverRuntimeContract, "sendCommand", [
-                instanceId,
-                command,
-              ]);
-              if (result !== null) {
-                throw new Error("server runtime returned an invalid command result");
-              }
-            },
+              await serverConfigurations.write(request),
+            previewServerRuntime: (instanceId, startupSettings) =>
+              serverRuntime.preview(instanceId, startupSettings),
+            readServerRuntime: async (instanceId) => await serverRuntime.get(instanceId),
+            startServerRuntime: async (instanceId) => await serverRuntime.start(instanceId),
+            stopServerRuntime: async (instanceId) => await serverRuntime.stop(instanceId),
+            sendServerCommand: (instanceId, command) =>
+              serverRuntime.sendCommand(instanceId, command),
             readServerConsoleLines: async (instanceId, afterSequence) =>
-              expectServerConsoleLines(
-                await kernel.callService(serverRuntimeContract, "getLogs", [
-                  instanceId,
-                  afterSequence,
-                ]),
-              ),
+              await serverRuntime.getLogs(instanceId, afterSequence),
             onServerConsoleLine,
-            scanJavaInstallations: async () =>
-              expectJavaInstallations(
-                await kernel.callService(javaRuntimeManagerContract, "scan", []),
-              ),
+            scanJavaInstallations: async () => await javaRuntimes.scan(),
             inspectJavaInstallation: async (executablePath) =>
-              expectJavaInstallation(
-                await kernel.callService(javaRuntimeManagerContract, "inspect", [executablePath]),
-              ),
-            removeJavaInstallation: async (executablePath) => {
-              const removed = await kernel.callService(javaRuntimeManagerContract, "remove", [
-                executablePath,
-              ]);
-              if (typeof removed !== "boolean") {
-                throw new Error("java runtime manager returned an invalid removal result");
-              }
-              return removed;
-            },
-            setJavaInstallationDisabled: async (installationId, disabled) => {
-              const result = await kernel.callService(javaRuntimeManagerContract, "setDisabled", [
-                installationId,
-                disabled,
-              ]);
-              if (typeof result !== "boolean" || result !== disabled) {
-                throw new Error("java runtime manager returned an invalid disabled state");
-              }
-              return result;
-            },
+              await javaRuntimes.inspect(executablePath),
+            removeJavaInstallation: (executablePath) => javaRuntimes.remove(executablePath),
+            setJavaInstallationDisabled: (installationId, disabled) =>
+              javaRuntimes.setDisabled(installationId, disabled),
             listFileDownloadTasks,
             cancelFileDownload,
-            listServerCoreDownloadTasks: async () =>
-              expectServerCoreDownloadTasks(
-                await kernel.callService(serverCoreSourceContract, "listTasks", []),
-              ),
-            cancelServerCoreDownload: async (taskId) => {
-              const cancelled = await kernel.callService(serverCoreSourceContract, "cancel", [
-                taskId,
-              ]);
-              if (typeof cancelled !== "boolean") {
-                throw new Error("server core source returned an invalid cancellation result");
-              }
-              return cancelled;
-            },
+            listServerCoreDownloadTasks: async () => await serverCoreSource.listTasks(),
+            cancelServerCoreDownload: (taskId) => serverCoreSource.cancel(taskId),
             onRendererReady: (snapshot) => {
               if (!smokeMode || smokeQuitScheduled) return;
               smokeQuitScheduled = true;

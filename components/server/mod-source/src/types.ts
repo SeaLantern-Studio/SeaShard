@@ -1,3 +1,9 @@
+import type {
+  ServerModDownloadResult,
+  ServerModSaveAsRequest,
+  ServerModSourceClientService,
+} from "@seashard/contracts";
+
 export {
   serverModSearchLimits,
   serverModSourceContract,
@@ -14,4 +20,12 @@ export {
   type ServerModVersion,
 } from "@seashard/contracts";
 
-export type { ServerModSourceClientService as ServerModSourceService } from "@seashard/contracts";
+export interface ServerModSourceSaveRequest extends ServerModSaveAsRequest {
+  readonly destinationDirectory: string;
+  readonly connections: number;
+}
+
+/** Host 侧目录与下载能力；Client 的目录选择取消语义留在具体 Gateway。 */
+export interface ServerModSourceService extends Omit<ServerModSourceClientService, "saveAs"> {
+  saveAs(request: ServerModSourceSaveRequest): Promise<ServerModDownloadResult>;
+}

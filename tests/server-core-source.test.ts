@@ -148,6 +148,7 @@ function exposeDownloads(manager: DownloadManager): DownloadService {
     snapshot: async (taskId) => manager.snapshot(taskId) ?? null,
     wait: async (taskId) => (await manager.wait(taskId)) ?? null,
     listTasks: async () => manager.listTasks(),
+    listUserVisibleTasks: async () => [],
     cancel: (taskId) => manager.cancel(taskId),
   };
 }

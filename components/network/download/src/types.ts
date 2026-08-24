@@ -1,3 +1,4 @@
+import type { FileDownloadTaskSnapshot } from "@seashard/contracts";
 import type { JsonValue } from "@seashard/plugin-sdk";
 
 export const downloadContract = "seashard.download";
@@ -49,6 +50,8 @@ export interface DownloadService {
   wait(taskId: string): Promise<DownloadTaskSnapshot | null>;
   /** 按创建时间返回当前保留的任务。 */
   listTasks(): Promise<readonly DownloadTaskSnapshot[]>;
+  /** 只投影显式标记为用户可见的任务，并剥离 URL 与业务 metadata。 */
+  listUserVisibleTasks(): Promise<readonly FileDownloadTaskSnapshot[]>;
   /** 取消任务并等待临时文件清理完成。 */
   cancel(taskId: string): Promise<boolean>;
 }

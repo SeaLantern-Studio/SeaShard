@@ -1,3 +1,8 @@
+import {
+  getServiceProviderMethod,
+  resolveServiceResultValidators,
+  validateServiceResult,
+} from "@seashard/plugin-sdk";
 import type {
   AgentActivityPresentationField,
   AgentResourceDefinition,
@@ -10,7 +15,12 @@ import type {
   PluginModule,
   PluginStoredDocument,
   ServiceProvider,
+  ServiceResultValidator,
 } from "@seashard/plugin-sdk";
+import {
+  deserializeProtocolError,
+  serializeProtocolError,
+} from "@seashard/plugin-system/host-protocol";
 import type {
   AgentCallCancellationPayload,
   AgentResourcePresentRequestPayload,
@@ -39,11 +49,18 @@ interface PreparedState {
   execution: ExecutionContext;
 }
 
+interface HostedServiceRegistration {
+  readonly contract: string;
+  readonly runtimeId: string;
+  readonly provider: ServiceProvider;
+  readonly resultValidators: Readonly<Record<string, ServiceResultValidator>>;
+}
+
 const pending = new Map<
   string,
   { resolve(value: JsonValue | undefined): void; reject(error: Error): void }
 >();
-const providers = new Map<string, ServiceProvider>();
+const providers = new Map<string, HostedServiceRegistration>();
 const eventHandlers = new Map<string, (payload: JsonValue) => Promise<void> | void>();
 const agentToolHandlers = new Map<string, AgentToolHandler>();
 const agentResourceImplementations = new Map<string, AgentResourceImplementation>();
@@ -69,7 +86,7 @@ async function receive(message: HostProtocolMessage): Promise<void> {
     if (message.ok) {
       request.resolve(message.value);
     } else {
-      request.reject(new Error(message.error ?? "plugin host request failed"));
+      request.reject(deserializeProtocolError(message.error));
     }
     return;
   }
@@ -87,7 +104,7 @@ async function receive(message: HostProtocolMessage): Promise<void> {
       ...(value === undefined ? {} : { value }),
     });
   } catch (error) {
-    respond({ type: "response", id: message.id, ok: false, error: formatError(error) });
+    respond({ type: "response", id: message.id, ok: false, error: serializeProtocolError(error) });
   }
 }
 
@@ -195,13 +212,18 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
     effect(execute, label) {
       cordisContext.effect(async () => (await execute()) ?? (() => {}), label);
     },
-    provide(contract, provider) {
+    provide(contract, provider, options) {
       const registrationId = nextRegistrationId("service");
       const methods = Object.entries(provider);
       if (!methods.length || methods.some(([, method]) => typeof method !== "function")) {
         throw new TypeError(`service provider ${contract} must expose callable methods`);
       }
-      providers.set(registrationId, provider);
+      providers.set(registrationId, {
+        contract,
+        runtimeId: state.runtimeId,
+        provider,
+        resultValidators: resolveServiceResultValidators(contract, provider, options),
+      });
       notify("service-register", {
         registrationId,
         contract,
@@ -301,15 +323,23 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
 }
 
 async function invokeProvider(payload: ProviderInvocationPayload): Promise<JsonValue | undefined> {
-  const provider = providers.get(payload.registrationId);
-  if (!provider) throw new Error(`service registration is not active: ${payload.registrationId}`);
-  const method = provider[payload.method];
-  if (typeof method !== "function")
-    throw new Error(`service method does not exist: ${payload.method}`);
+  const registration = providers.get(payload.registrationId);
+  if (!registration) {
+    throw new Error(`service registration is not active: ${payload.registrationId}`);
+  }
+  const method = getServiceProviderMethod(registration.provider, payload.method);
+  if (!method) throw new Error(`service method does not exist: ${payload.method}`);
   const result = await method(...payload.args);
+  const validator = Object.hasOwn(registration.resultValidators, payload.method)
+    ? registration.resultValidators[payload.method]
+    : undefined;
+  await validateServiceResult(validator, result, {
+    runtimeId: registration.runtimeId,
+    contract: registration.contract,
+    method: payload.method,
+  });
   return result === undefined ? undefined : result;
 }
-
 async function dispatchEvent(payload: EventDispatchPayload): Promise<void> {
   const handler = eventHandlers.get(payload.registrationId);
   if (!handler) return;
@@ -427,9 +457,4 @@ function validateContracts(values: readonly string[], exportName: string): strin
 
 function nextRegistrationId(kind: string): string {
   return `${kind}:${++registrationCounter}`;
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
-  return String(error);
 }

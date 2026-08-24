@@ -1,4 +1,9 @@
-import { serverInstanceManagerContract } from "@seashard/contracts";
+import {
+  serverCoreIconScheme,
+  serverInstanceIconHost,
+  serverInstanceManagerContract,
+  type ServerInstanceSnapshot,
+} from "@seashard/contracts";
 import type { DatabaseService } from "@seashard/database";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import {
@@ -8,6 +13,7 @@ import {
 import { ServerInstanceManager } from "./manager";
 import { serverInstanceDataCapsule, SQLiteServerInstanceRegistry } from "./registry";
 import { registerServerInstanceAgentResources } from "./agent-resources";
+import type { ServerInstanceClientProjection } from "./types";
 
 export interface ServerInstanceManagerModuleOptions {
   readonly database: DatabaseService;
@@ -57,6 +63,8 @@ export function createServerInstanceManagerModule(
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
+        listForClient: async () =>
+          asJsonValue((await manager.list()).map(projectServerInstanceForClient)),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listMods: async (instanceId) => asJsonValue(await manager.listMods(instanceId)),
         setModDisabled: async (instanceId, relativePath, disabled) => {
@@ -100,9 +108,13 @@ export function createServerInstanceManagerModule(
         switchWorld: async (instanceId, worldId) =>
           asJsonValue(await manager.switchWorld(instanceId, worldId)),
         setStartupSettings: async (instanceId, settings) =>
-          asJsonValue(await manager.setStartupSettings(instanceId, settings)),
+          asJsonValue(
+            projectServerInstanceForClient(await manager.setStartupSettings(instanceId, settings)),
+          ),
         setIcon: async (instanceId, iconDataUrl) =>
-          asJsonValue(await manager.setIcon(instanceId, iconDataUrl)),
+          asJsonValue(
+            projectServerInstanceForClient(await manager.setIcon(instanceId, iconDataUrl)),
+          ),
         recordResourceSource: async (instanceId, record) => {
           await manager.recordResourceSource(instanceId, record);
           return null;
@@ -125,6 +137,23 @@ export function createServerInstanceManagerModule(
       });
       return () => manager.dispose();
     },
+  };
+}
+
+/**
+ * Desktop 等 Client 只接收可展示的实例图标 URI；宿主路径和资源来源索引留在领域侧。
+ */
+export function projectServerInstanceForClient(
+  instance: ServerInstanceSnapshot,
+): ServerInstanceClientProjection {
+  const { iconPath, resourceSources: _resourceSources, ...projection } = instance;
+  return {
+    ...projection,
+    ...(iconPath
+      ? {
+          iconUrl: `${serverCoreIconScheme}://${serverInstanceIconHost}/${encodeURIComponent(instance.id)}`,
+        }
+      : {}),
   };
 }
 

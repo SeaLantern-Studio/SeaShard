@@ -1,7 +1,9 @@
-import { serverInstanceManagerContract } from "@seashard/server-instance-manager";
+import {
+  serverInstanceManagerContract,
+  type ServerInstanceManagerService,
+} from "@seashard/server-instance-manager";
 import type { RuntimeControlSnapshot, RuntimePluginSnapshot } from "@seashard/plugin-sdk";
 import { type PluginKernel, type PluginPackageRecord } from "@seashard/plugin-system";
-import { expectServerInstances } from "./contract-validation";
 
 export async function registerSmokePlugin(pluginKernel: PluginKernel): Promise<void> {
   const archivePath = process.env.SEASHARD_SMOKE_PLUGIN_ARCHIVE;
@@ -52,9 +54,9 @@ export async function verifySmokeRuntime(
   smokeMode: boolean,
 ): Promise<void> {
   if (smokeMode) {
-    const instances = expectServerInstances(
-      await pluginKernel.callService(serverInstanceManagerContract, "list", []),
-    );
+    const instances = await pluginKernel
+      .service<ServerInstanceManagerService>(serverInstanceManagerContract)
+      .listForClient();
     console.log(`SEASHARD_SMOKE_SERVER_INSTANCES count=${instances.length}`);
     const resource = await pluginKernel.agentResources.snapshot().read("server://instances", {});
     if (
@@ -66,7 +68,7 @@ export async function verifySmokeRuntime(
     ) {
       throw new Error("server instance Agent resource returned an unexpected projection");
     }
-    const resourceInstances = expectServerInstances(resource.content.items);
+    const resourceInstances = resource.content.items;
     if (resourceInstances.length !== instances.length) {
       throw new Error("server instance Agent resource returned an unexpected instance count");
     }

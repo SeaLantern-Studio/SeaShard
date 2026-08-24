@@ -78,6 +78,138 @@ export interface ExecutionContext {
 
 export type ServiceMethod = (...args: JsonValue[]) => Awaitable<JsonValue | void>;
 export type ServiceProvider = Record<string, ServiceMethod>;
+
+export interface ServiceResultValidationIssue {
+  readonly path?: readonly PropertyKey[];
+  readonly message: string;
+}
+
+/**
+ * 返回值校验器只判断 Provider 是否兑现 Contract，不参与结果投影或修正。
+ */
+export interface ServiceResultValidator {
+  validate(value: unknown): Awaitable<readonly ServiceResultValidationIssue[]>;
+}
+
+export interface ServiceProvideOptions {
+  readonly resultValidators?: Readonly<Record<string, ServiceResultValidator>>;
+}
+
+const emptyServiceResultValidators = Object.freeze(
+  Object.create(null) as Record<string, ServiceResultValidator>,
+);
+
+/**
+ * 注册时冻结方法到校验器的映射，避免 Provider 后续修改 options 影响已发布能力。
+ */
+export function resolveServiceResultValidators(
+  contract: string,
+  provider: ServiceProvider,
+  options?: ServiceProvideOptions,
+): Readonly<Record<string, ServiceResultValidator>> {
+  if (!options?.resultValidators) return emptyServiceResultValidators;
+  const resolved = Object.create(null) as Record<string, ServiceResultValidator>;
+  for (const [method, validator] of Object.entries(options.resultValidators)) {
+    if (!Object.hasOwn(provider, method) || typeof provider[method] !== "function") {
+      throw new TypeError(
+        `service result validator targets a missing method: ${contract}.${method}`,
+      );
+    }
+    if (!validator || typeof validator.validate !== "function") {
+      throw new TypeError(`service result validator is invalid: ${contract}.${method}`);
+    }
+    resolved[method] = validator;
+  }
+  return Object.freeze(resolved);
+}
+
+/** Service 只允许调用 Provider 自己发布的方法，不能穿透到 Object.prototype。 */
+export function getServiceProviderMethod(
+  provider: ServiceProvider,
+  method: string,
+): ServiceMethod | undefined {
+  if (!Object.hasOwn(provider, method)) return undefined;
+  const candidate = provider[method];
+  return typeof candidate === "function" ? candidate : undefined;
+}
+/**
+ * Runtime 在对应 Provider 的调用边界抛出该错误，字段用于准确归责组件与方法。
+ */
+export class ServiceResultValidationError extends Error {
+  readonly runtimeId: string;
+  readonly contract: string;
+  readonly method: string;
+  readonly issues: readonly ServiceResultValidationIssue[];
+
+  constructor(
+    runtimeId: string,
+    contract: string,
+    method: string,
+    issues: readonly ServiceResultValidationIssue[],
+  ) {
+    const details = issues
+      .map((issue) => {
+        const path = issue.path?.length ? ` at ${issue.path.map(String).join(".")}` : "";
+        return `${issue.message}${path}`;
+      })
+      .join("; ");
+    super(
+      `service result validation failed for ${contract}.${method} from ${runtimeId}: ${details}`,
+    );
+    this.name = "ServiceResultValidationError";
+    this.runtimeId = runtimeId;
+    this.contract = contract;
+    this.method = method;
+    this.issues = issues;
+  }
+}
+
+/** 共享给本地 Runtime 与 Plugin Host，保证校验位置不同但失败语义一致。 */
+export async function validateServiceResult(
+  validator: ServiceResultValidator | undefined,
+  value: unknown,
+  identity: {
+    readonly runtimeId: string;
+    readonly contract: string;
+    readonly method: string;
+  },
+): Promise<void> {
+  if (!validator) return;
+  const issues = await validator.validate(value);
+  if (!Array.isArray(issues)) {
+    throw new TypeError(
+      `service result validator for ${identity.contract}.${identity.method} must return an issue array`,
+    );
+  }
+  for (const issue of issues) {
+    const path = issue && typeof issue === "object" ? issue.path : undefined;
+    if (
+      !issue ||
+      typeof issue !== "object" ||
+      typeof issue.message !== "string" ||
+      (path !== undefined &&
+        (!Array.isArray(path) ||
+          path.some(
+            (segment) =>
+              typeof segment !== "string" &&
+              typeof segment !== "number" &&
+              typeof segment !== "symbol",
+          )))
+    ) {
+      throw new TypeError(
+        `service result validator for ${identity.contract}.${identity.method} returned an invalid issue`,
+      );
+    }
+  }
+  if (issues.length) {
+    throw new ServiceResultValidationError(
+      identity.runtimeId,
+      identity.contract,
+      identity.method,
+      issues,
+    );
+  }
+}
 export interface PluginStoredDocument {
   readonly value: JsonValue;
   readonly revision: number;
@@ -267,7 +399,7 @@ export interface PluginContext {
   readonly runtimeId: string;
   readonly storage: PluginStorage;
   effect(execute: () => Awaitable<Disposable | void>, label?: string): void;
-  provide(contract: string, provider: ServiceProvider): void;
+  provide(contract: string, provider: ServiceProvider, options?: ServiceProvideOptions): void;
   service<T extends object>(contract: string): T;
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;

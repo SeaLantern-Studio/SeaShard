@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   DownloadManager,
+  projectUserVisibleDownloadTasks,
   type DownloadTaskSnapshot,
 } from "../components/network/download/src/index.ts";
 
@@ -215,4 +216,46 @@ await test("shared downloader requires a full destination file path", async () =
   } finally {
     await manager.dispose();
   }
+});
+
+await test("shared downloader owns the user-visible client projection", () => {
+  const commonTask = {
+    id: "mod-task-1",
+    url: "https://cdn.modrinth.com/data/project/version/mod.jar",
+    destinationPath: "C:/SeaShard/resources/mod.jar",
+    state: "completed",
+    downloadedBytes: 1_024,
+    totalBytes: 1_024,
+    connections: 8,
+    progress: 100,
+    createdAt: "2026-08-17T12:00:00.000Z",
+    finishedAt: "2026-08-17T12:00:01.000Z",
+  } as const;
+
+  assert.deepEqual(
+    projectUserVisibleDownloadTasks([
+      {
+        ...commonTask,
+        metadata: { kind: "server-mod", userVisible: true },
+      },
+      {
+        ...commonTask,
+        id: "icon-task-1",
+        metadata: { kind: "server-core-icon" },
+      },
+    ]),
+    [
+      {
+        id: commonTask.id,
+        destinationPath: commonTask.destinationPath,
+        state: commonTask.state,
+        downloadedBytes: commonTask.downloadedBytes,
+        totalBytes: commonTask.totalBytes,
+        connections: commonTask.connections,
+        progress: commonTask.progress,
+        createdAt: commonTask.createdAt,
+        finishedAt: commonTask.finishedAt,
+      },
+    ],
+  );
 });

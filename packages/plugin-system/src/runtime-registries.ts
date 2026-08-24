@@ -1,6 +1,9 @@
 import {
   defaultAgentResourcePresentationTitle,
+  getServiceProviderMethod,
   isAgentActivityPresentationIcon,
+  resolveServiceResultValidators,
+  validateServiceResult,
 } from "@seashard/plugin-sdk";
 import type {
   AgentProviderCatalogModel,
@@ -22,6 +25,8 @@ import type {
   JsonObject,
   JsonValue,
   ScopeAddress,
+  ServiceProvideOptions,
+  ServiceResultValidator,
   ServiceProvider,
 } from "@seashard/plugin-sdk";
 import { compileJsonSchemaValidator } from "./json-schema";
@@ -31,6 +36,7 @@ interface ServiceRegistration {
   runtimeId: string;
   scope: ScopeAddress;
   provider: ServiceProvider;
+  resultValidators: Readonly<Record<string, ServiceResultValidator>>;
 }
 
 interface ContributionRegistration {
@@ -146,7 +152,6 @@ export interface ContributionSnapshot {
   scope: ScopeAddress;
   value: JsonValue;
 }
-
 /**
  * 运行时注册表只保存当前 Cordis Fiber 的公开内容。
  *
@@ -161,13 +166,20 @@ export class ServiceRegistry {
     runtimeId: string,
     scope: ScopeAddress,
     provider: ServiceProvider,
+    options?: ServiceProvideOptions,
   ): () => void {
     validateContract(contract);
     const methods = Object.entries(provider);
     if (methods.length === 0 || methods.some(([, method]) => typeof method !== "function")) {
       throw new TypeError(`service provider ${contract} must expose callable methods`);
     }
-    const registration: ServiceRegistration = { contract, runtimeId, scope, provider };
+    const registration: ServiceRegistration = {
+      contract,
+      runtimeId,
+      scope,
+      provider,
+      resultValidators: resolveServiceResultValidators(contract, provider, options),
+    };
     let set = this.registrations.get(contract);
     if (!set) {
       set = new Set();
@@ -209,10 +221,18 @@ export class ServiceRegistry {
     }
     const registration = this.select(contract, execution);
     if (!registration) throw new Error(`no service provider available: ${contract}`);
-    const target = registration.provider[method];
-    if (typeof target !== "function")
-      throw new Error(`service method does not exist: ${contract}.${method}`);
-    return target(...args);
+    const target = getServiceProviderMethod(registration.provider, method);
+    if (!target) throw new Error(`service method does not exist: ${contract}.${method}`);
+    const result = await target(...args);
+    const validator = Object.hasOwn(registration.resultValidators, method)
+      ? registration.resultValidators[method]
+      : undefined;
+    await validateServiceResult(validator, result, {
+      runtimeId: registration.runtimeId,
+      contract,
+      method,
+    });
+    return result;
   }
 
   removeRuntime(runtimeId: string): void {

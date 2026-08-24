@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
-import type { ExecutionContext, JsonValue } from "../packages/plugin-sdk/src/index.ts";
+import { ServiceResultValidationError } from "../packages/plugin-sdk/src/index.ts";
+import type {
+  ExecutionContext,
+  JsonValue,
+  ServiceResultValidator,
+} from "../packages/plugin-sdk/src/index.ts";
+import {
+  deserializeProtocolError,
+  serializeProtocolError,
+} from "../packages/plugin-system/src/host-protocol.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
   AgentProviderTypeRegistry,
@@ -183,6 +192,125 @@ await test("service registry selects the nearest active provider", async () => {
   );
   replacementDispose();
   globalDispose();
+});
+
+await test("service result validation is optional and bound to the selected registration", async () => {
+  const registry = new ServiceRegistry();
+  const execution: ExecutionContext = {
+    actorType: "core",
+    actorId: "seashard.core",
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: ["*"],
+    permissionRevision: 1,
+  };
+  let result: JsonValue = { count: 1 };
+  const resultValidators: Record<string, ServiceResultValidator> = {
+    read: {
+      validate(value) {
+        const count =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).count
+            : undefined;
+        return typeof count === "number" && count >= 0
+          ? []
+          : [{ path: ["count"], message: "count must be non-negative" }];
+      },
+    },
+  };
+  const dispose = registry.register(
+    "example.catalog",
+    "catalog-provider",
+    { type: "global", id: "global" },
+    {
+      read: () => result,
+      unchecked: () => ({ count: -1 }),
+    },
+    { resultValidators },
+  );
+
+  assert.equal(await registry.call("example.catalog", "read", [], execution), result);
+  assert.deepEqual(await registry.call("example.catalog", "unchecked", [], execution), {
+    count: -1,
+  });
+
+  delete resultValidators.read;
+  result = { count: -1 };
+  await assert.rejects(
+    registry.call("example.catalog", "read", [], execution),
+    (error: unknown) => {
+      assert(error instanceof ServiceResultValidationError);
+      assert.equal(error.runtimeId, "catalog-provider");
+      assert.equal(error.contract, "example.catalog");
+      assert.equal(error.method, "read");
+      assert.deepEqual(error.issues, [{ path: ["count"], message: "count must be non-negative" }]);
+      return true;
+    },
+  );
+  dispose();
+  const prototypeSafeRegistry = new ServiceRegistry();
+  prototypeSafeRegistry.register(
+    "example.prototype-safe",
+    "prototype-safe-provider",
+    { type: "global", id: "global" },
+    {
+      read: () => "read",
+      toString: () => "provider-to-string",
+    },
+  );
+  assert.equal(
+    await prototypeSafeRegistry.call("example.prototype-safe", "toString", [], execution),
+    "provider-to-string",
+  );
+  await assert.rejects(
+    prototypeSafeRegistry.call("example.prototype-safe", "hasOwnProperty", [], execution),
+    /method does not exist/u,
+  );
+
+  assert.throws(
+    () =>
+      registry.register(
+        "example.invalid",
+        "invalid-provider",
+        { type: "global", id: "global" },
+        { read: () => null },
+        {
+          resultValidators: {
+            missing: { validate: () => [] },
+          },
+        },
+      ),
+    /targets a missing method/u,
+  );
+  assert.throws(
+    () =>
+      registry.register(
+        "example.inherited",
+        "invalid-provider",
+        { type: "global", id: "global" },
+        { read: () => null },
+        {
+          resultValidators: {
+            toString: { validate: () => [] },
+          },
+        },
+      ),
+    /targets a missing method/u,
+  );
+
+  const remoteError = deserializeProtocolError(
+    serializeProtocolError(
+      new ServiceResultValidationError("external-provider", "example.remote", "read", [
+        { path: ["items", 0], message: "item is invalid" },
+      ]),
+    ),
+  );
+  assert(remoteError instanceof ServiceResultValidationError);
+  assert.equal(remoteError.runtimeId, "external-provider");
+  assert.equal(remoteError.contract, "example.remote");
+  assert.equal(remoteError.method, "read");
+  assert.deepEqual(remoteError.issues, [{ path: ["items", 0], message: "item is invalid" }]);
 });
 
 await test("Agent tool registry rejects duplicates and invalidates Fiber snapshots", async () => {

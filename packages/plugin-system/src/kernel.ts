@@ -6,6 +6,7 @@ import type {
   RuntimeControlSnapshot,
   ScopeAddress,
   ServiceProvider,
+  ServiceProvideOptions,
 } from "@seashard/plugin-sdk";
 import { Context } from "cordis";
 import { mkdir } from "node:fs/promises";
@@ -102,8 +103,18 @@ export class PluginKernel {
     return this.registry.registerBuiltIn(registration);
   }
 
-  registerCoreService(contract: string, provider: ServiceProvider): void {
-    const dispose = this.services.register(contract, "seashard.core", globalScope(), provider);
+  registerCoreService(
+    contract: string,
+    provider: ServiceProvider,
+    options?: ServiceProvideOptions,
+  ): void {
+    const dispose = this.services.register(
+      contract,
+      "seashard.core",
+      globalScope(),
+      provider,
+      options,
+    );
     this.coreDisposers.push(dispose);
   }
 
@@ -193,6 +204,25 @@ export class PluginKernel {
       contributions: this.contributions.list().length,
       clientEntries: this.clientEntries.length,
     };
+  }
+
+  /**
+   * Core 侧按公开 Contract 取得类型化 Service façade；实际 Provider 仍由每次调用时按 Scope 选择。
+   */
+  service<T extends object>(
+    contract: string,
+    scopeChain: readonly ScopeAddress[] = [globalScope()],
+  ): T {
+    return new Proxy(
+      {},
+      {
+        get: (_target, property) => {
+          if (property === "then") return undefined;
+          if (typeof property !== "string") return undefined;
+          return (...args: JsonValue[]) => this.callService(contract, property, args, scopeChain);
+        },
+      },
+    ) as T;
   }
 
   callService(
