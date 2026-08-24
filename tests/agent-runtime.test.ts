@@ -16,6 +16,7 @@ import {
   bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
+import { interleaveAgentInvocationContent } from "../packages/contracts/src/index.ts";
 import { registerServerInstanceAgentResources } from "../components/server/instance-manager/src/index.ts";
 import {
   AgentProviderTypeRegistry,
@@ -524,6 +525,7 @@ await test("Agent Session Journal 复制完整历史并重新分配记录身份"
     presentation: { title: "读取分支资料" },
     state: "running",
     input: { path: "local://notes/branch.txt" },
+    assistantTextOffset: 0,
     startedAt: "2026-08-23T10:00:00.000Z",
   });
   await journal.appendToolCall(source.header.id, {
@@ -534,6 +536,7 @@ await test("Agent Session Journal 复制完整历史并重新分配记录身份"
     state: "completed",
     input: { path: "local://notes/branch.txt" },
     output: { content: "branch context" },
+    assistantTextOffset: 0,
     startedAt: "2026-08-23T10:00:00.000Z",
     finishedAt: "2026-08-23T10:00:01.000Z",
   });
@@ -1044,6 +1047,7 @@ await test("Agent Session Journal 为无展示字段的读取记录补默认标�
       state: "completed",
       input: { path: "server://instances" },
       output: [],
+      assistantTextOffset: 0,
       startedAt: "2026-08-23T07:51:50.000Z",
       finishedAt: "2026-08-23T07:51:51.000Z",
     })}\n`,
@@ -1064,6 +1068,7 @@ await test("Agent Session Journal 为无展示字段的读取记录补默认标�
       state: "completed",
       input: { path: "server://instances" },
       output: [],
+      assistantTextOffset: 0,
       startedAt: "2026-08-23T07:51:50.000Z",
       finishedAt: "2026-08-23T07:51:51.000Z",
     },
@@ -1076,6 +1081,7 @@ await test("Agent Session Journal 为无展示字段的读取记录补默认标�
     state: "completed",
     input: { path: "help://resource/server", input: {} },
     output: "# `server://` 资源",
+    assistantTextOffset: 0,
     startedAt: "2026-08-23T07:52:00.000Z",
     finishedAt: "2026-08-23T07:52:01.000Z",
   });
@@ -1241,6 +1247,7 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
         items: ["Fabric"],
         pagination: { offset: 2, limit: 1, total: 3, hasMore: true },
       },
+      assistantTextOffset: 0,
       startedAt: invocation.toolCalls[0]?.startedAt,
       finishedAt: invocation.toolCalls[0]?.finishedAt,
     },
@@ -1350,7 +1357,7 @@ await test("Agent 资源展示投影失败不会中断读取", async (context) =
   );
 });
 
-await test("Agent 模式执行工具闭环并持久化工具活动", async (context) => {
+await test("Agent 模式按文本偏移持久化多次工具活动", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-tools-"));
   context.after(async () => {
     const { rm } = await import("node:fs/promises");
@@ -1366,11 +1373,34 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       {
         stream: simulateReadableStream({
           chunks: [
+            { type: "text-start", id: "first-analysis" },
+            { type: "text-delta", id: "first-analysis", delta: "先检查。" },
+            { type: "text-end", id: "first-analysis" },
             {
               type: "tool-call",
               toolCallId: "echo-1",
               toolName: "test_echo",
               input: '{"value":"probe"}',
+            },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage,
+            },
+          ],
+        }),
+      },
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "text-start", id: "second-analysis" },
+            { type: "text-delta", id: "second-analysis", delta: "继续检查。" },
+            { type: "text-end", id: "second-analysis" },
+            {
+              type: "tool-call",
+              toolCallId: "echo-2",
+              toolName: "test_echo",
+              input: '{"value":"next"}',
             },
             {
               type: "finish",
@@ -1409,7 +1439,7 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       languageModel: model,
     }),
   };
-  let executions = 0;
+  const executions: JsonValue[] = [];
   const toolRegistry = new AgentToolRegistry();
   const runtime = new AgentRuntime({
     userDataRoot,
@@ -1436,20 +1466,20 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       },
     },
     async (input) => {
-      executions += 1;
+      executions.push(input);
       return input;
     },
   );
 
   const reference = await runtime.startSession({
-    initialMessage: { text: "回显 probe。" },
+    initialMessage: { text: "连续回显两次。" },
     mode: "agent",
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
-  assert.equal(invocation.text, "回显完成。");
-  assert.equal(executions, 1);
-  assert.equal(model.doStreamCalls.length, 2);
+  assert.equal(invocation.text, "先检查。继续检查。回显完成。");
+  assert.deepEqual(executions, [{ value: "probe" }, { value: "next" }]);
+  assert.equal(model.doStreamCalls.length, 3);
   assert.deepEqual(
     model.doStreamCalls[0]?.tools?.map(({ name }) => name),
     ["read", "test_echo"],
@@ -1463,18 +1493,45 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
       state: "completed",
       input: { value: "probe" },
       output: { value: "probe" },
+      assistantTextOffset: "先检查。".length,
       startedAt: invocation.toolCalls[0]?.startedAt,
       finishedAt: invocation.toolCalls[0]?.finishedAt,
     },
+    {
+      id: "echo-2",
+      invocationId: reference.invocationId,
+      toolName: "test_echo",
+      presentation: { title: "测试回显" },
+      state: "completed",
+      input: { value: "next" },
+      output: { value: "next" },
+      assistantTextOffset: "先检查。继续检查。".length,
+      startedAt: invocation.toolCalls[1]?.startedAt,
+      finishedAt: invocation.toolCalls[1]?.finishedAt,
+    },
   ]);
+  assert.deepEqual(
+    interleaveAgentInvocationContent(invocation.text, invocation.toolCalls).map((part) =>
+      part.kind === "text"
+        ? { kind: part.kind, content: part.content }
+        : { kind: part.kind, id: part.call.id },
+    ),
+    [
+      { kind: "text", content: "先检查。" },
+      { kind: "tool", id: "echo-1" },
+      { kind: "text", content: "继续检查。" },
+      { kind: "tool", id: "echo-2" },
+      { kind: "text", content: "回显完成。" },
+    ],
+  );
 
   const session = await runtime.getSession(reference.sessionId);
   assert.deepEqual(session.toolCalls, invocation.toolCalls);
   assert.deepEqual(
     session.messages.map(({ role, content }) => ({ role, content })),
     [
-      { role: "user", content: "回显 probe。" },
-      { role: "assistant", content: "回显完成。" },
+      { role: "user", content: "连续回显两次。" },
+      { role: "assistant", content: "先检查。继续检查。回显完成。" },
     ],
   );
 });

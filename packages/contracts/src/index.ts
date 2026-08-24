@@ -252,7 +252,58 @@ export interface AgentToolCallSnapshot {
   readonly output?: JsonValue;
   readonly error?: string;
   readonly startedAt: string;
+  /** 工具开始前已经输出的 Assistant 文本长度；使用 JavaScript UTF-16 偏移量。 */
+  readonly assistantTextOffset: number;
   readonly finishedAt?: string;
+}
+
+export type AgentInvocationContentPart =
+  | {
+      readonly kind: "text";
+      readonly content: string;
+      readonly start: number;
+      readonly end: number;
+    }
+  | {
+      readonly kind: "tool";
+      readonly call: AgentToolCallSnapshot;
+    };
+
+/**
+ * 按工具记录的文本偏移恢复单次 Invocation 的真实输出顺序。
+ * 同一偏移上的多个工具保持注册表快照中的原始顺序。
+ */
+export function interleaveAgentInvocationContent(
+  assistantText: string,
+  toolCalls: readonly AgentToolCallSnapshot[],
+): readonly AgentInvocationContentPart[] {
+  const orderedCalls = [...toolCalls].sort(
+    (left, right) => left.assistantTextOffset - right.assistantTextOffset,
+  );
+  const parts: AgentInvocationContentPart[] = [];
+  let cursor = 0;
+  for (const call of orderedCalls) {
+    const offset = Math.max(cursor, Math.min(assistantText.length, call.assistantTextOffset));
+    if (offset > cursor) {
+      parts.push({
+        kind: "text",
+        content: assistantText.slice(cursor, offset),
+        start: cursor,
+        end: offset,
+      });
+    }
+    parts.push({ kind: "tool", call });
+    cursor = offset;
+  }
+  if (cursor < assistantText.length) {
+    parts.push({
+      kind: "text",
+      content: assistantText.slice(cursor),
+      start: cursor,
+      end: assistantText.length,
+    });
+  }
+  return parts;
 }
 
 export interface AgentMessageSnapshot {

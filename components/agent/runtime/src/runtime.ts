@@ -14,6 +14,7 @@ import type {
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
+import { interleaveAgentInvocationContent } from "@seashard/contracts";
 import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
 import type {
   AgentActivityPresentationField,
@@ -552,6 +553,7 @@ export class AgentRuntime {
         } satisfies AgentActivityPresentation),
       state: "running",
       input: call.input,
+      assistantTextOffset: invocation.snapshot.text.length,
       startedAt,
     };
     await this.recordToolCall(invocation, snapshot);
@@ -674,7 +676,7 @@ function projectInvocation(
   };
 }
 
-/** 按 Invocation 重建工具调用消息，确保后续轮次能看到既有工具结果。 */
+/** 按 Invocation 的文本偏移重建消息，确保后续轮次看到原始的文字与工具交错顺序。 */
 function projectModelMessages(session: LoadedAgentSession): ModelMessage[] {
   const messages: ModelMessage[] = [];
   const assistantByInvocation = new Map<string, typeof session.messages>();
@@ -687,8 +689,18 @@ function projectModelMessages(session: LoadedAgentSession): ModelMessage[] {
   for (const message of session.messages) {
     if (message.role !== "user") continue;
     messages.push({ role: "user", content: message.content });
-    for (const call of session.toolCalls) {
-      if (call.invocationId !== message.invocationId || call.state === "running") continue;
+    const assistantText = (assistantByInvocation.get(message.invocationId) ?? [])
+      .map(({ content }) => content)
+      .join("");
+    const calls = session.toolCalls.filter(
+      (call) => call.invocationId === message.invocationId && call.state !== "running",
+    );
+    for (const part of interleaveAgentInvocationContent(assistantText, calls)) {
+      if (part.kind === "text") {
+        messages.push({ role: "assistant", content: part.content });
+        continue;
+      }
+      const call = part.call;
       messages.push({
         role: "assistant",
         content: [
@@ -714,9 +726,6 @@ function projectModelMessages(session: LoadedAgentSession): ModelMessage[] {
           },
         ],
       });
-    }
-    for (const assistant of assistantByInvocation.get(message.invocationId) ?? []) {
-      messages.push({ role: "assistant", content: assistant.content });
     }
   }
   return messages;

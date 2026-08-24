@@ -10,6 +10,7 @@ import type {
   AgentSessionSnapshot,
   AgentToolCallSnapshot,
 } from "@seashard/contracts";
+import { interleaveAgentInvocationContent } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
 import { Cmz_Markdown, Cmz_Toast, useToast } from "cmzya-modern-ui";
 import {
@@ -33,14 +34,18 @@ const props = defineProps<{
   workspace: typeof agentWorkspace;
 }>();
 
-interface ConversationEntry {
-  readonly kind: "message" | "tool";
-  readonly key: string;
-  readonly timestamp: string;
-  readonly role?: AgentMessageSnapshot["role"];
-  readonly content?: string;
-  readonly call?: AgentToolCallSnapshot;
-}
+type ConversationEntry =
+  | {
+      readonly kind: "message";
+      readonly key: string;
+      readonly role: AgentMessageSnapshot["role"];
+      readonly content: string;
+    }
+  | {
+      readonly kind: "tool";
+      readonly key: string;
+      readonly call: AgentToolCallSnapshot;
+    };
 
 const toast = useToast();
 const composer = ref("");
@@ -71,23 +76,65 @@ const visibleToolCalls = computed<readonly AgentToolCallSnapshot[]>(() => {
   for (const call of liveToolCalls.value) calls.set(call.id, call);
   return [...calls.values()];
 });
-const conversationEntries = computed<readonly ConversationEntry[]>(() =>
-  [
-    ...messages.value.map((message) => ({
-      kind: "message" as const,
+const conversationEntries = computed<readonly ConversationEntry[]>(() => {
+  const entries: ConversationEntry[] = [];
+  const assistantTextByInvocation = new Map<string, string>();
+  const callsByInvocation = new Map<string, AgentToolCallSnapshot[]>();
+  for (const message of messages.value) {
+    if (message.role !== "assistant") continue;
+    assistantTextByInvocation.set(
+      message.invocationId,
+      `${assistantTextByInvocation.get(message.invocationId) ?? ""}${message.content}`,
+    );
+  }
+  for (const call of visibleToolCalls.value) {
+    const calls = callsByInvocation.get(call.invocationId) ?? [];
+    calls.push(call);
+    callsByInvocation.set(call.invocationId, calls);
+  }
+
+  const representedInvocations = new Set<string>();
+  for (const message of messages.value) {
+    if (message.role !== "user") continue;
+    entries.push({
+      kind: "message",
       key: `message:${message.id}`,
-      timestamp: message.timestamp,
-      role: message.role,
+      role: "user",
       content: message.content,
-    })),
-    ...visibleToolCalls.value.map((call) => ({
-      kind: "tool" as const,
-      key: `tool:${call.id}`,
-      timestamp: call.startedAt,
-      call,
-    })),
-  ].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
-);
+    });
+    representedInvocations.add(message.invocationId);
+    appendAssistantEntries(
+      entries,
+      message.invocationId,
+      message.invocationId === runningInvocationId.value
+        ? liveAssistantText.value
+        : (assistantTextByInvocation.get(message.invocationId) ?? ""),
+      callsByInvocation.get(message.invocationId) ?? [],
+    );
+  }
+
+  // 损坏 Journal 中的孤立活动仍可局部展示，不能拖垮其余完整会话。
+  for (const invocationId of new Set([
+    ...assistantTextByInvocation.keys(),
+    ...callsByInvocation.keys(),
+  ])) {
+    if (representedInvocations.has(invocationId)) continue;
+    appendAssistantEntries(
+      entries,
+      invocationId,
+      invocationId === runningInvocationId.value
+        ? liveAssistantText.value
+        : (assistantTextByInvocation.get(invocationId) ?? ""),
+      callsByInvocation.get(invocationId) ?? [],
+    );
+  }
+  return entries;
+});
+const showLiveThinking = computed(() => {
+  if (!sending.value || runningSessionId.value !== activeConversationId.value) return false;
+  const parts = interleaveAgentInvocationContent(liveAssistantText.value, liveToolCalls.value);
+  return parts.length === 0 || parts.at(-1)?.kind === "tool";
+});
 const selectedModelRecord = computed(() =>
   models.value.find(
     (model) =>
@@ -100,6 +147,27 @@ const selectedModeLabel = computed(() => (selectedMode.value === "agent" ? "Agen
 const canSend = computed(() =>
   Boolean(composer.value.trim() && selectedModelRecord.value && !sending.value),
 );
+
+/** 单次 Invocation 的文字片段和工具卡共用同一偏移恢复规则，流式与历史记录不会分叉。 */
+function appendAssistantEntries(
+  entries: ConversationEntry[],
+  invocationId: string,
+  text: string,
+  calls: readonly AgentToolCallSnapshot[],
+): void {
+  for (const part of interleaveAgentInvocationContent(text, calls)) {
+    if (part.kind === "tool") {
+      entries.push({ kind: "tool", key: `tool:${part.call.id}`, call: part.call });
+      continue;
+    }
+    entries.push({
+      kind: "message",
+      key: `assistant:${invocationId}:${part.start}:${part.end}`,
+      role: "assistant",
+      content: part.content,
+    });
+  }
+}
 
 watch(activeConversationId, (id) => {
   if (id !== runningSessionId.value) {
@@ -303,7 +371,7 @@ function delay(milliseconds: number): Promise<void> {
 
     <div class="agent-conversation-scroll">
       <div
-        v-if="messages.length === 0 && visibleToolCalls.length === 0 && !liveAssistantText"
+        v-if="conversationEntries.length === 0 && !showLiveThinking"
         class="agent-conversation-empty"
       >
         <div class="agent-brand-mark" aria-hidden="true"></div>
@@ -335,16 +403,12 @@ function delay(milliseconds: number): Promise<void> {
           </article>
         </template>
 
-        <article
-          v-if="sending && runningSessionId === activeConversationId"
-          class="agent-message is-assistant is-live"
-        >
+        <article v-if="showLiveThinking" class="agent-message is-assistant is-live">
           <div class="agent-message-avatar" aria-hidden="true">
             <div class="agent-brand-mark"></div>
           </div>
           <div class="agent-assistant-message">
-            <Cmz_Markdown v-if="liveAssistantText" :content="liveAssistantText" variant="plain" />
-            <div v-else class="agent-thinking" aria-label="AI 正在回复">
+            <div class="agent-thinking" aria-label="AI 正在回复">
               <span></span><span></span><span></span>
             </div>
           </div>

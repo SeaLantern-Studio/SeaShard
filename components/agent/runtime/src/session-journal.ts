@@ -460,6 +460,9 @@ function parseToolCall(record: Record<string, unknown>, fileName: string): ToolC
     typeof record.invocationId !== "string" ||
     typeof record.toolName !== "string" ||
     !isToolCallState(record.state) ||
+    typeof record.assistantTextOffset !== "number" ||
+    !Number.isSafeInteger(record.assistantTextOffset) ||
+    record.assistantTextOffset < 0 ||
     typeof record.startedAt !== "string" ||
     typeof record.timestamp !== "string" ||
     (record.finishedAt !== undefined && typeof record.finishedAt !== "string") ||
@@ -480,6 +483,7 @@ function parseToolCall(record: Record<string, unknown>, fileName: string): ToolC
     ),
     state: record.state,
     input: requireJsonValue(record.input, fileName, "input"),
+    assistantTextOffset: record.assistantTextOffset,
     ...(record.output === undefined
       ? {}
       : { output: requireJsonValue(record.output, fileName, "output") }),
