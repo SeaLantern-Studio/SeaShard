@@ -1,8 +1,10 @@
 import { agentWorkspace } from "@seashard/agent-ui-shared";
 import {
   agentInvocationContract,
+  agentModelConfigurationContract,
   agentSessionContract,
   type AgentInvocationService,
+  type AgentModelConfigurationClientService,
   type AgentSessionService,
 } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
@@ -14,6 +16,9 @@ export default defineClientUiModule({
   apply(context) {
     const sessions = context.service<AgentSessionService>(agentSessionContract);
     const invocations = context.service<AgentInvocationService>(agentInvocationContract);
+    const modelConfiguration = context.service<AgentModelConfigurationClientService>(
+      agentModelConfigurationContract,
+    );
     context.effect(() => agentWorkspace.bind(sessions), "Agent workspace session binding");
 
     const page = defineComponent({
@@ -22,6 +27,7 @@ export default defineClientUiModule({
         h(AgentConversationPage, {
           sessions,
           invocations,
+          modelConfiguration,
           workspace: agentWorkspace,
         }),
     });

@@ -4,6 +4,7 @@ import type {
   AgentConversationMode,
   AgentInvocationService,
   AgentMessageSnapshot,
+  AgentModelConfigurationClientService,
   AgentModelSelection,
   AgentSessionService,
   AgentSessionSnapshot,
@@ -28,6 +29,7 @@ import "./AgentConversationPage.css";
 const props = defineProps<{
   sessions: AgentSessionService;
   invocations: AgentInvocationService;
+  modelConfiguration: AgentModelConfigurationClientService;
   workspace: typeof agentWorkspace;
 }>();
 
@@ -57,6 +59,9 @@ const runningSessionId = ref<string>();
 const runningInvocationId = ref<string>();
 let conversationLoad = 0;
 let invocationPoll = 0;
+let modelConfigurationLoad = 0;
+let modelCatalogInitialized = false;
+let disposeModelConfigurationChanged: (() => void) | undefined;
 
 const activeConversationId = computed(() => props.workspace.activeConversationId.value);
 const messages = computed(() => session.value?.messages ?? []);
@@ -93,7 +98,7 @@ const selectedModelRecord = computed(() =>
 const selectedModelLabel = computed(() => selectedModelRecord.value?.name ?? "未配置模型");
 const selectedModeLabel = computed(() => (selectedMode.value === "agent" ? "Agent" : "Chat"));
 const canSend = computed(() =>
-  Boolean(composer.value.trim() && selectedModel.value && !sending.value),
+  Boolean(composer.value.trim() && selectedModelRecord.value && !sending.value),
 );
 
 watch(activeConversationId, (id) => {
@@ -106,6 +111,11 @@ watch(activeConversationId, (id) => {
 });
 
 onMounted(() => {
+  // 先订阅再读取初始快照，避免页面挂载期间发生的配置变更落在两个动作之间。
+  disposeModelConfigurationChanged = props.modelConfiguration.onConfigurationChanged((snapshot) => {
+    modelConfigurationLoad += 1;
+    applyModels(snapshot.models);
+  });
   void loadModels();
   void loadActiveConversation();
 });
@@ -113,17 +123,39 @@ onMounted(() => {
 onBeforeUnmount(() => {
   conversationLoad += 1;
   invocationPoll += 1;
+  modelConfigurationLoad += 1;
+  disposeModelConfigurationChanged?.();
 });
 
 async function loadModels(): Promise<void> {
+  const load = ++modelConfigurationLoad;
   try {
-    models.value = await props.sessions.listModels();
-    if (!selectedModel.value && models.value[0]) {
-      selectedModel.value = selectionOf(models.value[0]);
-    }
+    const snapshot = await props.modelConfiguration.getConfiguration();
+    // 变化事件可能先于初始读取返回；旧请求不得覆盖较新的推送快照。
+    if (load !== modelConfigurationLoad) return;
+    applyModels(snapshot.models);
   } catch (error) {
+    if (load !== modelConfigurationLoad) return;
     toast.error({ title: "读取模型配置失败", description: errorMessage(error) });
   }
+}
+
+/** 保留仍然可用的选择；供应商被移除时立即切换到当前目录中的首个模型。 */
+function applyModels(nextModels: readonly AgentConfiguredModel[]): void {
+  models.value = nextModels;
+  modelCatalogInitialized = true;
+  selectAvailableModel(selectedModel.value);
+}
+
+function selectAvailableModel(preferred?: AgentModelSelection): void {
+  const available = preferred
+    ? models.value.find(
+        (model) =>
+          model.connectionId === preferred.connectionId && model.modelId === preferred.modelId,
+      )
+    : undefined;
+  const selected = available ?? models.value[0];
+  selectedModel.value = selected ? selectionOf(selected) : undefined;
 }
 
 async function loadActiveConversation(): Promise<void> {
@@ -137,7 +169,9 @@ async function loadActiveConversation(): Promise<void> {
     const snapshot = await props.sessions.getSession(id);
     if (load !== conversationLoad) return;
     session.value = snapshot;
+    // Session 可能先于初始模型目录返回；先保留其模型身份，待目录到达后再校验可用性。
     selectedModel.value = { ...snapshot.model };
+    if (modelCatalogInitialized) selectAvailableModel(snapshot.model);
   } catch (error) {
     if (load !== conversationLoad) return;
     session.value = undefined;

@@ -1,4 +1,8 @@
-import { agentInvocationContract, agentSessionContract } from "@seashard/contracts";
+import {
+  agentInvocationContract,
+  agentModelConfigurationContract,
+  agentSessionContract,
+} from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const agentConversationUiManifest: PluginManifest = {
@@ -12,7 +16,7 @@ export const agentConversationUiManifest: PluginManifest = {
       module: "./dist/client.js",
       targets: ["desktop"],
       activationScopes: ["global"],
-      permissions: [agentSessionContract, agentInvocationContract],
+      permissions: [agentSessionContract, agentInvocationContract, agentModelConfigurationContract],
     },
   ],
   compatibility: {
