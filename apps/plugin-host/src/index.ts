@@ -279,6 +279,9 @@ function createPluginContext(cordisContext: Context, state: PreparedState): Plug
         );
       }
     },
+    aiProviderType(definition) {
+      throw new Error(`AI Provider Type ${definition.id} 必须由 Core Host 中的内建组件注册`);
+    },
     on(event, handler) {
       const registrationId = nextRegistrationId("event");
       eventHandlers.set(registrationId, handler);

@@ -1,6 +1,7 @@
 import {
   desktopShellContract,
   runtimeDiagnosticsContract,
+  type AgentModelConfigurationSnapshot,
   type ClientEntryPublication,
   type DesktopShellService,
   type FileDownloadTaskSnapshot,
@@ -43,6 +44,7 @@ import {
 } from "../components/desktop/shell/src/index.ts";
 import type {
   Disposable,
+  JsonValue,
   PluginContext,
   ServiceProvider,
 } from "../packages/plugin-sdk/src/index.ts";
@@ -263,11 +265,16 @@ export class FakeDesktopShellRuntime extends EventEmitter implements DesktopShel
 export async function activateDesktopShell(
   config: DesktopShellConfig,
   diagnostics: RuntimeDiagnosticsService,
-): Promise<{ service: DesktopShellService; dispose: () => Promise<void> }> {
+): Promise<{
+  emitEvent: (event: string, payload: JsonValue) => Promise<void>;
+  service: DesktopShellService;
+  dispose: () => Promise<void>;
+}> {
   const providers = new Map<string, ServiceProvider>([
     [runtimeDiagnosticsContract, diagnostics as unknown as ServiceProvider],
   ]);
   const disposers: Disposable[] = [];
+  const eventHandlers = new Map<string, Set<(payload: JsonValue) => void | Promise<void>>>();
   const context = {
     provide(contract: string, provider: ServiceProvider) {
       providers.set(contract, provider);
@@ -276,6 +283,15 @@ export async function activateDesktopShell(
       const provider = providers.get(contract);
       if (!provider) throw new Error(`missing service: ${contract}`);
       return provider;
+    },
+    on(event: string, handler: (payload: JsonValue) => void | Promise<void>) {
+      const handlers = eventHandlers.get(event) ?? new Set();
+      handlers.add(handler);
+      eventHandlers.set(event, handlers);
+      disposers.push(() => {
+        handlers.delete(handler);
+        if (!handlers.size) eventHandlers.delete(event);
+      });
     },
     effect(execute: () => void | Disposable | Promise<void | Disposable>) {
       const result = execute();
@@ -289,6 +305,9 @@ export async function activateDesktopShell(
   assert.ok(service, "desktop shell must publish its service");
 
   return {
+    emitEvent: async (event: string, payload: JsonValue) => {
+      for (const handler of eventHandlers.get(event) ?? []) await handler(payload);
+    },
     service: service as unknown as DesktopShellService,
     dispose: async () => {
       for (const disposer of disposers.reverse()) await disposer();
@@ -535,6 +554,20 @@ export async function createDesktopShellHarness(
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
+  let agentModelConfiguration: AgentModelConfigurationSnapshot = {
+    revision: "a".repeat(64),
+    connections: [],
+    models: [],
+    providerTypes: [
+      {
+        id: "openai-compatible",
+        displayName: "OpenAI Compatible",
+        settingsSchema: { type: "object" },
+        supportsModelDiscovery: true,
+      },
+    ],
+    diagnostics: [],
+  };
   let serverSettings: ServerSettingsSnapshot = {
     resourceDownloadDirectory: "C:/SeaShard/resources",
     defaultDownloadConnections: 16,
@@ -624,6 +657,23 @@ export async function createDesktopShellHarness(
         toolCalls: [],
       }),
       cancelAgentInvocation: async () => {},
+      readAgentModelConfiguration: async () => agentModelConfiguration,
+      mutateAgentModelConnection: async () => agentModelConfiguration,
+      removeAgentModelConnection: async () => agentModelConfiguration,
+      resetAgentModelConfiguration: async () => {
+        agentModelConfiguration = {
+          ...agentModelConfiguration,
+          revision: "b".repeat(64),
+          connections: [],
+          models: [],
+          diagnostics: [],
+        };
+        return agentModelConfiguration;
+      },
+      discoverAgentModels: async () => [{ id: "discovered-model" }],
+      writeAgentCredential: async () => agentModelConfiguration,
+      removeAgentCredential: async () => agentModelConfiguration,
+      openAgentModelConfiguration: async () => {},
       readServerCoreTypes: async () => serverCoreTypes,
       readServerCoreVersions: async (serverType) => (serverType === "paper" ? ["1.21.1"] : []),
       readServerCoreArtifacts: async (serverType, gameVersion) =>

@@ -8,6 +8,7 @@ import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/ind
 import type { ExecutionContext, JsonValue } from "../packages/plugin-sdk/src/index.ts";
 import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
+  AgentProviderTypeRegistry,
   AgentResourceRegistry,
   AgentToolRegistry,
   ServiceRegistry,
@@ -216,6 +217,58 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
   registry.register("replacement-handler", scope, definition, async () => null);
   registry.removeRuntime("replacement-handler");
   assert.equal(registry.countRuntime(), 0);
+});
+
+await test("AI Provider Type registry validates settings and invalidates Fiber snapshots", () => {
+  const registry = new AgentProviderTypeRegistry();
+  const scope = { type: "global" as const, id: "global" };
+  let changes = 0;
+  registry.onChanged(() => {
+    changes += 1;
+  });
+  const registration = registry.register("provider-runtime", scope, {
+    id: "test-provider",
+    displayName: "Test Provider",
+    settingsSchema: {
+      type: "object",
+      properties: {
+        baseURL: { type: "string", minLength: 1 },
+      },
+      required: ["baseURL"],
+      additionalProperties: false,
+    },
+    catalog: [{ id: "test-model", displayName: "Test Model" }],
+    create: ({ connectionId, settings }) => ({ connectionId, settings }),
+  });
+
+  const snapshot = registry.snapshot().resolve("test-provider");
+  assert(snapshot);
+  snapshot.validateSettings({ baseURL: "http://127.0.0.1/v1" });
+  assert.throws(() => snapshot.validateSettings({}), /baseURL/u);
+  assert.deepEqual(
+    snapshot.create({
+      connectionId: "local",
+      settings: { baseURL: "http://127.0.0.1/v1" },
+    }),
+    {
+      connectionId: "local",
+      settings: { baseURL: "http://127.0.0.1/v1" },
+    },
+  );
+  assert.equal(registry.countRuntime("provider-runtime"), 1);
+  assert.equal(changes, 1);
+
+  registration.dispose();
+  assert.equal(changes, 2);
+  assert.equal(registry.snapshot().resolve("test-provider"), undefined);
+  assert.throws(
+    () =>
+      snapshot.create({
+        connectionId: "local",
+        settings: { baseURL: "http://127.0.0.1/v1" },
+      }),
+    /AI Provider Type 已停止/u,
+  );
 });
 
 await test("Agent resource registry routes, validates domain input and invalidates snapshots", async () => {

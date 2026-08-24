@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import {
+  AgentCredentialVault,
   AgentModelCatalog,
   AgentOutputCollector,
   AgentRuntime,
   AgentSessionJournal,
   AgentSessionLocalStore,
   bindAgentHelpResource,
+  registerBuiltInAgentProviderTypes,
   bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
 import { registerServerInstanceAgentResources } from "../components/server/instance-manager/src/index.ts";
 import {
+  AgentProviderTypeRegistry,
   AgentResourceRegistry,
   AgentToolRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
@@ -23,14 +26,60 @@ import type { JsonValue } from "../packages/plugin-sdk/src/index.ts";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
-await test("Agent 模型目录创建 models.yml 并读取 OMP 风格配置", async (context) => {
+async function waitForModels(
+  catalog: AgentModelCatalog,
+  expected: readonly string[],
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const ids = (await catalog.list()).map(
+      ({ connectionId, modelId }) => `${connectionId}/${modelId}`,
+    );
+    if (ids.length === expected.length && ids.every((id, index) => id === expected[index])) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`模型目录未更新为：${expected.join(", ")}`);
+}
+async function waitForConnection(
+  catalog: AgentModelCatalog,
+  connectionId: string,
+): Promise<Awaited<ReturnType<AgentModelCatalog["getConfiguration"]>>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const configuration = await catalog.getConfiguration();
+    if (configuration.connections.some(({ id }) => id === connectionId)) return configuration;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`模型供应商连接未载入：${connectionId}`);
+}
+
+function registerProviderTypes(registry: AgentProviderTypeRegistry): void {
+  registerBuiltInAgentProviderTypes({
+    aiProviderType(definition) {
+      return registry.register("test.agent-providers", { type: "global", id: "global" }, definition)
+        .id;
+    },
+  });
+}
+
+function createProviderTypes(): AgentProviderTypeRegistry {
+  const registry = new AgentProviderTypeRegistry();
+  registerProviderTypes(registry);
+  return registry;
+}
+
+await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-models-"));
   context.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const catalog = new AgentModelCatalog({ userDataRoot, environment: {} });
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {},
+  });
   await catalog.initialize();
   const initial = await readFile(catalog.configPath, "utf8");
   assert.match(initial, /providers: \{\}/);
@@ -40,28 +89,366 @@ await test("Agent 模型目录创建 models.yml 并读取 OMP 风格配置", asy
     [
       "providers:",
       "  local:",
-      "    baseUrl: http://127.0.0.1:11434/v1",
-      "    auth: none",
-      "    api: openai-completions",
+      "    displayName: Local Qwen",
+      "    providerType: openai-compatible",
+      "    settings:",
+      "      baseURL: http://127.0.0.1:11434/v1",
       "    models:",
       "      - id: qwen3-coder",
-      "        name: Qwen 3 Coder",
+      "        displayName: Qwen 3 Coder",
       "",
     ].join("\n"),
     "utf8",
   );
+  await waitForModels(catalog, ["local/qwen3-coder"]);
 
   assert.deepEqual(await catalog.list(), [
     {
       connectionId: "local",
       modelId: "qwen3-coder",
       name: "Qwen 3 Coder",
-      api: "openai-completions",
     },
   ]);
   const resolved = await catalog.resolve({ connectionId: "local", modelId: "qwen3-coder" });
   assert.deepEqual(resolved.selection, { connectionId: "local", modelId: "qwen3-coder" });
   assert.equal(dirname(catalog.configPath), join(userDataRoot, "agent"));
+  await catalog.dispose();
+});
+await test("旧格式 models.yml 不阻断 Agent 启动并可显式重置", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-invalid-models-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const configDirectory = join(userDataRoot, "agent");
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(
+    join(configDirectory, "models.yml"),
+    [
+      "providers:",
+      "  legacy:",
+      "    api: openai-responses",
+      "    apiKey: plaintext-is-not-supported",
+      "    models:",
+      "      - id: legacy-model",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const reported: unknown[] = [];
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {},
+    reportError: (error) => reported.push(error),
+  });
+
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  const invalid = await catalog.getConfiguration();
+  assert.deepEqual(invalid.connections, []);
+  assert.deepEqual(invalid.models, []);
+  assert.match(invalid.diagnostics[0] ?? "", /providerType/u);
+  assert.equal(reported.length, 1);
+
+  const reset = await catalog.resetConfiguration({ expectedRevision: invalid.revision });
+  assert.deepEqual(reset.connections, []);
+  assert.deepEqual(reset.diagnostics, []);
+  assert.match(await readFile(catalog.configPath, "utf8"), /providers: \{\}/u);
+});
+
+await test("models.yml 热更新保留最后有效快照并识别 rename 保存", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-model-watch-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const reported: unknown[] = [];
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {},
+    watchDebounceMs: 20,
+    reportError: (error) => reported.push(error),
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+
+  const valid = (modelId: string) =>
+    [
+      "providers:",
+      "  local:",
+      "    providerType: openai-compatible",
+      "    settings:",
+      "      baseURL: http://127.0.0.1:11434/v1",
+      "    models:",
+      `      - id: ${modelId}`,
+      "",
+    ].join("\n");
+  await writeFile(catalog.configPath, valid("model-a"), "utf8");
+  await waitForModels(catalog, ["local/model-a"]);
+  const acceptedRevision = (await catalog.getConfiguration()).revision;
+
+  await writeFile(catalog.configPath, "providers:\n  local: [", "utf8");
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (
+      (await catalog.getConfiguration()).diagnostics.some((message) => message.includes("无效"))
+    ) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(await catalog.list(), [
+    { connectionId: "local", modelId: "model-a", name: "model-a" },
+  ]);
+  assert.equal((await catalog.getConfiguration()).revision, acceptedRevision);
+  assert.ok(reported.length > 0);
+
+  const temporary = `${catalog.configPath}.editor.tmp`;
+  await writeFile(temporary, valid("model-b"), "utf8");
+  await rename(temporary, catalog.configPath);
+  await waitForModels(catalog, ["local/model-b"]);
+  assert.deepEqual((await catalog.getConfiguration()).diagnostics, []);
+});
+
+await test("模型连接修改保留未触及 YAML 节点并拒绝旧 revision", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-model-write-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {},
+    watchDebounceMs: 20,
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  await writeFile(
+    catalog.configPath,
+    [
+      "# 保留这条人工注释",
+      "futureRoot: true",
+      "providers:",
+      "  local:",
+      "    providerType: openai-compatible",
+      "    advancedField: keep-me",
+      "    settings:",
+      "      baseURL: http://127.0.0.1:11434/v1",
+      "    models:",
+      "      - id: model-a",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await waitForModels(catalog, ["local/model-a"]);
+  const before = await catalog.getConfiguration();
+  const after = await catalog.mutateConnection({
+    expectedRevision: before.revision,
+    connectionId: "local",
+    operations: [
+      { op: "set", path: ["displayName"], value: "Local Gateway" },
+      { op: "set", path: ["settings", "baseURL"], value: "http://127.0.0.1:11435/v1" },
+    ],
+  });
+  assert.notEqual(after.revision, before.revision);
+  const source = await readFile(catalog.configPath, "utf8");
+  assert.match(source, /# 保留这条人工注释/u);
+  assert.match(source, /futureRoot: true/u);
+  assert.match(source, /advancedField: keep-me/u);
+  assert.match(source, /displayName: Local Gateway/u);
+  await assert.rejects(
+    catalog.removeConnection({
+      expectedRevision: before.revision,
+      connectionId: "local",
+    }),
+    { name: "AgentModelConfigurationConflictError" },
+  );
+});
+
+await test("Provider Type 暂时缺失时保留连接并在重注册后恢复模型", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-provider-lifecycle-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const providerTypes = new AgentProviderTypeRegistry();
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes,
+    environment: {},
+    watchDebounceMs: 20,
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  await writeFile(
+    catalog.configPath,
+    [
+      "providers:",
+      "  local:",
+      "    providerType: openai-compatible",
+      "    settings:",
+      "      baseURL: http://127.0.0.1:11434/v1",
+      "    models:",
+      "      - id: model-a",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if ((await catalog.getConfiguration()).connections.length === 1) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  let configuration = await catalog.getConfiguration();
+  assert.equal(configuration.connections[0]?.available, false);
+  assert.deepEqual(configuration.models, []);
+
+  registerProviderTypes(providerTypes);
+  await waitForModels(catalog, ["local/model-a"]);
+  configuration = await catalog.getConfiguration();
+  assert.equal(configuration.connections[0]?.available, true);
+
+  providerTypes.removeRuntime("test.agent-providers");
+  await waitForModels(catalog, []);
+  configuration = await catalog.getConfiguration();
+  assert.equal(configuration.connections[0]?.available, false);
+  assert.match(configuration.connections[0]?.diagnostic ?? "", /Provider Type 未注册/u);
+});
+
+await test("凭据 Vault 只落盘密文并为模型发现提供临时授权", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-credentials-"));
+  const requests: Array<{ readonly url?: string; readonly authorization?: string }> = [];
+  const server = createServer((request, response) => {
+    requests.push({
+      url: request.url,
+      authorization:
+        typeof request.headers.authorization === "string"
+          ? request.headers.authorization
+          : undefined,
+    });
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "model-a" }, { id: "model-b" }] }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const vault = new AgentCredentialVault({
+    userDataRoot,
+    environment: {},
+    cipher: {
+      encrypt: (value) => Buffer.from(`encrypted:${value}`, "utf8"),
+      decrypt: (value) =>
+        Buffer.from(value)
+          .toString("utf8")
+          .replace(/^encrypted:/u, ""),
+    },
+  });
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    credentials: vault,
+    watchDebounceMs: 20,
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  await writeFile(
+    catalog.configPath,
+    [
+      "providers:",
+      "  local:",
+      "    providerType: openai-compatible",
+      "    credentialId: LOCAL_API_KEY",
+      "    settings:",
+      `      baseURL: http://127.0.0.1:${address.port}/v1`,
+      "    models:",
+      "      - id: model-a",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const missingCredential = await waitForConnection(catalog, "local");
+  assert.equal(missingCredential.connections[0]?.credentialConfigured, false);
+  assert.equal(missingCredential.connections[0]?.available, false);
+  assert.deepEqual(missingCredential.models, []);
+  await assert.rejects(
+    catalog.discoverModels({
+      providerType: "openai-compatible",
+      credentialId: "LOCAL_API_KEY",
+      settings: { baseURL: `http://127.0.0.1:${address.port}/v1` },
+    }),
+    /凭据尚未配置/u,
+  );
+  assert.deepEqual(requests, []);
+
+  assert.deepEqual(
+    await catalog.discoverModels({
+      providerType: "openai-compatible",
+      credentialValue: "temporary-secret",
+      settings: { baseURL: `http://127.0.0.1:${address.port}/v1` },
+    }),
+    [{ id: "model-a" }, { id: "model-b" }],
+  );
+  assert.deepEqual(requests, [
+    {
+      url: "/v1/models",
+      authorization: "Bearer temporary-secret",
+    },
+  ]);
+  assert.deepEqual(JSON.parse(await readFile(vault.filePath, "utf8")).entries, {});
+  requests.length = 0;
+  await assert.rejects(
+    catalog.discoverModels({
+      providerType: "openai-compatible",
+      credentialId: "LOCAL_API_KEY",
+      credentialValue: "temporary-secret",
+      settings: { baseURL: `http://127.0.0.1:${address.port}/v1` },
+    }),
+    /不能同时使用/u,
+  );
+
+  const withCredential = await catalog.writeCredential({
+    credentialId: "LOCAL_API_KEY",
+    value: "secret-value",
+  });
+  assert.equal(withCredential.connections[0]?.credentialConfigured, true);
+  assert.equal(withCredential.connections[0]?.available, true);
+  assert.deepEqual(withCredential.models, [
+    { connectionId: "local", modelId: "model-a", name: "model-a" },
+  ]);
+  const credentialSource = await readFile(vault.filePath, "utf8");
+  assert.doesNotMatch(credentialSource, /secret-value/u);
+  assert.match(credentialSource, /ZW5jcnlwdGVkOnNlY3JldC12YWx1ZQ==/u);
+
+  assert.deepEqual(
+    await catalog.discoverModels({
+      providerType: "openai-compatible",
+      credentialId: "LOCAL_API_KEY",
+      settings: { baseURL: `http://127.0.0.1:${address.port}/v1` },
+    }),
+    [{ id: "model-a" }, { id: "model-b" }],
+  );
+  assert.deepEqual(requests, [
+    {
+      url: "/v1/models",
+      authorization: "Bearer secret-value",
+    },
+  ]);
+
+  const withoutCredential = await catalog.removeCredential({ credentialId: "LOCAL_API_KEY" });
+  assert.equal(withoutCredential.connections[0]?.credentialConfigured, false);
+  assert.equal(withoutCredential.connections[0]?.available, false);
+  assert.deepEqual(withoutCredential.models, []);
 });
 
 await test("Agent Session Journal 保留新对话标题并投影最近使用的模型", async (context) => {
@@ -636,7 +1023,6 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
     connectionId: "test",
     modelId: "resource-model",
     name: "Resource Model",
-    api: "openai-responses" as const,
   };
   const modelSource: AgentModelSource = {
     initialize: async () => {},
@@ -897,7 +1283,6 @@ await test("Agent 模式执行工具闭环并持久化工具活动", async (cont
     connectionId: "test",
     modelId: "tool-model",
     name: "Tool Model",
-    api: "openai-responses" as const,
   };
   const modelSource: AgentModelSource = {
     initialize: async () => {},
@@ -1137,23 +1522,28 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
   const address = server.address();
   assert(address && typeof address === "object");
 
-  const catalog = new AgentModelCatalog({ userDataRoot, environment: {} });
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: { TEST_OPENAI_API_KEY: "test-key" },
+  });
   await catalog.initialize();
   await writeFile(
     catalog.configPath,
     [
       "providers:",
       "  test:",
-      `    baseUrl: http://127.0.0.1:${address.port}/v1`,
-      "    apiKey: test-key",
-      "    api: openai-responses",
+      "    providerType: openai",
+      "    credentialId: TEST_OPENAI_API_KEY",
+      "    settings:",
+      `      baseURL: http://127.0.0.1:${address.port}/v1`,
       "    models:",
       "      - id: gpt-5.6-sol",
-      "        name: GPT-5.6 Sol",
-      "",
+      "        displayName: GPT-5.6 Sol",
     ].join("\n"),
     "utf8",
   );
+  await waitForModels(catalog, ["test/gpt-5.6-sol"]);
   const resourceRegistry = new AgentResourceRegistry();
   registerServerInstanceAgentResources(
     {

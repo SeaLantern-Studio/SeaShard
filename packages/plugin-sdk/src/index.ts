@@ -223,6 +223,44 @@ export function defineAgentResource<
 >(resource: AgentResource<Input, Output>): AgentResource<Input, Output> {
   return resource;
 }
+export interface AgentProviderCatalogModel {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly providerOptions?: JsonObject;
+}
+
+/**
+ * Provider Type 只描述配置与 AI SDK Provider 工厂。
+ *
+ * Provider 实例保持为泛型对象，避免把 AI SDK 的版本化类型带入 SeaShard
+ * Contract；实际注册表会在 Core Host 内校验其 Provider 结构。
+ */
+export interface AiProviderType<
+  TSettings extends JsonObject = JsonObject,
+  TProvider extends object = object,
+> {
+  readonly id: string;
+  readonly displayName: string;
+  readonly settingsSchema: JsonObject;
+  readonly catalog?: readonly AgentProviderCatalogModel[];
+  create(input: {
+    readonly connectionId: string;
+    readonly settings: TSettings;
+    readonly apiKey?: string;
+  }): TProvider;
+  discoverModels?(input: {
+    readonly settings: TSettings;
+    readonly apiKey?: string;
+    readonly signal: AbortSignal;
+  }): Promise<readonly AgentProviderCatalogModel[]>;
+}
+
+/** 保留具体设置与 Provider 的类型推导；生命周期仍由 PluginContext 接管。 */
+export function defineAiProviderType<TSettings extends JsonObject, TProvider extends object>(
+  definition: AiProviderType<TSettings, TProvider>,
+): AiProviderType<TSettings, TProvider> {
+  return definition;
+}
 
 export interface PluginContext {
   readonly execution: ExecutionContext;
@@ -234,6 +272,9 @@ export interface PluginContext {
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;
   agentResources(resources: AgentResourceMap): void;
+  aiProviderType<TSettings extends JsonObject, TProvider extends object>(
+    definition: AiProviderType<TSettings, TProvider>,
+  ): string;
   on(event: string, handler: (payload: JsonValue) => Awaitable<void>): void;
   emit(event: string, payload: JsonValue): Promise<void>;
 }

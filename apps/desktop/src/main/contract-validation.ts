@@ -10,6 +10,8 @@ import {
   isServerModSource,
   type AgentActivityPresentation,
   type AgentConfiguredModel,
+  type AgentModelConfigurationSnapshot,
+  type AgentModelConnectionModel,
   type AgentInvocationReference,
   type AgentInvocationSnapshot,
   type AgentMessageSnapshot,
@@ -74,6 +76,96 @@ function isServerImageDataUrl(value: unknown): value is string {
     typeof value === "string" &&
     /^data:image\/(?:png|gif|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/u.test(value)
   );
+}
+
+export function expectAgentModelConfiguration(value: unknown): AgentModelConfigurationSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Agent model configuration service returned an invalid snapshot");
+  }
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.revision !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(snapshot.revision) ||
+    !Array.isArray(snapshot.connections) ||
+    !Array.isArray(snapshot.models) ||
+    !Array.isArray(snapshot.providerTypes) ||
+    !Array.isArray(snapshot.diagnostics) ||
+    snapshot.diagnostics.some((diagnostic) => typeof diagnostic !== "string")
+  ) {
+    throw new Error("Agent model configuration service returned an invalid snapshot");
+  }
+  for (const connection of snapshot.connections) {
+    if (!isAgentModelConnection(connection)) {
+      throw new Error("Agent model configuration service returned an invalid connection");
+    }
+  }
+  for (const providerType of snapshot.providerTypes) {
+    if (!isAgentProviderType(providerType)) {
+      throw new Error("Agent model configuration service returned an invalid provider type");
+    }
+  }
+  expectAgentModels(snapshot.models);
+  return value as AgentModelConfigurationSnapshot;
+}
+
+export function expectAgentModelConnectionModels(
+  value: unknown,
+): readonly AgentModelConnectionModel[] {
+  if (!Array.isArray(value) || value.some((model) => !isAgentConnectionModel(model))) {
+    throw new Error("Agent model discovery returned an invalid model list");
+  }
+  return value as readonly AgentModelConnectionModel[];
+}
+
+function isAgentModelConnection(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const connection = value as Record<string, unknown>;
+  return (
+    typeof connection.id === "string" &&
+    typeof connection.providerType === "string" &&
+    typeof connection.credentialConfigured === "boolean" &&
+    isJsonObject(connection.settings) &&
+    typeof connection.available === "boolean" &&
+    (connection.displayName === undefined || typeof connection.displayName === "string") &&
+    (connection.credentialId === undefined || typeof connection.credentialId === "string") &&
+    (connection.diagnostic === undefined || typeof connection.diagnostic === "string") &&
+    (connection.models === undefined ||
+      (Array.isArray(connection.models) &&
+        connection.models.every((model) => isAgentConnectionModel(model))))
+  );
+}
+
+function isAgentConnectionModel(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const model = value as Record<string, unknown>;
+  return (
+    typeof model.id === "string" &&
+    (model.displayName === undefined || typeof model.displayName === "string") &&
+    (model.providerOptions === undefined || isJsonObject(model.providerOptions))
+  );
+}
+
+function isAgentProviderType(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const providerType = value as Record<string, unknown>;
+  return (
+    typeof providerType.id === "string" &&
+    typeof providerType.displayName === "string" &&
+    isJsonObject(providerType.settingsSchema) &&
+    typeof providerType.supportsModelDiscovery === "boolean" &&
+    (providerType.catalog === undefined ||
+      (Array.isArray(providerType.catalog) &&
+        providerType.catalog.every((model) => isAgentConnectionModel(model))))
+  );
+}
+
+function isJsonObject(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  try {
+    return JSON.stringify(value) !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 export function expectServerCoreTypes(value: unknown): ServerCoreType[] {
@@ -1211,19 +1303,10 @@ export function expectAgentModels(value: unknown): AgentConfiguredModel[] {
   return value.map((model, index) => {
     const record = expectAgentRecord(model, `model ${index}`);
     const selection = expectAgentModelSelection(record, `model ${index}`);
-    if (
-      typeof record.name !== "string" ||
-      !record.name ||
-      ![
-        "openai-completions",
-        "openai-responses",
-        "anthropic-messages",
-        "google-generative-ai",
-      ].includes(String(record.api))
-    ) {
+    if (typeof record.name !== "string" || !record.name) {
       throw new Error(`Agent Runtime returned invalid model ${index}`);
     }
-    return { ...selection, name: record.name, api: record.api as AgentConfiguredModel["api"] };
+    return { ...selection, name: record.name };
   });
 }
 

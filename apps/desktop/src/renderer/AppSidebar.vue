@@ -5,6 +5,7 @@ import type { SettingsNavigationGroup } from "@seashard/ui-sdk";
 import {
   Archive,
   ArrowLeft,
+  Bot,
   ChevronDown,
   Download,
   Folder,
@@ -23,11 +24,11 @@ import {
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import logoSvg from "./assets/logo.svg";
-import type { WorkspaceMode } from "./workspace-layout";
+import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
   workspace: WorkspaceMode;
-  settingsMode: boolean;
+  settingsMode?: SettingsMode;
   downloadMode: boolean;
 }>();
 
@@ -36,12 +37,20 @@ const router = useRouter();
 const route = useRoute();
 const sidebarNav = ref<HTMLElement>();
 const navIndicator = ref<HTMLElement>();
+const agentWorkspaceScroll = ref<HTMLElement>();
+const agentWorkspaceScrollContent = ref<HTMLElement>();
+const agentScrollbarTrack = ref<HTMLElement>();
+const agentScrollbarThumb = ref<HTMLElement>();
 const lastWorkspacePath = ref("/");
 const settingsPages = computed(() =>
   runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "settings"),
 );
+const agentSettingsPages = computed(() =>
+  runtime.pages.value.filter(
+    (page) => page.navigation !== false && page.placement === "agent-settings",
+  ),
+);
 const settingsNavigationGroups = [
-  { id: "agent", label: "Agent 设置" },
   { id: "game", label: "游戏设置" },
   { id: "server", label: "服务器设置" },
   { id: "launcher", label: "启动器设置" },
@@ -65,16 +74,18 @@ const otherDownloadPages = computed(() =>
   downloadPages.value.filter((page) => page.path !== "/server/download"),
 );
 const sidebarLabel = computed(() => {
-  if (props.settingsMode) return "设置导航";
+  if (props.settingsMode === "general") return "设置导航";
+  if (props.settingsMode === "agent") return "Agent 设置导航";
   if (props.downloadMode) return "下载导航";
   return "主导航";
 });
 const sidebarMenuKey = computed(() => {
-  if (props.settingsMode) return "settings";
+  if (props.settingsMode) return `settings:${props.settingsMode}`;
   if (props.downloadMode) return "server-download";
   return `workspace:${props.workspace}`;
 });
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
+const agentSettingsPath = computed(() => agentSettingsPages.value[0]?.path);
 const agentProjects = [{ name: "SeaShard", threads: ["界面布局规划", "组件运行时设计"] }] as const;
 const instancePrimaryItems = [
   { id: "launch", label: "启动", icon: Play },
@@ -112,6 +123,15 @@ const instanceManagementItems = computed(() =>
 );
 const instanceWorkspaceLabel = computed(() => (props.workspace === "server" ? "服务器" : "启动器"));
 const expandedProjects = ref<Set<string>>(new Set(agentProjects.map((project) => project.name)));
+interface AgentScrollbarDrag {
+  readonly pointerId: number;
+  readonly startClientY: number;
+  readonly startScrollTop: number;
+}
+
+let agentScrollbarDrag: AgentScrollbarDrag | undefined;
+let agentScrollbarFrame: number | undefined;
+let agentScrollbarResizeObserver: ResizeObserver | undefined;
 let indicatorFrame: number | undefined;
 let sidebarMenuEntering = false;
 const sidebarMenuItemSelector = [
@@ -152,8 +172,16 @@ function openSettings(): void {
   const path = settingsEntryPath.value;
   if (path) navigate(path);
 }
+function openAgentSettings(): void {
+  const path = agentSettingsPath.value;
+  if (path) navigate(path);
+}
 
 function leaveSettings(): void {
+  if (props.settingsMode === "agent") {
+    navigate("/agent/chat");
+    return;
+  }
   navigate(lastWorkspacePath.value);
 }
 function leaveDownload(): void {
@@ -212,6 +240,105 @@ function toggleProject(name: string): void {
   }
   expandedProjects.value = next;
 }
+
+/** 原生区域只负责滚动；轨道与滑块由这一层按实时比例投影。 */
+function scheduleAgentScrollbar(): void {
+  if (agentScrollbarFrame !== undefined) return;
+  agentScrollbarFrame = requestAnimationFrame(renderAgentScrollbar);
+}
+
+function renderAgentScrollbar(): void {
+  agentScrollbarFrame = undefined;
+  const viewport = agentWorkspaceScroll.value;
+  const track = agentScrollbarTrack.value;
+  const thumb = agentScrollbarThumb.value;
+  if (!viewport || !track || !thumb) return;
+
+  const maximumScroll = viewport.scrollHeight - viewport.clientHeight;
+  const trackHeight = track.clientHeight;
+  const visible = maximumScroll > 1 && trackHeight > 0;
+  track.classList.toggle("is-visible", visible);
+  if (!visible) return;
+
+  const thumbHeight = Math.max(
+    28,
+    Math.min(trackHeight, trackHeight * (viewport.clientHeight / viewport.scrollHeight)),
+  );
+  const thumbRange = trackHeight - thumbHeight;
+  const thumbTop = thumbRange > 0 ? (viewport.scrollTop / maximumScroll) * thumbRange : 0;
+  thumb.style.height = `${thumbHeight}px`;
+  thumb.style.transform = `translate3d(0, ${thumbTop}px, 0)`;
+}
+
+function reconnectAgentScrollbarObserver(): void {
+  agentScrollbarResizeObserver?.disconnect();
+  const viewport = agentWorkspaceScroll.value;
+  const content = agentWorkspaceScrollContent.value;
+  if (!viewport || !content) return;
+  agentScrollbarResizeObserver ??= new ResizeObserver(scheduleAgentScrollbar);
+  agentScrollbarResizeObserver.observe(viewport);
+  agentScrollbarResizeObserver.observe(content);
+  scheduleAgentScrollbar();
+}
+
+function handleAgentWorkspaceScroll(): void {
+  updateNavIndicator();
+  scheduleAgentScrollbar();
+}
+
+function seekAgentScrollbar(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  const viewport = agentWorkspaceScroll.value;
+  const track = agentScrollbarTrack.value;
+  const thumb = agentScrollbarThumb.value;
+  if (!viewport || !track || !thumb) return;
+  const maximumScroll = viewport.scrollHeight - viewport.clientHeight;
+  const thumbRange = track.clientHeight - thumb.offsetHeight;
+  if (maximumScroll <= 0 || thumbRange <= 0) return;
+  const trackRect = track.getBoundingClientRect();
+  const target = Math.min(
+    thumbRange,
+    Math.max(0, event.clientY - trackRect.top - thumb.offsetHeight / 2),
+  );
+  viewport.scrollTop = (target / thumbRange) * maximumScroll;
+}
+
+function beginAgentScrollbarDrag(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  const viewport = agentWorkspaceScroll.value;
+  const thumb = agentScrollbarThumb.value;
+  if (!viewport || !thumb) return;
+  event.preventDefault();
+  agentScrollbarDrag = {
+    pointerId: event.pointerId,
+    startClientY: event.clientY,
+    startScrollTop: viewport.scrollTop,
+  };
+  thumb.setPointerCapture(event.pointerId);
+  thumb.classList.add("is-dragging");
+}
+
+function moveAgentScrollbarDrag(event: PointerEvent): void {
+  const drag = agentScrollbarDrag;
+  const viewport = agentWorkspaceScroll.value;
+  const track = agentScrollbarTrack.value;
+  const thumb = agentScrollbarThumb.value;
+  if (!drag || drag.pointerId !== event.pointerId || !viewport || !track || !thumb) return;
+  const maximumScroll = viewport.scrollHeight - viewport.clientHeight;
+  const thumbRange = track.clientHeight - thumb.offsetHeight;
+  if (maximumScroll <= 0 || thumbRange <= 0) return;
+  viewport.scrollTop =
+    drag.startScrollTop + ((event.clientY - drag.startClientY) / thumbRange) * maximumScroll;
+}
+
+function endAgentScrollbarDrag(event: PointerEvent): void {
+  const drag = agentScrollbarDrag;
+  const thumb = agentScrollbarThumb.value;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  agentScrollbarDrag = undefined;
+  if (thumb?.hasPointerCapture(event.pointerId)) thumb.releasePointerCapture(event.pointerId);
+  thumb?.classList.remove("is-dragging");
+}
 function hideNavIndicatorForMenuSwap(): void {
   const indicator = navIndicator.value;
   if (!indicator) return;
@@ -239,7 +366,10 @@ function prepareSidebarMenuLeave(): void {
 function finishSidebarMenuEnter(): void {
   navIndicator.value?.style.removeProperty("transition");
   sidebarMenuEntering = false;
-  void nextTick(updateNavIndicator);
+  void nextTick(() => {
+    updateNavIndicator();
+    reconnectAgentScrollbarObserver();
+  });
 }
 
 function updateNavIndicator(): void {
@@ -258,10 +388,18 @@ function updateNavIndicator(): void {
       indicator.style.opacity = "0";
       return;
     }
+    const itemRect = item.getBoundingClientRect();
+    const scrollRegion = item.closest<HTMLElement>(".agent-workspace-scroll");
+    if (scrollRegion) {
+      const scrollRect = scrollRegion.getBoundingClientRect();
+      if (itemRect.bottom <= scrollRect.top || itemRect.top >= scrollRect.bottom) {
+        indicator.style.opacity = "0";
+        return;
+      }
+    }
     indicator.style.opacity = "1";
     const navRect = nav.getBoundingClientRect();
-    const itemRect = item.getBoundingClientRect();
-    const top = itemRect.top - navRect.top + nav.scrollTop + (itemRect.height - 16) / 2;
+    const top = itemRect.top - navRect.top + (itemRect.height - 16) / 2;
     indicator.style.top = `${top}px`;
   });
 }
@@ -269,14 +407,23 @@ function updateNavIndicator(): void {
 watch(
   () => route.fullPath,
   (path) => {
-    if (!path.startsWith("/settings/")) lastWorkspacePath.value = path;
+    if (!path.startsWith("/settings/") && !path.startsWith("/agent/settings")) {
+      lastWorkspacePath.value = path;
+    }
     activeServerItem.value = serverItemForPath(path);
   },
   { immediate: true },
 );
 
 watch(
-  [() => route.path, () => props.workspace, settingsPages, downloadPages, activeInstanceItem],
+  [
+    () => route.path,
+    () => props.workspace,
+    settingsPages,
+    agentSettingsPages,
+    downloadPages,
+    activeInstanceItem,
+  ],
   () => void nextTick(updateNavIndicator),
   {
     flush: "post",
@@ -285,12 +432,17 @@ watch(
 
 onMounted(() => {
   updateNavIndicator();
+  void nextTick(reconnectAgentScrollbarObserver);
   window.addEventListener("resize", updateNavIndicator);
+  window.addEventListener("resize", scheduleAgentScrollbar);
 });
 
 onUnmounted(() => {
   if (indicatorFrame !== undefined) cancelAnimationFrame(indicatorFrame);
+  if (agentScrollbarFrame !== undefined) cancelAnimationFrame(agentScrollbarFrame);
+  agentScrollbarResizeObserver?.disconnect();
   window.removeEventListener("resize", updateNavIndicator);
+  window.removeEventListener("resize", scheduleAgentScrollbar);
 });
 </script>
 
@@ -314,7 +466,7 @@ onUnmounted(() => {
         @after-enter="finishSidebarMenuEnter"
       >
         <div :key="sidebarMenuKey" class="sidebar-menu-stage">
-          <div v-if="props.settingsMode" class="settings-mode-nav">
+          <div v-if="props.settingsMode === 'general'" class="settings-mode-nav">
             <button type="button" class="workspace-row mode-back" @click="leaveSettings">
               <ArrowLeft :size="16" :stroke-width="1.8" />
               <span>返回工作区</span>
@@ -346,6 +498,36 @@ onUnmounted(() => {
                 </button>
               </section>
             </template>
+          </div>
+          <div v-else-if="props.settingsMode === 'agent'" class="settings-mode-nav">
+            <button type="button" class="workspace-row mode-back" @click="leaveSettings">
+              <ArrowLeft :size="16" :stroke-width="1.8" />
+              <span>返回 Agent</span>
+            </button>
+
+            <section class="settings-section" aria-labelledby="agent-settings-label">
+              <h3 id="agent-settings-label" class="workspace-section-title">
+                <span class="workspace-section-title-text">Agent 设置</span>
+              </h3>
+              <button
+                v-for="page in agentSettingsPages"
+                :key="page.id"
+                type="button"
+                class="nav-item settings-nav-item"
+                :class="{ active: isActive(page.path) }"
+                :aria-current="isActive(page.path) ? 'page' : undefined"
+                @click="navigate(page.path)"
+              >
+                <component
+                  :is="page.icon"
+                  v-if="page.icon"
+                  class="nav-icon"
+                  :size="19"
+                  :stroke-width="1.8"
+                />
+                <span class="nav-label">{{ page.label }}</span>
+              </button>
+            </section>
           </div>
 
           <div v-else-if="props.downloadMode" class="download-mode-nav">
@@ -410,66 +592,95 @@ onUnmounted(() => {
               <span>新建对话</span>
             </button>
 
-            <section class="workspace-section" aria-labelledby="projects-label">
-              <h3 id="projects-label" class="workspace-section-title">
-                <span class="workspace-section-title-text">项目</span>
-              </h3>
-              <div v-for="project in agentProjects" :key="project.name" class="workspace-project">
-                <button
-                  type="button"
-                  class="workspace-row workspace-project-row"
-                  :aria-expanded="isProjectExpanded(project.name)"
-                  :aria-controls="`project-${project.name}-threads`"
-                  @click="toggleProject(project.name)"
-                >
-                  <Folder :size="15" :stroke-width="1.8" />
-                  <span>{{ project.name }}</span>
-                  <ChevronDown
-                    class="workspace-project-chevron"
-                    :class="{ expanded: isProjectExpanded(project.name) }"
-                    :size="15"
-                    :stroke-width="1.8"
-                  />
-                </button>
-                <div
-                  :id="`project-${project.name}-threads`"
-                  class="workspace-project-threads"
-                  :class="{ expanded: isProjectExpanded(project.name) }"
-                  :aria-hidden="!isProjectExpanded(project.name)"
-                  :inert="!isProjectExpanded(project.name)"
-                >
-                  <div class="workspace-project-threads-inner">
+            <div class="agent-workspace-scroll-shell">
+              <div
+                ref="agentWorkspaceScroll"
+                class="agent-workspace-scroll"
+                @scroll.passive="handleAgentWorkspaceScroll"
+              >
+                <div ref="agentWorkspaceScrollContent" class="agent-workspace-scroll-content">
+                  <section class="workspace-section" aria-labelledby="projects-label">
+                    <h3 id="projects-label" class="workspace-section-title">
+                      <span class="workspace-section-title-text">项目</span>
+                    </h3>
+                    <div
+                      v-for="project in agentProjects"
+                      :key="project.name"
+                      class="workspace-project"
+                    >
+                      <button
+                        type="button"
+                        class="workspace-row workspace-project-row"
+                        :aria-expanded="isProjectExpanded(project.name)"
+                        :aria-controls="`project-${project.name}-threads`"
+                        @click="toggleProject(project.name)"
+                      >
+                        <Folder :size="15" :stroke-width="1.8" />
+                        <span>{{ project.name }}</span>
+                        <ChevronDown
+                          class="workspace-project-chevron"
+                          :class="{ expanded: isProjectExpanded(project.name) }"
+                          :size="15"
+                          :stroke-width="1.8"
+                        />
+                      </button>
+                      <div
+                        :id="`project-${project.name}-threads`"
+                        class="workspace-project-threads"
+                        :class="{ expanded: isProjectExpanded(project.name) }"
+                        :aria-hidden="!isProjectExpanded(project.name)"
+                        :inert="!isProjectExpanded(project.name)"
+                      >
+                        <div class="workspace-project-threads-inner">
+                          <button
+                            v-for="thread in project.threads"
+                            :key="thread"
+                            type="button"
+                            class="workspace-row workspace-thread-row"
+                          >
+                            <MessageSquare :size="14" :stroke-width="1.8" />
+                            <span>{{ thread }}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="workspace-section" aria-labelledby="chats-label">
+                    <h3 id="chats-label" class="workspace-section-title">
+                      <span class="workspace-section-title-text">对话</span>
+                    </h3>
                     <button
-                      v-for="thread in project.threads"
-                      :key="thread"
+                      v-for="chat in agentWorkspace.conversations.value"
+                      :key="chat.id"
                       type="button"
-                      class="workspace-row workspace-thread-row"
+                      class="workspace-row workspace-chat-row"
+                      :class="{ active: isAgentConversationActive(chat.id) }"
+                      :aria-current="isAgentConversationActive(chat.id) ? 'page' : undefined"
+                      @click="selectAgentConversation(chat.id)"
                     >
                       <MessageSquare :size="14" :stroke-width="1.8" />
-                      <span>{{ thread }}</span>
+                      <span>{{ chat.title }}</span>
                     </button>
-                  </div>
+                  </section>
                 </div>
               </div>
-            </section>
-
-            <section class="workspace-section" aria-labelledby="chats-label">
-              <h3 id="chats-label" class="workspace-section-title">
-                <span class="workspace-section-title-text">对话</span>
-              </h3>
-              <button
-                v-for="chat in agentWorkspace.conversations.value"
-                :key="chat.id"
-                type="button"
-                class="workspace-row workspace-chat-row"
-                :class="{ active: isAgentConversationActive(chat.id) }"
-                :aria-current="isAgentConversationActive(chat.id) ? 'page' : undefined"
-                @click="selectAgentConversation(chat.id)"
+              <div
+                ref="agentScrollbarTrack"
+                class="agent-proxy-scrollbar"
+                aria-hidden="true"
+                @pointerdown.self="seekAgentScrollbar"
               >
-                <MessageSquare :size="14" :stroke-width="1.8" />
-                <span>{{ chat.title }}</span>
-              </button>
-            </section>
+                <div
+                  ref="agentScrollbarThumb"
+                  class="agent-proxy-scrollbar-thumb"
+                  @pointerdown.stop="beginAgentScrollbarDrag"
+                  @pointermove="moveAgentScrollbarDrag"
+                  @pointerup="endAgentScrollbarDrag"
+                  @pointercancel="endAgentScrollbarDrag"
+                ></div>
+              </div>
+            </div>
           </div>
 
           <div
@@ -510,6 +721,17 @@ onUnmounted(() => {
           </div>
 
           <div v-if="!props.settingsMode && !props.downloadMode" class="nav-group lower-side">
+            <button
+              type="button"
+              class="nav-item"
+              :class="{ active: agentSettingsPath && isActive(agentSettingsPath) }"
+              :disabled="!agentSettingsPath"
+              :aria-current="agentSettingsPath && isActive(agentSettingsPath) ? 'page' : undefined"
+              @click="openAgentSettings"
+            >
+              <Bot class="nav-icon" :size="20" :stroke-width="1.8" />
+              <span class="nav-label">Agent 设置</span>
+            </button>
             <button
               type="button"
               class="nav-item"

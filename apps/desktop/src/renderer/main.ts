@@ -1,5 +1,6 @@
 import {
   agentInvocationContract,
+  agentModelConfigurationContract,
   agentSessionContract,
   javaRuntimeManagerContract,
   runtimeDiagnosticsContract,
@@ -27,6 +28,7 @@ const runtime = new ClientUiRuntime({
   services: {
     [agentSessionContract]: window.seashard.agent,
     [agentInvocationContract]: window.seashard.agent,
+    [agentModelConfigurationContract]: window.seashard.agentModels,
     [runtimeDiagnosticsContract]: window.seashard.runtime,
     [serverCoreSourceContract]: window.seashard.serverCore,
     [serverCoreDownloadContract]: window.seashard.serverCoreDownload,

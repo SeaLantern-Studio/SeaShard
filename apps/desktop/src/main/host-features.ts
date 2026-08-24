@@ -1,4 +1,8 @@
-import { agentRuntimeManifest, createAgentRuntimeModule } from "@seashard/agent-runtime";
+import {
+  AgentCredentialVault,
+  agentRuntimeManifest,
+  createAgentRuntimeModule,
+} from "@seashard/agent-runtime";
 import { serverDownloadConnectionLimits, type ServerConsoleLine } from "@seashard/contracts";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
@@ -31,6 +35,7 @@ import {
 import { createServerRuntimeModule, serverRuntimeManifest } from "@seashard/server-runtime";
 import { createServerSettingsModule, serverSettingsManifest } from "@seashard/server-settings";
 import type { Context } from "cordis";
+import { safeStorage, shell } from "electron";
 import { join } from "node:path";
 
 interface HostFeatureOptions {
@@ -66,8 +71,30 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
         load: async () =>
           createAgentRuntimeModule({
             userDataRoot,
+            providerTypeSource: kernel.agentProviderTypes,
+            credentialSource: new AgentCredentialVault({
+              userDataRoot,
+              cipher: {
+                encrypt(value) {
+                  if (!safeStorage.isEncryptionAvailable()) {
+                    throw new Error("当前系统无法安全保存 Agent 凭据");
+                  }
+                  return safeStorage.encryptString(value);
+                },
+                decrypt(value) {
+                  if (!safeStorage.isEncryptionAvailable()) {
+                    throw new Error("当前系统无法解密 Agent 凭据");
+                  }
+                  return safeStorage.decryptString(Buffer.from(value));
+                },
+              },
+            }),
             toolSource: kernel.agentTools,
             resourceSource: kernel.agentResources,
+            openModelConfigurationFile: async (path) => {
+              const failure = await shell.openPath(path);
+              if (failure) throw new Error(`打开 Agent models.yml 失败：${failure}`);
+            },
             reportError: (error) => console.error("Agent Runtime failed", error),
           }),
       },

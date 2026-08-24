@@ -15,6 +15,7 @@ import { PluginRuntime, type PluginRuntimeAdapter } from "./runtime";
 import { PluginRuntimeBackend as DefaultPluginRuntimeBackend } from "./runtime-backend";
 import {
   AgentResourceRegistry,
+  AgentProviderTypeRegistry,
   AgentToolRegistry,
   ContributionRegistry,
   PluginEventBus,
@@ -48,6 +49,7 @@ export class PluginKernel {
   readonly services = new ServiceRegistry();
   readonly agentTools = new AgentToolRegistry();
   readonly agentResources = new AgentResourceRegistry();
+  readonly agentProviderTypes = new AgentProviderTypeRegistry();
   readonly contributions = new ContributionRegistry();
   readonly events = new PluginEventBus();
 
@@ -74,6 +76,7 @@ export class PluginKernel {
       {
         services: this.services,
         agentTools: this.agentTools,
+        agentProviderTypes: this.agentProviderTypes,
         agentResources: this.agentResources,
         contributions: this.contributions,
         events: this.events,

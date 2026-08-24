@@ -1,4 +1,5 @@
 import {
+  agentModelConfigurationChangedEvent,
   desktopChannels,
   type ServerConfigurationWriteRequest,
 } from "../packages/contracts/src/index.ts";
@@ -106,6 +107,58 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     "done",
   );
   await runtime.invoke(desktopChannels.agentInvocationCancel, 1, "agent-invocation");
+  assert.equal(
+    (
+      (await runtime.invoke(desktopChannels.agentModelConfigurationGet, 1)) as {
+        revision: string;
+      }
+    ).revision,
+    "a".repeat(64),
+  );
+  const eventSnapshot = {
+    revision: "a".repeat(64),
+    connections: [],
+    models: [],
+    providerTypes: [],
+    diagnostics: [],
+  };
+  await shell.emitEvent(agentModelConfigurationChangedEvent, eventSnapshot);
+  assert.deepEqual(first.sent.at(-1), {
+    channel: desktopChannels.agentModelConfigurationChanged,
+    payload: eventSnapshot,
+  });
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.agentModelDiscover, 1, {
+      providerType: "openai-compatible",
+      settings: { baseURL: "http://127.0.0.1:8000/v1" },
+      credentialValue: "temporary-secret",
+    }),
+    [{ id: "discovered-model" }],
+  );
+  assert.equal(
+    (
+      (await runtime.invoke(desktopChannels.agentModelConfigurationReset, 1, {
+        expectedRevision: "a".repeat(64),
+      })) as { revision: string }
+    ).revision,
+    "b".repeat(64),
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.agentModelConnectionMutate, 1, {
+      expectedRevision: "b".repeat(64),
+      connectionId: "",
+      operations: [],
+    }),
+    /connection ID must be a non-empty string/u,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.agentCredentialWrite, 1, {
+      credentialId: "agent.connection.test",
+      value: "",
+    }),
+    /credential value must be a non-empty string/u,
+  );
+  await runtime.invoke(desktopChannels.agentModelConfigurationOpen, 1);
   await assert.rejects(
     runtime.invoke(desktopChannels.agentSessionStart, 1, { initialMessage: { text: "" } }),
     /non-empty string/,

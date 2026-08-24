@@ -1,6 +1,9 @@
 import type {
   AgentActivityPresentation,
   AgentConfiguredModel,
+  AgentModelConfigurationSnapshot,
+  AgentModelConnectionModel,
+  AgentModelConnectionMutation,
   AgentConversationMode,
   AgentInvocationReference,
   AgentInvocationSnapshot,
@@ -20,6 +23,7 @@ import type {
   AgentResourceReadResult,
   AgentToolDefinition,
   AgentToolHandler,
+  JsonObject,
   JsonValue,
 } from "@seashard/plugin-sdk";
 import {
@@ -35,7 +39,12 @@ import {
 } from "ai";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { AgentModelCatalog, type ResolvedAgentModel } from "./model-config";
+import {
+  AgentModelCatalog,
+  type AgentCredentialSource,
+  type AgentProviderTypeSource,
+  type ResolvedAgentModel,
+} from "./model-config";
 import { AgentSessionJournal, type LoadedAgentSession } from "./session-journal";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
 import { bindAgentHelpResource } from "./help-resource";
@@ -49,6 +58,38 @@ export interface AgentModelSource {
   initialize(): Promise<void>;
   list(): Promise<readonly AgentConfiguredModel[]>;
   resolve(selection?: AgentModelSelection): Promise<ResolvedAgentModel>;
+  dispose?(): Promise<void>;
+}
+
+export interface AgentModelConfigurationAccess {
+  getConfiguration(): Promise<AgentModelConfigurationSnapshot>;
+  mutateConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+    readonly operations: readonly AgentModelConnectionMutation[];
+  }): Promise<AgentModelConfigurationSnapshot>;
+  removeConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  resetConfiguration(input: {
+    readonly expectedRevision: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  discoverModels(input: {
+    readonly providerType: string;
+    readonly settings: JsonObject;
+    readonly credentialId?: string;
+    readonly credentialValue?: string;
+  }): Promise<readonly AgentModelConnectionModel[]>;
+  writeCredential(input: {
+    readonly credentialId: string;
+    readonly value: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  removeCredential(input: {
+    readonly credentialId: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  openConfigurationFile(): Promise<void>;
+  onConfigurationChanged(listener: (snapshot: AgentModelConfigurationSnapshot) => void): () => void;
 }
 
 export interface AgentRuntimeTool {
@@ -93,6 +134,12 @@ interface RunningInvocation {
 export interface AgentRuntimeOptions {
   readonly userDataRoot: string;
   readonly modelCatalog?: AgentModelSource;
+  readonly modelConfiguration?: AgentModelConfigurationAccess;
+  readonly providerTypeSource?: AgentProviderTypeSource;
+  readonly credentialSource?: AgentCredentialSource;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly modelConfigWatchDebounceMs?: number;
+  readonly openModelConfigurationFile?: (path: string) => Promise<void>;
   readonly toolSource: AgentRuntimeToolSource;
   readonly resourceSource: AgentRuntimeResourceSource;
   readonly reportError?: (error: unknown) => void;
@@ -102,6 +149,7 @@ export interface AgentRuntimeOptions {
 export class AgentRuntime {
   readonly journal: AgentSessionJournal;
   readonly models: AgentModelSource;
+  readonly modelConfiguration?: AgentModelConfigurationAccess;
 
   private readonly reportError: (error: unknown) => void;
   private readonly toolSource: AgentRuntimeToolSource;
@@ -113,8 +161,29 @@ export class AgentRuntime {
   private disposed = false;
 
   constructor(options: AgentRuntimeOptions) {
-    this.models =
-      options.modelCatalog ?? new AgentModelCatalog({ userDataRoot: options.userDataRoot });
+    if (options.modelCatalog) {
+      this.models = options.modelCatalog;
+      this.modelConfiguration = options.modelConfiguration;
+    } else {
+      if (!options.providerTypeSource) {
+        throw new Error("Agent Runtime 缺少 Provider Type Registry");
+      }
+      const catalog = new AgentModelCatalog({
+        userDataRoot: options.userDataRoot,
+        providerTypes: options.providerTypeSource,
+        ...(options.credentialSource ? { credentials: options.credentialSource } : {}),
+        ...(options.environment ? { environment: options.environment } : {}),
+        ...(options.modelConfigWatchDebounceMs === undefined
+          ? {}
+          : { watchDebounceMs: options.modelConfigWatchDebounceMs }),
+        ...(options.openModelConfigurationFile
+          ? { openConfigurationFile: options.openModelConfigurationFile }
+          : {}),
+        ...(options.reportError ? { reportError: options.reportError } : {}),
+      });
+      this.models = catalog;
+      this.modelConfiguration = catalog;
+    }
     this.journal = new AgentSessionJournal(options.userDataRoot);
     this.reportError =
       options.reportError ?? ((error) => console.error("Agent Runtime failed", error));
@@ -131,6 +200,71 @@ export class AgentRuntime {
   listModels(): Promise<readonly AgentConfiguredModel[]> {
     this.assertAvailable();
     return this.models.list();
+  }
+
+  getModelConfiguration(): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().getConfiguration();
+  }
+
+  mutateModelConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+    readonly operations: readonly AgentModelConnectionMutation[];
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().mutateConnection(input);
+  }
+
+  removeModelConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().removeConnection(input);
+  }
+  resetModelConfiguration(input: {
+    readonly expectedRevision: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().resetConfiguration(input);
+  }
+
+  discoverModels(input: {
+    readonly providerType: string;
+    readonly settings: JsonObject;
+    readonly credentialId?: string;
+    readonly credentialValue?: string;
+  }): Promise<readonly AgentModelConnectionModel[]> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().discoverModels(input);
+  }
+
+  writeModelCredential(input: {
+    readonly credentialId: string;
+    readonly value: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().writeCredential(input);
+  }
+
+  removeModelCredential(input: {
+    readonly credentialId: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().removeCredential(input);
+  }
+
+  openModelConfigurationFile(): Promise<void> {
+    this.assertAvailable();
+    return this.requireModelConfiguration().openConfigurationFile();
+  }
+
+  onModelConfigurationChanged(
+    listener: (snapshot: AgentModelConfigurationSnapshot) => void,
+  ): () => void {
+    this.assertAvailable();
+    return this.requireModelConfiguration().onConfigurationChanged(listener);
   }
 
   async startSession(input: {
@@ -224,6 +358,7 @@ export class AgentRuntime {
       invocation.controller.abort("Agent Runtime is stopping");
     }
     await Promise.allSettled(this.tasks.values());
+    await this.models.dispose?.();
     this.running.clear();
     this.tasks.clear();
     this.activeBySession.clear();
@@ -498,6 +633,13 @@ export class AgentRuntime {
       ...(error ? { error } : {}),
     };
     this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+  }
+
+  private requireModelConfiguration(): AgentModelConfigurationAccess {
+    if (!this.modelConfiguration) {
+      throw new Error("当前 Agent 模型来源不提供结构化配置服务");
+    }
+    return this.modelConfiguration;
   }
 
   private assertAvailable(): void {

@@ -2,6 +2,7 @@ import type {
   ActivationScope,
   AgentActivityPresentationField,
   AgentActivityPresentationIcon,
+  JsonObject,
   JsonValue,
 } from "@seashard/plugin-sdk";
 
@@ -75,6 +76,15 @@ export const desktopChannels = {
   agentMessageSend: "seashard.agent.message-send",
   agentInvocationGet: "seashard.agent.invocation-get",
   agentInvocationCancel: "seashard.agent.invocation-cancel",
+  agentModelConfigurationGet: "seashard.agent.model-configuration.get",
+  agentModelConnectionMutate: "seashard.agent.model-connection.mutate",
+  agentModelConnectionRemove: "seashard.agent.model-connection.remove",
+  agentModelConfigurationReset: "seashard.agent.model-configuration.reset",
+  agentModelDiscover: "seashard.agent.model-discover",
+  agentCredentialWrite: "seashard.agent.credential-write",
+  agentCredentialRemove: "seashard.agent.credential-remove",
+  agentModelConfigurationOpen: "seashard.agent.model-configuration.open",
+  agentModelConfigurationChanged: "seashard.agent.model-configuration.changed",
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
@@ -107,12 +117,10 @@ export const desktopShellContract = "seashard.desktop-shell";
 export const agentSessionContract = "seashard.agent-session";
 /** Agent Invocation 的运行状态读取与取消 Contract。 */
 export const agentInvocationContract = "seashard.agent-invocation";
-
-export type AgentModelApi =
-  | "openai-completions"
-  | "openai-responses"
-  | "anthropic-messages"
-  | "google-generative-ai";
+/** Agent 模型供应商连接的结构化配置 Contract。 */
+export const agentModelConfigurationContract = "seashard.agent-model-configuration";
+/** 模型配置最后有效 Snapshot 变化事件。 */
+export const agentModelConfigurationChangedEvent = "seashard.agent-model-configuration.changed";
 
 export interface AgentModelSelection {
   readonly connectionId: string;
@@ -121,7 +129,93 @@ export interface AgentModelSelection {
 
 export interface AgentConfiguredModel extends AgentModelSelection {
   readonly name: string;
-  readonly api: AgentModelApi;
+}
+
+export interface AgentModelConnectionModel {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly providerOptions?: JsonObject;
+}
+
+/** Renderer 可读取的连接投影不包含凭据正文。 */
+export interface AgentModelConnectionConfig {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly providerType: string;
+  readonly credentialId?: string;
+  readonly credentialConfigured: boolean;
+  readonly settings: JsonObject;
+  readonly models?: readonly AgentModelConnectionModel[];
+  readonly available: boolean;
+  readonly diagnostic?: string;
+}
+
+/** Provider Type 的只读元数据；工厂和凭据只存在于 Core Host。 */
+export interface AgentProviderTypeDescriptor {
+  readonly id: string;
+  readonly displayName: string;
+  readonly settingsSchema: JsonObject;
+  readonly catalog?: readonly AgentModelConnectionModel[];
+  readonly supportsModelDiscovery: boolean;
+}
+
+/** revision 对应 models.yml 字节内容；diagnostics 描述未取代最后有效配置的加载故障。 */
+export interface AgentModelConfigurationSnapshot {
+  readonly revision: string;
+  readonly connections: readonly AgentModelConnectionConfig[];
+  readonly models: readonly AgentConfiguredModel[];
+  readonly providerTypes: readonly AgentProviderTypeDescriptor[];
+  readonly diagnostics: readonly string[];
+}
+
+export type AgentModelConnectionMutation =
+  | {
+      readonly op: "set";
+      readonly path: readonly string[];
+      readonly value: JsonValue;
+    }
+  | {
+      readonly op: "unset";
+      readonly path: readonly string[];
+    };
+
+export interface AgentModelConfigurationService {
+  getConfiguration(): Promise<AgentModelConfigurationSnapshot>;
+  mutateConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+    readonly operations: readonly AgentModelConnectionMutation[];
+  }): Promise<AgentModelConfigurationSnapshot>;
+  removeConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  /** 用户确认后以空模板替换当前配置；用于从无法结构化编辑的损坏文件恢复。 */
+  resetConfiguration(input: {
+    readonly expectedRevision: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  /** 使用尚未写入 models.yml 的候选设置和临时凭据查询上游模型目录。 */
+  discoverModels(input: {
+    readonly providerType: string;
+    readonly settings: JsonObject;
+    readonly credentialId?: string;
+    /** 只供本次发现请求使用，不写入 Host Vault。 */
+    readonly credentialValue?: string;
+  }): Promise<readonly AgentModelConnectionModel[]>;
+  /** 明文仅作为调用参数进入 Host Vault，任何返回值和事件都不得包含它。 */
+  writeCredential(input: {
+    readonly credentialId: string;
+    readonly value: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  /** 只移除 Host Vault 中的密文，不改写 models.yml 的 credentialId 引用。 */
+  removeCredential(input: {
+    readonly credentialId: string;
+  }): Promise<AgentModelConfigurationSnapshot>;
+  openConfigurationFile(): Promise<void>;
+}
+/** Desktop Renderer 使用的模型设置能力；变化订阅由 Preload 转换成可释放监听器。 */
+export interface AgentModelConfigurationClientService extends AgentModelConfigurationService {
+  onConfigurationChanged(listener: (snapshot: AgentModelConfigurationSnapshot) => void): () => void;
 }
 
 export interface AgentUserMessage {
@@ -1029,6 +1123,7 @@ export interface SeaShardDesktopApi {
   };
   agent: AgentClientService;
   serverCore: ServerCoreSourceClientService;
+  agentModels: AgentModelConfigurationClientService;
   serverSettings: ServerSettingsClientService;
   serverCoreDownload: ServerCoreDownloadClientService;
   fileDownloads: FileDownloadClientService;

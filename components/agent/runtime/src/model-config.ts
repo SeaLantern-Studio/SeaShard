@@ -1,16 +1,25 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogle } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { AgentConfiguredModel, AgentModelApi, AgentModelSelection } from "@seashard/contracts";
-import type { JsonObject, JsonValue } from "@seashard/plugin-sdk";
-import type { LanguageModel } from "ai";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import type {
+  AgentConfiguredModel,
+  AgentModelConfigurationSnapshot,
+  AgentModelConnectionConfig,
+  AgentModelConnectionModel,
+  AgentModelConnectionMutation,
+  AgentProviderTypeDescriptor,
+  AgentModelSelection,
+} from "@seashard/contracts";
+import type { AgentProviderCatalogModel, JsonObject, JsonValue } from "@seashard/plugin-sdk";
+import { createProviderRegistry, type LanguageModel } from "ai";
+import { createHash, randomUUID } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { parseDocument } from "yaml";
 
 export const agentModelsFileName = "models.yml";
 export type AgentProviderOptions = Record<string, JsonObject>;
+
+type AiSdkProvider = Parameters<typeof createProviderRegistry>[0][string];
+type ParsedYamlDocument = ReturnType<typeof parseDocument>;
 
 export interface ResolvedAgentModel {
   readonly selection: AgentModelSelection;
@@ -18,121 +27,617 @@ export interface ResolvedAgentModel {
   readonly providerOptions?: AgentProviderOptions;
 }
 
-interface ParsedModel extends AgentConfiguredModel {
-  readonly headers: Readonly<Record<string, string>>;
+export interface AgentProviderTypeSnapshot {
+  readonly id: string;
+  readonly displayName: string;
+  readonly settingsSchema: JsonObject;
+  readonly catalog?: readonly AgentProviderCatalogModel[];
+  validateSettings(settings: JsonObject): void;
+  create(input: {
+    readonly connectionId: string;
+    readonly settings: JsonObject;
+    readonly apiKey?: string;
+  }): object;
+  discoverModels?(input: {
+    readonly settings: JsonObject;
+    readonly apiKey?: string;
+    readonly signal: AbortSignal;
+  }): Promise<readonly AgentProviderCatalogModel[]>;
+}
+
+export interface AgentProviderTypeSource {
+  snapshot(): {
+    readonly definitions: readonly AgentProviderTypeSnapshot[];
+    resolve(id: string): AgentProviderTypeSnapshot | undefined;
+  };
+  onChanged(listener: () => void): () => void;
+}
+
+export interface AgentCredentialSource {
+  initialize?(): Promise<void>;
+  read(credentialId: string): string | undefined;
+  write?(credentialId: string, value: string): Promise<void>;
+  remove?(credentialId: string): Promise<void>;
+  onChanged?(listener: () => void): () => void;
+  dispose?(): Promise<void>;
+}
+
+interface ParsedConnection {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly providerType: string;
+  readonly credentialId?: string;
+  readonly settings: JsonObject;
+  readonly models?: readonly AgentModelConnectionModel[];
+}
+
+interface EffectiveModel extends AgentConfiguredModel {
+  readonly providerType: string;
   readonly providerOptions?: AgentProviderOptions;
 }
 
-interface ParsedProvider {
-  readonly id: string;
-  readonly baseUrl?: string;
-  readonly apiKey?: string;
-  readonly auth: "apiKey" | "none";
-  readonly api?: AgentModelApi;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly models: readonly ParsedModel[];
-}
-
 interface CatalogSnapshot {
-  readonly fingerprint: string;
-  readonly providers: readonly ParsedProvider[];
-  readonly models: readonly AgentConfiguredModel[];
+  readonly revision: string;
+  readonly source: string;
+  readonly registry: ReturnType<typeof createProviderRegistry>;
+  readonly models: readonly EffectiveModel[];
+  readonly configuration: AgentModelConfigurationSnapshot;
+  readonly loadedAt: string;
 }
 
-const emptyModelsTemplate = `# SeaShard Agent 模型配置。
-# 字段结构参考 OMP models.yml；第一个供应商的第一个模型作为默认模型。
+const emptyModelsTemplate = `# SeaShard Agent 模型供应商配置。
+# providers 的映射键是稳定连接 ID；Session 只保存连接 ID 和模型 ID。
 #
 # providers:
-#   openai:
-#     api: openai-responses
-#     apiKey: OPENAI_API_KEY
+#   company-gateway:
+#     displayName: Company Gateway
+#     providerType: openai-compatible
+#     credentialId: COMPANY_GATEWAY_API_KEY
+#     settings:
+#       baseURL: https://gateway.example/v1
+#       headers:
+#         X-Team: platform
 #     models:
-#       - id: gpt-5.4
-#         name: GPT-5.4
-#
-#   local-openai:
-#     baseUrl: http://127.0.0.1:8000/v1
-#     auth: none
-#     api: openai-completions
-#     models:
-#       - id: Qwen/Qwen3-Coder
-#         name: Qwen 3 Coder
+#       - id: company-coder
+#         displayName: Company Coder
 providers: {}
 `;
 
-/** 读取 <userData>/agent/models.yml，并在每次调用前按文件指纹刷新模型目录。 */
+const connectionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const revisionPattern = /^[a-f0-9]{64}$/u;
+const maximumConfigBytes = 1024 * 1024;
+const writerLockStaleMs = 30_000;
+
+export class AgentModelConfigurationConflictError extends Error {
+  readonly code = "AGENT_MODEL_CONFIGURATION_CONFLICT";
+
+  constructor() {
+    super("模型供应商配置已被其他窗口或外部编辑器修改，请重新载入后再保存。");
+    this.name = "AgentModelConfigurationConflictError";
+  }
+}
+
+/**
+ * models.yml 的唯一 Host 所有者。
+ *
+ * 该类把文件、Provider Type 与凭据一次性投影成不可变 Provider Registry。任何候选
+ * 投影失败都会保留上一份可调用快照；运行中的 Invocation 已持有 LanguageModel，
+ * 后续文件变化只影响下一次 resolve()。
+ */
 export class AgentModelCatalog {
   readonly configPath: string;
 
-  private readonly environment: Readonly<Record<string, string | undefined>>;
+  private readonly credentials: AgentCredentialSource;
+  private readonly providerTypes: AgentProviderTypeSource;
+  private readonly watchDebounceMs: number;
+  private readonly openConfiguration?: (path: string) => Promise<void>;
+  private readonly reportError: (error: unknown) => void;
+  private readonly listeners = new Set<(snapshot: AgentModelConfigurationSnapshot) => void>();
   private snapshot?: CatalogSnapshot;
+  private watcher?: FSWatcher;
+  private reloadTimer?: ReturnType<typeof setTimeout>;
+  private operationQueue: Promise<void> = Promise.resolve();
+  private disposeProviderTypes?: () => void;
+  private disposeCredentials?: () => void;
+  private initialized = false;
+  private disposed = false;
 
   constructor(options: {
     readonly userDataRoot: string;
+    readonly providerTypes: AgentProviderTypeSource;
+    readonly credentials?: AgentCredentialSource;
     readonly environment?: Readonly<Record<string, string | undefined>>;
+    readonly watchDebounceMs?: number;
+    readonly openConfigurationFile?: (path: string) => Promise<void>;
+    readonly reportError?: (error: unknown) => void;
   }) {
     this.configPath = join(options.userDataRoot, "agent", agentModelsFileName);
-    this.environment = options.environment ?? process.env;
+    this.providerTypes = options.providerTypes;
+    this.credentials =
+      options.credentials ?? createEnvironmentCredentialSource(options.environment ?? process.env);
+    this.watchDebounceMs = options.watchDebounceMs ?? 100;
+    if (!Number.isSafeInteger(this.watchDebounceMs) || this.watchDebounceMs < 0) {
+      throw new RangeError("模型配置监听稳定窗口必须是非负安全整数");
+    }
+    this.openConfiguration = options.openConfigurationFile;
+    this.reportError =
+      options.reportError ?? ((error) => console.error("Agent model configuration failed", error));
   }
 
   async initialize(): Promise<void> {
-    await mkdir(dirname(this.configPath), { recursive: true });
+    this.assertNotDisposed();
+    if (this.initialized) return;
+    await this.credentials.initialize?.();
     try {
-      await writeFile(this.configPath, emptyModelsTemplate, {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
+      await mkdir(dirname(this.configPath), { recursive: true });
+      try {
+        await writeFile(this.configPath, emptyModelsTemplate, {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+        });
+      } catch (error) {
+        if (!isAlreadyExists(error)) throw error;
+      }
+      await this.enqueue(async () => {
+        await this.reloadFromDisk(true);
       });
+      this.disposeProviderTypes = this.providerTypes.onChanged(() => this.scheduleReprojection());
+      this.disposeCredentials = this.credentials.onChanged?.(() => this.scheduleReprojection());
+      this.startWatcher();
+      this.initialized = true;
     } catch (error) {
-      if (!isAlreadyExists(error)) throw error;
+      await this.credentials.dispose?.();
+      throw error;
     }
-    await this.refresh();
   }
 
   async list(): Promise<readonly AgentConfiguredModel[]> {
-    return (await this.refresh()).models.map((model) => ({ ...model }));
+    this.assertReady();
+    return this.current().models.map(
+      ({ providerType: _providerType, providerOptions: _options, ...model }) => ({
+        ...model,
+      }),
+    );
   }
 
   async resolve(selection?: AgentModelSelection): Promise<ResolvedAgentModel> {
-    const snapshot = await this.refresh();
+    this.assertReady();
+    const snapshot = this.current();
     const selected = selection ?? snapshot.models[0];
     if (!selected) throw new Error(`Agent 模型尚未配置：${this.configPath}`);
-
-    const provider = snapshot.providers.find((candidate) => candidate.id === selected.connectionId);
-    const model = provider?.models.find((candidate) => candidate.modelId === selected.modelId);
-    if (!provider || !model) {
+    const model = snapshot.models.find(
+      (candidate) =>
+        candidate.connectionId === selected.connectionId && candidate.modelId === selected.modelId,
+    );
+    if (!model) {
       throw new Error(`Agent 模型不存在：${selected.connectionId}/${selected.modelId}`);
     }
-    const providerOptions = resolveProviderOptions(provider, model);
+    const providerOptions = resolveProviderOptions(model);
     return {
-      selection: { connectionId: provider.id, modelId: model.modelId },
-      languageModel: createLanguageModel(provider, model, this.environment, this.configPath),
+      selection: { connectionId: model.connectionId, modelId: model.modelId },
+      languageModel: snapshot.registry.languageModel(`${model.connectionId}:${model.modelId}`),
       ...(providerOptions ? { providerOptions } : {}),
     };
   }
 
-  private async refresh(): Promise<CatalogSnapshot> {
-    const metadata = await stat(this.configPath);
-    const fingerprint = `${metadata.size}:${metadata.mtimeMs}`;
-    if (this.snapshot?.fingerprint === fingerprint) return this.snapshot;
+  async getConfiguration(): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    return cloneConfiguration(this.current().configuration);
+  }
 
-    const source = await readFile(this.configPath, "utf8");
-    const providers = parseModelsFile(source, this.configPath);
-    const models = providers.flatMap((provider) =>
-      provider.models.map((model) => ({
-        connectionId: provider.id,
-        modelId: model.modelId,
-        name: model.name,
-        api: model.api,
-      })),
+  mutateConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+    readonly operations: readonly AgentModelConnectionMutation[];
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    const expectedRevision = requireRevision(input.expectedRevision);
+    const connectionId = requireConnectionId(input.connectionId);
+    const operations = normalizeMutations(input.operations);
+    return this.enqueue(async () =>
+      this.writeDocument(expectedRevision, (document) => {
+        for (const operation of operations) {
+          const path = ["providers", connectionId, ...operation.path];
+          if (operation.op === "set") document.setIn(path, structuredClone(operation.value));
+          else document.deleteIn(path);
+        }
+      }),
     );
-    const snapshot = { fingerprint, providers, models };
+  }
+
+  removeConnection(input: {
+    readonly expectedRevision: string;
+    readonly connectionId: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    const expectedRevision = requireRevision(input.expectedRevision);
+    const connectionId = requireConnectionId(input.connectionId);
+    return this.enqueue(async () =>
+      this.writeDocument(expectedRevision, (document) => {
+        if (!document.hasIn(["providers", connectionId])) {
+          throw new Error(`模型供应商连接不存在：${connectionId}`);
+        }
+        document.deleteIn(["providers", connectionId]);
+      }),
+    );
+  }
+  resetConfiguration(input: {
+    readonly expectedRevision: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    const expectedRevision = requireRevision(input.expectedRevision);
+    return this.enqueue(async () =>
+      withWriterLock(this.configPath, async () => {
+        const currentBytes = await readBoundedFile(this.configPath);
+        if (digest(currentBytes) !== expectedRevision) {
+          throw new AgentModelConfigurationConflictError();
+        }
+        const nextBytes = Buffer.from(emptyModelsTemplate, "utf8");
+        const candidate = this.buildSnapshot(emptyModelsTemplate, digest(nextBytes));
+        await writeFileAtomically(this.configPath, nextBytes);
+        this.accept(candidate);
+        return cloneConfiguration(candidate.configuration);
+      }),
+    );
+  }
+
+  async discoverModels(input: {
+    readonly providerType: string;
+    readonly settings: JsonObject;
+    readonly credentialId?: string;
+    readonly credentialValue?: string;
+  }): Promise<readonly AgentModelConnectionModel[]> {
+    this.assertReady();
+    const providerTypeId = requireNonEmptyText(input.providerType, "providerType");
+    const providerType = this.providerTypes.snapshot().resolve(providerTypeId);
+    if (!providerType) throw new Error(`AI Provider Type 未注册：${providerTypeId}`);
+    if (!providerType.discoverModels) {
+      throw new Error(`AI Provider Type 不支持模型发现：${providerTypeId}`);
+    }
+    const settings = normalizeJsonObject(input.settings, "模型发现 settings");
+    providerType.validateSettings(settings);
+    const credentialId =
+      input.credentialId === undefined ? undefined : requireCredentialReference(input.credentialId);
+    const credentialValue =
+      input.credentialValue === undefined
+        ? undefined
+        : requireNonEmptyText(input.credentialValue, "credentialValue");
+    if (credentialId && credentialValue) {
+      throw new TypeError("模型发现不能同时使用 credentialId 和临时凭据");
+    }
+    const apiKey =
+      credentialValue ?? (credentialId ? this.credentials.read(credentialId) : undefined);
+    if (credentialId && !apiKey) {
+      throw new Error(`Agent 凭据尚未配置：${credentialId}`);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort("模型发现超时"), 30_000);
+    try {
+      const models = await providerType.discoverModels({
+        settings,
+        ...(apiKey ? { apiKey } : {}),
+        signal: controller.signal,
+      });
+      return normalizeDiscoveredModels(models, providerTypeId);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async writeCredential(input: {
+    readonly credentialId: string;
+    readonly value: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    if (!this.credentials.write) throw new Error("当前 Host 没有可写的 Agent 凭据存储");
+    const credentialId = requireCredentialReference(input.credentialId);
+    if (typeof input.value !== "string" || !input.value.trim()) {
+      throw new TypeError("Agent 凭据不能为空");
+    }
+    await this.credentials.write(credentialId, input.value);
+    return this.enqueue(async () => this.reprojectCurrent());
+  }
+
+  async removeCredential(input: {
+    readonly credentialId: string;
+  }): Promise<AgentModelConfigurationSnapshot> {
+    this.assertReady();
+    if (!this.credentials.remove) throw new Error("当前 Host 没有可写的 Agent 凭据存储");
+    await this.credentials.remove(requireCredentialReference(input.credentialId));
+    return this.enqueue(async () => this.reprojectCurrent());
+  }
+
+  async openConfigurationFile(): Promise<void> {
+    this.assertReady();
+    if (!this.openConfiguration) {
+      throw new Error("当前 Host 不支持打开模型供应商配置文件");
+    }
+    await this.openConfiguration(this.configPath);
+  }
+
+  onConfigurationChanged(
+    listener: (snapshot: AgentModelConfigurationSnapshot) => void,
+  ): () => void {
+    this.assertReady();
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.initialized = false;
+    if (this.reloadTimer) clearTimeout(this.reloadTimer);
+    this.reloadTimer = undefined;
+    this.watcher?.close();
+    this.watcher = undefined;
+    this.disposeProviderTypes?.();
+    this.disposeCredentials?.();
+    this.disposeProviderTypes = undefined;
+    this.disposeCredentials = undefined;
+    await this.operationQueue;
+    await this.credentials.dispose?.();
+    this.listeners.clear();
+  }
+
+  private startWatcher(): void {
+    const fileName = basename(this.configPath);
+    this.watcher = watch(dirname(this.configPath), { persistent: false }, (_event, changed) => {
+      if (changed !== null && changed.toString() !== fileName) return;
+      this.scheduleReload();
+    });
+    this.watcher.on("error", (error) => {
+      void this.enqueue(async () => this.publishDiagnostic(error)).catch(this.reportError);
+    });
+  }
+
+  /** 目录级监听同时覆盖原地写入与临时文件 rename 替换。 */
+  private scheduleReload(): void {
+    if (this.disposed) return;
+    if (this.reloadTimer) clearTimeout(this.reloadTimer);
+    this.reloadTimer = setTimeout(() => {
+      this.reloadTimer = undefined;
+      void this.enqueue(async () => this.reloadFromDisk(false)).catch(this.reportError);
+    }, this.watchDebounceMs);
+  }
+
+  private scheduleReprojection(): void {
+    if (this.disposed || !this.snapshot) return;
+    void this.enqueue(async () => {
+      try {
+        this.reprojectCurrent();
+      } catch (error) {
+        this.publishDiagnostic(error);
+      }
+    }).catch(this.reportError);
+  }
+
+  private reprojectCurrent(): AgentModelConfigurationSnapshot {
+    const current = this.current();
+    const candidate = this.buildSnapshot(current.source, current.revision);
+    this.accept(candidate);
+    return cloneConfiguration(candidate.configuration);
+  }
+
+  private async reloadFromDisk(startup: boolean): Promise<void> {
+    if (this.disposed && !startup) return;
+    let bytes: Buffer;
+    try {
+      bytes = await readBoundedFile(this.configPath);
+    } catch (error) {
+      if (startup || !this.snapshot) throw error;
+      this.publishDiagnostic(error);
+      return;
+    }
+    const revision = digest(bytes);
+    if (
+      this.snapshot?.revision === revision &&
+      this.snapshot.configuration.diagnostics.length === semanticDiagnostics(this.snapshot).length
+    ) {
+      return;
+    }
+    try {
+      const source = decodeUtf8(bytes, this.configPath);
+      this.accept(this.buildSnapshot(source, revision));
+    } catch (error) {
+      if (startup && !this.snapshot) {
+        // 配置损坏不能阻止 Session 与设置 Contract 启动；保留原文件，由用户显式重置或外部修复。
+        this.accept(this.buildInvalidSnapshot(bytes.toString("utf8"), revision, error));
+        this.reportError(error);
+        return;
+      }
+      this.publishDiagnostic(error);
+    }
+  }
+
+  private buildInvalidSnapshot(source: string, revision: string, error: unknown): CatalogSnapshot {
+    const configuration: AgentModelConfigurationSnapshot = {
+      revision,
+      connections: [],
+      models: [],
+      providerTypes: projectProviderTypes(this.providerTypes.snapshot().definitions),
+      diagnostics: [errorMessage(error)],
+    };
+    return {
+      revision,
+      source,
+      registry: createProviderRegistry({}),
+      models: [],
+      configuration,
+      loadedAt: new Date().toISOString(),
+    };
+  }
+
+  private buildSnapshot(source: string, revision: string): CatalogSnapshot {
+    const connections = parseModelsFile(source, this.configPath).connections;
+    const providerTypeSnapshot = this.providerTypes.snapshot();
+    const providers: Record<string, AiSdkProvider> = Object.create(null) as Record<
+      string,
+      AiSdkProvider
+    >;
+    const models: EffectiveModel[] = [];
+    const projectedConnections: AgentModelConnectionConfig[] = [];
+    const diagnostics: string[] = [];
+
+    for (const connection of connections) {
+      const credential = connection.credentialId
+        ? this.credentials.read(connection.credentialId)
+        : undefined;
+      // 显式 credentialId 缺失时不创建 Provider，避免 SDK 悄悄回退到进程环境中的同名默认变量。
+      if (connection.credentialId && !credential) {
+        const diagnostic = `连接 ${connection.id} 的凭据尚未配置：${connection.credentialId}`;
+        diagnostics.push(diagnostic);
+        projectedConnections.push(projectConnection(connection, false, false, diagnostic));
+        continue;
+      }
+      const providerType = providerTypeSnapshot.resolve(connection.providerType);
+      if (!providerType) {
+        const diagnostic = `连接 ${connection.id} 的 Provider Type 未注册：${connection.providerType}`;
+        diagnostics.push(diagnostic);
+        projectedConnections.push(
+          projectConnection(connection, Boolean(credential), false, diagnostic),
+        );
+        continue;
+      }
+
+      providerType.validateSettings(connection.settings);
+      const configuredModels = resolveConnectionModels(
+        connection,
+        providerType.catalog,
+        this.configPath,
+      );
+      const provider = assertAiSdkProvider(
+        providerType.create({
+          connectionId: connection.id,
+          settings: structuredClone(connection.settings),
+          ...(credential ? { apiKey: credential } : {}),
+        }),
+        connection.id,
+      );
+      providers[connection.id] = provider;
+      projectedConnections.push(projectConnection(connection, Boolean(credential), true));
+      for (const configured of configuredModels) {
+        models.push({
+          connectionId: connection.id,
+          modelId: configured.id,
+          name: configured.displayName ?? configured.id,
+          providerType: connection.providerType,
+          ...(configured.providerOptions
+            ? {
+                providerOptions: normalizeProviderOptions(
+                  configured.providerOptions,
+                  connection.id,
+                  configured.id,
+                ),
+              }
+            : {}),
+        });
+      }
+    }
+
+    const registry = createProviderRegistry(providers);
+    const configuration: AgentModelConfigurationSnapshot = {
+      revision,
+      connections: projectedConnections,
+      models: models.map(
+        ({ providerType: _providerType, providerOptions: _options, ...model }) => ({
+          ...model,
+        }),
+      ),
+      providerTypes: projectProviderTypes(providerTypeSnapshot.definitions),
+      diagnostics,
+    };
+    return {
+      revision,
+      source,
+      registry,
+      models,
+      configuration,
+      loadedAt: new Date().toISOString(),
+    };
+  }
+
+  private async writeDocument(
+    expectedRevision: string,
+    mutate: (document: ParsedYamlDocument) => void,
+  ): Promise<AgentModelConfigurationSnapshot> {
+    return withWriterLock(this.configPath, async () => {
+      const currentBytes = await readBoundedFile(this.configPath);
+      if (digest(currentBytes) !== expectedRevision) {
+        throw new AgentModelConfigurationConflictError();
+      }
+      const currentSource = decodeUtf8(currentBytes, this.configPath);
+      const document = parseModelsFile(currentSource, this.configPath).document;
+      mutate(document);
+      const nextSource = document.toString({ lineWidth: 0 });
+      const nextBytes = Buffer.from(nextSource, "utf8");
+      if (nextBytes.byteLength > maximumConfigBytes) {
+        throw new RangeError("Agent models.yml 不能超过 1 MB");
+      }
+      const candidate = this.buildSnapshot(nextSource, digest(nextBytes));
+      await writeFileAtomically(this.configPath, nextBytes);
+      this.accept(candidate);
+      return cloneConfiguration(candidate.configuration);
+    });
+  }
+
+  private accept(snapshot: CatalogSnapshot): void {
     this.snapshot = snapshot;
-    return snapshot;
+    this.publish(snapshot.configuration);
+  }
+
+  private publishDiagnostic(error: unknown): void {
+    const current = this.snapshot;
+    if (!current) return;
+    const diagnostic = errorMessage(error);
+    this.reportError(error);
+    const baseline = semanticDiagnostics(current);
+    const diagnostics = [...new Set([...baseline, diagnostic])];
+    if (arraysEqual(current.configuration.diagnostics, diagnostics)) return;
+    const configuration = { ...current.configuration, diagnostics };
+    this.snapshot = { ...current, configuration };
+    this.publish(configuration);
+  }
+
+  private publish(snapshot: AgentModelConfigurationSnapshot): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(cloneConfiguration(snapshot));
+      } catch (error) {
+        this.reportError(error);
+      }
+    }
+  }
+
+  private current(): CatalogSnapshot {
+    if (!this.snapshot) throw new Error("Agent 模型配置尚未初始化");
+    return this.snapshot;
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationQueue.then(operation);
+    this.operationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private assertReady(): void {
+    this.assertNotDisposed();
+    if (!this.initialized) throw new Error("Agent 模型配置尚未初始化");
+  }
+
+  private assertNotDisposed(): void {
+    if (this.disposed) throw new Error("Agent 模型配置已停止");
   }
 }
 
-function parseModelsFile(source: string, configPath: string): readonly ParsedProvider[] {
+function parseModelsFile(
+  source: string,
+  configPath: string,
+): { readonly document: ParsedYamlDocument; readonly connections: readonly ParsedConnection[] } {
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length > 0) {
     throw configError(configPath, document.errors.map((error) => error.message).join("; "));
@@ -145,251 +650,333 @@ function parseModelsFile(source: string, configPath: string): readonly ParsedPro
   }
   const root = requireObject(raw, configPath, "root");
   const providers = requireObject(root.providers ?? {}, configPath, "providers");
-  return Object.entries(providers).map(([providerId, value]) =>
-    parseProvider(providerId, value, configPath),
+  const connections = Object.entries(providers).map(([connectionId, value]) =>
+    parseConnection(connectionId, value, configPath),
   );
+  return { document, connections };
 }
 
-function parseProvider(providerId: string, value: unknown, configPath: string): ParsedProvider {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(providerId)) {
-    throw configError(configPath, `供应商 ID 无效：${providerId}`);
-  }
-  const path = `providers.${providerId}`;
-  const object = requireObject(value, configPath, path);
-  const api = optionalApi(object.api, configPath, `${path}.api`);
-  const rawModels = object.models ?? [];
-  if (!Array.isArray(rawModels)) throw configError(configPath, `${path}.models 必须是数组`);
-  const models = rawModels.map((model, index) =>
-    parseModel(providerId, model, api, configPath, `${path}.models[${index}]`),
-  );
-  const seen = new Set<string>();
-  for (const model of models) {
-    if (seen.has(model.modelId)) {
-      throw configError(configPath, `模型重复：${providerId}/${model.modelId}`);
-    }
-    seen.add(model.modelId);
-  }
-  const auth = object.auth === undefined ? "apiKey" : requireAuth(object.auth, configPath, path);
-  const apiKey = optionalString(object.apiKey, configPath, `${path}.apiKey`);
-  if (apiKey?.startsWith("!")) {
-    throw configError(configPath, `${path}.apiKey 不支持执行命令`);
-  }
-  const baseUrl = optionalUrl(object.baseUrl, configPath, `${path}.baseUrl`);
-  return {
-    id: providerId,
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(apiKey ? { apiKey } : {}),
-    ...(api ? { api } : {}),
-    auth,
-    headers: parseStringRecord(object.headers, configPath, `${path}.headers`),
-    models,
-  };
-}
-
-function parseModel(
-  connectionId: string,
+function parseConnection(
+  connectionIdValue: string,
   value: unknown,
-  providerApi: AgentModelApi | undefined,
   configPath: string,
-  path: string,
-): ParsedModel {
+): ParsedConnection {
+  const connectionId = requireConnectionId(connectionIdValue);
+  const path = `providers.${connectionId}`;
   const object = requireObject(value, configPath, path);
-  const modelId = requireString(object.id, configPath, `${path}.id`);
-  const api = optionalApi(object.api, configPath, `${path}.api`) ?? providerApi;
-  if (!api) throw configError(configPath, `${path}.api 或供应商 api 必须配置`);
+  const models =
+    object.models === undefined
+      ? undefined
+      : parseConnectionModels(object.models, configPath, path);
   return {
-    connectionId,
-    modelId,
-    name: optionalString(object.name, configPath, `${path}.name`) ?? modelId,
-    api,
-    headers: parseStringRecord(object.headers, configPath, `${path}.headers`),
-    ...(object.providerOptions === undefined
+    id: connectionId,
+    ...(object.displayName === undefined
       ? {}
-      : {
-          providerOptions: parseProviderOptions(
-            object.providerOptions,
-            configPath,
-            `${path}.providerOptions`,
-          ),
-        }),
+      : { displayName: requireString(object.displayName, configPath, `${path}.displayName`) }),
+    providerType: requireString(object.providerType, configPath, `${path}.providerType`),
+    ...(object.credentialId === undefined
+      ? {}
+      : { credentialId: requireCredentialId(object.credentialId, configPath, path) }),
+    settings:
+      object.settings === undefined
+        ? {}
+        : requireJsonObject(object.settings, configPath, `${path}.settings`),
+    ...(models === undefined ? {} : { models }),
   };
 }
 
-function createLanguageModel(
-  provider: ParsedProvider,
-  model: ParsedModel,
-  environment: Readonly<Record<string, string | undefined>>,
+function parseConnectionModels(
+  value: unknown,
   configPath: string,
-): LanguageModel {
-  const apiKey = resolveApiKey(provider, model.api, environment, configPath);
-  const headers = { ...provider.headers, ...model.headers };
-  if (model.api === "openai-completions") {
-    if (provider.baseUrl) {
-      return createOpenAICompatible({
-        name: provider.id,
-        baseURL: provider.baseUrl,
-        ...(apiKey ? { apiKey } : {}),
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
-        includeUsage: true,
-      })(model.modelId);
-    }
-    if (!apiKey) throw configError(configPath, `${provider.id} 需要 API Key`);
-    return createOpenAI({
-      name: provider.id,
-      apiKey,
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    }).chat(model.modelId);
+  connectionPath: string,
+): readonly AgentModelConnectionModel[] {
+  if (!Array.isArray(value)) {
+    throw configError(configPath, `${connectionPath}.models 必须是数组`);
   }
-  if (provider.auth === "none") {
-    throw configError(configPath, `${provider.id} 的 auth: none 仅支持 OpenAI 兼容接口`);
-  }
-  if (!apiKey) throw configError(configPath, `${provider.id} 需要 API Key`);
-  if (model.api === "openai-responses") {
-    return createOpenAI({
-      name: provider.id,
-      apiKey,
-      ...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    }).responses(model.modelId);
-  }
-  if (model.api === "anthropic-messages") {
-    return createAnthropic({
-      name: provider.id,
-      apiKey,
-      ...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    }).messages(model.modelId);
-  }
-  return createGoogle({
-    name: provider.id,
-    apiKey,
-    ...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-  }).languageModel(model.modelId);
+  const seen = new Set<string>();
+  return value.map((entry, index) => {
+    const path = `${connectionPath}.models[${index}]`;
+    const object = requireObject(entry, configPath, path);
+    const id = requireString(object.id, configPath, `${path}.id`);
+    if (seen.has(id)) throw configError(configPath, `模型重复：${id}`);
+    seen.add(id);
+    return {
+      id,
+      ...(object.displayName === undefined
+        ? {}
+        : { displayName: requireString(object.displayName, configPath, `${path}.displayName`) }),
+      ...(object.providerOptions === undefined
+        ? {}
+        : {
+            providerOptions: requireJsonObject(
+              object.providerOptions,
+              configPath,
+              `${path}.providerOptions`,
+            ),
+          }),
+    };
+  });
 }
 
-/**
- * Responses 工具闭环由本地 Session 回放完整上下文，不依赖供应商保存响应。
- * 显式关闭 store 后，OpenAI Provider 会请求并回传 encrypted reasoning，
- * 避免中转层将 store 强制改为 false 时继续引用上游未保存的 rs_* 项。
- */
-function resolveProviderOptions(
-  provider: ParsedProvider,
-  model: ParsedModel,
-): AgentProviderOptions | undefined {
-  if (model.api !== "openai-responses") return model.providerOptions;
-  const configured = model.providerOptions ?? {};
-  const optionNamespace = provider.id.includes("azure") ? "azure" : "openai";
+function resolveConnectionModels(
+  connection: ParsedConnection,
+  catalog: readonly AgentProviderCatalogModel[] | undefined,
+  configPath: string,
+): readonly AgentModelConnectionModel[] {
+  const models = connection.models ?? catalog;
+  if (!models?.length) {
+    throw configError(
+      configPath,
+      `providers.${connection.id} 必须声明 models，或使用带内建 Catalog 的 Provider Type`,
+    );
+  }
+  const seen = new Set<string>();
+  return models.map((model) => {
+    if (seen.has(model.id)) {
+      throw configError(configPath, `模型重复：${connection.id}/${model.id}`);
+    }
+    seen.add(model.id);
+    return structuredClone(model);
+  });
+}
+
+function projectConnection(
+  connection: ParsedConnection,
+  credentialConfigured: boolean,
+  available: boolean,
+  diagnostic?: string,
+): AgentModelConnectionConfig {
   return {
-    ...configured,
-    [optionNamespace]: {
-      ...configured[optionNamespace],
+    id: connection.id,
+    ...(connection.displayName ? { displayName: connection.displayName } : {}),
+    providerType: connection.providerType,
+    ...(connection.credentialId ? { credentialId: connection.credentialId } : {}),
+    credentialConfigured,
+    settings: structuredClone(connection.settings),
+    ...(connection.models
+      ? { models: connection.models.map((model) => structuredClone(model)) }
+      : {}),
+    available,
+    ...(diagnostic ? { diagnostic } : {}),
+  };
+}
+function projectProviderTypes(
+  definitions: readonly AgentProviderTypeSnapshot[],
+): readonly AgentProviderTypeDescriptor[] {
+  return definitions.map((definition) => ({
+    id: definition.id,
+    displayName: definition.displayName,
+    settingsSchema: structuredClone(definition.settingsSchema),
+    ...(definition.catalog
+      ? { catalog: definition.catalog.map((model) => structuredClone(model)) }
+      : {}),
+    supportsModelDiscovery: definition.discoverModels !== undefined,
+  }));
+}
+
+function normalizeDiscoveredModels(
+  value: readonly AgentProviderCatalogModel[],
+  providerTypeId: string,
+): readonly AgentModelConnectionModel[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`AI Provider Type ${providerTypeId} 的模型发现结果必须是数组`);
+  }
+  const seen = new Set<string>();
+  return value.map((model, index) => {
+    if (!model || typeof model !== "object" || Array.isArray(model)) {
+      throw new TypeError(`AI Provider Type ${providerTypeId} 的模型发现结果 ${index + 1} 无效`);
+    }
+    const id = requireNonEmptyText(model.id, `模型发现结果 ${index + 1}.id`);
+    if (seen.has(id)) {
+      throw new TypeError(`AI Provider Type ${providerTypeId} 返回了重复模型：${id}`);
+    }
+    seen.add(id);
+    return {
+      id,
+      ...(model.displayName
+        ? { displayName: requireNonEmptyText(model.displayName, `模型 ${id} displayName`) }
+        : {}),
+      ...(model.providerOptions
+        ? {
+            providerOptions: normalizeJsonObject(
+              model.providerOptions,
+              `模型 ${id} providerOptions`,
+            ),
+          }
+        : {}),
+    };
+  });
+}
+
+function normalizeJsonObject(value: unknown, label: string): JsonObject {
+  const normalized = requireJsonValue(value, label);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    throw new TypeError(`${label} 必须是对象`);
+  }
+  return normalized;
+}
+
+function assertAiSdkProvider(value: object, connectionId: string): AiSdkProvider {
+  const record = value as {
+    readonly specificationVersion?: unknown;
+    readonly languageModel?: unknown;
+    readonly embeddingModel?: unknown;
+    readonly imageModel?: unknown;
+  };
+  if (
+    (record.specificationVersion !== "v3" && record.specificationVersion !== "v4") ||
+    typeof record.languageModel !== "function" ||
+    typeof record.embeddingModel !== "function" ||
+    typeof record.imageModel !== "function"
+  ) {
+    throw new TypeError(`连接 ${connectionId} 的 Provider Type 没有返回有效的 AI SDK Provider`);
+  }
+  return value as AiSdkProvider;
+}
+
+function normalizeProviderOptions(
+  value: JsonObject,
+  connectionId: string,
+  modelId: string,
+): AgentProviderOptions {
+  return Object.fromEntries(
+    Object.entries(value).map(([providerId, options]) => {
+      if (!options || typeof options !== "object" || Array.isArray(options)) {
+        throw new TypeError(
+          `模型 ${connectionId}/${modelId} 的 providerOptions.${providerId} 必须是对象`,
+        );
+      }
+      return [providerId, structuredClone(options)];
+    }),
+  );
+}
+
+/** OpenAI Responses 必须显式关闭服务端存储，以保留可回放的加密推理内容。 */
+function resolveProviderOptions(model: EffectiveModel): AgentProviderOptions | undefined {
+  const configured = model.providerOptions ?? {};
+  if (model.providerType !== "openai") {
+    return Object.keys(configured).length > 0 ? structuredClone(configured) : undefined;
+  }
+  return {
+    ...structuredClone(configured),
+    openai: {
+      ...configured.openai,
       store: false,
     },
   };
 }
 
-function resolveApiKey(
-  provider: ParsedProvider,
-  api: AgentModelApi,
-  environment: Readonly<Record<string, string | undefined>>,
-  configPath: string,
-): string | undefined {
-  if (provider.auth === "none") return undefined;
-  if (provider.apiKey) return environment[provider.apiKey]?.trim() || provider.apiKey;
-  const environmentName =
-    api === "anthropic-messages"
-      ? "ANTHROPIC_API_KEY"
-      : api === "google-generative-ai"
-        ? "GOOGLE_GENERATIVE_AI_API_KEY"
-        : "OPENAI_API_KEY";
-  const value = environment[environmentName]?.trim();
-  if (!value) {
-    throw configError(configPath, `${provider.id}.apiKey 或 ${environmentName} 必须配置`);
+function normalizeMutations(
+  value: readonly AgentModelConnectionMutation[],
+): readonly AgentModelConnectionMutation[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new TypeError("模型连接修改必须至少包含一个操作");
+  }
+  return value.map((operation, index) => {
+    if (!operation || typeof operation !== "object") {
+      throw new TypeError(`模型连接修改 ${index + 1} 必须是对象`);
+    }
+    const path = normalizeMutationPath(operation.path, index);
+    if (operation.op === "unset") return { op: "unset", path };
+    if (operation.op !== "set") {
+      throw new TypeError(`模型连接修改 ${index + 1} 的 op 不受支持`);
+    }
+    return { op: "set", path, value: requireJsonValue(operation.value, "模型连接修改值") };
+  });
+}
+
+function normalizeMutationPath(value: readonly string[], index: number): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) {
+    throw new TypeError(`模型连接修改 ${index + 1} 的 path 长度无效`);
+  }
+  const path = value.map((segment) => {
+    if (
+      typeof segment !== "string" ||
+      !segment ||
+      segment.length > 64 ||
+      segment === "__proto__" ||
+      segment === "prototype" ||
+      segment === "constructor"
+    ) {
+      throw new TypeError(`模型连接修改 ${index + 1} 包含无效路径段`);
+    }
+    return segment;
+  });
+  if (!["displayName", "providerType", "credentialId", "settings", "models"].includes(path[0]!)) {
+    throw new TypeError(`模型连接修改 ${index + 1} 不能修改字段 ${path[0]}`);
+  }
+  return path;
+}
+
+function requireRevision(value: unknown): string {
+  if (typeof value !== "string" || !revisionPattern.test(value)) {
+    throw new TypeError("模型供应商配置 revision 无效");
   }
   return value;
 }
 
-function optionalApi(value: unknown, configPath: string, path: string): AgentModelApi | undefined {
-  if (value === undefined) return undefined;
-  if (
-    value === "openai-completions" ||
-    value === "openai-responses" ||
-    value === "anthropic-messages" ||
-    value === "google-generative-ai"
-  ) {
-    return value;
+function requireConnectionId(value: unknown): string {
+  if (typeof value !== "string" || !connectionIdPattern.test(value)) {
+    throw new TypeError(`模型供应商连接 ID 无效：${String(value)}`);
   }
-  throw configError(configPath, `${path} 使用了尚未支持的 API`);
+  return value;
 }
 
-function requireAuth(value: unknown, configPath: string, path: string): "apiKey" | "none" {
-  if (value === "apiKey" || value === "none") return value;
-  throw configError(configPath, `${path}.auth 必须是 apiKey 或 none`);
-}
-
-function optionalUrl(value: unknown, configPath: string, path: string): string | undefined {
-  const raw = optionalString(value, configPath, path);
-  if (!raw) return undefined;
-  let url: URL;
+function requireCredentialId(value: unknown, configPath: string, path: string): string {
   try {
-    url = new URL(raw);
-  } catch {
-    throw configError(configPath, `${path} 必须是绝对 HTTP URL`);
+    return requireCredentialReference(value);
+  } catch (error) {
+    throw configError(configPath, `${path}.credentialId 格式无效：${errorMessage(error)}`);
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw configError(configPath, `${path} 必须使用 HTTP 或 HTTPS`);
-  }
-  return raw.replace(/\/+$/, "");
 }
 
-function parseStringRecord(
-  value: unknown,
-  configPath: string,
-  path: string,
-): Readonly<Record<string, string>> {
-  if (value === undefined) return {};
-  const object = requireObject(value, configPath, path);
-  return Object.fromEntries(
-    Object.entries(object).map(([key, entry]) => [
-      key,
-      requireString(entry, configPath, `${path}.${key}`),
-    ]),
-  );
+function requireCredentialReference(value: unknown): string {
+  const id = requireNonEmptyText(value, "credentialId");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) {
+    throw new TypeError(`credentialId 格式无效：${id}`);
+  }
+  return id;
 }
 
-function parseProviderOptions(
-  value: unknown,
-  configPath: string,
-  path: string,
-): AgentProviderOptions {
-  const object = requireObject(value, configPath, path);
-  return Object.fromEntries(
-    Object.entries(object).map(([providerId, options]) => [
-      providerId,
-      requireJsonObject(options, configPath, `${path}.${providerId}`),
-    ]),
-  );
+function requireNonEmptyText(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`${label} 必须是非空字符串`);
+  }
+  return value.trim();
 }
 
 function requireJsonObject(value: unknown, configPath: string, path: string): JsonObject {
-  const object = requireObject(value, configPath, path);
-  return Object.fromEntries(
-    Object.entries(object).map(([key, entry]) => [
-      key,
-      requireJsonValue(entry, configPath, `${path}.${key}`),
-    ]),
-  );
+  const normalized = requireJsonValue(value, path);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    throw configError(configPath, `${path} 必须是对象`);
+  }
+  return normalized;
 }
 
-function requireJsonValue(value: unknown, configPath: string, path: string): JsonValue {
+function requireJsonValue(
+  value: unknown,
+  path: string,
+  ancestors: ReadonlySet<object> = new Set(),
+): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (!value || typeof value !== "object") throw new TypeError(`${path} 只能包含 JSON 值`);
+  if (ancestors.has(value)) throw new TypeError(`${path} 不能循环引用`);
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(value);
   if (Array.isArray(value)) {
-    return value.map((entry, index) => requireJsonValue(entry, configPath, `${path}[${index}]`));
+    return value.map((entry, index) => requireJsonValue(entry, `${path}[${index}]`, nextAncestors));
   }
-  if (value && typeof value === "object") return requireJsonObject(value, configPath, path);
-  throw configError(configPath, `${path} 只能包含 JSON 值`);
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${path} 必须是普通 JSON 对象`);
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      requireJsonValue(entry, `${path}.${key}`, nextAncestors),
+    ]),
+  );
 }
 
 function requireObject(value: unknown, configPath: string, path: string): Record<string, unknown> {
@@ -406,8 +993,103 @@ function requireString(value: unknown, configPath: string, path: string): string
   return value.trim();
 }
 
-function optionalString(value: unknown, configPath: string, path: string): string | undefined {
-  return value === undefined ? undefined : requireString(value, configPath, path);
+async function readBoundedFile(path: string): Promise<Buffer> {
+  const metadata = await stat(path);
+  if (!metadata.isFile() || metadata.size > maximumConfigBytes) {
+    throw new RangeError(`Agent models.yml 不存在或超过 1 MB：${path}`);
+  }
+  const bytes = await readFile(path);
+  if (bytes.byteLength > maximumConfigBytes) {
+    throw new RangeError(`Agent models.yml 不存在或超过 1 MB：${path}`);
+  }
+  return bytes;
+}
+
+function decodeUtf8(bytes: Uint8Array, configPath: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw configError(configPath, "文件不是有效的 UTF-8 文本");
+  }
+}
+
+function digest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function writeFileAtomically(path: string, bytes: Uint8Array): Promise<void> {
+  const temporaryPath = join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    await writeFile(temporaryPath, bytes, { flag: "wx", mode: 0o600 });
+    await rename(temporaryPath, path);
+  } finally {
+    await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+}
+
+async function withWriterLock<T>(configPath: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${configPath}.lock`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+      await handle.writeFile(`${process.pid}\n${Date.now()}\n`, "utf8");
+      break;
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      const metadata = await stat(lockPath).catch(() => undefined);
+      if (metadata && Date.now() - metadata.mtimeMs > writerLockStaleMs) {
+        await unlink(lockPath).catch(() => undefined);
+        continue;
+      }
+      await delay(25);
+    }
+  }
+  if (!handle) throw new Error("模型供应商配置正在被另一个 SeaShard 进程写入");
+  try {
+    return await operation();
+  } finally {
+    await handle.close();
+    await unlink(lockPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+}
+
+function createEnvironmentCredentialSource(
+  environment: Readonly<Record<string, string | undefined>>,
+): AgentCredentialSource {
+  return {
+    read(credentialId) {
+      const value = environment[credentialId];
+      return value?.trim() || undefined;
+    },
+  };
+}
+
+function semanticDiagnostics(snapshot: CatalogSnapshot): readonly string[] {
+  return snapshot.configuration.connections.flatMap((connection) =>
+    connection.diagnostic ? [connection.diagnostic] : [],
+  );
+}
+
+function cloneConfiguration(
+  snapshot: AgentModelConfigurationSnapshot,
+): AgentModelConfigurationSnapshot {
+  return structuredClone(snapshot);
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function configError(configPath: string, message: string): Error {

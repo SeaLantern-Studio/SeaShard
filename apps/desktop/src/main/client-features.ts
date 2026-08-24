@@ -1,5 +1,6 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
+import { agentSettingsProviderUiManifest } from "@seashard/agent-settings-provider-ui";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import type { PluginKernel } from "@seashard/plugin-system";
@@ -28,6 +29,21 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.agent-conversation.ui",
         entryId: "agent-conversation.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 模型供应商设置页拥有独立组件包与 Client Entry，不承载其他 Agent 设置页面。
+  await kernel.registerBuiltIn({
+    manifest: agentSettingsProviderUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.agent-settings-provider.ui",
+        entryId: "agent-settings-provider.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

@@ -1,5 +1,6 @@
 import type {
   AgentInvocationService,
+  AgentModelConfigurationService,
   AgentSessionService,
   ClientEntryPublication,
   FileDownloadClientService,
@@ -118,6 +119,28 @@ export interface DesktopShellConfig {
   cancelAgentInvocation(
     invocationId: string,
   ): ReturnType<AgentInvocationService["cancelInvocation"]>;
+  readAgentModelConfiguration(): ReturnType<AgentModelConfigurationService["getConfiguration"]>;
+  mutateAgentModelConnection(
+    input: Parameters<AgentModelConfigurationService["mutateConnection"]>[0],
+  ): ReturnType<AgentModelConfigurationService["mutateConnection"]>;
+  removeAgentModelConnection(
+    input: Parameters<AgentModelConfigurationService["removeConnection"]>[0],
+  ): ReturnType<AgentModelConfigurationService["removeConnection"]>;
+  resetAgentModelConfiguration(
+    input: Parameters<AgentModelConfigurationService["resetConfiguration"]>[0],
+  ): ReturnType<AgentModelConfigurationService["resetConfiguration"]>;
+  discoverAgentModels(
+    input: Parameters<AgentModelConfigurationService["discoverModels"]>[0],
+  ): ReturnType<AgentModelConfigurationService["discoverModels"]>;
+  writeAgentCredential(
+    input: Parameters<AgentModelConfigurationService["writeCredential"]>[0],
+  ): ReturnType<AgentModelConfigurationService["writeCredential"]>;
+  removeAgentCredential(
+    input: Parameters<AgentModelConfigurationService["removeCredential"]>[0],
+  ): ReturnType<AgentModelConfigurationService["removeCredential"]>;
+  openAgentModelConfiguration(): ReturnType<
+    AgentModelConfigurationService["openConfigurationFile"]
+  >;
   onRendererReady?(snapshot: RuntimeSnapshot): void | Promise<void>;
   readServerCoreTypes(): ReturnType<ServerCoreSourceClientService["listTypes"]>;
   readServerCoreVersions(

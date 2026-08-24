@@ -43,6 +43,7 @@ import type {
 } from "./host-protocol";
 import { PluginRegistry } from "./registry";
 import {
+  AgentProviderTypeRegistry,
   AgentResourceRegistry,
   AgentToolRegistry,
   ContributionRegistry,
@@ -54,6 +55,7 @@ import type { ResolvedEntry } from "./types";
 interface RuntimeRegistries {
   services: ServiceRegistry;
   agentTools: AgentToolRegistry;
+  agentProviderTypes: AgentProviderTypeRegistry;
   agentResources: AgentResourceRegistry;
   contributions: ContributionRegistry;
   events: PluginEventBus;
@@ -631,6 +633,15 @@ function createLocalPluginContext(
       );
       return registration.id;
     },
+    aiProviderType(definition) {
+      const registration = registries.agentProviderTypes.register(
+        entry.runtimeId,
+        scope,
+        definition,
+      );
+      cordisContext.effect(() => registration.dispose, `AI Provider Type ${definition.id}`);
+      return registration.id;
+    },
     agentResources(resources) {
       for (const [pattern, resource] of Object.entries(resources)) {
         const registration = registries.agentResources.register(
@@ -678,6 +689,7 @@ function removeRuntimeRegistrations(registries: RuntimeRegistries, runtimeId: st
   registries.contributions.removeRuntime(runtimeId);
   registries.events.removeRuntime(runtimeId);
   registries.agentTools.removeRuntime(runtimeId);
+  registries.agentProviderTypes.removeRuntime(runtimeId);
   registries.agentResources.removeRuntime(runtimeId);
 }
 

@@ -3,6 +3,8 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   serverModSearchLimits,
+  type AgentModelConfigurationService,
+  type AgentModelConnectionMutation,
   type AgentModelSelection,
   type AgentSessionService,
   type ServerConfigurationWriteRequest,
@@ -17,6 +19,7 @@ import {
   type ServerInstanceStartupSettings,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
+import type { JsonObject, JsonValue } from "@seashard/plugin-sdk";
 
 export function expectNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -33,6 +36,91 @@ export function expectString(value: unknown, label: string): string {
 export function expectSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
   return value as number;
+}
+
+export function expectAgentModelConnectionMutationInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["mutateConnection"]>[0] {
+  const record = expectRecord(value, "Agent model connection mutation");
+  if (!Array.isArray(record.operations)) {
+    throw new TypeError("Agent model connection operations must be an array");
+  }
+  const operations: AgentModelConnectionMutation[] = record.operations.map((operation, index) => {
+    const item = expectRecord(operation, `Agent model connection operation ${index}`);
+    if (!Array.isArray(item.path) || item.path.some((segment) => typeof segment !== "string")) {
+      throw new TypeError(`Agent model connection operation ${index} path must be a string array`);
+    }
+    const path = item.path as string[];
+    if (item.op === "unset") return { op: "unset", path };
+    if (item.op !== "set") {
+      throw new TypeError(`Agent model connection operation ${index} is invalid`);
+    }
+    return { op: "set", path, value: item.value as JsonValue };
+  });
+  return {
+    expectedRevision: expectNonEmptyString(record.expectedRevision, "Agent model revision"),
+    connectionId: expectNonEmptyString(record.connectionId, "Agent model connection ID"),
+    operations,
+  };
+}
+
+export function expectAgentModelConnectionRemovalInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["removeConnection"]>[0] {
+  const record = expectRecord(value, "Agent model connection removal");
+  return {
+    expectedRevision: expectNonEmptyString(record.expectedRevision, "Agent model revision"),
+    connectionId: expectNonEmptyString(record.connectionId, "Agent model connection ID"),
+  };
+}
+
+export function expectAgentModelConfigurationResetInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["resetConfiguration"]>[0] {
+  const record = expectRecord(value, "Agent model configuration reset");
+  return {
+    expectedRevision: expectNonEmptyString(record.expectedRevision, "Agent model revision"),
+  };
+}
+
+export function expectAgentModelDiscoveryInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["discoverModels"]>[0] {
+  const record = expectRecord(value, "Agent model discovery");
+  const settings = expectRecord(record.settings, "Agent provider settings") as JsonObject;
+  return {
+    providerType: expectNonEmptyString(record.providerType, "Agent provider type"),
+    settings,
+    ...(record.credentialId === undefined
+      ? {}
+      : {
+          credentialId: expectNonEmptyString(record.credentialId, "Agent credential ID"),
+        }),
+    ...(record.credentialValue === undefined
+      ? {}
+      : {
+          credentialValue: expectNonEmptyString(record.credentialValue, "Agent credential value"),
+        }),
+  };
+}
+
+export function expectAgentCredentialWriteInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["writeCredential"]>[0] {
+  const record = expectRecord(value, "Agent credential write");
+  return {
+    credentialId: expectNonEmptyString(record.credentialId, "Agent credential ID"),
+    value: expectNonEmptyString(record.value, "Agent credential value"),
+  };
+}
+
+export function expectAgentCredentialRemovalInput(
+  value: unknown,
+): Parameters<AgentModelConfigurationService["removeCredential"]>[0] {
+  const record = expectRecord(value, "Agent credential removal");
+  return {
+    credentialId: expectNonEmptyString(record.credentialId, "Agent credential ID"),
+  };
 }
 
 export function expectServerStartupDefaultsUpdate(value: unknown): ServerStartupDefaultsUpdate {

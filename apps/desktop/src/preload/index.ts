@@ -1,6 +1,7 @@
 import {
   desktopChannels,
   type AgentClientService,
+  type AgentModelConfigurationClientService,
   type DesktopClientBootstrap,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
@@ -34,6 +35,39 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.agentInvocationGet, invocationId),
     cancelInvocation: (invocationId: string) =>
       ipcRenderer.invoke(desktopChannels.agentInvocationCancel, invocationId),
+  }),
+  agentModels: Object.freeze({
+    getConfiguration: () => ipcRenderer.invoke(desktopChannels.agentModelConfigurationGet),
+    mutateConnection: (
+      input: Parameters<AgentModelConfigurationClientService["mutateConnection"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentModelConnectionMutate, input),
+    removeConnection: (
+      input: Parameters<AgentModelConfigurationClientService["removeConnection"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentModelConnectionRemove, input),
+    resetConfiguration: (
+      input: Parameters<AgentModelConfigurationClientService["resetConfiguration"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentModelConfigurationReset, input),
+    discoverModels: (
+      input: Parameters<AgentModelConfigurationClientService["discoverModels"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentModelDiscover, input),
+    writeCredential: (
+      input: Parameters<AgentModelConfigurationClientService["writeCredential"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentCredentialWrite, input),
+    removeCredential: (
+      input: Parameters<AgentModelConfigurationClientService["removeCredential"]>[0],
+    ) => ipcRenderer.invoke(desktopChannels.agentCredentialRemove, input),
+    openConfigurationFile: () => ipcRenderer.invoke(desktopChannels.agentModelConfigurationOpen),
+    onConfigurationChanged: (
+      listener: Parameters<AgentModelConfigurationClientService["onConfigurationChanged"]>[0],
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        snapshot: Parameters<typeof listener>[0],
+      ) => listener(snapshot);
+      ipcRenderer.on(desktopChannels.agentModelConfigurationChanged, handler);
+      return () =>
+        ipcRenderer.removeListener(desktopChannels.agentModelConfigurationChanged, handler);
+    },
   }),
   serverCore: Object.freeze({
     listTypes: () => ipcRenderer.invoke(desktopChannels.serverCoreTypes),

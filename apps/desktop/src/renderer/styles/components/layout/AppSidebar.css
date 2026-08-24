@@ -45,8 +45,7 @@
 
 .sidebar-nav {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   padding: var(--sl-space-sm);
   position: relative;
   display: flex;
@@ -105,8 +104,85 @@
 
 .agent-workspace-nav {
   display: flex;
+  min-height: 0;
+  flex: 1;
   flex-direction: column;
   gap: var(--sl-space-md);
+}
+
+.agent-workspace-scroll-shell {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  margin-right: calc(-1 * var(--sl-space-sm));
+}
+
+.agent-workspace-scroll {
+  width: 100%;
+  height: 100%;
+  padding-right: calc(var(--sl-space-sm) + 10px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.agent-workspace-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.agent-workspace-scroll-content {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: var(--sl-space-md);
+}
+
+.agent-proxy-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  width: 8px;
+  border-radius: var(--sl-radius-full);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--sl-transition-fast);
+  user-select: none;
+  touch-action: none;
+}
+
+.agent-proxy-scrollbar.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.agent-proxy-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 3px;
+  min-height: 28px;
+  border-radius: var(--sl-radius-full);
+  background: color-mix(in srgb, var(--sl-primary) 58%, transparent);
+  cursor: grab;
+  transition: background-color var(--sl-transition-fast);
+  will-change: height, transform;
+}
+
+.agent-proxy-scrollbar-thumb:hover,
+.agent-proxy-scrollbar-thumb.is-dragging {
+  background: color-mix(in srgb, var(--sl-primary) 84%, transparent);
+}
+
+.agent-proxy-scrollbar-thumb.is-dragging {
+  cursor: grabbing;
+}
+
+.agent-workspace-nav > .workspace-action,
+.lower-side {
+  flex-shrink: 0;
 }
 
 .instance-workspace-nav,
@@ -117,6 +193,10 @@
 
 .instance-workspace-nav {
   gap: 10px;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .instance-nav-group {
@@ -152,6 +232,10 @@
 .settings-mode-nav,
 .download-mode-nav {
   gap: var(--sl-space-md);
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .settings-section,

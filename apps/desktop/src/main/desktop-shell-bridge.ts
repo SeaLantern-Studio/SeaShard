@@ -1,5 +1,6 @@
 import {
   agentInvocationContract,
+  agentModelConfigurationContract,
   agentSessionContract,
   javaRuntimeManagerContract,
   serverConfigurationContract,
@@ -28,6 +29,8 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "elect
 import { isAbsolute, join } from "node:path";
 import {
   expectAgentInvocation,
+  expectAgentModelConfiguration,
+  expectAgentModelConnectionModels,
   expectAgentInvocationReference,
   expectAgentModels,
   expectAgentSession,
@@ -169,6 +172,53 @@ export async function registerDesktopShellBridge(
               ),
             cancelAgentInvocation: async (invocationId) => {
               await kernel.callService(agentInvocationContract, "cancelInvocation", [invocationId]);
+            },
+            readAgentModelConfiguration: async () =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "getConfiguration", []),
+              ),
+            mutateAgentModelConnection: async (input) =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "mutateConnection", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            removeAgentModelConnection: async (input) =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "removeConnection", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            resetAgentModelConfiguration: async (input) =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "resetConfiguration", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            discoverAgentModels: async (input) =>
+              expectAgentModelConnectionModels(
+                await kernel.callService(agentModelConfigurationContract, "discoverModels", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            writeAgentCredential: async (input) =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "writeCredential", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            removeAgentCredential: async (input) =>
+              expectAgentModelConfiguration(
+                await kernel.callService(agentModelConfigurationContract, "removeCredential", [
+                  input as unknown as JsonValue,
+                ]),
+              ),
+            openAgentModelConfiguration: async () => {
+              await kernel.callService(
+                agentModelConfigurationContract,
+                "openConfigurationFile",
+                [],
+              );
             },
             readServerCoreTypes: async () =>
               expectServerCoreTypes(

@@ -1,4 +1,5 @@
 import {
+  agentModelConfigurationChangedEvent,
   desktopChannels,
   desktopShellContract,
   runtimeDiagnosticsContract,
@@ -12,6 +13,12 @@ import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { BrowserWindow } from "electron";
 import type { DesktopShellConfig } from "./types";
 import {
+  expectAgentCredentialRemovalInput,
+  expectAgentCredentialWriteInput,
+  expectAgentModelConfigurationResetInput,
+  expectAgentModelConnectionMutationInput,
+  expectAgentModelConnectionRemovalInput,
+  expectAgentModelDiscoveryInput,
   expectAgentSendMessageInput,
   expectAgentStartSessionInput,
   expectNonEmptyString,
@@ -93,6 +100,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         }
         return primaryWindow;
       };
+      ctx.on(agentModelConfigurationChangedEvent, (snapshot) => {
+        if (!primaryWindow || primaryWindow.isDestroyed()) return;
+        primaryWindow.webContents.send(desktopChannels.agentModelConfigurationChanged, snapshot);
+      });
 
       const createClientBootstrap = (webContentsId: number): DesktopClientBootstrap => ({
         protocolVersion: 1,
@@ -268,6 +279,40 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           return config.cancelAgentInvocation(
             expectNonEmptyString(invocationId, "Agent invocation ID"),
           );
+        });
+        config.runtime.handle(desktopChannels.agentModelConfigurationGet, (event) => {
+          ownedWindow(event.sender.id);
+          return config.readAgentModelConfiguration();
+        });
+        config.runtime.handle(desktopChannels.agentModelConnectionMutate, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.mutateAgentModelConnection(expectAgentModelConnectionMutationInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentModelConnectionRemove, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.removeAgentModelConnection(expectAgentModelConnectionRemovalInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentModelConfigurationReset, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.resetAgentModelConfiguration(
+            expectAgentModelConfigurationResetInput(input),
+          );
+        });
+        config.runtime.handle(desktopChannels.agentModelDiscover, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.discoverAgentModels(expectAgentModelDiscoveryInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentCredentialWrite, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.writeAgentCredential(expectAgentCredentialWriteInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentCredentialRemove, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.removeAgentCredential(expectAgentCredentialRemovalInput(input));
+        });
+        config.runtime.handle(desktopChannels.agentModelConfigurationOpen, (event) => {
+          ownedWindow(event.sender.id);
+          return config.openAgentModelConfiguration();
         });
         config.runtime.handle(desktopChannels.dialogSelectDirectory, async (event) => {
           const window = ownedWindow(event.sender.id);
@@ -824,6 +869,14 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.agentMessageSend);
           config.runtime.removeHandler(desktopChannels.agentInvocationGet);
           config.runtime.removeHandler(desktopChannels.agentInvocationCancel);
+          config.runtime.removeHandler(desktopChannels.agentModelConfigurationGet);
+          config.runtime.removeHandler(desktopChannels.agentModelConnectionMutate);
+          config.runtime.removeHandler(desktopChannels.agentModelConnectionRemove);
+          config.runtime.removeHandler(desktopChannels.agentModelConfigurationReset);
+          config.runtime.removeHandler(desktopChannels.agentModelDiscover);
+          config.runtime.removeHandler(desktopChannels.agentCredentialWrite);
+          config.runtime.removeHandler(desktopChannels.agentCredentialRemove);
+          config.runtime.removeHandler(desktopChannels.agentModelConfigurationOpen);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);

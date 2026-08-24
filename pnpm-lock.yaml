@@ -68,6 +68,9 @@ importers:
       '@seashard/agent-runtime':
         specifier: workspace:*
         version: link:../../components/agent/runtime
+      '@seashard/agent-settings-provider-ui':
+        specifier: workspace:*
+        version: link:../../frontend/agent/settings-provider
       '@seashard/agent-ui-shared':
         specifier: workspace:*
         version: link:../../frontend/agent/shared
@@ -386,6 +389,27 @@ importers:
       '@seashard/agent-ui-shared':
         specifier: workspace:*
         version: link:../shared
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/agent/settings-provider:
+    dependencies:
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../../packages/contracts

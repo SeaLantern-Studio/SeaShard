@@ -8,6 +8,7 @@
     "@seashard/about-ui": "workspace:*",
     "@seashard/agent-conversation-ui": "workspace:*",
     "@seashard/agent-runtime": "workspace:*",
+    "@seashard/agent-settings-provider-ui": "workspace:*",
     "@seashard/agent-ui-shared": "workspace:*",
     "@seashard/bootstrap-runtime": "workspace:*",
     "@seashard/contracts": "workspace:*",

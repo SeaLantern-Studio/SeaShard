@@ -5,14 +5,18 @@ import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
 import logoSvg from "./assets/logo.svg";
 import UiEntryBoundary from "./UiEntryBoundary.vue";
-import type { WorkspaceMode } from "./workspace-layout";
+import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
 
 const route = useRoute();
 const router = useRouter();
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
 );
-const settingsMode = computed(() => route.path.startsWith("/settings/"));
+const settingsMode = computed<SettingsMode | undefined>(() => {
+  if (route.path.startsWith("/settings/")) return "general";
+  if (route.path === "/agent/settings" || route.path.startsWith("/agent/settings/")) return "agent";
+  return undefined;
+});
 const downloadMode = computed(() => route.path.startsWith("/server/download"));
 const workspace = ref<WorkspaceMode>(workspaceForPath(route.path) ?? "agent");
 const rightPanelOpen = ref(false);
@@ -59,7 +63,15 @@ function workspaceForPath(path: string): WorkspaceMode | undefined {
       <div class="workspace-frame">
         <main
           class="app-content"
-          :aria-label="settingsMode ? '设置内容' : downloadMode ? '下载内容' : '工作区内容'"
+          :aria-label="
+            settingsMode === 'general'
+              ? '设置内容'
+              : settingsMode === 'agent'
+                ? 'Agent 设置内容'
+                : downloadMode
+                  ? '下载内容'
+                  : '工作区内容'
+          "
         >
           <RouterView v-slot="{ Component }">
             <UiEntryBoundary :runtime-id="activeRuntimeId">
@@ -71,7 +83,7 @@ function workspaceForPath(path: string): WorkspaceMode | undefined {
           class="right-sidebar"
           :class="{ open: rightPanelOpen && !settingsMode }"
           aria-label="右侧栏"
-          :aria-hidden="settingsMode || !rightPanelOpen"
+          :aria-hidden="!!settingsMode || !rightPanelOpen"
         ></aside>
       </div>
     </div>

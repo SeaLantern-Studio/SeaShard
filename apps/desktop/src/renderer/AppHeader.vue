@@ -18,11 +18,11 @@ import {
 import { computed, ref } from "vue";
 import { appearanceService } from "./appearance";
 import DownloadTaskPill from "./DownloadTaskPill.vue";
-import type { WorkspaceMode } from "./workspace-layout";
+import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
   workspace: WorkspaceMode;
-  settingsMode: boolean;
+  settingsMode?: SettingsMode;
   rightPanelOpen: boolean;
 }>();
 const emit = defineEmits<{
@@ -56,7 +56,9 @@ async function closeWindow(): Promise<void> {
 <template>
   <header class="app-header">
     <div class="header-workspace">
-      <div v-if="props.settingsMode" class="settings-header-title">设置</div>
+      <div v-if="props.settingsMode" class="settings-header-title">
+        {{ props.settingsMode === "agent" ? "Agent 设置" : "设置" }}
+      </div>
       <div
         v-else
         class="workspace-switcher"
