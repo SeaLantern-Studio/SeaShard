@@ -1,5 +1,6 @@
 # Local architecture notes
-DESIGN.md
+**/DESIGN.md
+!/DESIGN.md
 AGENTS.md
 
 # Dependencies
