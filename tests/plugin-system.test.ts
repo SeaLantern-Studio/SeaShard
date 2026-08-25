@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
-import { ServiceResultValidationError } from "../packages/plugin-sdk/src/index.ts";
+import type { ServiceResultValidationError } from "../packages/plugin-sdk/src/index.ts";
 import type {
   ExecutionContext,
   JsonValue,
+  PluginBinding,
   ServiceResultValidator,
 } from "../packages/plugin-sdk/src/index.ts";
 import type { ResolvedEntry } from "../packages/plugin-system/src/types.ts";
@@ -16,8 +17,13 @@ import {
   deserializeProtocolError,
   serializeProtocolError,
 } from "../packages/plugin-system/src/host-protocol.ts";
+import { PluginInstaller } from "../packages/plugin-system/src/installer.ts";
+import {
+  automaticPluginBindingId,
+  automaticPluginBindingPrefix,
+  PluginRegistry,
+} from "../packages/plugin-system/src/registry.ts";
 import { authorizeExternalServiceCall } from "../packages/plugin-system/src/runtime-backend.ts";
-import { PluginRegistry } from "../packages/plugin-system/src/registry.ts";
 import {
   AgentProviderTypeRegistry,
   AgentResourceRegistry,
@@ -25,7 +31,11 @@ import {
   ServiceRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
 import { PluginStore } from "../packages/plugin-system/src/store.ts";
-import { databaseWorkerEntry, validManifest } from "./plugin-test-fixtures.ts";
+import {
+  databaseWorkerEntry,
+  validManifest,
+  validPluginPackageManifest,
+} from "./plugin-test-fixtures.ts";
 
 await test("plugin system starts from the current package and Binding schema", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-store-"));
@@ -87,6 +97,50 @@ await test("plugin system starts from the current package and Binding schema", a
   }
 });
 
+await test("directory installation persists an immutable trusted snapshot", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-directory-install-"));
+  const sourceRoot = join(directory, "source");
+  const modulePath = join(sourceRoot, "dist", "host.js");
+  await mkdir(join(sourceRoot, "dist"), { recursive: true });
+  await writeFile(
+    join(sourceRoot, "plugin.json"),
+    `${JSON.stringify(validPluginPackageManifest, null, 2)}\n`,
+  );
+  await writeFile(modulePath, "export const version = 1;\n");
+  const broker = await SQLiteDatabaseBroker.create({
+    databasePath: join(directory, "seashard.sqlite3"),
+    workerEntry: databaseWorkerEntry,
+    readWorkers: 1,
+  });
+
+  try {
+    const store = await PluginStore.create(broker, "0.0.0");
+    const installer = new PluginInstaller(store, directory, "0.0.0");
+    const prepared = await installer.prepareDirectory(sourceRoot);
+    const record = await prepared
+      .commit({
+        digest: prepared.digest,
+        acknowledgeFullMachineAccess: true,
+      })
+      .finally(() => prepared.dispose());
+
+    await writeFile(modulePath, "export const version = 2;\n");
+    assert.equal(record.source, "installed");
+    assert.notEqual(record.rootPath, sourceRoot);
+    assert.equal(
+      await readFile(join(record.rootPath, "dist", "host.js"), "utf8"),
+      "export const version = 1;\n",
+    );
+    assert.equal(
+      (await store.listPackages(validPluginPackageManifest.id))[0]?.digest,
+      record.digest,
+    );
+  } finally {
+    await broker.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test("third-party bindings are global without changing internal scope support", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-binding-scope-"));
   const broker = await SQLiteDatabaseBroker.create({
@@ -121,6 +175,21 @@ await test("third-party bindings are global without changing internal scope supp
       enabled: true,
       config: null,
     });
+    for (const id of [
+      `plugin:${validManifest.id}:example.host`,
+      `dev:${validManifest.id}:example.host`,
+    ]) {
+      await assert.rejects(
+        registry.upsertGlobalBinding({
+          id,
+          pluginId: validManifest.id,
+          entryId: "example.host",
+          enabled: true,
+          config: null,
+        }),
+        /reserved automatic namespace/,
+      );
+    }
     await registry.upsertBinding({
       id: "internal.server",
       pluginId: validManifest.id,
@@ -403,14 +472,20 @@ await test("service result validation is optional and bound to the selected regi
 
   delete resultValidators.read;
   result = { count: -1 };
+  let validationFailure: ServiceResultValidationError | undefined;
   await assert.rejects(
     registry.call("example.catalog", "read", [], execution),
     (error: unknown) => {
-      assert(error instanceof ServiceResultValidationError);
-      assert.equal(error.runtimeId, "catalog-provider");
-      assert.equal(error.contract, "example.catalog");
-      assert.equal(error.method, "read");
-      assert.deepEqual(error.issues, [{ path: ["count"], message: "count must be non-negative" }]);
+      assert(error instanceof Error);
+      assert.equal(error.name, "ServiceResultValidationError");
+      const validationError = error as ServiceResultValidationError;
+      validationFailure = validationError;
+      assert.equal(validationError.runtimeId, "catalog-provider");
+      assert.equal(validationError.contract, "example.catalog");
+      assert.equal(validationError.method, "read");
+      assert.deepEqual(validationError.issues, [
+        { path: ["count"], message: "count must be non-negative" },
+      ]);
       return true;
     },
   );
@@ -465,18 +540,16 @@ await test("service result validation is optional and bound to the selected regi
     /targets a missing method/u,
   );
 
-  const remoteError = deserializeProtocolError(
-    serializeProtocolError(
-      new ServiceResultValidationError("external-provider", "example.remote", "read", [
-        { path: ["items", 0], message: "item is invalid" },
-      ]),
-    ),
-  );
-  assert(remoteError instanceof ServiceResultValidationError);
-  assert.equal(remoteError.runtimeId, "external-provider");
-  assert.equal(remoteError.contract, "example.remote");
-  assert.equal(remoteError.method, "read");
-  assert.deepEqual(remoteError.issues, [{ path: ["items", 0], message: "item is invalid" }]);
+  assert(validationFailure);
+  const remoteError = deserializeProtocolError(serializeProtocolError(validationFailure));
+  assert.equal(remoteError.name, "ServiceResultValidationError");
+  const remoteValidationError = remoteError as ServiceResultValidationError;
+  assert.equal(remoteValidationError.runtimeId, "catalog-provider");
+  assert.equal(remoteValidationError.contract, "example.catalog");
+  assert.equal(remoteValidationError.method, "read");
+  assert.deepEqual(remoteValidationError.issues, [
+    { path: ["count"], message: "count must be non-negative" },
+  ]);
 });
 
 await test("Agent tool registry rejects duplicates and invalidates Fiber snapshots", async () => {
@@ -719,4 +792,182 @@ await test("Agent resource registry routes, validates domain input and invalidat
   );
   registry.removeRuntime("server-runtime");
   assert.equal(registry.countRuntime(), 0);
+});
+
+await test("development package overlays stay in memory and replace their complete Entry set", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-development-overlay-"));
+  const broker = await SQLiteDatabaseBroker.create({
+    databasePath: join(directory, "seashard.sqlite3"),
+    workerEntry: databaseWorkerEntry,
+    readWorkers: 1,
+  });
+
+  try {
+    const store = await PluginStore.create(broker, "0.0.0");
+    const registry = new PluginRegistry(store, "0.0.0");
+    const persisted = {
+      manifest: validManifest,
+      digest: "a".repeat(64),
+      rootPath: "C:/plugins/example.plugin",
+      source: "installed" as const,
+      trust: "package-full-trust" as const,
+      installedAt: "2026-08-25T00:00:00.000Z",
+    };
+    await store.registerPackage(persisted);
+    await store.setCurrentVersion(
+      persisted.manifest.id,
+      persisted.manifest.version,
+      persisted.digest,
+    );
+    await registry.upsertGlobalBinding({
+      id: "plugin.example.persisted",
+      pluginId: persisted.manifest.id,
+      entryId: persisted.manifest.entries[0]!.id,
+      enabled: true,
+      config: null,
+    });
+
+    const firstDevelopment = {
+      ...persisted,
+      manifest: {
+        ...validManifest,
+        version: "2.0.0",
+        entries: [
+          {
+            ...validManifest.entries[0]!,
+            id: "development.host",
+          },
+        ],
+      },
+      digest: "b".repeat(64),
+      rootPath: "C:/work/example.plugin",
+      source: "development" as const,
+      trust: "local-full-trust" as const,
+    };
+    registry.setDevelopmentPackage(firstDevelopment);
+    const firstResolved = await registry.resolve({
+      hostProfile: "electron",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+    });
+    assert.deepEqual(
+      firstResolved.map((entry) => [entry.runtimeId, entry.entry.id, entry.package.digest]),
+      [[`dev:${validManifest.id}:development.host`, "development.host", firstDevelopment.digest]],
+    );
+
+    const secondDevelopment = {
+      ...firstDevelopment,
+      manifest: {
+        ...firstDevelopment.manifest,
+        entries: [
+          {
+            ...validManifest.entries[0]!,
+            id: "replacement.host",
+          },
+        ],
+      },
+      digest: "c".repeat(64),
+    };
+    registry.setDevelopmentPackage(secondDevelopment, firstDevelopment.manifest.id);
+    const secondResolved = await registry.resolve({
+      hostProfile: "electron",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+    });
+    assert.deepEqual(
+      secondResolved.map((entry) => [entry.runtimeId, entry.entry.id, entry.package.digest]),
+      [[`dev:${validManifest.id}:replacement.host`, "replacement.host", secondDevelopment.digest]],
+    );
+
+    registry.clearDevelopmentPackages();
+    const restored = await registry.resolve({
+      hostProfile: "electron",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+    });
+    assert.deepEqual(
+      restored.map((entry) => [entry.runtimeId, entry.package.digest]),
+      [["plugin.example.persisted", persisted.digest]],
+    );
+    assert.deepEqual(
+      (await store.listBindings(validManifest.id)).map((binding) => binding.id),
+      ["plugin.example.persisted"],
+    );
+  } finally {
+    await broker.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("package selection and automatic Binding replacement roll back atomically", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-package-binding-transaction-"));
+  const broker = await SQLiteDatabaseBroker.create({
+    databasePath: join(directory, "seashard.sqlite3"),
+    workerEntry: databaseWorkerEntry,
+    readWorkers: 1,
+  });
+
+  try {
+    const store = await PluginStore.create(broker, "0.0.0");
+    const previous = {
+      manifest: validManifest,
+      digest: "d".repeat(64),
+      rootPath: "C:/plugins/example.plugin/1.0.0",
+      source: "installed" as const,
+      trust: "package-full-trust" as const,
+      installedAt: "2026-08-25T00:00:00.000Z",
+    };
+    const next = {
+      ...previous,
+      manifest: {
+        ...validManifest,
+        version: "2.0.0",
+      },
+      digest: "e".repeat(64),
+      rootPath: "C:/plugins/example.plugin/2.0.0",
+    };
+    const prefix = automaticPluginBindingPrefix("plugin", validManifest.id);
+    const previousBinding: PluginBinding = {
+      id: `${prefix}${validManifest.entries[0]!.id}`,
+      pluginId: validManifest.id,
+      entryId: validManifest.entries[0]!.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: {},
+    };
+    await store.registerPackage(previous);
+    await store.registerPackage(next);
+    await store.setCurrentVersion(previous.manifest.id, previous.manifest.version, previous.digest);
+    await store.upsertBinding(previousBinding);
+
+    const invalidBinding = {
+      ...previousBinding,
+      id: null,
+    } as unknown as PluginBinding;
+    await assert.rejects(
+      store.replaceCurrentPackageBindings(validManifest.id, next, prefix, [invalidBinding]),
+      /NOT NULL|constraint/i,
+    );
+
+    assert.deepEqual(
+      (await store.listCurrentPackages()).map((record) => [record.manifest.version, record.digest]),
+      [[previous.manifest.version, previous.digest]],
+    );
+    assert.deepEqual(await store.listBindings(validManifest.id), [previousBinding]);
+  } finally {
+    await broker.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("automatic Binding IDs preserve dotted Manifest boundaries", () => {
+  assert.notEqual(
+    automaticPluginBindingId("plugin", "acme.foo", "bar"),
+    automaticPluginBindingId("plugin", "acme", "foo.bar"),
+  );
+  assert.equal(automaticPluginBindingId("plugin", "a".repeat(128), "b".repeat(128)).length, 264);
 });

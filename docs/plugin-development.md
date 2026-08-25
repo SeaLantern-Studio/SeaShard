@@ -1,5 +1,7 @@
 # SeaShard 第三方插件开发指南
 
+> **维护状态：暂缓更新。** 插件开发链仍在收口，下文的 SDK 版本、示例 Contract 和 CLI 行为可能滞后；待插件开发能力完成后统一校正，当前不要将本文视为最终规范。
+
 > 面向当前 0.x 插件 API。本文只介绍可执行的第三方 **host 插件**；`client` 运行时尚未作为稳定的第三方能力开放。`@seashard/plugin-sdk` 当前也是仓库内包，发布到公共 registry 前应通过 SeaShard 源码工作区获取类型。
 
 ## 1. 最小插件结构
@@ -26,8 +28,9 @@ my-plugin/
       "runtime": "host",
       "module": "./dist/host.js",
       "hostProfiles": ["electron", "node", "docker"],
-      "activationScopes": ["global"],
-      "permissions": ["seashard.logger"]
+      "uses": {
+        "seashard.logger": ["write"]
+      }
     }
   ],
   "compatibility": {
@@ -38,20 +41,19 @@ my-plugin/
 
 必要字段：
 
-| 字段                     | 含义                                                                 |
-| ------------------------ | -------------------------------------------------------------------- |
-| `id` / `publisher`       | 小写标识符；可使用数字、`.`、`-`，首尾必须是字母或数字               |
-| `version`                | 语义化版本                                                           |
-| `entries`                | 一个包可包含多个独立入口；入口 `id` 在包内唯一                       |
-| `module`                 | 以 `./` 开头的包内 ESM 路径，不允许 `..`、反斜杠或绝对路径           |
-| `hostProfiles`           | 至少一个：`electron`、`node`、`docker`                               |
-| `activationScopes`       | 可选范围：`global`、`workspace`、`server`、`agent`、`client-session` |
-| `permissions`            | 该入口允许调用的 SeaShard 服务 contract；遵循最小权限原则            |
-| `compatibility.seaShard` | 当前插件支持的 SeaShard semver 范围                                  |
+| 字段                     | 含义                                                          |
+| ------------------------ | ------------------------------------------------------------- |
+| `id` / `publisher`       | 小写标识符；可使用数字、`.`、`-`，首尾必须是字母或数字        |
+| `version`                | 语义化版本                                                    |
+| `entries`                | 一个包可包含多个独立入口；入口 `id` 在包内唯一                |
+| `module`                 | 以 `./` 开头的包内 ESM 路径，不允许 `..`、反斜杠或绝对路径    |
+| `hostProfiles`           | 至少一个：`electron`、`node`、`docker`                        |
+| `uses`                   | 按 Contract 列出入口实际调用的方法；Host 据此生成最小调用授权 |
+| `compatibility.seaShard` | 当前插件支持的 SeaShard semver 范围                           |
 
 可用 `os` 和 `arch` 限制平台。清单采用严格校验，未知字段会直接拒绝。
 
-每个启用的 binding 会产生一个运行实例。`activationScopes` 只声明入口允许在哪些范围绑定；用户或宿主决定实际 binding、范围和配置。
+每个启用的 binding 会产生一个全局运行实例；插件包不声明宿主内部的 Scope 或权限字段。
 
 ## 3. 编写入口模块
 
@@ -110,12 +112,12 @@ export async function apply(ctx: PluginContext, rawConfig: JsonValue) {
 
 模块可导出：
 
-- `inject`：启动前必须已经发布的服务 contract。
-- `provides`：本入口承诺提供的服务 contract；应与 `ctx.provide()` 保持一致。
+- `inject`：启动前必须已经发布的服务 Contract。
+- `provides`：本入口承诺提供的服务 Contract；应与 `ctx.provide()` 保持一致。
 - `Config`：可选的 [Standard Schema](https://standardschema.dev/) 校验器。校验失败时入口不会启动。
 - `apply(ctx, config)`：入口函数，可以异步执行，也可以返回清理函数。
 
-`inject` 负责启动依赖，`plugin.json.permissions` 负责调用授权。需要调用一个服务时通常两者都要声明。
+`inject` 负责启动依赖，`plugin.json.entries[].uses` 负责逐方法授权。需要调用一个 Service 时通常两者都要声明。
 
 ## 4. `PluginContext` 必知 API
 
@@ -160,9 +162,42 @@ await ctx.storage.delete("state/session", { expectedRevision: saved.revision });
 
 启用插件时，SeaShard 创建 Cordis Fiber；关闭插件时，直接释放该 Fiber。替换版本采用“停止旧版本，再启动新版本”的顺序，因此替换期间插件功能可能短暂不可用，但软件进程不会重启。启动失败会报告错误，旧版本不会以热切换方式并行保留。
 
-## 6. 打包与发布
+## 6. CLI 开发工作流
 
-将 `plugin.json` 放在压缩包根目录，把所有入口产物和运行依赖一起打包，然后将 ZIP 文件命名为 `*.seashard-plugin`：
+SeaShard CLI 直接复用 Plugin Installer 与实际 Desktop Host：
+
+```text
+seashard plugin validate [directory]
+seashard plugin build [directory]
+seashard plugin pack [directory]
+seashard plugin install <package-or-directory>
+seashard plugin dev [directory]
+seashard plugin reload [runtime-id]
+seashard plugin logs [runtime-id]
+```
+
+- `validate` 校验 `plugin.json`、SeaShard 版本范围、包路径限制和全部入口文件，不执行插件代码。
+- `build` 调用项目 `package.json` 中的 `scripts.build`，随后执行同一份包校验。
+- `pack` 将已验证目录按稳定路径顺序写成确定性 `.seashard-plugin`，不会隐式忽略目录内容。应把 `node_modules` 和其他开发文件放在待打包目录之外。
+- `install` 通过实际 Host 安装不可变插件包；传入目录时会先复制并重新校验私有快照，后续构建不会改变已授予精确摘要信任的代码。
+- `dev` 在存在构建脚本时先构建，启动真实 Desktop Host，并监听项目变化执行构建、校验和 Host Runtime reload。
+- `reload` 与 `logs` 连接当前用户启动的本地开发会话；不开放任意 Service 调用或远程控制。
+
+按 `Ctrl+C` 可等待开发 Host、插件 Runtime 和文件监听器完成清理后退出。
+
+### 查询可用 Service
+
+```text
+seashard inspect services
+seashard inspect service seashard.server-runtime
+seashard inspect service seashard.server-runtime --json
+```
+
+Inspect 将编译期 Service Catalog 与当前开发 Host 的 Service Registry 快照交叉，输出说明、方法签名、参数、返回值、引用类型、`uses` 示例、Provider Scope 和方法漂移。没有活动 Host 时，内建 Contract 仍会显示并标记为 `inactive`；第三方运行态 Service 缺少编译期文档时会明确显示 `signature unavailable`。
+
+## 7. 打包与发布
+
+`seashard plugin pack` 会在插件目录的同级目录生成 `<id>-<version>.seashard-plugin`。包根目录必须直接包含 `plugin.json`，全部入口产物和运行依赖都必须位于该目录内：
 
 ```text
 acme-greeter.seashard-plugin
@@ -172,12 +207,12 @@ acme-greeter.seashard-plugin
 
 当前限制：压缩包不超过 32 MiB，解压后不超过 128 MiB，最多 4096 个文件，单文件不超过 32 MiB；不允许符号链接或路径穿越。
 
-第三方 host 插件在独立 Node 子进程中运行，但**不是操作系统安全沙箱**。安装时用户必须对该包的精确摘要授予“完整机器访问”信任；`permissions` 只限制 SeaShard 服务调用，不能限制插件直接使用 Node.js、文件系统或网络。
+第三方 Host 插件在独立 Node 子进程中运行，但不构成操作系统安全沙箱。安装时用户必须对该包的精确摘要授予“完整机器访问”信任；`uses` 只限制 SeaShard Service 调用，不能限制插件直接使用 Node.js、文件系统或网络。
 
 发布前至少验证：
 
 1. 全新安装和配置校验。
-2. 所有服务参数与返回值均可 JSON 序列化。
-3. 手动 reload 后，新 generation 正常发布，旧 generation 的资源全部释放。
-4. 所选升级模式下，启动失败不会损坏持久数据或占用独占资源。
+2. 所有 Service 参数与返回值均可 JSON 序列化。
+3. 手动 reload 后，新 Runtime 正常发布，旧 Runtime 的资源全部释放。
+4. 启动失败不会损坏持久数据或占用独占资源。
 5. `compatibility.seaShard` 准确覆盖实际测试版本。

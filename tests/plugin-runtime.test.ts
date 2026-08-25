@@ -107,5 +107,23 @@ await test("plugin runtime reports a failed Fiber without persisting runtime sta
 
   assert.equal(runtime.snapshot().plugins[0]?.state, "failed");
   assert.match(runtime.snapshot().plugins[0]?.error ?? "", /version 1\.0\.0 failed/);
+  await runtime.reconcile([]);
+  assert.deepEqual(runtime.snapshot().plugins, []);
+  await runtime.dispose();
+});
+
+await test("plugin runtime reload retries a desired failed Fiber", async () => {
+  const backend = new RecordingBackend();
+  backend.failedVersions.add("1.0.0");
+  const runtime = new CordisPluginRuntime(backend);
+
+  await runtime.reconcile([entryFor("1.0.0")]);
+  assert.equal(runtime.snapshot().plugins[0]?.state, "failed");
+
+  backend.failedVersions.clear();
+  await runtime.reload("example.runtime");
+
+  assert.deepEqual(backend.events, ["start:1.0.0", "start:1.0.0"]);
+  assert.equal(runtime.snapshot().plugins[0]?.state, "active");
   await runtime.dispose();
 });

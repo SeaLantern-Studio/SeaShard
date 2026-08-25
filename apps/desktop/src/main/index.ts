@@ -2,7 +2,13 @@ import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { desktopShellContract, serverCoreIconScheme } from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
-import { PluginKernel, type PluginKernelOptions } from "@seashard/plugin-system";
+import {
+  PluginKernel,
+  pluginDeveloperControlProtocolVersion,
+  type PluginDeveloperControlLaunch,
+  type PluginKernelOptions,
+  type PluginPackageRecord,
+} from "@seashard/plugin-system";
 import { Context } from "cordis";
 import { app, protocol } from "electron";
 import { dirname, join } from "node:path";
@@ -11,6 +17,7 @@ import { registerClientFeatures } from "./client-features";
 import { publishServerConsoleLine, registerDesktopShellBridge } from "./desktop-shell-bridge";
 import { registerHostFeatures } from "./host-features";
 import { registerSmokePlugin, verifySmokeRuntime } from "./smoke";
+import { startPluginDeveloperControl } from "./developer-control";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -27,6 +34,10 @@ const developmentUrl = resolveDevelopmentUrl();
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const startedAt = new Date().toISOString();
 const seaShardVersion = "0.0.0";
+const developerControlLaunch = resolvePluginDeveloperControlLaunch();
+const disposeDeveloperParentDisconnect = developerControlLaunch
+  ? installDeveloperParentDisconnect()
+  : undefined;
 if (smokeMode) {
   const smokeUserDataRoot = process.env.SEASHARD_SMOKE_USER_DATA_DIR;
   if (!smokeUserDataRoot) {
@@ -39,9 +50,17 @@ if (developmentUrl) installDevelopmentControl();
 
 let kernel: PluginKernel | undefined;
 let bootstrapLoader: BootstrapLoader | undefined;
+let bootstrapTask: Promise<void> | undefined;
 let shutdownTask: Promise<void> | undefined;
 let shutdownComplete = false;
 let stopping = false;
+let signalBootstrapStop!: () => void;
+const bootstrapStop = new Promise<void>((resolve) => {
+  signalBootstrapStop = resolve;
+});
+let disposeDeveloperControl: (() => Promise<void>) | undefined;
+let developmentPlugin: PluginPackageRecord | undefined;
+const developmentRuntimeHistory = new Set<string>();
 
 function resolveDevelopmentUrl(): string | undefined {
   const argumentPrefix = "--seashard-dev-server-url=";
@@ -65,8 +84,46 @@ function installDevelopmentControl(): void {
   });
 }
 
+/**
+ * CLI 通过专用 IPC 通道启动开发 Host。父进程崩溃或终端被关闭时，操作系统会断开
+ * 通道；由子进程主动进入现有 app.quit/shutdown 链，避免遗留窗口、Runtime 和描述文件。
+ */
+function installDeveloperParentDisconnect(): () => void {
+  let listening = true;
+  const requestShutdown = () => {
+    if (listening) app.quit();
+  };
+  if (process.connected) {
+    process.once("disconnect", requestShutdown);
+  } else {
+    queueMicrotask(requestShutdown);
+  }
+  return () => {
+    listening = false;
+    process.off("disconnect", requestShutdown);
+  };
+}
+
+class BootstrapStoppedError extends Error {
+  readonly name = "BootstrapStoppedError";
+}
+
+function assertBootstrapContinues(): void {
+  if (stopping) throw new BootstrapStoppedError("SeaShard bootstrap was stopped");
+}
+
+async function waitForApplicationReady(): Promise<void> {
+  await Promise.race([
+    app.whenReady(),
+    bootstrapStop.then(() => {
+      throw new BootstrapStoppedError("SeaShard stopped before Electron became ready");
+    }),
+  ]);
+  assertBootstrapContinues();
+}
+
 async function bootstrap(): Promise<void> {
-  await app.whenReady();
+  await waitForApplicationReady();
   const host = resolveHost();
   const userDataRoot = app.getPath("userData");
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
@@ -84,6 +141,7 @@ async function bootstrap(): Promise<void> {
       seaShardVersion,
     }),
   ]);
+  assertBootstrapContinues();
   kernel = await PluginKernel.create({
     dataRoot,
     seaShardVersion,
@@ -96,6 +154,7 @@ async function bootstrap(): Promise<void> {
     store: root["plugin-foundation"].store,
     pluginStorage: root["plugin-foundation"].storage,
   });
+  assertBootstrapContinues();
   const activeKernel = kernel;
   if (smokeMode) {
     kernel.registerCoreService("seashard.smoke.marker", {
@@ -106,6 +165,7 @@ async function bootstrap(): Promise<void> {
     });
   }
   await registerClientFeatures(activeKernel);
+  assertBootstrapContinues();
   await registerHostFeatures({
     kernel: activeKernel,
     root,
@@ -116,25 +176,77 @@ async function bootstrap(): Promise<void> {
     isStopping: () => stopping,
     publishServerConsoleLine,
   });
+  assertBootstrapContinues();
   await registerDesktopShellBridge({
     kernel: activeKernel,
     moduleDirectory,
     ...(developmentUrl ? { developmentUrl } : {}),
     smokeMode,
   });
+  assertBootstrapContinues();
   await registerSmokePlugin(activeKernel);
+  assertBootstrapContinues();
+  developmentPlugin = await registerDevelopmentPlugin(activeKernel, developerControlLaunch);
+  assertBootstrapContinues();
   await activeKernel.start();
+  assertBootstrapContinues();
   await verifySmokeRuntime(activeKernel, smokeMode);
+  assertBootstrapContinues();
+  if (developerControlLaunch) {
+    const currentDevelopmentRuntimeIds = () =>
+      developmentPlugin
+        ? activeKernel
+            .runtimeSnapshot()
+            .plugins.filter((plugin) => plugin.pluginId === developmentPlugin?.manifest.id)
+            .map((plugin) => plugin.runtimeId)
+        : [];
+    for (const runtimeId of currentDevelopmentRuntimeIds()) {
+      developmentRuntimeHistory.add(runtimeId);
+    }
+    disposeDeveloperControl = await startPluginDeveloperControl({
+      kernel: activeKernel,
+      launch: developerControlLaunch,
+      startedAt,
+      pluginId: () => developmentPlugin?.manifest.id,
+      runtimeIds: currentDevelopmentRuntimeIds,
+      logRuntimeIds: () => [...developmentRuntimeHistory],
+      refreshDevelopmentPlugin: async () => {
+        developmentPlugin = await registerDevelopmentPlugin(
+          activeKernel,
+          developerControlLaunch,
+          developmentPlugin?.manifest.id,
+        );
+        for (const runtimeId of currentDevelopmentRuntimeIds()) {
+          developmentRuntimeHistory.add(runtimeId);
+        }
+      },
+      requestShutdown: () => app.quit(),
+    });
+    assertBootstrapContinues();
+    process.send?.({
+      type: "seashard:plugin-developer-control-ready",
+      sessionId: developerControlLaunch.sessionId,
+    });
+  }
 
-  // 全部组件发布后再加载 Renderer，Preload 的首个调用必定命中已注册的 Shell Handler。
-  await activeKernel.callService(desktopShellContract, "openPrimary", []);
+  // 一次性 CLI 操作不创建窗口；开发会话继续加载真实 Renderer，便于联调 Client Entry。
+  if (developerControlLaunch?.mode !== "operation") {
+    await activeKernel.callService(desktopShellContract, "openPrimary", []);
+    assertBootstrapContinues();
+  }
   if (developmentUrl) console.log(`SEASHARD_DEV_WINDOW_READY ${developmentUrl}`);
 }
 
 async function shutdown(): Promise<void> {
   shutdownTask ??= (async () => {
     stopping = true;
+    signalBootstrapStop();
+    disposeDeveloperParentDisconnect?.();
+    // Bootstrap 先完整退出当前异步步骤，Shutdown 才释放其 Loader、Kernel 和 Cordis Context。
+    // 这条屏障同时覆盖父 IPC 断开、正常退出和启动失败三条路径。
+    await bootstrapTask?.catch(() => undefined);
     try {
+      await disposeDeveloperControl?.();
       await kernel?.dispose();
       const activeUnits =
         kernel?.runtimeSnapshot().plugins.filter((plugin) => plugin.state === "active").length ?? 0;
@@ -169,10 +281,43 @@ app.on("before-quit", (event) => {
   });
 });
 
-void bootstrap().catch((error) => {
+bootstrapTask = bootstrap();
+void bootstrapTask.catch((error) => {
+  if (error instanceof BootstrapStoppedError) return;
   console.error("SeaShard bootstrap failed", error);
   void shutdown().finally(() => app.exit(1));
 });
+
+function resolvePluginDeveloperControlLaunch(): PluginDeveloperControlLaunch | undefined {
+  const encoded = process.env.SEASHARD_PLUGIN_DEVELOPER_CONTROL;
+  if (!encoded) return undefined;
+  const value = JSON.parse(
+    Buffer.from(encoded, "base64url").toString("utf8"),
+  ) as Partial<PluginDeveloperControlLaunch>;
+  if (
+    value.protocolVersion !== pluginDeveloperControlProtocolVersion ||
+    typeof value.sessionId !== "string" ||
+    !/^[a-f0-9]{24}$/u.test(value.sessionId) ||
+    typeof value.token !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(value.token) ||
+    typeof value.socketPath !== "string" ||
+    typeof value.descriptorPath !== "string" ||
+    (value.mode !== "development" && value.mode !== "operation") ||
+    (value.mode === "development" && typeof value.pluginRoot !== "string")
+  ) {
+    throw new TypeError("SEASHARD_PLUGIN_DEVELOPER_CONTROL is invalid");
+  }
+  return value as PluginDeveloperControlLaunch;
+}
+
+async function registerDevelopmentPlugin(
+  activeKernel: PluginKernel,
+  launch: PluginDeveloperControlLaunch | undefined,
+  previousPluginId?: string,
+): Promise<PluginPackageRecord | undefined> {
+  if (launch?.mode !== "development" || !launch.pluginRoot) return undefined;
+  return activeKernel.refreshDevelopmentDirectory(launch.pluginRoot, previousPluginId);
+}
 
 function resolveHost(): Pick<PluginKernelOptions, "platform" | "architecture"> {
   const platforms: PluginKernelOptions["platform"][] = [

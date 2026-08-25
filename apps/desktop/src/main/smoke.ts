@@ -29,11 +29,15 @@ export async function registerSmokePlugin(pluginKernel: PluginKernel): Promise<v
       acknowledgeFullMachineAccess: true,
     });
   } else {
-    const candidate = await pluginKernel.installer.inspectDevelopmentDirectory(sourceRoot!);
-    record = await pluginKernel.installDevelopmentDirectory(sourceRoot!, {
-      digest: candidate.digest,
-      acknowledgeFullMachineAccess: true,
-    });
+    const prepared = await pluginKernel.prepareDirectory(sourceRoot!);
+    try {
+      record = await prepared.commit({
+        digest: prepared.digest,
+        acknowledgeFullMachineAccess: true,
+      });
+    } finally {
+      await prepared.dispose();
+    }
   }
   await pluginKernel.registry.selectPackageVersion(record);
   const entry = record.manifest.entries.find((candidateEntry) => candidateEntry.runtime === "host");

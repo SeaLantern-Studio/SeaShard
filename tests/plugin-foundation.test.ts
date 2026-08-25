@@ -318,3 +318,104 @@ await test("plugin foundation exposes managed storage with runtime isolation and
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+await test("package installation enables every Entry without activating incompatible Hosts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-install-enable-"));
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
+  let kernel: PluginKernel | undefined;
+  try {
+    await loader.start([
+      createPluginFoundationBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    kernel = await PluginKernel.create({
+      dataRoot: directory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+      root,
+      store: root["plugin-foundation"].store,
+      pluginStorage: root["plugin-foundation"].storage,
+    });
+    const manifest = {
+      id: "example.install-auto-enable",
+      version: "1.0.0",
+      publisher: "example",
+      entries: [
+        {
+          id: "client",
+          runtime: "client",
+          module: "./dist/client.js",
+          targets: ["desktop"],
+          uses: {},
+          activationScopes: ["global"],
+          permissions: [],
+        },
+        {
+          id: "electron-only",
+          runtime: "host",
+          module: "./dist/electron-only.js",
+          hostProfiles: ["electron"],
+          uses: {},
+          activationScopes: ["global"],
+          permissions: [],
+        },
+      ],
+      compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+    } satisfies PluginManifest;
+    const record = {
+      manifest,
+      digest: "d".repeat(64),
+      rootPath: "C:/plugins/example.install-auto-enable",
+      source: "installed" as const,
+      trust: "package-full-trust" as const,
+      installedAt: "2026-08-25T00:00:00.000Z",
+    };
+    await root["plugin-foundation"].store.registerPackage(record);
+
+    await kernel.selectPackageVersionAndEnable(record);
+
+    assert.deepEqual(await root["plugin-foundation"].store.listBindings(manifest.id), [
+      {
+        id: "plugin:example.install-auto-enable:client",
+        pluginId: manifest.id,
+        entryId: "client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: {},
+      },
+      {
+        id: "plugin:example.install-auto-enable:electron-only",
+        pluginId: manifest.id,
+        entryId: "electron-only",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: {},
+      },
+    ]);
+    assert.deepEqual(
+      kernel
+        .clientEntrySnapshot()
+        .entries.map((entry) => [entry.runtimeId, entry.package.manifest.id]),
+      [["plugin:example.install-auto-enable:client", manifest.id]],
+    );
+  } finally {
+    await kernel?.dispose();
+    await loader.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

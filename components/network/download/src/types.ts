@@ -1,7 +1,7 @@
 import type { FileDownloadTaskSnapshot } from "@seashard/contracts";
-import type { JsonValue } from "@seashard/plugin-sdk";
+import { defineServiceContract, type JsonValue } from "@seashard/plugin-sdk";
 
-export const downloadContract = "seashard.download";
+export const downloadContract = defineServiceContract<DownloadService>("seashard.download");
 
 export type DownloadTaskState = "queued" | "downloading" | "completed" | "failed" | "cancelled";
 
@@ -42,17 +42,45 @@ export interface DownloadTaskSnapshot {
 
 /** 所有需要下载文件的组件都通过这一份进程级服务创建和管理任务。 */
 export interface DownloadService {
-  /** 创建后台下载任务并立即返回初始快照。 */
+  /**
+   * 创建后台下载任务并立即返回初始快照。
+   *
+   * @param request 已验证的 URL、目标路径、并发策略与可选元数据。
+   * @returns 新下载任务的初始快照。
+   */
   start(request: StartDownloadRequest): Promise<DownloadTaskSnapshot>;
-  /** 查询单个任务；任务不存在时返回 null。 */
+  /**
+   * 查询单个任务；任务不存在时返回 null。
+   *
+   * @param taskId 下载任务 ID。
+   * @returns 当前任务快照或 null。
+   */
   snapshot(taskId: string): Promise<DownloadTaskSnapshot | null>;
-  /** 等待任务进入终态并返回最终快照；任务不存在时返回 null。 */
+  /**
+   * 等待任务进入终态并返回最终快照；任务不存在时返回 null。
+   *
+   * @param taskId 下载任务 ID。
+   * @returns 结算后的任务快照或 null。
+   */
   wait(taskId: string): Promise<DownloadTaskSnapshot | null>;
-  /** 按创建时间返回当前保留的任务。 */
+  /**
+   * 按创建时间返回当前保留的任务。
+   *
+   * @returns 包含 Host 侧完整下载字段的任务快照。
+   */
   listTasks(): Promise<readonly DownloadTaskSnapshot[]>;
-  /** 只投影显式标记为用户可见的任务，并剥离 URL 与业务 metadata。 */
+  /**
+   * 只投影显式标记为用户可见的任务，并剥离 URL 与业务 metadata。
+   *
+   * @returns 可以跨 Client 边界发布的下载任务。
+   */
   listUserVisibleTasks(): Promise<readonly FileDownloadTaskSnapshot[]>;
-  /** 取消任务并等待临时文件清理完成。 */
+  /**
+   * 取消任务并等待临时文件清理完成。
+   *
+   * @param taskId 下载任务 ID。
+   * @returns 是否成功取消了尚未结算的任务。
+   */
   cancel(taskId: string): Promise<boolean>;
 }
 

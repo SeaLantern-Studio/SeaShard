@@ -1,0 +1,16 @@
+{
+  "name": "@seashard/cli",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "seashard": "dist/index.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "@seashard/plugin-system": "workspace:*",
+    "chokidar": "5.0.0",
+    "commander": "15.0.0",
+    "electron": "43.4.0",
+    "fflate": "0.8.3"
+  }
+}

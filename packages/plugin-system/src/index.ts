@@ -1,5 +1,6 @@
 export * from "./host-protocol";
 export * from "./client-projection";
+export * from "./developer-control";
 export * from "./installer";
 export * from "./kernel";
 export * from "./manifest";

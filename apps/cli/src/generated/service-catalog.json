@@ -1,0 +1,2277 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "contract": "seashard.agent-invocation",
+      "owner": "seashard.agent-runtime",
+      "description": "读取和控制正在执行或已经结算的 Agent Invocation。",
+      "source": "packages/contracts/src/index.ts:133",
+      "methods": [
+        {
+          "name": "getInvocation",
+          "signature": "getInvocation(invocationId: string): Promise<AgentInvocationSnapshot>",
+          "description": "读取 Invocation 的文本、工具活动和最终状态。",
+          "parameters": [
+            {
+              "name": "invocationId",
+              "type": "string",
+              "description": "Invocation ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentInvocationSnapshot>",
+            "description": "当前 Invocation 快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "cancelInvocation",
+          "signature": "cancelInvocation(invocationId: string): Promise<void>",
+          "description": "请求取消仍在运行的 Invocation；已经结算的调用保持幂等。",
+          "parameters": [
+            {
+              "name": "invocationId",
+              "type": "string",
+              "description": "Invocation ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "AgentActivityPresentation",
+          "description": "",
+          "declaration": "export interface AgentActivityPresentation {\n  readonly title: string;\n  readonly icon?: AgentActivityPresentationIcon;\n  readonly requestPayload?: readonly AgentActivityPresentationField[];\n  readonly resultPayload?: readonly AgentActivityPresentationField[];\n}",
+          "source": "packages/contracts/src/index.ts:291"
+        },
+        {
+          "name": "AgentActivityPresentationField",
+          "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
+          "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
+          "source": "packages/plugin-sdk/src/index.ts:321"
+        },
+        {
+          "name": "AgentActivityPresentationIcon",
+          "description": "",
+          "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
+          "source": "packages/plugin-sdk/src/index.ts:328"
+        },
+        {
+          "name": "AgentInvocationSnapshot",
+          "description": "",
+          "declaration": "export interface AgentInvocationSnapshot extends AgentInvocationSummary {\n  readonly text: string;\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n}",
+          "source": "packages/contracts/src/index.ts:394"
+        },
+        {
+          "name": "AgentInvocationState",
+          "description": "",
+          "declaration": "export type AgentInvocationState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
+          "source": "packages/contracts/src/index.ts:288"
+        },
+        {
+          "name": "AgentInvocationSummary",
+          "description": "",
+          "declaration": "export interface AgentInvocationSummary {\n  readonly id: string;\n  readonly sessionId: string;\n  readonly state: AgentInvocationState;\n  readonly model: AgentModelSelection;\n  readonly startedAt: string;\n  readonly finishedAt?: string;\n  readonly error?: string;\n}",
+          "source": "packages/contracts/src/index.ts:384"
+        },
+        {
+          "name": "AgentModelSelection",
+          "description": "",
+          "declaration": "export interface AgentModelSelection {\n  readonly connectionId: string;\n  readonly modelId: string;\n}",
+          "source": "packages/contracts/src/index.ts:142"
+        },
+        {
+          "name": "AgentToolCallSnapshot",
+          "description": "Agent 调用工具时持久化并投影给客户端的稳定活动记录。",
+          "declaration": "/** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */\nexport interface AgentToolCallSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly toolName: string;\n  readonly presentation: AgentActivityPresentation;\n  readonly state: AgentToolCallState;\n  readonly input: JsonValue;\n  readonly output?: JsonValue;\n  readonly error?: string;\n  readonly startedAt: string;\n  /** 工具开始前已经输出的 Assistant 文本长度；使用 JavaScript UTF-16 偏移量。 */\n  readonly assistantTextOffset: number;\n  readonly finishedAt?: string;\n}",
+          "source": "packages/contracts/src/index.ts:299"
+        },
+        {
+          "name": "AgentToolCallState",
+          "description": "",
+          "declaration": "export type AgentToolCallState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
+          "source": "packages/contracts/src/index.ts:289"
+        },
+        {
+          "name": "JsonPrimitive",
+          "description": "",
+          "declaration": "export type JsonPrimitive = boolean | number | string | null;",
+          "source": "packages/plugin-sdk/src/index.ts:4"
+        },
+        {
+          "name": "JsonValue",
+          "description": "",
+          "declaration": "export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };",
+          "source": "packages/plugin-sdk/src/index.ts:5"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.agent-model-configuration",
+      "owner": "seashard.agent-runtime",
+      "description": "管理 Agent 模型连接、凭据引用和可选择模型目录。",
+      "source": "packages/contracts/src/index.ts:138",
+      "methods": [
+        {
+          "name": "getConfiguration",
+          "signature": "getConfiguration(): Promise<AgentModelConfigurationSnapshot>",
+          "description": "读取最后一次通过校验的模型配置。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "当前配置快照及最近一次加载诊断。"
+          },
+          "throws": []
+        },
+        {
+          "name": "mutateConnection",
+          "signature": "mutateConnection(input: { readonly expectedRevision: string; readonly connectionId: string; readonly operations: readonly AgentModelConnectionMutation[]; }): Promise<AgentModelConfigurationSnapshot>",
+          "description": "以乐观并发方式修改指定模型连接。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly expectedRevision: string; readonly connectionId: string; readonly operations: readonly AgentModelConnectionMutation[]; }",
+              "description": "预期 revision、连接 ID 与有序字段操作。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "写入成功后的新配置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "removeConnection",
+          "signature": "removeConnection(input: { readonly expectedRevision: string; readonly connectionId: string; }): Promise<AgentModelConfigurationSnapshot>",
+          "description": "删除一个模型连接及其模型目录引用。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly expectedRevision: string; readonly connectionId: string; }",
+              "description": "预期 revision 与待删除连接 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "删除成功后的新配置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "resetConfiguration",
+          "signature": "resetConfiguration(input: { readonly expectedRevision: string; }): Promise<AgentModelConfigurationSnapshot>",
+          "description": "用户确认后以空模板替换当前配置，用于从无法结构化编辑的损坏文件恢复。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly expectedRevision: string; }",
+              "description": "当前调用方观察到的配置 revision。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "重置后的空配置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "discoverModels",
+          "signature": "discoverModels(input: { readonly providerType: string; readonly settings: JsonObject; readonly credentialId?: string; readonly credentialValue?: string; }): Promise<readonly AgentModelConnectionModel[]>",
+          "description": "使用尚未写入 models.yml 的候选设置和临时凭据查询上游模型目录。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly providerType: string; readonly settings: JsonObject; readonly credentialId?: string; readonly credentialValue?: string; }",
+              "description": "Provider 类型、候选设置及可选的临时凭据。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly AgentModelConnectionModel[]>",
+            "description": "上游当前返回的可配置模型目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "writeCredential",
+          "signature": "writeCredential(input: { readonly credentialId: string; readonly value: string; }): Promise<AgentModelConfigurationSnapshot>",
+          "description": "将凭据明文写入 Host Vault，任何返回值和事件都不会包含明文。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly credentialId: string; readonly value: string; }",
+              "description": "凭据 ID 与只用于本次写入的明文值。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "保持凭据正文脱敏的最新配置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "removeCredential",
+          "signature": "removeCredential(input: { readonly credentialId: string; }): Promise<AgentModelConfigurationSnapshot>",
+          "description": "只移除 Host Vault 中的密文，不改写 models.yml 的 credentialId 引用。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ readonly credentialId: string; }",
+              "description": "待移除的凭据 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentModelConfigurationSnapshot>",
+            "description": "更新凭据可用状态后的配置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "openConfigurationFile",
+          "signature": "openConfigurationFile(): Promise<void>",
+          "description": "使用系统默认编辑器打开当前 models.yml。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "AgentConfiguredModel",
+          "description": "",
+          "declaration": "export interface AgentConfiguredModel extends AgentModelSelection {\n  readonly name: string;\n}",
+          "source": "packages/contracts/src/index.ts:147"
+        },
+        {
+          "name": "AgentModelConfigurationSnapshot",
+          "description": "revision 对应 models.yml 字节内容；diagnostics 描述未取代最后有效配置的加载故障。",
+          "declaration": "/** revision 对应 models.yml 字节内容；diagnostics 描述未取代最后有效配置的加载故障。 */\nexport interface AgentModelConfigurationSnapshot {\n  readonly revision: string;\n  readonly connections: readonly AgentModelConnectionConfig[];\n  readonly models: readonly AgentConfiguredModel[];\n  readonly providerTypes: readonly AgentProviderTypeDescriptor[];\n  readonly diagnostics: readonly string[];\n}",
+          "source": "packages/contracts/src/index.ts:180"
+        },
+        {
+          "name": "AgentModelConnectionConfig",
+          "description": "Renderer 可读取的连接投影不包含凭据正文。",
+          "declaration": "/** Renderer 可读取的连接投影不包含凭据正文。 */\nexport interface AgentModelConnectionConfig {\n  readonly id: string;\n  readonly displayName?: string;\n  readonly providerType: string;\n  readonly credentialId?: string;\n  readonly credentialConfigured: boolean;\n  readonly settings: JsonObject;\n  readonly models?: readonly AgentModelConnectionModel[];\n  readonly available: boolean;\n  readonly diagnostic?: string;\n}",
+          "source": "packages/contracts/src/index.ts:158"
+        },
+        {
+          "name": "AgentModelConnectionModel",
+          "description": "",
+          "declaration": "export interface AgentModelConnectionModel {\n  readonly id: string;\n  readonly displayName?: string;\n  readonly providerOptions?: JsonObject;\n}",
+          "source": "packages/contracts/src/index.ts:151"
+        },
+        {
+          "name": "AgentModelConnectionMutation",
+          "description": "",
+          "declaration": "export type AgentModelConnectionMutation =\n  | {\n      readonly op: \"set\";\n      readonly path: readonly string[];\n      readonly value: JsonValue;\n    }\n  | {\n      readonly op: \"unset\";\n      readonly path: readonly string[];\n    };",
+          "source": "packages/contracts/src/index.ts:188"
+        },
+        {
+          "name": "AgentModelSelection",
+          "description": "",
+          "declaration": "export interface AgentModelSelection {\n  readonly connectionId: string;\n  readonly modelId: string;\n}",
+          "source": "packages/contracts/src/index.ts:142"
+        },
+        {
+          "name": "AgentProviderTypeDescriptor",
+          "description": "Provider Type 的只读元数据；工厂和凭据只存在于 Core Host。",
+          "declaration": "/** Provider Type 的只读元数据；工厂和凭据只存在于 Core Host。 */\nexport interface AgentProviderTypeDescriptor {\n  readonly id: string;\n  readonly displayName: string;\n  readonly settingsSchema: JsonObject;\n  readonly catalog?: readonly AgentModelConnectionModel[];\n  readonly supportsModelDiscovery: boolean;\n}",
+          "source": "packages/contracts/src/index.ts:171"
+        },
+        {
+          "name": "JsonObject",
+          "description": "",
+          "declaration": "export type JsonObject = { [key: string]: JsonValue };",
+          "source": "packages/plugin-sdk/src/index.ts:6"
+        },
+        {
+          "name": "JsonPrimitive",
+          "description": "",
+          "declaration": "export type JsonPrimitive = boolean | number | string | null;",
+          "source": "packages/plugin-sdk/src/index.ts:4"
+        },
+        {
+          "name": "JsonValue",
+          "description": "",
+          "declaration": "export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };",
+          "source": "packages/plugin-sdk/src/index.ts:5"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.agent-session",
+      "owner": "seashard.agent-runtime",
+      "description": "创建、读取和管理可持久化的 Agent 会话。",
+      "source": "packages/contracts/src/index.ts:131",
+      "methods": [
+        {
+          "name": "listModels",
+          "signature": "listModels(): Promise<readonly AgentConfiguredModel[]>",
+          "description": "列出当前配置中可以创建会话的模型。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly AgentConfiguredModel[]>",
+            "description": "带连接身份和显示名称的可选模型。"
+          },
+          "throws": []
+        },
+        {
+          "name": "startSession",
+          "signature": "startSession(input: { initialMessage: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
+          "description": "创建会话并立即启动第一轮 Invocation。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ initialMessage: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }",
+              "description": "初始用户消息、会话模式及可选模型。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentInvocationReference>",
+            "description": "新会话与首轮 Invocation 的稳定 ID。"
+          },
+          "throws": []
+        },
+        {
+          "name": "sendMessage",
+          "signature": "sendMessage(input: { sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
+          "description": "向已有会话追加用户消息并启动新 Invocation。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "{ sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }",
+              "description": "会话 ID、用户消息、会话模式及可选模型。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentInvocationReference>",
+            "description": "会话与新 Invocation 的稳定 ID。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listSessions",
+          "signature": "listSessions(): Promise<readonly AgentSessionSummary[]>",
+          "description": "按更新时间列出当前保存的会话。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly AgentSessionSummary[]>",
+            "description": "不含完整消息正文的会话摘要。"
+          },
+          "throws": []
+        },
+        {
+          "name": "getSession",
+          "signature": "getSession(sessionId: string): Promise<AgentSessionSnapshot>",
+          "description": "读取一个会话的完整消息和工具调用投影。",
+          "parameters": [
+            {
+              "name": "sessionId",
+              "type": "string",
+              "description": "已保存的会话 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentSessionSnapshot>",
+            "description": "当前会话快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "copySession",
+          "signature": "copySession(sessionId: string): Promise<AgentSessionSummary>",
+          "description": "复制已有会话并生成新的会话身份。",
+          "parameters": [
+            {
+              "name": "sessionId",
+              "type": "string",
+              "description": "源会话 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentSessionSummary>",
+            "description": "新会话摘要。"
+          },
+          "throws": []
+        },
+        {
+          "name": "renameSession",
+          "signature": "renameSession(sessionId: string, title: string): Promise<void>",
+          "description": "更新已有会话标题。",
+          "parameters": [
+            {
+              "name": "sessionId",
+              "type": "string",
+              "description": "目标会话 ID。"
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "description": "去除首尾空白后的新标题。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "deleteSession",
+          "signature": "deleteSession(sessionId: string): Promise<void>",
+          "description": "删除会话及其持久化 Journal。",
+          "parameters": [
+            {
+              "name": "sessionId",
+              "type": "string",
+              "description": "目标会话 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "AgentActivityPresentation",
+          "description": "",
+          "declaration": "export interface AgentActivityPresentation {\n  readonly title: string;\n  readonly icon?: AgentActivityPresentationIcon;\n  readonly requestPayload?: readonly AgentActivityPresentationField[];\n  readonly resultPayload?: readonly AgentActivityPresentationField[];\n}",
+          "source": "packages/contracts/src/index.ts:291"
+        },
+        {
+          "name": "AgentActivityPresentationField",
+          "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
+          "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
+          "source": "packages/plugin-sdk/src/index.ts:321"
+        },
+        {
+          "name": "AgentActivityPresentationIcon",
+          "description": "",
+          "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
+          "source": "packages/plugin-sdk/src/index.ts:328"
+        },
+        {
+          "name": "AgentConfiguredModel",
+          "description": "",
+          "declaration": "export interface AgentConfiguredModel extends AgentModelSelection {\n  readonly name: string;\n}",
+          "source": "packages/contracts/src/index.ts:147"
+        },
+        {
+          "name": "AgentConversationMode",
+          "description": "",
+          "declaration": "export type AgentConversationMode = \"chat\" | \"agent\";",
+          "source": "packages/contracts/src/index.ts:281"
+        },
+        {
+          "name": "AgentInvocationReference",
+          "description": "",
+          "declaration": "export interface AgentInvocationReference {\n  readonly sessionId: string;\n  readonly invocationId: string;\n}",
+          "source": "packages/contracts/src/index.ts:283"
+        },
+        {
+          "name": "AgentMessageSnapshot",
+          "description": "",
+          "declaration": "export interface AgentMessageSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly role: \"user\" | \"assistant\";\n  readonly content: string;\n  readonly timestamp: string;\n}",
+          "source": "packages/contracts/src/index.ts:363"
+        },
+        {
+          "name": "AgentModelSelection",
+          "description": "",
+          "declaration": "export interface AgentModelSelection {\n  readonly connectionId: string;\n  readonly modelId: string;\n}",
+          "source": "packages/contracts/src/index.ts:142"
+        },
+        {
+          "name": "AgentSessionSnapshot",
+          "description": "",
+          "declaration": "export interface AgentSessionSnapshot extends AgentSessionSummary {\n  readonly messages: readonly AgentMessageSnapshot[];\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n}",
+          "source": "packages/contracts/src/index.ts:379"
+        },
+        {
+          "name": "AgentSessionSummary",
+          "description": "",
+          "declaration": "export interface AgentSessionSummary {\n  readonly id: string;\n  readonly title: string;\n  readonly model: AgentModelSelection;\n  readonly createdAt: string;\n  readonly updatedAt: string;\n}",
+          "source": "packages/contracts/src/index.ts:371"
+        },
+        {
+          "name": "AgentToolCallSnapshot",
+          "description": "Agent 调用工具时持久化并投影给客户端的稳定活动记录。",
+          "declaration": "/** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */\nexport interface AgentToolCallSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly toolName: string;\n  readonly presentation: AgentActivityPresentation;\n  readonly state: AgentToolCallState;\n  readonly input: JsonValue;\n  readonly output?: JsonValue;\n  readonly error?: string;\n  readonly startedAt: string;\n  /** 工具开始前已经输出的 Assistant 文本长度；使用 JavaScript UTF-16 偏移量。 */\n  readonly assistantTextOffset: number;\n  readonly finishedAt?: string;\n}",
+          "source": "packages/contracts/src/index.ts:299"
+        },
+        {
+          "name": "AgentToolCallState",
+          "description": "",
+          "declaration": "export type AgentToolCallState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
+          "source": "packages/contracts/src/index.ts:289"
+        },
+        {
+          "name": "AgentUserMessage",
+          "description": "",
+          "declaration": "export interface AgentUserMessage {\n  readonly text: string;\n}",
+          "source": "packages/contracts/src/index.ts:277"
+        },
+        {
+          "name": "JsonPrimitive",
+          "description": "",
+          "declaration": "export type JsonPrimitive = boolean | number | string | null;",
+          "source": "packages/plugin-sdk/src/index.ts:4"
+        },
+        {
+          "name": "JsonValue",
+          "description": "",
+          "declaration": "export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };",
+          "source": "packages/plugin-sdk/src/index.ts:5"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.desktop-shell",
+      "owner": "seashard.desktop-shell",
+      "description": "控制 Desktop 主窗口生命周期的宿主 Service。",
+      "source": "packages/contracts/src/index.ts:128",
+      "methods": [
+        {
+          "name": "openPrimary",
+          "signature": "openPrimary(): Promise<void>",
+          "description": "创建或聚焦主窗口；窗口已经打开时保持幂等。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        }
+      ],
+      "types": []
+    },
+    {
+      "contract": "seashard.download",
+      "owner": "seashard.download",
+      "description": "所有需要下载文件的组件都通过这一份进程级服务创建和管理任务。",
+      "source": "components/network/download/src/types.ts:4",
+      "methods": [
+        {
+          "name": "start",
+          "signature": "start(request: StartDownloadRequest): Promise<DownloadTaskSnapshot>",
+          "description": "创建后台下载任务并立即返回初始快照。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "StartDownloadRequest",
+              "description": "已验证的 URL、目标路径、并发策略与可选元数据。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<DownloadTaskSnapshot>",
+            "description": "新下载任务的初始快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "snapshot",
+          "signature": "snapshot(taskId: string): Promise<DownloadTaskSnapshot | null>",
+          "description": "查询单个任务；任务不存在时返回 null。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<DownloadTaskSnapshot | null>",
+            "description": "当前任务快照或 null。"
+          },
+          "throws": []
+        },
+        {
+          "name": "wait",
+          "signature": "wait(taskId: string): Promise<DownloadTaskSnapshot | null>",
+          "description": "等待任务进入终态并返回最终快照；任务不存在时返回 null。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<DownloadTaskSnapshot | null>",
+            "description": "结算后的任务快照或 null。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listTasks",
+          "signature": "listTasks(): Promise<readonly DownloadTaskSnapshot[]>",
+          "description": "按创建时间返回当前保留的任务。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly DownloadTaskSnapshot[]>",
+            "description": "包含 Host 侧完整下载字段的任务快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listUserVisibleTasks",
+          "signature": "listUserVisibleTasks(): Promise<readonly FileDownloadTaskSnapshot[]>",
+          "description": "只投影显式标记为用户可见的任务，并剥离 URL 与业务 metadata。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly FileDownloadTaskSnapshot[]>",
+            "description": "可以跨 Client 边界发布的下载任务。"
+          },
+          "throws": []
+        },
+        {
+          "name": "cancel",
+          "signature": "cancel(taskId: string): Promise<boolean>",
+          "description": "取消任务并等待临时文件清理完成。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<boolean>",
+            "description": "是否成功取消了尚未结算的任务。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "DownloadTaskSnapshot",
+          "description": "公共下载任务快照；metadata 由创建任务的业务组件解释。",
+          "declaration": "/** 公共下载任务快照；metadata 由创建任务的业务组件解释。 */\nexport interface DownloadTaskSnapshot {\n  readonly id: string;\n  readonly url: string;\n  readonly destinationPath: string;\n  readonly state: DownloadTaskState;\n  readonly downloadedBytes: number;\n  readonly totalBytes: number;\n  /** 实际使用的连接数；探测完成前为 0。 */\n  readonly connections: number;\n  readonly progress: number;\n  readonly createdAt: string;\n  readonly finishedAt?: string;\n  readonly error?: string;\n  readonly metadata?: JsonValue;\n}",
+          "source": "components/network/download/src/types.ts:27"
+        },
+        {
+          "name": "DownloadTaskState",
+          "description": "",
+          "declaration": "export type DownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
+          "source": "components/network/download/src/types.ts:6"
+        },
+        {
+          "name": "FileDownloadTaskSnapshot",
+          "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
+          "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
+          "source": "packages/contracts/src/index.ts:887"
+        },
+        {
+          "name": "FileDownloadTaskState",
+          "description": "",
+          "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
+          "source": "packages/contracts/src/index.ts:867"
+        },
+        {
+          "name": "JsonPrimitive",
+          "description": "",
+          "declaration": "export type JsonPrimitive = boolean | number | string | null;",
+          "source": "packages/plugin-sdk/src/index.ts:4"
+        },
+        {
+          "name": "JsonValue",
+          "description": "",
+          "declaration": "export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };",
+          "source": "packages/plugin-sdk/src/index.ts:5"
+        },
+        {
+          "name": "StartDownloadRequest",
+          "description": "公共下载组件接收完整目标文件路径，而不是某一种业务目录。\n\n服务端、模组、插件和自定义文件组件负责决定自己的目录结构与最终文件名。",
+          "declaration": "/**\n * 公共下载组件接收完整目标文件路径，而不是某一种业务目录。\n *\n * 服务端、模组、插件和自定义文件组件负责决定自己的目录结构与最终文件名。\n */\nexport interface StartDownloadRequest {\n  readonly url: string;\n  readonly destinationPath: string;\n  readonly expectedBytes?: number;\n  readonly sha256?: string;\n  readonly sha1?: string;\n  readonly sha512?: string;\n  /** 期望的并发连接数；远端不支持 Range 时自动退回单连接。 */\n  readonly connections?: number;\n  readonly headers?: Readonly<Record<string, string>>;\n  readonly metadata?: JsonValue;\n}",
+          "source": "components/network/download/src/types.ts:13"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.java-runtime-manager",
+      "owner": "seashard.java-runtime-manager",
+      "description": "Host 组件的完整能力；显式检查只接受用户选择的可执行文件路径。",
+      "source": "packages/contracts/src/index.ts:122",
+      "methods": [
+        {
+          "name": "scan",
+          "signature": "scan(): Promise<readonly JavaInstallationSnapshot[]>",
+          "description": "重新扫描系统和 SeaShard 保存的 Java 安装。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly JavaInstallationSnapshot[]>",
+            "description": "规范化、去重并带启用状态的安装列表。"
+          },
+          "throws": []
+        },
+        {
+          "name": "inspect",
+          "signature": "inspect(executablePath: string): Promise<JavaInstallationSnapshot>",
+          "description": "检查用户明确选择的 Java 可执行文件。",
+          "parameters": [
+            {
+              "name": "executablePath",
+              "type": "string",
+              "description": "Java 可执行文件的绝对路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<JavaInstallationSnapshot>",
+            "description": "执行探测得到的版本、供应商和架构信息。"
+          },
+          "throws": []
+        },
+        {
+          "name": "remove",
+          "signature": "remove(executablePath: string): Promise<boolean>",
+          "description": "仅移除 SeaShard 保存的手动路径记录，不删除或卸载本地 Java。",
+          "parameters": [
+            {
+              "name": "executablePath",
+              "type": "string",
+              "description": "手动添加的 Java 可执行文件路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<boolean>",
+            "description": "是否移除了已保存记录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setDisabled",
+          "signature": "setDisabled(installationId: string, disabled: boolean): Promise<boolean>",
+          "description": "持久化启用状态；禁用只影响 SeaShard 选择，不修改本地 Java。",
+          "parameters": [
+            {
+              "name": "installationId",
+              "type": "string",
+              "description": "扫描快照中的稳定安装 ID。"
+            },
+            {
+              "name": "disabled",
+              "type": "boolean",
+              "description": "是否从自动选择候选中排除。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<boolean>",
+            "description": "是否更新了目标安装。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "JavaInstallationSnapshot",
+          "description": "自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。",
+          "declaration": "/** 自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。 */\nexport interface JavaInstallationSnapshot {\n  id: string;\n  path: string;\n  javaHome: string;\n  version: string;\n  majorVersion: number;\n  vendor: string;\n  architecture: string;\n  is64Bit: boolean;\n  source: JavaInstallationSource;\n  /** 禁用项继续展示，但不会参与服务器启动时的 Java 选择。 */\n  disabled: boolean;\n}",
+          "source": "packages/contracts/src/index.ts:1332"
+        },
+        {
+          "name": "JavaInstallationSource",
+          "description": "",
+          "declaration": "export type JavaInstallationSource = \"java-home\" | \"path\" | \"registry\" | \"filesystem\" | \"manual\";",
+          "source": "packages/contracts/src/index.ts:1329"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.runtime-diagnostics",
+      "owner": "seashard.runtime-diagnostics",
+      "description": "读取普通插件运行状态的稳定诊断投影。",
+      "source": "packages/contracts/src/index.ts:94",
+      "methods": [
+        {
+          "name": "getSnapshot",
+          "signature": "getSnapshot(): Promise<RuntimeSnapshot>",
+          "description": "读取当前 Host 和全部普通组件的运行状态。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<RuntimeSnapshot>",
+            "description": "不暴露 Cordis 或宿主句柄的运行态快照。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ComponentSnapshot",
+          "description": "面向客户端的单个插件运行视图。",
+          "declaration": "/** 面向客户端的单个插件运行视图。 */\nexport type ComponentSnapshot = {\n  id: string;\n  displayName: string;\n  phase: RuntimePhase;\n  error?: string;\n};",
+          "source": "packages/contracts/src/index.ts:497"
+        },
+        {
+          "name": "RuntimePhase",
+          "description": "",
+          "declaration": "export type RuntimePhase = \"active\" | \"failed\";",
+          "source": "packages/contracts/src/index.ts:10"
+        },
+        {
+          "name": "RuntimeSnapshot",
+          "description": "可跨插件 Service 与 IPC 传输的稳定运行态读取模型。",
+          "declaration": "/** 可跨插件 Service 与 IPC 传输的稳定运行态读取模型。 */\nexport type RuntimeSnapshot = {\n  protocolVersion: 1;\n  host: \"electron\";\n  state: \"active\" | \"degraded\" | \"stopping\";\n  startedAt: string;\n  components: ComponentSnapshot[];\n};",
+          "source": "packages/contracts/src/index.ts:505"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-configuration",
+      "owner": "seashard.server-configuration",
+      "description": "配置文件路径必须先由 list 发布；Host 仍会独立校验实例边界、后缀与符号链接。",
+      "source": "packages/contracts/src/index.ts:118",
+      "methods": [
+        {
+          "name": "list",
+          "signature": "list(instanceId: string): Promise<ServerConfigurationCatalog>",
+          "description": "扫描实例内允许编辑的服务端、其他及插件配置文件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerConfigurationCatalog>",
+            "description": "已通过路径与文件类型校验的配置目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "read",
+          "signature": "read(instanceId: string, path: string): Promise<ServerConfigurationDocument>",
+          "description": "读取目录中已经发布的配置文件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "path",
+              "type": "string",
+              "description": "list 返回的实例内相对路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerConfigurationDocument>",
+            "description": "文本内容、编码和用于并发控制的 revision。"
+          },
+          "throws": []
+        },
+        {
+          "name": "write",
+          "signature": "write(request: ServerConfigurationWriteRequest): Promise<ServerConfigurationDocument>",
+          "description": "仅在 revision 未变化时原子写入配置文件。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "ServerConfigurationWriteRequest",
+              "description": "实例、相对路径、正文与预期 revision。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerConfigurationDocument>",
+            "description": "写入后的最新配置文档。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerConfigurationCatalog",
+          "description": "单个实例当前可编辑配置的目录；其他配置只在实际发现文件时显示。",
+          "declaration": "/** 单个实例当前可编辑配置的目录；其他配置只在实际发现文件时显示。 */\nexport interface ServerConfigurationCatalog {\n  instanceId: string;\n  serverType?: string;\n  /** 实际配置根目录；Quilt 等核心可能位于实例根目录的子目录。 */\n  configurationRootPath: string;\n  pluginSupported: boolean;\n  serverFiles: readonly ServerConfigurationFile[];\n  otherFiles: readonly ServerConfigurationFile[];\n  plugins: readonly ServerPluginConfigurationGroup[];\n}",
+          "source": "packages/contracts/src/index.ts:1274"
+        },
+        {
+          "name": "ServerConfigurationDocument",
+          "description": "revision 是原始文件字节的 SHA-256，用于拒绝覆盖服务器或外部编辑器的新修改。",
+          "declaration": "/** revision 是原始文件字节的 SHA-256，用于拒绝覆盖服务器或外部编辑器的新修改。 */\nexport interface ServerConfigurationDocument extends ServerConfigurationFile {\n  instanceId: string;\n  content: string;\n  revision: string;\n  encoding: ServerConfigurationTextEncoding;\n  modifiedAt: string;\n}",
+          "source": "packages/contracts/src/index.ts:1286"
+        },
+        {
+          "name": "ServerConfigurationFile",
+          "description": "Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。",
+          "declaration": "/** Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。 */\nexport interface ServerConfigurationFile {\n  path: string;\n  name: string;\n  kind: ServerConfigurationFileKind;\n  scope: ServerConfigurationFileScope;\n  pluginName?: string;\n}",
+          "source": "packages/contracts/src/index.ts:1260"
+        },
+        {
+          "name": "ServerConfigurationFileKind",
+          "description": "",
+          "declaration": "export type ServerConfigurationFileKind = \"properties\" | \"yaml\" | \"json\" | \"toml\" | \"text\";",
+          "source": "packages/contracts/src/index.ts:1255"
+        },
+        {
+          "name": "ServerConfigurationFileScope",
+          "description": "",
+          "declaration": "export type ServerConfigurationFileScope = \"server\" | \"other\" | \"plugin\";",
+          "source": "packages/contracts/src/index.ts:1256"
+        },
+        {
+          "name": "ServerConfigurationTextEncoding",
+          "description": "",
+          "declaration": "export type ServerConfigurationTextEncoding = \"utf-8\" | \"utf-8-bom\";",
+          "source": "packages/contracts/src/index.ts:1257"
+        },
+        {
+          "name": "ServerConfigurationWriteRequest",
+          "description": "",
+          "declaration": "export interface ServerConfigurationWriteRequest {\n  instanceId: string;\n  path: string;\n  content: string;\n  expectedRevision: string;\n}",
+          "source": "packages/contracts/src/index.ts:1294"
+        },
+        {
+          "name": "ServerPluginConfigurationGroup",
+          "description": "",
+          "declaration": "export interface ServerPluginConfigurationGroup {\n  name: string;\n  files: readonly ServerConfigurationFile[];\n}",
+          "source": "packages/contracts/src/index.ts:1268"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-core-source",
+      "owner": "seashard.server-core-source",
+      "description": "服务端核心源组件提供给创建、升级、UI 和 Agent 的公共能力。",
+      "source": "components/server/core-source/src/types.ts:98",
+      "methods": [
+        {
+          "name": "listTypes",
+          "signature": "listTypes(): Promise<readonly ServerCoreType[]>",
+          "description": "列出 CNB 目录中的全部服务端类型。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly ServerCoreType[]>",
+            "description": "带名称、能力和图标哈希的核心类型。"
+          },
+          "throws": []
+        },
+        {
+          "name": "resolveIconPath",
+          "signature": "resolveIconPath(sha256: string): Promise<string | null>",
+          "description": "将本地协议中的内容哈希解析成已验证缓存文件，不向 Renderer 暴露真实路径。",
+          "parameters": [
+            {
+              "name": "sha256",
+              "type": "string",
+              "description": "目录声明的十六进制 SHA-256。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<string | null>",
+            "description": "已验证缓存路径，缓存不存在时返回 null。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listVersions",
+          "signature": "listVersions(serverType: string): Promise<readonly string[]>",
+          "description": "列出指定服务端类型支持的游戏版本。",
+          "parameters": [
+            {
+              "name": "serverType",
+              "type": "string",
+              "description": "目录中的服务端类型 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly string[]>",
+            "description": "可用 Minecraft 版本。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listArtifacts",
+          "signature": "listArtifacts(serverType: string, gameVersion: string): Promise<readonly ServerCoreArtifact[]>",
+          "description": "返回指定类型和版本下经过校验的下载产物。",
+          "parameters": [
+            {
+              "name": "serverType",
+              "type": "string",
+              "description": "目录中的服务端类型 ID。"
+            },
+            {
+              "name": "gameVersion",
+              "type": "string",
+              "description": "Minecraft 版本。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerCoreArtifact[]>",
+            "description": "可下载核心产物。"
+          },
+          "throws": []
+        },
+        {
+          "name": "start",
+          "signature": "start(request: StartServerCoreDownloadRequest): Promise<ServerCoreDownloadTaskSnapshot>",
+          "description": "创建后台下载任务并立即返回初始快照。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "StartServerCoreDownloadRequest",
+              "description": "核心身份、目标目录、文件名和并发数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerCoreDownloadTaskSnapshot>",
+            "description": "新核心下载任务的初始快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "snapshot",
+          "signature": "snapshot(taskId: string): Promise<ServerCoreDownloadTaskSnapshot | null>",
+          "description": "查询单个任务；任务不存在时返回 null。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "核心下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerCoreDownloadTaskSnapshot | null>",
+            "description": "当前任务快照或 null。"
+          },
+          "throws": []
+        },
+        {
+          "name": "wait",
+          "signature": "wait(taskId: string): Promise<ServerCoreDownloadTaskSnapshot | null>",
+          "description": "等待任务进入终态；实例管理器据此决定注册或清理托管目录。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "核心下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerCoreDownloadTaskSnapshot | null>",
+            "description": "结算后的任务快照或 null。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listTasks",
+          "signature": "listTasks(): Promise<readonly ServerCoreDownloadTaskSnapshot[]>",
+          "description": "按创建时间返回当前保留的任务快照。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly ServerCoreDownloadTaskSnapshot[]>",
+            "description": "当前保留的全部核心下载任务。"
+          },
+          "throws": []
+        },
+        {
+          "name": "cancel",
+          "signature": "cancel(taskId: string): Promise<boolean>",
+          "description": "取消未进入终态的任务，并等待临时文件清理完成。",
+          "parameters": [
+            {
+              "name": "taskId",
+              "type": "string",
+              "description": "核心下载任务 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<boolean>",
+            "description": "是否成功取消了尚未结算的任务。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "FileDownloadTaskSnapshot",
+          "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
+          "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
+          "source": "packages/contracts/src/index.ts:887"
+        },
+        {
+          "name": "FileDownloadTaskState",
+          "description": "",
+          "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
+          "source": "packages/contracts/src/index.ts:867"
+        },
+        {
+          "name": "ServerCoreArtifact",
+          "description": "Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。",
+          "declaration": "/** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */\nexport interface ServerCoreArtifact {\n  source: \"cnb\";\n  serverType: string;\n  gameVersion: string;\n  fileName: string;\n  url: string;\n  sha256: string;\n}",
+          "source": "packages/contracts/src/index.ts:608"
+        },
+        {
+          "name": "ServerCoreDownloadTaskSnapshot",
+          "description": "顶栏和下载页共享的服务器核心任务投影。",
+          "declaration": "/** 顶栏和下载页共享的服务器核心任务投影。 */\nexport interface ServerCoreDownloadTaskSnapshot extends FileDownloadTaskSnapshot {\n  artifact: ServerCoreArtifact;\n}",
+          "source": "packages/contracts/src/index.ts:906"
+        },
+        {
+          "name": "ServerCoreType",
+          "description": "Renderer 可安全读取的服务端核心类型；图标地址只指向 Host 本地缓存协议。",
+          "declaration": "/** Renderer 可安全读取的服务端核心类型；图标地址只指向 Host 本地缓存协议。 */\nexport interface ServerCoreType {\n  id: string;\n  iconUrl?: string;\n}",
+          "source": "packages/contracts/src/index.ts:560"
+        },
+        {
+          "name": "StartServerCoreDownloadRequest",
+          "description": "Host 侧下载请求；目录由 Client 平台选择，产物身份仍由核心目录验证。",
+          "declaration": "/** Host 侧下载请求；目录由 Client 平台选择，产物身份仍由核心目录验证。 */\nexport interface StartServerCoreDownloadRequest {\n  serverType: string;\n  gameVersion: string;\n  destinationDirectory: string;\n  artifactFileName: string;\n  destinationFileName: string;\n  connections: number;\n}",
+          "source": "components/server/core-source/src/types.ts:22"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-instance-manager",
+      "owner": "seashard.server-instance-manager",
+      "description": "实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。",
+      "source": "components/server/instance-manager/src/types.ts:246",
+      "methods": [
+        {
+          "name": "createManaged",
+          "signature": "createManaged(request: CreateManagedServerInstanceRequest): Promise<ServerCoreManagedDownloadResult>",
+          "description": "下载服务端核心；校验成功后写入双 JSON，并在 SQLite 登记 seashard.json 路径。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "CreateManagedServerInstanceRequest",
+              "description": "核心产物身份、实例名称和下载参数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerCoreManagedDownloadResult>",
+            "description": "预留实例 ID 与后台下载任务。"
+          },
+          "throws": []
+        },
+        {
+          "name": "list",
+          "signature": "list(): Promise<readonly ServerInstanceSnapshot[]>",
+          "description": "从路径索引读取并合并 server.json 与 seashard.json。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly ServerInstanceSnapshot[]>",
+            "description": "当前全部有效实例快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listForClient",
+          "signature": "listForClient(): Promise<readonly ServerInstanceClientProjection[]>",
+          "description": "为 Client 生成可展示的图标 URI，并排除宿主图标路径与资源来源索引。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<readonly ServerInstanceClientProjection[]>",
+            "description": "可以跨 Client 边界发布的实例投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setStartupSettings",
+          "signature": "setStartupSettings(instanceId: string, settings: ServerInstanceStartupSettings): Promise<ServerInstanceClientProjection>",
+          "description": "持久化启动参数，并返回可直接交给 Client 的最新实例投影。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "settings",
+              "type": "ServerInstanceStartupSettings",
+              "description": "完整的实例启动设置。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceClientProjection>",
+            "description": "更新后的实例投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setIcon",
+          "signature": "setIcon(instanceId: string, iconDataUrl: string): Promise<ServerInstanceClientProjection>",
+          "description": "保存实例自定义图标，并返回可直接交给 Client 的最新实例投影。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "iconDataUrl",
+              "type": "string",
+              "description": "经过大小和媒体类型限制的数据 URL。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceClientProjection>",
+            "description": "更新后的实例投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "ensureWorldStorageDirectory",
+          "signature": "ensureWorldStorageDirectory(instanceId: string): Promise<ServerInstanceSnapshot>",
+          "description": "确保实例拥有持久化的世界存储外层目录，并返回最新实例清单。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceSnapshot>",
+            "description": "更新后的完整实例快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "recordResourceSource",
+          "signature": "recordResourceSource(instanceId: string, record: ServerResourceSourceRecord): Promise<void>",
+          "description": "记录已安装资源的来源信息；未知来源保留展示信息，只有已支持来源才允许跳转详情。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "record",
+              "type": "ServerResourceSourceRecord",
+              "description": "资源类型、相对路径和来源项目身份。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "contentCounts",
+          "signature": "contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>",
+          "description": "统计实例标准 Mod 与插件目录中的 JAR 文件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceContentCounts>",
+            "description": "Mod 与插件数量。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listMods",
+          "signature": "listMods(instanceId: string): Promise<readonly ServerInstalledModSnapshot[]>",
+          "description": "列出实例标准 Mod 目录中的已安装 MOD，并读取 JAR 元数据。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerInstalledModSnapshot[]>",
+            "description": "已安装 Mod 的安全投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setModDisabled",
+          "signature": "setModDisabled(instanceId: string, relativePath: string, disabled: boolean): Promise<ServerInstalledModSnapshot>",
+          "description": "通过 .disabled 后缀切换 MOD 文件状态。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "relativePath",
+              "type": "string",
+              "description": "listMods 返回的实例内相对路径。"
+            },
+            {
+              "name": "disabled",
+              "type": "boolean",
+              "description": "是否禁用目标 Mod。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstalledModSnapshot>",
+            "description": "更新后的 Mod 快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "deleteMod",
+          "signature": "deleteMod(instanceId: string, relativePath: string): Promise<void>",
+          "description": "删除实例标准 Mod 目录中的单个 MOD。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "relativePath",
+              "type": "string",
+              "description": "listMods 返回的实例内相对路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "switchWorld",
+          "signature": "switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>",
+          "description": "切换 server.properties 中的 level-name，并返回最新存档投影。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerWorldStorageSnapshot>",
+            "description": "切换后的世界存储快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listWorldStorage",
+          "signature": "listWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>",
+          "description": "列出实例下的原生世界、下载世界或分维度世界。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerWorldStorageSnapshot>",
+            "description": "实例当前世界存储投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "listWorldDatapacks",
+          "signature": "listWorldDatapacks(instanceId: string, worldId: string): Promise<readonly ServerWorldDatapackSnapshot[]>",
+          "description": "列出指定世界目录中已识别的数据包文件和文件夹。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerWorldDatapackSnapshot[]>",
+            "description": "指定世界的数据包快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setWorldDatapackDisabled",
+          "signature": "setWorldDatapackDisabled(instanceId: string, worldId: string, fileName: string, disabled: boolean): Promise<ServerWorldDatapackSnapshot>",
+          "description": "通过安全后缀切换指定世界数据包状态。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            },
+            {
+              "name": "fileName",
+              "type": "string",
+              "description": "listWorldDatapacks 返回的文件名。"
+            },
+            {
+              "name": "disabled",
+              "type": "boolean",
+              "description": "是否禁用目标数据包。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerWorldDatapackSnapshot>",
+            "description": "更新后的数据包快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "deleteWorldDatapack",
+          "signature": "deleteWorldDatapack(instanceId: string, worldId: string, fileName: string): Promise<void>",
+          "description": "删除指定世界数据包。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            },
+            {
+              "name": "fileName",
+              "type": "string",
+              "description": "listWorldDatapacks 返回的文件名。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "listWorldBackups",
+          "signature": "listWorldBackups(instanceId: string, worldId: string): Promise<readonly ServerWorldBackupSnapshot[]>",
+          "description": "列出指定世界已有的备份文件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerWorldBackupSnapshot[]>",
+            "description": "按创建时间排序的世界备份。"
+          },
+          "throws": []
+        },
+        {
+          "name": "createWorldBackup",
+          "signature": "createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>",
+          "description": "创建指定逻辑世界的 ZIP 备份；调用方负责保证服务端已停机。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerWorldBackupSnapshot>",
+            "description": "新建的备份快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "restoreWorldBackup",
+          "signature": "restoreWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<ServerWorldStorageSnapshot>",
+          "description": "恢复指定备份；调用方负责保证服务端已停机。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            },
+            {
+              "name": "fileName",
+              "type": "string",
+              "description": "listWorldBackups 返回的备份文件名。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerWorldStorageSnapshot>",
+            "description": "恢复后的世界存储快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "deleteWorldBackup",
+          "signature": "deleteWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<void>",
+          "description": "删除指定备份文件，不允许操作备份根目录之外的路径。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "worldId",
+              "type": "string",
+              "description": "listWorldStorage 返回的逻辑世界 ID。"
+            },
+            {
+              "name": "fileName",
+              "type": "string",
+              "description": "listWorldBackups 返回的备份文件名。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "recordStartedAt",
+          "signature": "recordStartedAt(instanceId: string, startedAt: string): Promise<void>",
+          "description": "服务器进程成功启动后，持久化最近启动时间供跨会话统计使用。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "startedAt",
+              "type": "string",
+              "description": "ISO 8601 启动时间。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "recordRuntime",
+          "signature": "recordRuntime(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>",
+          "description": "服务器进程退出后，将本次运行区间累加到实例总运行时长。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "startedAt",
+              "type": "string",
+              "description": "ISO 8601 启动时间。"
+            },
+            {
+              "name": "stoppedAt",
+              "type": "string",
+              "description": "ISO 8601 停止时间。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "delete",
+          "signature": "delete(instanceId: string): Promise<void>",
+          "description": "删除托管目录和 SQLite 中对应的 manifest 路径记录。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "resolveIconPath",
+          "signature": "resolveIconPath(instanceId: string): Promise<string | null>",
+          "description": "只按已注册实例 ID 解析实例内图标，不接受调用方传入任意路径。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<string | null>",
+            "description": "实例图标绝对路径，无自定义图标时返回 null。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "CreateManagedServerInstanceRequest",
+          "description": "Host 侧创建托管实例时补入设置组件保存的下载并发数。",
+          "declaration": "/** Host 侧创建托管实例时补入设置组件保存的下载并发数。 */\nexport interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {\n  connections: number;\n}",
+          "source": "components/server/instance-manager/src/types.ts:27"
+        },
+        {
+          "name": "FileDownloadTaskSnapshot",
+          "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
+          "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
+          "source": "packages/contracts/src/index.ts:887"
+        },
+        {
+          "name": "FileDownloadTaskState",
+          "description": "",
+          "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
+          "source": "packages/contracts/src/index.ts:867"
+        },
+        {
+          "name": "ServerCoreArtifact",
+          "description": "Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。",
+          "declaration": "/** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */\nexport interface ServerCoreArtifact {\n  source: \"cnb\";\n  serverType: string;\n  gameVersion: string;\n  fileName: string;\n  url: string;\n  sha256: string;\n}",
+          "source": "packages/contracts/src/index.ts:608"
+        },
+        {
+          "name": "ServerCoreDownloadTaskSnapshot",
+          "description": "顶栏和下载页共享的服务器核心任务投影。",
+          "declaration": "/** 顶栏和下载页共享的服务器核心任务投影。 */\nexport interface ServerCoreDownloadTaskSnapshot extends FileDownloadTaskSnapshot {\n  artifact: ServerCoreArtifact;\n}",
+          "source": "packages/contracts/src/index.ts:906"
+        },
+        {
+          "name": "ServerCoreManagedDownloadRequest",
+          "description": "“开始下载”创建由 SeaShard 托管的实例；目标目录只能由 Host 决定。",
+          "declaration": "/** “开始下载”创建由 SeaShard 托管的实例；目标目录只能由 Host 决定。 */\nexport interface ServerCoreManagedDownloadRequest extends ServerCoreSaveAsRequest {}",
+          "source": "packages/contracts/src/index.ts:878"
+        },
+        {
+          "name": "ServerCoreManagedDownloadResult",
+          "description": "托管下载立即返回任务与预留实例 ID，下载完成后可精确跳转到新实例。",
+          "declaration": "/** 托管下载立即返回任务与预留实例 ID，下载完成后可精确跳转到新实例。 */\nexport interface ServerCoreManagedDownloadResult {\n  instanceId: string;\n  task: ServerCoreDownloadTaskSnapshot;\n}",
+          "source": "packages/contracts/src/index.ts:881"
+        },
+        {
+          "name": "ServerCoreSaveAsRequest",
+          "description": "“另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。",
+          "declaration": "/** “另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。 */\nexport interface ServerCoreSaveAsRequest {\n  serverType: string;\n  gameVersion: string;\n  artifactFileName: string;\n  destinationFileName: string;\n}",
+          "source": "packages/contracts/src/index.ts:871"
+        },
+        {
+          "name": "ServerInstalledModSnapshot",
+          "description": "一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。",
+          "declaration": "/** 一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。 */\nexport interface ServerInstalledModSnapshot {\n  instanceId: string;\n  relativePath: string;\n  fileName: string;\n  name: string;\n  version?: string;\n  /** 从 MOD 清单读取的简短介绍。 */\n  description?: string;\n  /** MOD JAR 内部图标的数据地址。 */\n  iconDataUrl?: string;\n  /** 文件首次落盘时间；手动复制的 MOD 使用文件系统创建时间。 */\n  addedAt: string;\n  disabled: boolean;\n  resourceSource?: ServerResourceSourceMetadata;\n}",
+          "source": "packages/contracts/src/index.ts:1004"
+        },
+        {
+          "name": "ServerInstanceClientProjection",
+          "description": "",
+          "declaration": "export type ServerInstanceClientProjection = Omit<\n  ServerInstanceSnapshot,\n  \"iconPath\" | \"resourceSources\"\n>;",
+          "source": "components/server/instance-manager/src/types.ts:31"
+        },
+        {
+          "name": "ServerInstanceContentCounts",
+          "description": "Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。",
+          "declaration": "/** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */\nexport interface ServerInstanceContentCounts {\n  mods: number;\n  plugins: number;\n}",
+          "source": "packages/contracts/src/index.ts:1076"
+        },
+        {
+          "name": "ServerInstanceSnapshot",
+          "description": "服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。",
+          "declaration": "/** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */\nexport interface ServerInstanceSnapshot {\n  id: string;\n  name: string;\n  rootPath: string;\n  coreJarPath: string;\n  iconPath?: string;\n  /** 世界下载外层目录的完整名称；例如 worlds-abc123。 */\n  worldStorageDirectoryName?: string;\n  /** 世界备份外层目录的完整名称；例如 backups-def456。 */\n  backupDirectoryName?: string;\n  storageMode: ServerInstanceStorageMode;\n  source: ServerInstanceSource;\n  /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */\n  modLoader: ServerModLoader | null;\n  serverType?: string;\n  gameVersion?: string;\n  coreArtifactFileName?: string;\n  artifactSha256?: string;\n  createdAt: string;\n  updatedAt: string;\n  iconUrl?: string;\n  lastStartedAt?: string;\n  /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */\n  totalRuntimeMs?: number;\n  /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */\n  startupSettings?: ServerInstanceStartupSettings;\n  /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */\n  resourceSources?: ServerResourceSourceIndex;\n}",
+          "source": "packages/contracts/src/index.ts:931"
+        },
+        {
+          "name": "ServerInstanceSource",
+          "description": "",
+          "declaration": "export type ServerInstanceSource = \"downloaded\" | \"imported\";",
+          "source": "packages/contracts/src/index.ts:919"
+        },
+        {
+          "name": "ServerInstanceStartupSettings",
+          "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
+          "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
+          "source": "packages/contracts/src/index.ts:922"
+        },
+        {
+          "name": "ServerInstanceStorageMode",
+          "description": "",
+          "declaration": "export type ServerInstanceStorageMode = \"managed\" | \"external\";",
+          "source": "packages/contracts/src/index.ts:918"
+        },
+        {
+          "name": "ServerModLoader",
+          "description": "",
+          "declaration": "export type ServerModLoader = (typeof serverModLoaders)[number];",
+          "source": "packages/contracts/src/index.ts:632"
+        },
+        {
+          "name": "ServerResourceSource",
+          "description": "",
+          "declaration": "export type ServerResourceSource = string;",
+          "source": "packages/contracts/src/index.ts:742"
+        },
+        {
+          "name": "ServerResourceSourceIndex",
+          "description": "实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。",
+          "declaration": "/** 实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。 */\nexport interface ServerResourceSourceIndex {\n  mods?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  datapacks?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  worlds?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n}",
+          "source": "packages/contracts/src/index.ts:754"
+        },
+        {
+          "name": "ServerResourceSourceMetadata",
+          "description": "已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。",
+          "declaration": "/** 已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。 */\nexport interface ServerResourceSourceMetadata {\n  source: ServerResourceSource;\n  id: string;\n  /** 来源发布版本的显示标签，例如 Modrinth 的 version_number。 */\n  version?: string;\n  iconUrl?: string;\n}",
+          "source": "packages/contracts/src/index.ts:745"
+        },
+        {
+          "name": "ServerResourceSourceRecord",
+          "description": "Host 写入资源来源索引时使用的单条记录。",
+          "declaration": "/** Host 写入资源来源索引时使用的单条记录。 */\nexport interface ServerResourceSourceRecord extends ServerResourceSourceMetadata {\n  resourceType: ServerResourceSourceType;\n  relativePath: string;\n}",
+          "source": "packages/contracts/src/index.ts:761"
+        },
+        {
+          "name": "ServerResourceSourceType",
+          "description": "",
+          "declaration": "export type ServerResourceSourceType = \"mod\" | \"datapack\" | \"world\";",
+          "source": "packages/contracts/src/index.ts:741"
+        },
+        {
+          "name": "ServerWorldBackupSnapshot",
+          "description": "一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。",
+          "declaration": "/** 一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。 */\nexport interface ServerWorldBackupSnapshot {\n  instanceId: string;\n  worldId: string;\n  worldDirectoryName: string;\n  fileName: string;\n  createdAt: string;\n  sizeBytes: number;\n}",
+          "source": "packages/contracts/src/index.ts:979"
+        },
+        {
+          "name": "ServerWorldDatapackKind",
+          "description": "",
+          "declaration": "export type ServerWorldDatapackKind = \"archive\" | \"directory\";",
+          "source": "packages/contracts/src/index.ts:963"
+        },
+        {
+          "name": "ServerWorldDatapackSnapshot",
+          "description": "一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。",
+          "declaration": "/** 一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。 */\nexport interface ServerWorldDatapackSnapshot {\n  instanceId: string;\n  worldId: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  fileName: string;\n  kind: ServerWorldDatapackKind;\n  disabled: boolean;\n  /** 从 pack.mcmeta 读取的简短介绍。 */\n  description?: string;\n  /** 数据包内部 pack.png 的数据地址。 */\n  iconDataUrl?: string;\n  updatedAt: string;\n}",
+          "source": "packages/contracts/src/index.ts:989"
+        },
+        {
+          "name": "ServerWorldDimension",
+          "description": "",
+          "declaration": "export type ServerWorldDimension = \"overworld\" | \"nether\" | \"end\";",
+          "source": "packages/contracts/src/index.ts:962"
+        },
+        {
+          "name": "ServerWorldDimensionGroup",
+          "description": "",
+          "declaration": "export interface ServerWorldDimensionGroup {\n  id: string;\n  name: string;\n  current: boolean;\n  saves: readonly ServerWorldSave[];\n}",
+          "source": "packages/contracts/src/index.ts:1020"
+        },
+        {
+          "name": "ServerWorldSave",
+          "description": "一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。",
+          "declaration": "/** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */\nexport interface ServerWorldSave {\n  id: string;\n  groupId: string;\n  name: string;\n  dimension: ServerWorldDimension;\n  current: boolean;\n  createdAt?: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  updatedAt?: string;\n  iconDataUrl?: string;\n}",
+          "source": "packages/contracts/src/index.ts:966"
+        },
+        {
+          "name": "ServerWorldStorageMode",
+          "description": "",
+          "declaration": "export type ServerWorldStorageMode = \"unified\" | \"split\";",
+          "source": "packages/contracts/src/index.ts:961"
+        },
+        {
+          "name": "ServerWorldStorageSnapshot",
+          "description": "Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。",
+          "declaration": "/** Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。 */\nexport interface ServerWorldStorageSnapshot {\n  instanceId: string;\n  mode: ServerWorldStorageMode;\n  currentId?: string;\n  saves: readonly ServerWorldSave[];\n  dimensions: readonly ServerWorldDimensionGroup[];\n}",
+          "source": "packages/contracts/src/index.ts:1028"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-mod-source",
+      "owner": "seashard.server-mod-source",
+      "description": "Host 侧目录与下载能力；Client 的目录选择取消语义留在具体 Gateway。",
+      "source": "components/server/mod-source/src/types.ts:42",
+      "methods": [
+        {
+          "name": "saveAs",
+          "signature": "saveAs(request: ServerModSourceSaveRequest): Promise<ServerModDownloadResult>",
+          "description": "将已选择的来源产物保存到 Host 已验证目录。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "ServerModSourceSaveRequest",
+              "description": "来源产物身份、目标目录和下载并发数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerModDownloadResult>",
+            "description": "完成校验和发布后的下载结果。"
+          },
+          "throws": []
+        },
+        {
+          "name": "getFilters",
+          "signature": "getFilters(resourceType: ServerModrinthResourceType, source: ServerModSource): Promise<ServerModFilters>",
+          "description": "读取指定资源类型和来源支持的筛选项。",
+          "parameters": [
+            {
+              "name": "resourceType",
+              "type": "ServerModrinthResourceType",
+              "description": "Mod、插件、数据包或世界。"
+            },
+            {
+              "name": "source",
+              "type": "ServerModSource",
+              "description": "Modrinth 或 CurseForge。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerModFilters>",
+            "description": "来源当前提供的版本、类别及加载器筛选项。"
+          },
+          "throws": []
+        },
+        {
+          "name": "search",
+          "signature": "search(request: ServerModSearchRequest): Promise<ServerModSearchResult>",
+          "description": "按来源语义搜索服务端资源。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "ServerModSearchRequest",
+              "description": "资源类型、来源、筛选条件与分页游标。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerModSearchResult>",
+            "description": "统一化的项目摘要和下一页状态。"
+          },
+          "throws": []
+        },
+        {
+          "name": "getProjectDetails",
+          "signature": "getProjectDetails(resourceType: ServerModrinthResourceType, source: ServerModSource, projectId: string): Promise<ServerModProjectDetails>",
+          "description": "读取来源中的项目详情和可安装版本。",
+          "parameters": [
+            {
+              "name": "resourceType",
+              "type": "ServerModrinthResourceType",
+              "description": "目标资源类型。"
+            },
+            {
+              "name": "source",
+              "type": "ServerModSource",
+              "description": "项目所属来源。"
+            },
+            {
+              "name": "projectId",
+              "type": "string",
+              "description": "来源分配的项目 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerModProjectDetails>",
+            "description": "统一化的项目详情及版本目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "installToInstance",
+          "signature": "installToInstance(request: ServerModInstallRequest): Promise<ServerModDownloadResult>",
+          "description": "下载已选择版本并安装到已登记实例。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "ServerModInstallRequest",
+              "description": "来源产物身份、实例 ID 及可选世界 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerModDownloadResult>",
+            "description": "完成校验和发布后的下载结果。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerModDownloadableResourceType",
+          "description": "",
+          "declaration": "export type ServerModDownloadableResourceType = ServerModrinthResourceType;",
+          "source": "packages/contracts/src/index.ts:630"
+        },
+        {
+          "name": "ServerModDownloadResult",
+          "description": "多来源资源完成校验并发布后的稳定结果。",
+          "declaration": "/** 多来源资源完成校验并发布后的稳定结果。 */\nexport interface ServerModDownloadResult {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n  fileName: string;\n  destination: \"instance\" | \"directory\";\n  instanceId?: string;\n  downloadedBytes: number;\n}",
+          "source": "packages/contracts/src/index.ts:785"
+        },
+        {
+          "name": "ServerModEnvironment",
+          "description": "",
+          "declaration": "export type ServerModEnvironment =\n  | \"client_and_server\"\n  | \"server_only\"\n  | \"server_only_client_optional\"\n  | \"dedicated_server_only\"\n  | \"client_or_server\"\n  | \"client_or_server_prefers_both\"\n  | \"client_only_server_optional\"\n  | \"client_only\";",
+          "source": "packages/contracts/src/index.ts:653"
+        },
+        {
+          "name": "ServerModFilterOption",
+          "description": "",
+          "declaration": "export interface ServerModFilterOption {\n  id: string;\n  label: string;\n}",
+          "source": "packages/contracts/src/index.ts:670"
+        },
+        {
+          "name": "ServerModFilters",
+          "description": "单个服务端资源来源的筛选元数据；来源暂时不可用时保留可验证的提示。",
+          "declaration": "/** 单个服务端资源来源的筛选元数据；来源暂时不可用时保留可验证的提示。 */\nexport interface ServerModFilters {\n  sources: readonly ServerModFilterOption[];\n  tags: readonly ServerModFilterOption[];\n  versions: readonly ServerModFilterOption[];\n  loaders: readonly ServerModFilterOption[];\n  unavailableReason?: string;\n}",
+          "source": "packages/contracts/src/index.ts:676"
+        },
+        {
+          "name": "ServerModInstallRequest",
+          "description": "Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。",
+          "declaration": "/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。 */\nexport interface ServerModInstallRequest {\n  source: ServerModSource;\n  resourceType: \"mod\" | \"datapack\" | \"world\";\n  projectId: string;\n  versionId: string;\n  instanceId: string;\n  /** 仅数据包安装使用；Host 会再次确认它属于该实例且确实存在。 */\n  worldId?: string;\n}",
+          "source": "packages/contracts/src/index.ts:767"
+        },
+        {
+          "name": "ServerModProject",
+          "description": "多来源 Mod 搜索结果的最小安全投影；图标仅允许来自受信任的上游 CDN。",
+          "declaration": "/** 多来源 Mod 搜索结果的最小安全投影；图标仅允许来自受信任的上游 CDN。 */\nexport interface ServerModProject {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  id: string;\n  slug: string;\n  title: string;\n  iconUrl?: string;\n  description: string;\n  author: string;\n  downloads: number;\n  follows: number;\n  dateModified: string;\n  environment: readonly ServerModEnvironment[];\n  categories: readonly string[];\n  versions: readonly string[];\n}",
+          "source": "packages/contracts/src/index.ts:698"
+        },
+        {
+          "name": "ServerModProjectDetails",
+          "description": "多来源项目长简介及其全部公开版本。",
+          "declaration": "/** 多来源项目长简介及其全部公开版本。 */\nexport interface ServerModProjectDetails {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  projectId: string;\n  project: ServerModProject;\n  body: string;\n  versions: readonly ServerModVersion[];\n}",
+          "source": "packages/contracts/src/index.ts:733"
+        },
+        {
+          "name": "ServerModrinthResourceType",
+          "description": "",
+          "declaration": "export type ServerModrinthResourceType = \"mod\" | \"modpack\" | \"datapack\" | \"world\";",
+          "source": "packages/contracts/src/index.ts:629"
+        },
+        {
+          "name": "ServerModSaveAsRequest",
+          "description": "“另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。",
+          "declaration": "/** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */\nexport interface ServerModSaveAsRequest {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n}",
+          "source": "packages/contracts/src/index.ts:778"
+        },
+        {
+          "name": "ServerModSearchIndex",
+          "description": "",
+          "declaration": "export type ServerModSearchIndex = \"relevance\" | \"downloads\" | \"follows\" | \"newest\" | \"updated\";",
+          "source": "packages/contracts/src/index.ts:652"
+        },
+        {
+          "name": "ServerModSearchRequest",
+          "description": "Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。",
+          "declaration": "/** Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。 */\nexport interface ServerModSearchRequest {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  query: string;\n  tag: string;\n  index: ServerModSearchIndex;\n  gameVersion: string;\n  loader: string;\n  offset: number;\n  limit: number;\n}",
+          "source": "packages/contracts/src/index.ts:685"
+        },
+        {
+          "name": "ServerModSearchResult",
+          "description": "",
+          "declaration": "export interface ServerModSearchResult {\n  items: readonly ServerModProject[];\n  offset: number;\n  limit: number;\n  total: number;\n  unavailableReason?: string;\n}",
+          "source": "packages/contracts/src/index.ts:715"
+        },
+        {
+          "name": "ServerModSource",
+          "description": "",
+          "declaration": "export type ServerModSource = \"modrinth\" | \"curseforge\";",
+          "source": "packages/contracts/src/index.ts:624"
+        },
+        {
+          "name": "ServerModSourceSaveRequest",
+          "description": "",
+          "declaration": "export interface ServerModSourceSaveRequest extends ServerModSaveAsRequest {\n  readonly destinationDirectory: string;\n  readonly connections: number;\n}",
+          "source": "components/server/mod-source/src/types.ts:24"
+        },
+        {
+          "name": "ServerModVersion",
+          "description": "详情页中的单个可下载版本；Host 只投影列表展示所需字段。",
+          "declaration": "/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */\nexport interface ServerModVersion {\n  id: string;\n  gameVersions: readonly string[];\n  loaders: readonly string[];\n  fileName: string;\n  downloads: number;\n  datePublished: string;\n}",
+          "source": "packages/contracts/src/index.ts:723"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-runtime",
+      "owner": "seashard.server-runtime",
+      "description": "Host 侧服务器进程能力；仅启动实例元数据中明确声明且已实现运行策略的核心。",
+      "source": "packages/contracts/src/index.ts:116",
+      "methods": [
+        {
+          "name": "preview",
+          "signature": "preview(instanceId: string, startupSettings?: ServerInstanceStartupSettings): Promise<ServerLaunchCommandPreview>",
+          "description": "解析实例当前将使用的 Java、工作目录和启动命令，不创建进程。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "startupSettings",
+              "type": "ServerInstanceStartupSettings | undefined",
+              "description": "只用于本次预览的启动设置覆盖。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerLaunchCommandPreview>",
+            "description": "不包含凭据的启动命令投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "get",
+          "signature": "get(instanceId: string): Promise<ServerRuntimeSnapshot>",
+          "description": "读取单个实例的进程状态。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeSnapshot>",
+            "description": "当前进程快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "start",
+          "signature": "start(instanceId: string): Promise<ServerRuntimeSnapshot>",
+          "description": "按实例元数据解析运行策略并启动服务端。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeSnapshot>",
+            "description": "进入启动状态后的进程快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "stop",
+          "signature": "stop(instanceId: string): Promise<ServerRuntimeSnapshot>",
+          "description": "请求安全停止当前服务器进程。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeSnapshot>",
+            "description": "结算后的进程快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "sendCommand",
+          "signature": "sendCommand(instanceId: string, command: string): Promise<void>",
+          "description": "将一条控制台命令写入运行中服务端的标准输入。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "command",
+              "type": "string",
+              "description": "不带换行符的服务端命令。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "getLogs",
+          "signature": "getLogs(instanceId: string, afterSequence?: number): Promise<readonly ServerConsoleLine[]>",
+          "description": "补拉指定序号之后的控制台输出。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "afterSequence",
+              "type": "number | undefined",
+              "description": "已消费的最后一条序号；省略时读取当前保留窗口。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerConsoleLine[]>",
+            "description": "按 sequence 递增排列的控制台行。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerConsoleLine",
+          "description": "进程输出按实例递增编号，Renderer 可用编号补拉事件订阅前后的缺口。",
+          "declaration": "/** 进程输出按实例递增编号，Renderer 可用编号补拉事件订阅前后的缺口。 */\nexport interface ServerConsoleLine {\n  sequence: number;\n  instanceId: string;\n  stream: ServerConsoleStream;\n  text: string;\n  timestamp: string;\n}",
+          "source": "packages/contracts/src/index.ts:1191"
+        },
+        {
+          "name": "ServerConsoleStream",
+          "description": "",
+          "declaration": "export type ServerConsoleStream = \"stdout\" | \"stderr\" | \"input\" | \"system\";",
+          "source": "packages/contracts/src/index.ts:1171"
+        },
+        {
+          "name": "ServerInstanceStartupSettings",
+          "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
+          "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
+          "source": "packages/contracts/src/index.ts:922"
+        },
+        {
+          "name": "ServerLaunchCommandPreview",
+          "description": "启动组件根据当前 Java 选择和核心策略生成的等价命令行。",
+          "declaration": "/** 启动组件根据当前 Java 选择和核心策略生成的等价命令行。 */\nexport interface ServerLaunchCommandPreview {\n  instanceId: string;\n  command: string;\n}",
+          "source": "packages/contracts/src/index.ts:1174"
+        },
+        {
+          "name": "ServerProcessState",
+          "description": "",
+          "declaration": "export type ServerProcessState = \"stopped\" | \"starting\" | \"running\" | \"stopping\" | \"failed\";",
+          "source": "packages/contracts/src/index.ts:1170"
+        },
+        {
+          "name": "ServerRuntimeSnapshot",
+          "description": "单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。",
+          "declaration": "/** 单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。 */\nexport interface ServerRuntimeSnapshot {\n  instanceId: string;\n  state: ServerProcessState;\n  pid?: number;\n  startedAt?: string;\n  stoppedAt?: string;\n  exitCode?: number;\n  error?: string;\n}",
+          "source": "packages/contracts/src/index.ts:1180"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-settings",
+      "owner": "seashard.server-settings",
+      "description": "Renderer 只获得设置读写能力，不接触插件存储或数据库对象。",
+      "source": "packages/contracts/src/index.ts:107",
+      "methods": [
+        {
+          "name": "get",
+          "signature": "get(): Promise<ServerSettingsSnapshot>",
+          "description": "读取当前服务器全局设置。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<ServerSettingsSnapshot>",
+            "description": "下载目录、并发数和新实例启动默认值。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setResourceDownloadDirectory",
+          "signature": "setResourceDownloadDirectory(directory: string): Promise<ServerSettingsSnapshot>",
+          "description": "更新资源另存为默认目录。",
+          "parameters": [
+            {
+              "name": "directory",
+              "type": "string",
+              "description": "由 Host 选择并验证的绝对目录。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerSettingsSnapshot>",
+            "description": "更新后的设置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setDefaultDownloadConnections",
+          "signature": "setDefaultDownloadConnections(connections: number): Promise<ServerSettingsSnapshot>",
+          "description": "更新公共下载器默认并发数。",
+          "parameters": [
+            {
+              "name": "connections",
+              "type": "number",
+              "description": "处于 serverDownloadConnectionLimits 内的并发数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerSettingsSnapshot>",
+            "description": "更新后的设置快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setStartupDefaults",
+          "signature": "setStartupDefaults(update: ServerStartupDefaultsUpdate): Promise<ServerSettingsSnapshot>",
+          "description": "一次性更新相互依赖的新实例启动默认值。",
+          "parameters": [
+            {
+              "name": "update",
+              "type": "ServerStartupDefaultsUpdate",
+              "description": "内存、端口、EULA 和 JVM 参数默认值。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerSettingsSnapshot>",
+            "description": "更新后的设置快照。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerSettingsSnapshot",
+          "description": "可持久化并跨 Host/Client 边界传输的服务器设置快照。",
+          "declaration": "/** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */\nexport interface ServerSettingsSnapshot extends ServerStartupDefaultsUpdate {\n  resourceDownloadDirectory: string;\n  defaultDownloadConnections: number;\n}",
+          "source": "packages/contracts/src/index.ts:1398"
+        },
+        {
+          "name": "ServerStartupDefaultsUpdate",
+          "description": "一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。",
+          "declaration": "/** 一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。 */\nexport interface ServerStartupDefaultsUpdate {\n  defaultMinimumMemoryMiB: number;\n  defaultMaximumMemoryMiB: number;\n  defaultServerPort: number;\n  autoAcceptEula: boolean;\n  defaultJvmArguments: string;\n}",
+          "source": "packages/contracts/src/index.ts:1389"
+        }
+      ]
+    }
+  ]
+}

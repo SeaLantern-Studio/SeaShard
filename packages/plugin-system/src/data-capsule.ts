@@ -186,6 +186,22 @@ export const pluginSystemDataCapsule = defineDataCapsule({
               updated_at = excluded.updated_at`,
     },
     {
+      id: "binding.insert",
+      access: "write",
+      result: "run",
+      sql: `INSERT INTO plugin_bindings (
+              id, plugin_id, entry_id, scope_type, scope_id, enabled, config_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    },
+    {
+      id: "binding.delete-by-plugin-prefix",
+      access: "write",
+      result: "run",
+      sql: `DELETE FROM plugin_bindings
+             WHERE plugin_id = ?1
+               AND substr(id, 1, length(?2)) = ?2`,
+    },
+    {
       id: "binding.delete",
       access: "write",
       result: "run",

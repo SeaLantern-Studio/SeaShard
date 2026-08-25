@@ -1,9 +1,10 @@
-import type {
-  ActivationScope,
-  AgentActivityPresentationField,
-  AgentActivityPresentationIcon,
-  JsonObject,
-  JsonValue,
+import {
+  defineServiceContract,
+  type ActivationScope,
+  type AgentActivityPresentationField,
+  type AgentActivityPresentationIcon,
+  type JsonObject,
+  type JsonValue,
 } from "@seashard/plugin-sdk";
 
 export type RuntimePhase = "active" | "failed";
@@ -90,10 +91,12 @@ export const desktopChannels = {
 } as const;
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
-export const runtimeDiagnosticsContract = "seashard.runtime-diagnostics";
-/** 服务端核心源面向 Client 的只读 Contract。 */
+export const runtimeDiagnosticsContract = defineServiceContract<RuntimeDiagnosticsService>(
+  "seashard.runtime-diagnostics",
+);
+/** 服务端核心源面向 Client 的只读 Contract；Host 完整类型由核心源组件关联。 */
 export const serverCoreSourceContract = "seashard.server-core-source";
-/** Modrinth 与 CurseForge 服务端资源来源面向 Client 的搜索、下载与实例安装 Contract。 */
+/** Modrinth 与 CurseForge 服务端资源来源 Contract；Host 完整类型由来源组件关联。 */
 export const serverModSourceContract = "seashard.server-mod-source";
 /** Renderer 通过受限本地协议读取已经校验并落盘的核心图标。 */
 export const serverCoreIconScheme = "seashard-cache";
@@ -101,26 +104,38 @@ export const serverCoreIconHost = "server-core-icon";
 /** Renderer 通过受限本地协议读取已复制到实例目录的服务器图标。 */
 export const serverInstanceIconHost = "server-instance-icon";
 /** 服务器设置 Host 组件发布的稳定 Service contract。 */
-export const serverSettingsContract = "seashard.server-settings";
+export const serverSettingsContract = defineServiceContract<ServerSettingsClientService>(
+  "seashard.server-settings",
+);
 /** 当前 Client 平台提供的服务器核心下载交互；Desktop 使用系统目录选择窗口。 */
 export const serverCoreDownloadContract = "seashard.server-core-download";
-/** 服务器实例管理组件发布的持久化实例 Service contract。 */
+/** 服务器实例管理 Contract；Host 完整类型由实例管理组件关联。 */
 export const serverInstanceManagerContract = "seashard.server-instance-manager";
 /** 服务器进程运行组件发布的 Host/Client 稳定 Contract。 */
-export const serverRuntimeContract = "seashard.server-runtime";
+export const serverRuntimeContract =
+  defineServiceContract<ServerRuntimeService>("seashard.server-runtime");
 /** 服务器与插件配置文件管理组件发布的 Host/Client 稳定 Contract。 */
-export const serverConfigurationContract = "seashard.server-configuration";
+export const serverConfigurationContract = defineServiceContract<ServerConfigurationService>(
+  "seashard.server-configuration",
+);
 /** Java 运行环境管理组件发布的只读扫描 Service contract。 */
-export const javaRuntimeManagerContract = "seashard.java-runtime-manager";
+export const javaRuntimeManagerContract = defineServiceContract<JavaRuntimeManagerService>(
+  "seashard.java-runtime-manager",
+);
 
 /** Desktop Shell 发布的主窗口生命周期 Service contract。 */
-export const desktopShellContract = "seashard.desktop-shell";
+export const desktopShellContract =
+  defineServiceContract<DesktopShellService>("seashard.desktop-shell");
 /** Agent Session 的创建、读取与续写 Contract。 */
-export const agentSessionContract = "seashard.agent-session";
+export const agentSessionContract =
+  defineServiceContract<AgentSessionService>("seashard.agent-session");
 /** Agent Invocation 的运行状态读取与取消 Contract。 */
-export const agentInvocationContract = "seashard.agent-invocation";
+export const agentInvocationContract = defineServiceContract<AgentInvocationService>(
+  "seashard.agent-invocation",
+);
 /** Agent 模型供应商连接的结构化配置 Contract。 */
-export const agentModelConfigurationContract = "seashard.agent-model-configuration";
+export const agentModelConfigurationContract =
+  defineServiceContract<AgentModelConfigurationService>("seashard.agent-model-configuration");
 /** 模型配置最后有效 Snapshot 变化事件。 */
 export const agentModelConfigurationChangedEvent = "seashard.agent-model-configuration.changed";
 
@@ -181,22 +196,50 @@ export type AgentModelConnectionMutation =
       readonly path: readonly string[];
     };
 
+/** 管理 Agent 模型连接、凭据引用和可选择模型目录。 */
 export interface AgentModelConfigurationService {
+  /**
+   * 读取最后一次通过校验的模型配置。
+   *
+   * @returns 当前配置快照及最近一次加载诊断。
+   */
   getConfiguration(): Promise<AgentModelConfigurationSnapshot>;
+  /**
+   * 以乐观并发方式修改指定模型连接。
+   *
+   * @param input 预期 revision、连接 ID 与有序字段操作。
+   * @returns 写入成功后的新配置快照。
+   */
   mutateConnection(input: {
     readonly expectedRevision: string;
     readonly connectionId: string;
     readonly operations: readonly AgentModelConnectionMutation[];
   }): Promise<AgentModelConfigurationSnapshot>;
+  /**
+   * 删除一个模型连接及其模型目录引用。
+   *
+   * @param input 预期 revision 与待删除连接 ID。
+   * @returns 删除成功后的新配置快照。
+   */
   removeConnection(input: {
     readonly expectedRevision: string;
     readonly connectionId: string;
   }): Promise<AgentModelConfigurationSnapshot>;
-  /** 用户确认后以空模板替换当前配置；用于从无法结构化编辑的损坏文件恢复。 */
+  /**
+   * 用户确认后以空模板替换当前配置，用于从无法结构化编辑的损坏文件恢复。
+   *
+   * @param input 当前调用方观察到的配置 revision。
+   * @returns 重置后的空配置快照。
+   */
   resetConfiguration(input: {
     readonly expectedRevision: string;
   }): Promise<AgentModelConfigurationSnapshot>;
-  /** 使用尚未写入 models.yml 的候选设置和临时凭据查询上游模型目录。 */
+  /**
+   * 使用尚未写入 models.yml 的候选设置和临时凭据查询上游模型目录。
+   *
+   * @param input Provider 类型、候选设置及可选的临时凭据。
+   * @returns 上游当前返回的可配置模型目录。
+   */
   discoverModels(input: {
     readonly providerType: string;
     readonly settings: JsonObject;
@@ -204,15 +247,26 @@ export interface AgentModelConfigurationService {
     /** 只供本次发现请求使用，不写入 Host Vault。 */
     readonly credentialValue?: string;
   }): Promise<readonly AgentModelConnectionModel[]>;
-  /** 明文仅作为调用参数进入 Host Vault，任何返回值和事件都不得包含它。 */
+  /**
+   * 将凭据明文写入 Host Vault，任何返回值和事件都不会包含明文。
+   *
+   * @param input 凭据 ID 与只用于本次写入的明文值。
+   * @returns 保持凭据正文脱敏的最新配置快照。
+   */
   writeCredential(input: {
     readonly credentialId: string;
     readonly value: string;
   }): Promise<AgentModelConfigurationSnapshot>;
-  /** 只移除 Host Vault 中的密文，不改写 models.yml 的 credentialId 引用。 */
+  /**
+   * 只移除 Host Vault 中的密文，不改写 models.yml 的 credentialId 引用。
+   *
+   * @param input 待移除的凭据 ID。
+   * @returns 更新凭据可用状态后的配置快照。
+   */
   removeCredential(input: {
     readonly credentialId: string;
   }): Promise<AgentModelConfigurationSnapshot>;
+  /** 使用系统默认编辑器打开当前 models.yml。 */
   openConfigurationFile(): Promise<void>;
 }
 /** Desktop Renderer 使用的模型设置能力；变化订阅由 Preload 转换成可释放监听器。 */
@@ -342,28 +396,86 @@ export interface AgentInvocationSnapshot extends AgentInvocationSummary {
   readonly toolCalls: readonly AgentToolCallSnapshot[];
 }
 
+/** 创建、读取和管理可持久化的 Agent 会话。 */
 export interface AgentSessionService {
+  /**
+   * 列出当前配置中可以创建会话的模型。
+   *
+   * @returns 带连接身份和显示名称的可选模型。
+   */
   listModels(): Promise<readonly AgentConfiguredModel[]>;
+  /**
+   * 创建会话并立即启动第一轮 Invocation。
+   *
+   * @param input 初始用户消息、会话模式及可选模型。
+   * @returns 新会话与首轮 Invocation 的稳定 ID。
+   */
   startSession(input: {
     initialMessage: AgentUserMessage;
     mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
+  /**
+   * 向已有会话追加用户消息并启动新 Invocation。
+   *
+   * @param input 会话 ID、用户消息、会话模式及可选模型。
+   * @returns 会话与新 Invocation 的稳定 ID。
+   */
   sendMessage(input: {
     sessionId: string;
     message: AgentUserMessage;
     mode: AgentConversationMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
+  /**
+   * 按更新时间列出当前保存的会话。
+   *
+   * @returns 不含完整消息正文的会话摘要。
+   */
   listSessions(): Promise<readonly AgentSessionSummary[]>;
+  /**
+   * 读取一个会话的完整消息和工具调用投影。
+   *
+   * @param sessionId 已保存的会话 ID。
+   * @returns 当前会话快照。
+   */
   getSession(sessionId: string): Promise<AgentSessionSnapshot>;
+  /**
+   * 复制已有会话并生成新的会话身份。
+   *
+   * @param sessionId 源会话 ID。
+   * @returns 新会话摘要。
+   */
   copySession(sessionId: string): Promise<AgentSessionSummary>;
+  /**
+   * 更新已有会话标题。
+   *
+   * @param sessionId 目标会话 ID。
+   * @param title 去除首尾空白后的新标题。
+   */
   renameSession(sessionId: string, title: string): Promise<void>;
+  /**
+   * 删除会话及其持久化 Journal。
+   *
+   * @param sessionId 目标会话 ID。
+   */
   deleteSession(sessionId: string): Promise<void>;
 }
 
+/** 读取和控制正在执行或已经结算的 Agent Invocation。 */
 export interface AgentInvocationService {
+  /**
+   * 读取 Invocation 的文本、工具活动和最终状态。
+   *
+   * @param invocationId Invocation ID。
+   * @returns 当前 Invocation 快照。
+   */
   getInvocation(invocationId: string): Promise<AgentInvocationSnapshot>;
+  /**
+   * 请求取消仍在运行的 Invocation；已经结算的调用保持幂等。
+   *
+   * @param invocationId Invocation ID。
+   */
   cancelInvocation(invocationId: string): Promise<void>;
 }
 
@@ -398,13 +510,19 @@ export type RuntimeSnapshot = {
   components: ComponentSnapshot[];
 };
 
-/** Runtime Diagnostics Service 的消费者契约。 */
+/** 读取普通插件运行状态的稳定诊断投影。 */
 export interface RuntimeDiagnosticsService {
+  /**
+   * 读取当前 Host 和全部普通组件的运行状态。
+   *
+   * @returns 不暴露 Cordis 或宿主句柄的运行态快照。
+   */
   getSnapshot(): Promise<RuntimeSnapshot>;
 }
 
-/** Desktop Shell Service 的宿主消费者契约。 */
+/** 控制 Desktop 主窗口生命周期的宿主 Service。 */
 export interface DesktopShellService {
+  /** 创建或聚焦主窗口；窗口已经打开时保持幂等。 */
   openPrimary(): Promise<void>;
 }
 export type ClientSurface = "primary";
@@ -674,18 +792,52 @@ export interface ServerModDownloadResult {
   instanceId?: string;
   downloadedBytes: number;
 }
+/** 查询多来源服务端资源，并把已选择产物安装到实例或用户目录。 */
 export interface ServerModSourceClientService {
+  /**
+   * 读取指定资源类型和来源支持的筛选项。
+   *
+   * @param resourceType Mod、插件、数据包或世界。
+   * @param source Modrinth 或 CurseForge。
+   * @returns 来源当前提供的版本、类别及加载器筛选项。
+   */
   getFilters(
     resourceType: ServerModrinthResourceType,
     source: ServerModSource,
   ): Promise<ServerModFilters>;
+  /**
+   * 按来源语义搜索服务端资源。
+   *
+   * @param request 资源类型、来源、筛选条件与分页游标。
+   * @returns 统一化的项目摘要和下一页状态。
+   */
   search(request: ServerModSearchRequest): Promise<ServerModSearchResult>;
+  /**
+   * 读取来源中的项目详情和可安装版本。
+   *
+   * @param resourceType 目标资源类型。
+   * @param source 项目所属来源。
+   * @param projectId 来源分配的项目 ID。
+   * @returns 统一化的项目详情及版本目录。
+   */
   getProjectDetails(
     resourceType: ServerModrinthResourceType,
     source: ServerModSource,
     projectId: string,
   ): Promise<ServerModProjectDetails>;
+  /**
+   * 下载已选择版本并安装到已登记实例。
+   *
+   * @param request 来源产物身份、实例 ID 及可选世界 ID。
+   * @returns 完成校验和发布后的下载结果。
+   */
   installToInstance(request: ServerModInstallRequest): Promise<ServerModDownloadResult>;
+  /**
+   * 让用户选择目录后保存来源产物；取消目录选择时不创建文件。
+   *
+   * @param request 来源产物身份。
+   * @returns 完成后的下载结果，用户取消时返回 undefined。
+   */
   saveAs(request: ServerModSaveAsRequest): Promise<ServerModDownloadResult | undefined>;
 }
 /** 默认下载并发数的稳定边界；服务端设置和公共下载器必须保持一致。 */
@@ -1046,14 +1198,52 @@ export interface ServerConsoleLine {
 
 /** Host 侧服务器进程能力；仅启动实例元数据中明确声明且已实现运行策略的核心。 */
 export interface ServerRuntimeService {
+  /**
+   * 解析实例当前将使用的 Java、工作目录和启动命令，不创建进程。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param startupSettings 只用于本次预览的启动设置覆盖。
+   * @returns 不包含凭据的启动命令投影。
+   */
   preview(
     instanceId: string,
     startupSettings?: ServerInstanceStartupSettings,
   ): Promise<ServerLaunchCommandPreview>;
+  /**
+   * 读取单个实例的进程状态。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 当前进程快照。
+   */
   get(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  /**
+   * 按实例元数据解析运行策略并启动服务端。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 进入启动状态后的进程快照。
+   */
   start(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  /**
+   * 请求安全停止当前服务器进程。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 结算后的进程快照。
+   */
   stop(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  /**
+   * 将一条控制台命令写入运行中服务端的标准输入。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param command 不带换行符的服务端命令。
+   */
   sendCommand(instanceId: string, command: string): Promise<void>;
+  /**
+   * 补拉指定序号之后的控制台输出。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param afterSequence 已消费的最后一条序号；省略时读取当前保留窗口。
+   * @returns 按 sequence 递增排列的控制台行。
+   */
   getLogs(instanceId: string, afterSequence?: number): Promise<readonly ServerConsoleLine[]>;
 }
 
@@ -1110,8 +1300,27 @@ export interface ServerConfigurationWriteRequest {
 
 /** 配置文件路径必须先由 list 发布；Host 仍会独立校验实例边界、后缀与符号链接。 */
 export interface ServerConfigurationService {
+  /**
+   * 扫描实例内允许编辑的服务端、其他及插件配置文件。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 已通过路径与文件类型校验的配置目录。
+   */
   list(instanceId: string): Promise<ServerConfigurationCatalog>;
+  /**
+   * 读取目录中已经发布的配置文件。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param path list 返回的实例内相对路径。
+   * @returns 文本内容、编码和用于并发控制的 revision。
+   */
   read(instanceId: string, path: string): Promise<ServerConfigurationDocument>;
+  /**
+   * 仅在 revision 未变化时原子写入配置文件。
+   *
+   * @param request 实例、相对路径、正文与预期 revision。
+   * @returns 写入后的最新配置文档。
+   */
   write(request: ServerConfigurationWriteRequest): Promise<ServerConfigurationDocument>;
 }
 
@@ -1136,11 +1345,33 @@ export interface JavaInstallationSnapshot {
 
 /** Host 组件的完整能力；显式检查只接受用户选择的可执行文件路径。 */
 export interface JavaRuntimeManagerService {
+  /**
+   * 重新扫描系统和 SeaShard 保存的 Java 安装。
+   *
+   * @returns 规范化、去重并带启用状态的安装列表。
+   */
   scan(): Promise<readonly JavaInstallationSnapshot[]>;
+  /**
+   * 检查用户明确选择的 Java 可执行文件。
+   *
+   * @param executablePath Java 可执行文件的绝对路径。
+   * @returns 执行探测得到的版本、供应商和架构信息。
+   */
   inspect(executablePath: string): Promise<JavaInstallationSnapshot>;
-  /** 仅移除 SeaShard 保存的手动路径记录，不删除或卸载本地 Java。 */
+  /**
+   * 仅移除 SeaShard 保存的手动路径记录，不删除或卸载本地 Java。
+   *
+   * @param executablePath 手动添加的 Java 可执行文件路径。
+   * @returns 是否移除了已保存记录。
+   */
   remove(executablePath: string): Promise<boolean>;
-  /** 持久化启用状态；禁用只影响 SeaShard 选择，不修改本地 Java。 */
+  /**
+   * 持久化启用状态；禁用只影响 SeaShard 选择，不修改本地 Java。
+   *
+   * @param installationId 扫描快照中的稳定安装 ID。
+   * @param disabled 是否从自动选择候选中排除。
+   * @returns 是否更新了目标安装。
+   */
   setDisabled(installationId: string, disabled: boolean): Promise<boolean>;
 }
 
@@ -1171,9 +1402,32 @@ export interface ServerSettingsSnapshot extends ServerStartupDefaultsUpdate {
 
 /** Renderer 只获得设置读写能力，不接触插件存储或数据库对象。 */
 export interface ServerSettingsClientService {
+  /**
+   * 读取当前服务器全局设置。
+   *
+   * @returns 下载目录、并发数和新实例启动默认值。
+   */
   get(): Promise<ServerSettingsSnapshot>;
+  /**
+   * 更新资源另存为默认目录。
+   *
+   * @param directory 由 Host 选择并验证的绝对目录。
+   * @returns 更新后的设置快照。
+   */
   setResourceDownloadDirectory(directory: string): Promise<ServerSettingsSnapshot>;
+  /**
+   * 更新公共下载器默认并发数。
+   *
+   * @param connections 处于 serverDownloadConnectionLimits 内的并发数。
+   * @returns 更新后的设置快照。
+   */
   setDefaultDownloadConnections(connections: number): Promise<ServerSettingsSnapshot>;
+  /**
+   * 一次性更新相互依赖的新实例启动默认值。
+   *
+   * @param update 内存、端口、EULA 和 JVM 参数默认值。
+   * @returns 更新后的设置快照。
+   */
   setStartupDefaults(update: ServerStartupDefaultsUpdate): Promise<ServerSettingsSnapshot>;
 }
 

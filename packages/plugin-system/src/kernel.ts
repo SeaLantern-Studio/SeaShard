@@ -1,7 +1,8 @@
 import type {
   ExecutionContext,
-  JsonValue,
   GlobalPluginBindingInput,
+  JsonValue,
+  PluginBinding,
   PluginStorageBroker,
   RuntimeControlSnapshot,
   ScopeAddress,
@@ -11,8 +12,12 @@ import type {
 import { Context } from "cordis";
 import { mkdir } from "node:fs/promises";
 import { PluginInstaller } from "./installer";
-import { PluginRegistry } from "./registry";
-import { PluginRuntime, type PluginRuntimeAdapter } from "./runtime";
+import { automaticPluginBindingId, automaticPluginBindingPrefix, PluginRegistry } from "./registry";
+import {
+  PluginRuntime,
+  type PluginRuntimeAdapter,
+  type PluginRuntimeLifecycleRecord,
+} from "./runtime";
 import { PluginRuntimeBackend as DefaultPluginRuntimeBackend } from "./runtime-backend";
 import {
   AgentResourceRegistry,
@@ -28,7 +33,6 @@ import type {
   PluginPackageRecord,
   ResolvedClientEntrySnapshot,
   ResolvedEntry,
-  TrustGrant,
 } from "./types";
 
 export interface PluginKernelOptions {
@@ -118,8 +122,28 @@ export class PluginKernel {
     this.coreDisposers.push(dispose);
   }
 
-  installDevelopmentDirectory(sourceRoot: string, grant: TrustGrant) {
-    return this.installer.registerDevelopmentDirectory(sourceRoot, grant);
+  prepareDirectory(sourceRoot: string) {
+    return this.installer.prepareDirectory(sourceRoot);
+  }
+
+  /**
+   * 将开发目录重新校验为进程内覆盖，并按最新 Manifest 重建全部开发 Binding。
+   *
+   * 该路径不写 PluginStore；每次文件变化都会产生新摘要，从而让 Runtime 的正常
+   * reconcile 完成停旧、启新和权限刷新。
+   */
+  async refreshDevelopmentDirectory(
+    sourceRoot: string,
+    previousPluginId?: string,
+  ): Promise<PluginPackageRecord> {
+    const candidate = await this.installer.inspectDevelopmentDirectory(sourceRoot);
+    const record = this.installer.createDevelopmentRecord(candidate, {
+      digest: candidate.digest,
+      acknowledgeFullMachineAccess: true,
+    });
+    this.registry.setDevelopmentPackage(record, previousPluginId);
+    await this.reconcile();
+    return record;
   }
 
   prepareArchive(archivePath: string) {
@@ -135,35 +159,57 @@ export class PluginKernel {
   }
 
   async selectPackageVersion(record: PluginPackageRecord): Promise<void> {
-    const previous = (await this.registry.listCurrentPackages()).find(
-      (candidate) => candidate.manifest.id === record.manifest.id,
-    );
+    const previous = await this.currentPackage(record.manifest.id);
     await this.registry.selectPackageVersion(record);
     try {
       await this.reconcile();
-      const enabledHostBindings = (await this.registry.listBindings(record.manifest.id))
-        .filter((binding) => binding.enabled)
-        .filter((binding) =>
-          record.manifest.entries.some(
-            (entry) => entry.id === binding.entryId && entry.runtime === "host",
-          ),
-        );
-      const plugins = new Map(
-        this.runtime.snapshot().plugins.map((plugin) => [plugin.runtimeId, plugin]),
-      );
-      const failed = enabledHostBindings.find((binding) => {
-        const plugin = plugins.get(binding.id);
-        return (
-          !plugin || plugin.pluginVersion !== record.manifest.version || plugin.state !== "active"
-        );
-      });
-      if (failed) throw new Error(`plugin activation failed for binding ${failed.id}`);
+      await this.assertSelectedHostBindingsActive(record);
     } catch (error) {
-      if (previous) {
-        await this.registry.selectPackageVersion(previous);
-      } else {
-        await this.registry.clearPackageSelection(record.manifest.id);
-      }
+      await this.restorePackageSelection(record.manifest.id, previous);
+      await this.reconcile();
+      throw error;
+    }
+  }
+
+  /**
+   * 安装命令选中包版本后，为每个 Entry 建立稳定的全局 Binding 并立即激活。
+   *
+   * 插件的用户设置由插件自己的 Storage 或配置 Service 管理，因此初始 Binding
+   * 只携带空对象。激活失败时同时恢复旧选择和原自动 Binding。
+   */
+  async selectPackageVersionAndEnable(record: PluginPackageRecord): Promise<void> {
+    const previous = await this.currentPackage(record.manifest.id);
+    const prefix = automaticPluginBindingPrefix("plugin", record.manifest.id);
+    const previousBindings = (await this.registry.listBindings(record.manifest.id)).filter(
+      (binding) => binding.id.startsWith(prefix),
+    );
+    const nextBindings: PluginBinding[] = record.manifest.entries.map((entry) => ({
+      id: automaticPluginBindingId("plugin", record.manifest.id, entry.id),
+      pluginId: record.manifest.id,
+      entryId: entry.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: {},
+    }));
+
+    // 包选择、旧自动 Binding 删除和新 Binding 写入必须同时可见，避免重启读到半套安装状态。
+    await this.registry.replacePackageSelectionAndBindings(
+      record.manifest.id,
+      record,
+      prefix,
+      nextBindings,
+    );
+    try {
+      await this.reconcile();
+      await this.assertSelectedHostBindingsActive(record);
+    } catch (error) {
+      await this.registry.replacePackageSelectionAndBindings(
+        record.manifest.id,
+        previous,
+        prefix,
+        previous ? previousBindings : [],
+      );
       await this.reconcile();
       throw error;
     }
@@ -180,6 +226,10 @@ export class PluginKernel {
 
   runtimeSnapshot(): RuntimeControlSnapshot {
     return this.runtime.snapshot();
+  }
+
+  runtimeLifecycle(runtimeId?: string): readonly PluginRuntimeLifecycleRecord[] {
+    return this.runtime.lifecycle(runtimeId);
   }
 
   clientEntrySnapshot(): ResolvedClientEntrySnapshot {
@@ -282,8 +332,55 @@ export class PluginKernel {
     for (const listener of this.clientEntryListeners) listener(snapshot);
   }
 
+  private async currentPackage(pluginId: string): Promise<PluginPackageRecord | undefined> {
+    return (await this.registry.listCurrentPackages()).find(
+      (candidate) => candidate.manifest.id === pluginId,
+    );
+  }
+
+  private async restorePackageSelection(
+    pluginId: string,
+    previous: PluginPackageRecord | undefined,
+  ): Promise<void> {
+    if (previous) {
+      await this.registry.selectPackageVersion(previous);
+    } else {
+      await this.registry.clearPackageSelection(pluginId);
+    }
+  }
+
+  private async assertSelectedHostBindingsActive(record: PluginPackageRecord): Promise<void> {
+    // 与 reconcile 共用 Registry 的环境解析结果；不适用于当前 Host 的 Entry 会被正常保留，
+    // 但不会被误判为“应该已经激活”。
+    const applicableHostEntries = (
+      await this.registry.resolve({
+        hostProfile: this.options.hostProfile,
+        clientTarget: this.options.clientTarget,
+        platform: this.options.platform,
+        architecture: this.options.architecture,
+      })
+    ).filter(
+      (entry) =>
+        entry.host !== "client" &&
+        entry.package.manifest.id === record.manifest.id &&
+        entry.package.digest === record.digest,
+    );
+    const plugins = new Map(
+      this.runtime.snapshot().plugins.map((plugin) => [plugin.runtimeId, plugin]),
+    );
+    const failed = applicableHostEntries.find((entry) => {
+      const plugin = plugins.get(entry.runtimeId);
+      return (
+        !plugin || plugin.pluginVersion !== record.manifest.version || plugin.state !== "active"
+      );
+    });
+    if (failed) throw new Error(`plugin activation failed for binding ${failed.runtimeId}`);
+  }
+
   private async disposeKernel(): Promise<void> {
     await this.runtime.dispose();
+    // 开发包从未写入数据库；清空覆盖表后，后续 Host 只会看到原持久化选择。
+    this.registry.clearDevelopmentPackages();
     for (const dispose of this.coreDisposers.reverse()) dispose();
     this.clientEntryListeners.clear();
   }

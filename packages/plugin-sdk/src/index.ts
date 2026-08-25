@@ -102,6 +102,38 @@ export interface ExecutionContext {
 export type ServiceMethod = (...args: JsonValue[]) => Awaitable<JsonValue | void>;
 export type ServiceProvider = Record<string, ServiceMethod>;
 
+declare const serviceContractType: unique symbol;
+
+/**
+ * 将稳定 Contract 字符串与其公开 Service 类型关联。
+ *
+ * 品牌字段只参与 TypeScript 推导，不会进入运行时字符串或插件清单。
+ */
+export type ServiceContract<TService extends object> = string & {
+  readonly [serviceContractType]?: (service: TService) => TService;
+};
+
+/** 从类型化 Contract 还原其 Service 接口。 */
+export type ServiceOfContract<TContract> =
+  TContract extends ServiceContract<infer TService> ? TService : never;
+
+const serviceContractPattern = /^[a-z0-9](?:[a-z0-9.:-]{0,126}[a-z0-9])?$/;
+
+/**
+ * 声明一个可由 Service Catalog 发现的公开 Contract。
+ *
+ * @param contract 稳定、可序列化的 Service 标识。
+ * @returns 保持原始字符串值的类型化 Contract。
+ */
+export function defineServiceContract<TService extends object>(
+  contract: string,
+): ServiceContract<TService> {
+  if (!serviceContractPattern.test(contract)) {
+    throw new TypeError(`invalid service contract: ${contract}`);
+  }
+  return contract as ServiceContract<TService>;
+}
+
 export interface ServiceResultValidationIssue {
   readonly path?: readonly PropertyKey[];
   readonly message: string;
@@ -423,6 +455,7 @@ export interface PluginContext {
   readonly storage: PluginStorage;
   effect(execute: () => Awaitable<Disposable | void>, label?: string): void;
   provide(contract: string, provider: ServiceProvider, options?: ServiceProvideOptions): void;
+  service<TService extends object>(contract: ServiceContract<TService>): TService;
   service<T extends object>(contract: string): T;
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;

@@ -33,6 +33,24 @@ interface ActivePlugin {
   readonly handle: RunningPlugin;
 }
 
+export type PluginRuntimeLifecycleEvent =
+  | "preparing"
+  | "starting"
+  | "active"
+  | "stopping"
+  | "stopped"
+  | "reload-requested"
+  | "failed";
+
+/** CLI 开发工具可读取的有界生命周期记录。 */
+export interface PluginRuntimeLifecycleRecord {
+  readonly sequence: number;
+  readonly timestamp: string;
+  readonly runtimeId: string;
+  readonly event: PluginRuntimeLifecycleEvent;
+  readonly error?: string;
+}
+
 /**
  * 普通桌面插件运行时。
  *
@@ -45,6 +63,8 @@ export class PluginRuntime {
   private desired = new Map<string, ResolvedEntry>();
   private reconcileTask: Promise<void> = Promise.resolve();
   private stopping = false;
+  private readonly lifecycleRecords: PluginRuntimeLifecycleRecord[] = [];
+  private lifecycleSequence = 0;
 
   constructor(
     private readonly backend: PluginRuntimeAdapter,
@@ -62,10 +82,17 @@ export class PluginRuntime {
   async reload(runtimeId: string): Promise<void> {
     const task = this.reconcileTask.then(async () => {
       if (this.stopping) throw new Error("plugin runtime is stopping");
+      if (!this.desired.has(runtimeId)) {
+        throw new Error(`plugin runtime is not desired: ${runtimeId}`);
+      }
+
+      this.record(runtimeId, "reload-requested");
       const current = this.active.get(runtimeId);
-      if (!current) throw new Error(`plugin runtime is not active: ${runtimeId}`);
-      await this.stopActive(current);
-      this.active.delete(runtimeId);
+      if (current) {
+        await this.stopActive(current);
+        this.active.delete(runtimeId);
+      }
+      // failed Runtime 没有 Active handle；清掉失败快照后直接按 desired Entry 重试。
       this.statuses.delete(runtimeId);
       await this.reconcileNow([...this.desired.values()]);
     });
@@ -81,6 +108,7 @@ export class PluginRuntime {
     if (!current) return;
     this.active.delete(runtimeId);
     this.statuses.set(runtimeId, snapshotFor(current.entry, "failed", error.message));
+    this.record(runtimeId, "failed", error.message);
   }
 
   snapshot(): RuntimeControlSnapshot {
@@ -89,6 +117,11 @@ export class PluginRuntime {
         left.runtimeId.localeCompare(right.runtimeId),
       ),
     };
+  }
+
+  /** 按序号返回当前进程内保留的最近生命周期事件。 */
+  lifecycle(runtimeId?: string): readonly PluginRuntimeLifecycleRecord[] {
+    return this.lifecycleRecords.filter((record) => !runtimeId || record.runtimeId === runtimeId);
   }
 
   dispose(): Promise<void> {
@@ -115,6 +148,10 @@ export class PluginRuntime {
     if (this.stopping) throw new Error("plugin runtime is stopping");
     const incoming = new Map(entries.map((entry) => [entry.runtimeId, entry]));
     this.desired = incoming;
+    // Manifest 已删除或改名的失败 Runtime 不在 active 中，也必须从公开快照移除。
+    for (const runtimeId of this.statuses.keys()) {
+      if (!incoming.has(runtimeId)) this.statuses.delete(runtimeId);
+    }
 
     for (const [runtimeId, current] of this.active) {
       const next = incoming.get(runtimeId);
@@ -129,12 +166,14 @@ export class PluginRuntime {
     for (const entry of entries) {
       if (this.active.has(entry.runtimeId)) continue;
       try {
+        this.record(entry.runtimeId, "preparing");
         pending.set(entry.runtimeId, await this.backend.prepare(entry));
       } catch (error) {
         this.statuses.set(
           runtimeIdSnapshot(entry),
           snapshotFor(entry, "failed", formatError(error)),
         );
+        this.record(entry.runtimeId, "failed", formatError(error));
       }
     }
 
@@ -156,6 +195,7 @@ export class PluginRuntime {
         pending.delete(runtimeId);
         progress = true;
         try {
+          this.record(runtimeId, "starting");
           const handle = await prepared.start();
           this.active.set(runtimeId, {
             entry,
@@ -163,8 +203,10 @@ export class PluginRuntime {
             handle,
           });
           this.statuses.set(runtimeId, snapshotFor(entry, "active"));
+          this.record(runtimeId, "active");
         } catch (error) {
           this.statuses.set(runtimeId, snapshotFor(entry, "failed", formatError(error)));
+          this.record(runtimeId, "failed", formatError(error));
         }
       }
 
@@ -177,13 +219,37 @@ export class PluginRuntime {
           runtimeId,
           snapshotFor(entry, "failed", "plugin dependencies are unavailable"),
         );
+        this.record(runtimeId, "failed", "plugin dependencies are unavailable");
       }
       pending.clear();
     }
   }
 
   private async stopActive(current: ActivePlugin): Promise<void> {
-    await current.handle.stop();
+    this.record(current.entry.runtimeId, "stopping");
+    try {
+      await current.handle.stop();
+      this.record(current.entry.runtimeId, "stopped");
+    } catch (error) {
+      this.record(current.entry.runtimeId, "failed", formatError(error));
+      throw error;
+    }
+  }
+
+  /**
+   * 生命周期日志严格限制在最近 1024 条，开发会话不会因长期热重载持续增长。
+   */
+  private record(runtimeId: string, event: PluginRuntimeLifecycleEvent, error?: string): void {
+    this.lifecycleRecords.push({
+      sequence: ++this.lifecycleSequence,
+      timestamp: new Date().toISOString(),
+      runtimeId,
+      event,
+      ...(error ? { error } : {}),
+    });
+    if (this.lifecycleRecords.length > 1_024) {
+      this.lifecycleRecords.splice(0, this.lifecycleRecords.length - 1_024);
+    }
   }
 }
 

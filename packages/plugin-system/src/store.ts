@@ -1,4 +1,5 @@
 import type {
+  DataCommandRequest,
   DatabaseCommandResult,
   DatabaseRow,
   DatabaseService,
@@ -112,6 +113,66 @@ export class PluginStore {
     const current = await this.get("package.current-is", [pluginId, version, digest]);
     if (current) throw new Error(`cannot remove current plugin version: ${pluginId}@${version}`);
     await this.run("package.delete", [pluginId, version, digest]);
+  }
+  /**
+   * 在一个写事务内替换当前包选择及其自动 Binding 集合。
+   *
+   * 事务先确认目标包可被选中，再删除同插件的旧自动 Binding，最后完整插入新集合。
+   * 任意一步失败时，SQLite 会恢复选择和 Binding，下一次启动不会观察到半套状态。
+   */
+  async replaceCurrentPackageBindings(
+    pluginId: string,
+    current: PluginPackageRecord | undefined,
+    bindingPrefix: string,
+    bindings: readonly PluginBinding[],
+  ): Promise<void> {
+    if (current && current.manifest.id !== pluginId) {
+      throw new Error(
+        `plugin package selection mismatch: expected ${pluginId}, received ${current.manifest.id}`,
+      );
+    }
+    if (bindings.some((binding) => binding.pluginId !== pluginId)) {
+      throw new Error(`plugin binding replacement crosses package boundary: ${pluginId}`);
+    }
+
+    const timestamp = now();
+    const requests: DataCommandRequest[] = [
+      current
+        ? {
+            command: "package.current.set",
+            parameters: [pluginId, current.manifest.version, current.digest, timestamp],
+          }
+        : {
+            command: "package.current.clear",
+            parameters: [pluginId],
+          },
+      {
+        command: "binding.delete-by-plugin-prefix",
+        parameters: [pluginId, bindingPrefix],
+      },
+      ...bindings.map((binding): DataCommandRequest => ({
+        command: "binding.insert",
+        parameters: [
+          binding.id,
+          binding.pluginId,
+          binding.entryId,
+          binding.scopeType,
+          binding.scopeId,
+          binding.enabled ? 1 : 0,
+          JSON.stringify(binding.config),
+          timestamp,
+        ],
+      })),
+    ];
+    const results = await this.repository.transaction(requests);
+    if (results.length !== requests.length) {
+      throw new Error(
+        `database transaction returned ${results.length} results for ${requests.length} commands`,
+      );
+    }
+    for (const [index, result] of results.entries()) {
+      if (result.kind !== "run") throw unexpectedResult(requests[index]!.command, result);
+    }
   }
 
   async upsertBinding(binding: PluginBinding): Promise<void> {

@@ -1,7 +1,6 @@
-import type { PluginPackageRecord } from "./types";
-import type { TrustGrant } from "./types";
+import type { InstallCandidate, PluginPackageRecord, TrustGrant } from "./types";
 import { unzipSync } from "fflate";
-import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { inspectPackageDirectory } from "./package-files";
 import { PluginStore } from "./store";
@@ -30,13 +29,14 @@ export class PluginInstaller {
     this.stagingRoot = join(dataRoot, "staging");
   }
 
-  async registerDevelopmentDirectory(
-    sourceRoot: string,
-    grant: TrustGrant,
-  ): Promise<PluginPackageRecord> {
-    const candidate = await inspectPackageDirectory(sourceRoot, this.seaShardVersion);
+  /**
+   * 校验开发目录并创建只存在于当前 Host 进程的包记录。
+   *
+   * `plugin dev` 每次刷新都重新计算摘要；记录不会写入用户的正式插件数据库。
+   */
+  createDevelopmentRecord(candidate: InstallCandidate, grant: TrustGrant): PluginPackageRecord {
     assertTrust(candidate.digest, grant);
-    const record: PluginPackageRecord = {
+    return {
       manifest: candidate.manifest,
       digest: candidate.digest,
       rootPath: candidate.sourceRoot,
@@ -44,9 +44,36 @@ export class PluginInstaller {
       trust: "local-full-trust",
       installedAt: new Date().toISOString(),
     };
-    await this.store.registerPackage(record);
-    await this.store.grantTrust(record);
-    return record;
+  }
+
+  /**
+   * 目录安装先复制到 Installer 的私有暂存区，并对复制结果重新校验摘要。
+   *
+   * 后续构建或编辑原目录不会改变已授予信任、已选中并持久化的插件代码。
+   */
+  async prepareDirectory(sourceRoot: string): Promise<PreparedPluginInstall> {
+    await mkdir(this.stagingRoot, { recursive: true });
+    const staging = join(
+      this.stagingRoot,
+      `plugin-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await mkdir(staging, { recursive: false });
+    try {
+      const sourceCandidate = await inspectPackageDirectory(sourceRoot, this.seaShardVersion);
+      for (const file of sourceCandidate.files) {
+        const destination = resolve(staging, ...file.relativePath.split("/"));
+        await mkdir(dirname(destination), { recursive: true });
+        await copyFile(file.absolutePath, destination);
+      }
+      const candidate = await inspectPackageDirectory(staging, this.seaShardVersion);
+      if (candidate.digest !== sourceCandidate.digest) {
+        throw new Error("plugin directory changed while its immutable snapshot was being prepared");
+      }
+      return this.createPreparedInstall(candidate, staging);
+    } catch (error) {
+      await rm(staging, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   async inspectDevelopmentDirectory(sourceRoot: string) {
@@ -68,53 +95,60 @@ export class PluginInstaller {
     try {
       await extractArchive(archive, staging);
       const candidate = await inspectPackageDirectory(staging, this.seaShardVersion);
-      let settled = false;
-      return {
-        manifest: candidate.manifest,
-        digest: candidate.digest,
-        commit: async (grant) => {
-          if (settled) throw new Error("prepared plugin install has already been settled");
-          assertTrust(candidate.digest, grant);
-          settled = true;
-          const finalRoot = join(
-            this.installRoot,
-            candidate.manifest.id,
-            candidate.manifest.version,
-            candidate.digest,
-          );
-          try {
-            await mkdir(dirname(finalRoot), { recursive: true });
-            if (await directoryExists(finalRoot)) {
-              await rm(staging, { recursive: true, force: true });
-            } else {
-              await rename(staging, finalRoot);
-            }
-            const record: PluginPackageRecord = {
-              manifest: candidate.manifest,
-              digest: candidate.digest,
-              rootPath: finalRoot,
-              source: "installed",
-              trust: "package-full-trust",
-              installedAt: new Date().toISOString(),
-            };
-            await this.store.registerPackage(record);
-            await this.store.grantTrust(record);
-            return record;
-          } catch (error) {
-            await rm(staging, { recursive: true, force: true });
-            throw error;
-          }
-        },
-        dispose: async () => {
-          if (settled) return;
-          settled = true;
-          await rm(staging, { recursive: true, force: true });
-        },
-      };
+      return this.createPreparedInstall(candidate, staging);
     } catch (error) {
       await rm(staging, { recursive: true, force: true });
       throw error;
     }
+  }
+
+  private createPreparedInstall(
+    candidate: InstallCandidate,
+    staging: string,
+  ): PreparedPluginInstall {
+    let settled = false;
+    return {
+      manifest: candidate.manifest,
+      digest: candidate.digest,
+      commit: async (grant) => {
+        if (settled) throw new Error("prepared plugin install has already been settled");
+        assertTrust(candidate.digest, grant);
+        settled = true;
+        const finalRoot = join(
+          this.installRoot,
+          candidate.manifest.id,
+          candidate.manifest.version,
+          candidate.digest,
+        );
+        try {
+          await mkdir(dirname(finalRoot), { recursive: true });
+          if (await directoryExists(finalRoot)) {
+            await rm(staging, { recursive: true, force: true });
+          } else {
+            await rename(staging, finalRoot);
+          }
+          const record: PluginPackageRecord = {
+            manifest: candidate.manifest,
+            digest: candidate.digest,
+            rootPath: finalRoot,
+            source: "installed",
+            trust: "package-full-trust",
+            installedAt: new Date().toISOString(),
+          };
+          await this.store.registerPackage(record);
+          await this.store.grantTrust(record);
+          return record;
+        } catch (error) {
+          await rm(staging, { recursive: true, force: true });
+          throw error;
+        }
+      },
+      dispose: async () => {
+        if (settled) return;
+        settled = true;
+        await rm(staging, { recursive: true, force: true });
+      },
+    };
   }
 
   async uninstall(pluginId: string, version: string, digest: string): Promise<void> {

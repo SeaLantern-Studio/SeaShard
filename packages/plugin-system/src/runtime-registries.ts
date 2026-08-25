@@ -39,6 +39,14 @@ interface ServiceRegistration {
   resultValidators: Readonly<Record<string, ServiceResultValidator>>;
 }
 
+/** Service Registry 对诊断工具发布的只读运行态投影。 */
+export interface ServiceRuntimeSnapshot {
+  readonly contract: string;
+  readonly runtimeId: string;
+  readonly scope: ScopeAddress;
+  readonly methods: readonly string[];
+}
+
 interface ContributionRegistration {
   id: string;
   kind: string;
@@ -233,6 +241,34 @@ export class ServiceRegistry {
       method,
     });
     return result;
+  }
+
+  /**
+   * 返回当前全部 Provider 的确定性快照。
+   *
+   * 快照只暴露 Contract、注册身份、Scope 与方法名；Provider 函数和验证器始终留在 Host。
+   */
+  snapshot(): readonly ServiceRuntimeSnapshot[] {
+    const snapshots: ServiceRuntimeSnapshot[] = [];
+    for (const registrations of this.registrations.values()) {
+      for (const registration of registrations) {
+        snapshots.push({
+          contract: registration.contract,
+          runtimeId: registration.runtimeId,
+          scope: { ...registration.scope },
+          methods: Object.keys(registration.provider).sort((left, right) =>
+            left.localeCompare(right),
+          ),
+        });
+      }
+    }
+    return snapshots.sort(
+      (left, right) =>
+        left.contract.localeCompare(right.contract) ||
+        left.runtimeId.localeCompare(right.runtimeId) ||
+        left.scope.type.localeCompare(right.scope.type) ||
+        left.scope.id.localeCompare(right.scope.id),
+    );
   }
 
   removeRuntime(runtimeId: string): void {
