@@ -1,12 +1,32 @@
 {
   "name": "@seashard/contracts",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "SeaShard 稳定 Service Contract 与 JSON 数据类型。",
+  "keywords": [
+    "contracts",
+    "seashard",
+    "typescript"
+  ],
+  "license": "AGPL-3.0-only",
   "type": "module",
+  "sideEffects": false,
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/write-sdk-package-manifest.mjs ."
+  },
+  "devDependencies": {
     "@seashard/plugin-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "@seashard/plugin-sdk": "^0.1.0"
+  },
+  "engines": {
+    "node": ">=24.11.0"
   }
 }

@@ -79,7 +79,7 @@ importers:
         version: link:../../packages/bootstrap-runtime
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../../packages/contracts/dist
       '@seashard/database-sqlite':
         specifier: workspace:*
         version: link:../../components/data/database-sqlite
@@ -103,7 +103,7 @@ importers:
         version: link:../../components/plugin/foundation
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        version: link:../../packages/plugin-sdk/dist
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
@@ -175,7 +175,7 @@ importers:
         version: link:../../packages/ui-runtime
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../packages/ui-sdk
+        version: link:../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -196,7 +196,7 @@ importers:
     dependencies:
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        version: link:../../packages/plugin-sdk/dist
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
@@ -220,10 +220,10 @@ importers:
         version: 3.0.35(zod@4.4.3)
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       ai:
         specifier: 7.0.77
         version: 7.0.77(zod@4.4.3)
@@ -247,10 +247,10 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       electron:
         specifier: 43.4.0
         version: 43.4.0
@@ -259,28 +259,28 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
 
   components/game/java-runtime-manager:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
 
   components/network/download:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
 
   components/plugin/foundation:
     dependencies:
@@ -295,7 +295,7 @@ importers:
         version: link:../../data/database-sqlite
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../../packages/plugin-system
@@ -307,10 +307,10 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../instance-manager
@@ -319,7 +319,7 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/database':
         specifier: workspace:*
         version: link:../../../packages/database
@@ -328,19 +328,19 @@ importers:
         version: link:../../network/download
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
 
   components/server/instance-manager:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/database':
         specifier: workspace:*
         version: link:../../../packages/database
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../core-source
@@ -352,13 +352,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/download':
         specifier: workspace:*
         version: link:../../network/download
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../instance-manager
@@ -370,10 +370,10 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../instance-manager
@@ -382,10 +382,10 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
 
   frontend/agent/conversation:
     dependencies:
@@ -394,13 +394,13 @@ importers:
         version: link:../shared
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -415,13 +415,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -436,7 +436,7 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
@@ -445,13 +445,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -481,16 +481,16 @@ importers:
         version: 1.2.3
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -505,16 +505,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -529,16 +529,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-download-resource-shared':
         specifier: workspace:*
         version: link:../download-resource-shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -550,16 +550,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-download-resource-shared':
         specifier: workspace:*
         version: link:../download-resource-shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -574,16 +574,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-download-resource-shared':
         specifier: workspace:*
         version: link:../download-resource-shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -595,7 +595,7 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -610,13 +610,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -634,16 +634,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-download-resource-shared':
         specifier: workspace:*
         version: link:../download-resource-shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -655,16 +655,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -682,16 +682,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -706,16 +706,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -730,16 +730,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -754,16 +754,16 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../shared
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -790,10 +790,10 @@ importers:
     dependencies:
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       lucide-vue-next:
         specifier: 0.400.0
         version: 0.400.0(vue@3.5.41(typescript@5.9.3))
@@ -805,13 +805,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -826,10 +826,10 @@ importers:
     dependencies:
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -844,13 +844,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../../../packages/contracts
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../../../packages/plugin-sdk
+        version: link:../../../packages/plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../../../packages/ui-sdk
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -868,26 +868,28 @@ importers:
         version: 4.0.0-rc.8
 
   packages/contracts:
-    dependencies:
+    devDependencies:
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../plugin-sdk
+        version: link:../plugin-sdk/dist
+    publishDirectory: dist
 
   packages/database: {}
 
-  packages/plugin-sdk: {}
+  packages/plugin-sdk:
+    publishDirectory: dist
 
   packages/plugin-system:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../contracts
+        version: link:../contracts/dist
       '@seashard/database':
         specifier: workspace:*
         version: link:../database
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../plugin-sdk
+        version: link:../plugin-sdk/dist
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
@@ -906,13 +908,13 @@ importers:
     dependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../contracts
+        version: link:../contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../plugin-sdk
+        version: link:../plugin-sdk/dist
       '@seashard/ui-sdk':
         specifier: workspace:*
-        version: link:../ui-sdk
+        version: link:../ui-sdk/dist
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
@@ -922,15 +924,17 @@ importers:
 
   packages/ui-sdk:
     dependencies:
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.41(typescript@5.9.3)
+    devDependencies:
       '@seashard/contracts':
         specifier: workspace:*
-        version: link:../contracts
+        version: link:../contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
-        version: link:../plugin-sdk
-      vue:
-        specifier: 3.5.41
-        version: 3.5.41(typescript@5.9.3)
+        version: link:../plugin-sdk/dist
+    publishDirectory: dist
 
 packages:
 

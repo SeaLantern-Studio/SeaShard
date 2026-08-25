@@ -1,9 +1,26 @@
 {
   "name": "@seashard/plugin-sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "SeaShard Host 插件开发 SDK。",
+  "keywords": [
+    "plugin",
+    "sdk",
+    "seashard"
+  ],
+  "license": "AGPL-3.0-only",
   "type": "module",
+  "sideEffects": false,
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/write-sdk-package-manifest.mjs ."
+  },
+  "engines": {
+    "node": ">=24.11.0"
   }
 }
