@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type {
+  PluginMarketInstallationSnapshot,
+  PluginMarketInstallService,
   PluginMarketPlugin,
   PluginMarketRelease,
   PluginMarketSearchResult,
@@ -10,6 +12,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   Github,
   Package,
@@ -22,6 +25,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{
   market: PluginMarketService;
+  installer: PluginMarketInstallService;
 }>();
 
 const pageSize = 20;
@@ -34,6 +38,8 @@ const loading = ref(true);
 const refreshing = ref(false);
 const loadFailed = ref(false);
 const selectedPlugin = ref<PluginMarketPlugin>();
+const installations = ref<readonly PluginMarketInstallationSnapshot[]>([]);
+const installingKeys = ref<ReadonlySet<string>>(new Set());
 let disposed = false;
 let requestSequence = 0;
 
@@ -57,14 +63,18 @@ async function loadPlugins(reportFailure: boolean, forceRefresh = false): Promis
   if (!result.value) loading.value = true;
   if (forceRefresh) refreshing.value = true;
   try {
-    const snapshot = await props.market.search({
-      query: query.value,
-      page: page.value,
-      pageSize,
-      ...(forceRefresh ? { refresh: true } : {}),
-    });
+    const [snapshot, installed] = await Promise.all([
+      props.market.search({
+        query: query.value,
+        page: page.value,
+        pageSize,
+        ...(forceRefresh ? { refresh: true } : {}),
+      }),
+      props.installer.list(),
+    ]);
     if (disposed || sequence !== requestSequence) return;
     result.value = snapshot;
+    installations.value = installed;
     loadFailed.value = false;
   } catch (error) {
     if (disposed || sequence !== requestSequence) return;
@@ -111,6 +121,90 @@ function openExternal(url: string): void {
 /** Registry 已按语义版本倒序生成，首个未撤回版本就是当前推荐展示版本。 */
 function currentRelease(plugin: PluginMarketPlugin): PluginMarketRelease | undefined {
   return plugin.releases.find((release) => !release.yanked);
+}
+
+function installedPlugin(pluginId: string): PluginMarketInstallationSnapshot | undefined {
+  return installations.value.find((installation) => installation.id === pluginId);
+}
+
+function installationKey(pluginId: string, version: string): string {
+  return `${pluginId}@${version}`;
+}
+
+function isInstalling(pluginId: string, version: string): boolean {
+  return installingKeys.value.has(installationKey(pluginId, version));
+}
+
+function installActionLabel(plugin: PluginMarketPlugin, release: PluginMarketRelease): string {
+  const installed = installedPlugin(plugin.id);
+  if (installed?.source === "development") return "开发版本";
+  if (installed?.digest === release.packageDigest) return "已安装";
+  return installed ? "更新" : "安装";
+}
+
+function canInstall(plugin: PluginMarketPlugin, release: PluginMarketRelease): boolean {
+  const installed = installedPlugin(plugin.id);
+  return (
+    !release.yanked &&
+    installed?.source !== "development" &&
+    installed?.digest !== release.packageDigest &&
+    !isInstalling(plugin.id, release.version)
+  );
+}
+
+function currentInstallActionLabel(plugin: PluginMarketPlugin): string {
+  const release = currentRelease(plugin);
+  return release ? installActionLabel(plugin, release) : "不可安装";
+}
+
+function canInstallCurrent(plugin: PluginMarketPlugin): boolean {
+  const release = currentRelease(plugin);
+  return release ? canInstall(plugin, release) : false;
+}
+
+function isInstallingCurrent(plugin: PluginMarketPlugin): boolean {
+  const release = currentRelease(plugin);
+  return release ? isInstalling(plugin.id, release.version) : false;
+}
+
+function installCurrent(plugin: PluginMarketPlugin): void {
+  const release = currentRelease(plugin);
+  if (release) void installRelease(plugin, release);
+}
+
+/** 安装按钮本身就是完整信任确认；Host 仍会独立校验 Registry 地址与两层摘要。 */
+async function installRelease(
+  plugin: PluginMarketPlugin,
+  release: PluginMarketRelease,
+): Promise<void> {
+  if (!canInstall(plugin, release)) return;
+  const key = installationKey(plugin.id, release.version);
+  const wasInstalled = Boolean(installedPlugin(plugin.id));
+  installingKeys.value = new Set(installingKeys.value).add(key);
+  try {
+    const installed = await props.installer.install({
+      pluginId: plugin.id,
+      version: release.version,
+      acknowledgeFullMachineAccess: true,
+    });
+    installations.value = [
+      ...installations.value.filter(({ id }) => id !== installed.id),
+      installed,
+    ].sort((left, right) => left.id.localeCompare(right.id));
+    toast.success({
+      title: wasInstalled ? "插件已更新" : "插件已安装",
+      description: `${plugin.name} ${release.version} 已安装并启用`,
+    });
+  } catch (error) {
+    toast.error({
+      title: wasInstalled ? "更新插件失败" : "安装插件失败",
+      description: errorMessage(error),
+    });
+  } finally {
+    const next = new Set(installingKeys.value);
+    next.delete(key);
+    installingKeys.value = next;
+  }
 }
 
 function runtimeSummary(release: PluginMarketRelease | undefined): string {
@@ -168,6 +262,13 @@ const selectedCurrentRelease = computed(() =>
         </span>
         <h1>{{ selectedPlugin.name }}</h1>
         <span class="registry-badge">官方目录</span>
+        <span v-if="installedPlugin(selectedPlugin.id)" class="installed-badge">
+          {{
+            installedPlugin(selectedPlugin.id)?.source === "development"
+              ? `开发版本 ${installedPlugin(selectedPlugin.id)?.version}`
+              : `已安装 ${installedPlugin(selectedPlugin.id)?.version}`
+          }}
+        </span>
       </div>
 
       <dl class="plugin-facts">
@@ -197,6 +298,10 @@ const selectedCurrentRelease = computed(() =>
             <code>{{ selectedPlugin.license }}</code>
           </dd>
         </div>
+        <div>
+          <dt>权限模型</dt>
+          <dd>第三方包完整信任</dd>
+        </div>
       </dl>
 
       <section class="release-section" aria-labelledby="release-section-title">
@@ -212,8 +317,30 @@ const selectedCurrentRelease = computed(() =>
           >
             <header class="release-card-heading">
               <h3>{{ release.version }}</h3>
-              <span v-if="release.yanked" class="yanked-badge">已撤回</span>
-              <span v-else class="version-badge">可用</span>
+              <div class="release-card-actions">
+                <span v-if="release.yanked" class="yanked-badge">已撤回</span>
+                <span
+                  v-else-if="installedPlugin(selectedPlugin.id)?.digest === release.packageDigest"
+                  class="installed-badge"
+                >
+                  已安装
+                </span>
+                <span v-else class="version-badge">可用</span>
+                <Cmz_Button
+                  v-if="!release.yanked"
+                  size="sm"
+                  :loading="isInstalling(selectedPlugin.id, release.version)"
+                  :disabled="!canInstall(selectedPlugin, release)"
+                  @click="installRelease(selectedPlugin, release)"
+                >
+                  <Download
+                    v-if="canInstall(selectedPlugin, release)"
+                    :size="15"
+                    :stroke-width="1.8"
+                  />
+                  {{ installActionLabel(selectedPlugin, release) }}
+                </Cmz_Button>
+              </div>
             </header>
             <dl class="release-facts">
               <div>
@@ -305,56 +432,75 @@ const selectedCurrentRelease = computed(() =>
 
       <template v-else>
         <div class="market-grid">
-          <article
-            v-for="plugin in plugins"
-            :key="plugin.id"
-            class="market-card"
-            role="button"
-            tabindex="0"
-            :aria-label="`查看 ${plugin.name} 详情`"
-            @click="openDetails(plugin)"
-            @keydown.enter="openDetails(plugin)"
-            @keydown.space.prevent="openDetails(plugin)"
-          >
-            <header>
-              <span class="plugin-mark" aria-hidden="true">
-                <Package :size="22" :stroke-width="1.8" />
-              </span>
-              <h2>{{ plugin.name }}</h2>
-            </header>
+          <article v-for="plugin in plugins" :key="plugin.id" class="market-card">
+            <div
+              class="market-card-main"
+              role="button"
+              tabindex="0"
+              :aria-label="`查看 ${plugin.name} 详情`"
+              @click="openDetails(plugin)"
+              @keydown.enter="openDetails(plugin)"
+              @keydown.space.prevent="openDetails(plugin)"
+            >
+              <header>
+                <span class="plugin-mark" aria-hidden="true">
+                  <Package :size="22" :stroke-width="1.8" />
+                </span>
+                <h2>{{ plugin.name }}</h2>
+              </header>
 
-            <div class="market-card-badges">
-              <span class="registry-badge">官方目录</span>
-              <span v-if="currentRelease(plugin)" class="version-badge">
-                {{ currentRelease(plugin)?.version }}
-              </span>
-              <span v-else class="yanked-badge">全部撤回</span>
+              <div class="market-card-badges">
+                <span class="registry-badge">官方目录</span>
+                <span v-if="currentRelease(plugin)" class="version-badge">
+                  {{ currentRelease(plugin)?.version }}
+                </span>
+                <span v-else class="yanked-badge">全部撤回</span>
+                <span v-if="installedPlugin(plugin.id)" class="installed-badge">
+                  {{
+                    installedPlugin(plugin.id)?.source === "development"
+                      ? `开发版本 ${installedPlugin(plugin.id)?.version}`
+                      : `已安装 ${installedPlugin(plugin.id)?.version}`
+                  }}
+                </span>
+              </div>
+
+              <dl>
+                <div>
+                  <dt>插件 ID</dt>
+                  <dd>
+                    <code>{{ plugin.id }}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>发布者</dt>
+                  <dd>{{ currentRelease(plugin)?.publisher || "无可用版本" }}</dd>
+                </div>
+                <div>
+                  <dt>Runtime</dt>
+                  <dd>{{ runtimeSummary(currentRelease(plugin)) }}</dd>
+                </div>
+                <div>
+                  <dt>许可证</dt>
+                  <dd>{{ plugin.license }}</dd>
+                </div>
+              </dl>
             </div>
 
-            <dl>
-              <div>
-                <dt>插件 ID</dt>
-                <dd>
-                  <code>{{ plugin.id }}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>发布者</dt>
-                <dd>{{ currentRelease(plugin)?.publisher || "无可用版本" }}</dd>
-              </div>
-              <div>
-                <dt>Runtime</dt>
-                <dd>{{ runtimeSummary(currentRelease(plugin)) }}</dd>
-              </div>
-              <div>
-                <dt>许可证</dt>
-                <dd>{{ plugin.license }}</dd>
-              </div>
-            </dl>
-
             <footer>
-              <span>插件详情</span>
-              <ChevronRight :size="17" :stroke-width="1.8" />
+              <Cmz_Button variant="ghost" size="sm" @click="openDetails(plugin)">
+                插件详情
+                <ChevronRight :size="17" :stroke-width="1.8" />
+              </Cmz_Button>
+              <Cmz_Button
+                v-if="currentRelease(plugin)"
+                size="sm"
+                :loading="isInstallingCurrent(plugin)"
+                :disabled="!canInstallCurrent(plugin)"
+                @click="installCurrent(plugin)"
+              >
+                <Download v-if="canInstallCurrent(plugin)" :size="15" :stroke-width="1.8" />
+                {{ currentInstallActionLabel(plugin) }}
+              </Cmz_Button>
             </footer>
           </article>
         </div>
@@ -403,7 +549,8 @@ const selectedCurrentRelease = computed(() =>
 .market-search,
 .market-pagination,
 .release-section-heading,
-.release-card-heading {
+.release-card-heading,
+.release-card-actions {
   display: flex;
   align-items: center;
 }
@@ -479,19 +626,25 @@ const selectedCurrentRelease = computed(() =>
 }
 
 .market-card {
-  cursor: pointer;
   transition:
     border-color 140ms ease,
     background 140ms ease,
     transform 140ms ease;
 }
 
-.market-card:hover,
-.market-card:focus-visible {
+.market-card-main {
+  cursor: pointer;
+}
+
+.market-card:hover {
   border-color: var(--sl-primary-light);
   background: var(--sl-bg-secondary);
-  outline: none;
   transform: translateY(-1px);
+}
+
+.market-card-main:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: -2px;
 }
 
 .market-card header {
@@ -522,11 +675,13 @@ const selectedCurrentRelease = computed(() =>
 
 .market-card-badges {
   gap: 7px;
+  flex-wrap: wrap;
   padding: 0 var(--sl-space-md) var(--sl-space-sm);
 }
 
 .registry-badge,
 .version-badge,
+.installed-badge,
 .yanked-badge {
   display: inline-flex;
   min-height: 22px;
@@ -543,6 +698,12 @@ const selectedCurrentRelease = computed(() =>
   border-color: color-mix(in srgb, var(--sl-primary) 28%, transparent);
   background: var(--sl-primary-bg);
   color: var(--sl-primary);
+}
+
+.installed-badge {
+  border-color: color-mix(in srgb, var(--sl-success) 30%, transparent);
+  background: var(--sl-success-bg);
+  color: var(--sl-success);
 }
 
 .yanked-badge {
@@ -596,6 +757,12 @@ const selectedCurrentRelease = computed(() =>
   border-top: 1px solid var(--sl-border-light);
   color: var(--sl-text-secondary);
   font-size: var(--sl-font-size-sm);
+}
+
+.release-card-actions {
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+  flex-wrap: wrap;
 }
 
 .market-pagination {

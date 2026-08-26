@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
-import { PluginRegistryCatalog } from "../components/plugin/market/src/index.ts";
+import type { PluginKernel } from "../packages/plugin-system/src/index.ts";
+import {
+  PluginMarketInstaller,
+  PluginRegistryCatalog,
+} from "../components/plugin/market/src/index.ts";
 
 const catalogFixture = {
   schemaVersion: 1,
@@ -130,6 +135,162 @@ await test("plugin market keeps its last snapshot for automatic refresh failures
   );
 });
 
+await test("plugin market verifies and installs a Registry release in one action", async () => {
+  const archive = new TextEncoder().encode("verified plugin archive");
+  const archiveSha256 = createHash("sha256").update(archive).digest("hex");
+  const installCatalog = structuredClone(catalogFixture);
+  installCatalog.plugins[0]!.releases[0]!.archiveSha256 = archiveSha256;
+  let preparedArchives = 0;
+  let committed = 0;
+  let selected = 0;
+  let disposed = 0;
+  let installed: Array<{
+    id: string;
+    version: string;
+    publisher: string;
+    source: "installed";
+    trust: "package-full-trust";
+    digest: string;
+    installedAt: string;
+    enabled: boolean;
+    entries: [];
+  }> = [];
+  const manifest = {
+    id: "sea-author.example-plugin",
+    version: "1.2.0",
+    publisher: "sea-author",
+    entries: [],
+    compatibility: { seaShard: ">=0.1.0 <1.0.0" },
+  };
+  const record = {
+    manifest,
+    digest: "b".repeat(64),
+    rootPath: "C:/plugins/sea-author.example-plugin",
+    source: "installed" as const,
+    trust: "package-full-trust" as const,
+    installedAt: "2026-08-27T12:00:00.000Z",
+  };
+  const kernel = {
+    listThirdPartyPlugins: async () => installed,
+    prepareArchiveBytes: async (value: Uint8Array) => {
+      preparedArchives += 1;
+      assert.deepEqual(value, archive);
+      return {
+        manifest,
+        digest: record.digest,
+        commit: async (grant: { digest: string; acknowledgeFullMachineAccess: boolean }) => {
+          committed += 1;
+          assert.deepEqual(grant, {
+            digest: record.digest,
+            acknowledgeFullMachineAccess: true,
+          });
+          return record;
+        },
+        dispose: async () => {
+          disposed += 1;
+        },
+      };
+    },
+    selectPackageVersionAndEnable: async () => {
+      selected += 1;
+      installed = [
+        {
+          id: manifest.id,
+          version: manifest.version,
+          publisher: manifest.publisher,
+          source: "installed",
+          trust: "package-full-trust",
+          digest: record.digest,
+          installedAt: record.installedAt,
+          enabled: true,
+          entries: [],
+        },
+      ];
+    },
+  } as unknown as PluginKernel;
+  const fetchImplementation: typeof globalThis.fetch = async (input) => {
+    const url = requestUrl(input);
+    if (url.hostname === "registry.test") return Response.json(installCatalog);
+    assert.equal(url.hostname, "github.com");
+    const response = new Response(archive, {
+      headers: { "content-length": String(archive.byteLength) },
+    });
+    Object.defineProperty(response, "url", {
+      value: "https://release-assets.githubusercontent.com/github-production-release-asset/test",
+    });
+    return response;
+  };
+  const catalog = new PluginRegistryCatalog({
+    catalogUrl: "https://registry.test/catalog-v1.json",
+    fetchProvider: () => fetchImplementation,
+  });
+  const installer = new PluginMarketInstaller(catalog, kernel, {
+    fetchProvider: () => fetchImplementation,
+  });
+
+  const result = await installer.install({
+    pluginId: manifest.id,
+    version: manifest.version,
+    acknowledgeFullMachineAccess: true,
+  });
+
+  assert.deepEqual(result, {
+    id: manifest.id,
+    version: manifest.version,
+    digest: record.digest,
+    source: "installed",
+    enabled: true,
+  });
+  assert.equal(preparedArchives, 1);
+  assert.equal(committed, 1);
+  assert.equal(selected, 1);
+  assert.equal(disposed, 1);
+});
+
+await test("plugin market rejects an archive before preparation when SHA-256 differs", async () => {
+  const archive = new TextEncoder().encode("tampered plugin archive");
+  const catalog = new PluginRegistryCatalog({
+    catalogUrl: "https://registry.test/catalog-v1.json",
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      if (url.hostname === "registry.test") return Response.json(catalogFixture);
+      const response = new Response(archive);
+      Object.defineProperty(response, "url", {
+        value: "https://release-assets.githubusercontent.com/github-production-release-asset/test",
+      });
+      return response;
+    },
+  });
+  const kernel = {
+    listThirdPartyPlugins: async () => [],
+    prepareArchiveBytes: async () => {
+      assert.fail("digest mismatch must reject before plugin preparation");
+    },
+  } as unknown as PluginKernel;
+  const installer = new PluginMarketInstaller(catalog, kernel, {
+    fetchProvider: () => async (input) => {
+      const url = requestUrl(input);
+      const response =
+        url.hostname === "registry.test" ? Response.json(catalogFixture) : new Response(archive);
+      if (url.hostname !== "registry.test") {
+        Object.defineProperty(response, "url", {
+          value:
+            "https://release-assets.githubusercontent.com/github-production-release-asset/test",
+        });
+      }
+      return response;
+    },
+  });
+
+  await assert.rejects(
+    installer.install({
+      pluginId: "sea-author.example-plugin",
+      version: "1.2.0",
+      acknowledgeFullMachineAccess: true,
+    }),
+    /归档 SHA-256 校验失败/u,
+  );
+});
 function requestUrl(input: string | URL | Request): URL {
   if (input instanceof Request) return new URL(input.url);
   return new URL(input.toString());

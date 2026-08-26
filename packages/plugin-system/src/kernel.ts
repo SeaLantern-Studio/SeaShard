@@ -163,6 +163,10 @@ export class PluginKernel {
     return this.installer.prepareArchive(archivePath);
   }
 
+  prepareArchiveBytes(archive: Uint8Array) {
+    return this.installer.prepareArchiveBytes(archive);
+  }
+
   upsertBinding(binding: GlobalPluginBindingInput): Promise<void> {
     return this.registry.upsertGlobalBinding(binding);
   }

@@ -356,6 +356,9 @@ importers:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-system
 
   components/server/configuration:
     dependencies:

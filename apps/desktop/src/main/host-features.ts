@@ -6,6 +6,8 @@ import {
 import {
   pluginManagementContract,
   pluginManagementUiRuntimeId,
+  pluginMarketInstallContract,
+  pluginMarketUiRuntimeId,
   serverDownloadConnectionLimits,
   type ServerConsoleLine,
 } from "@seashard/contracts";
@@ -79,6 +81,12 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
     (execution) =>
       execution.actorType === "client" && execution.runtimeId === pluginManagementUiRuntimeId,
   );
+  // 目录搜索保持只读公开；代码安装能力只接受固定的内建市场 Entry。
+  kernel.restrictServiceCalls(
+    pluginMarketInstallContract,
+    (execution) =>
+      execution.actorType === "client" && execution.runtimeId === pluginMarketUiRuntimeId,
+  );
   await kernel.registerBuiltIn({
     manifest: pluginManagementManifest,
     loaders: {
@@ -104,6 +112,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       "plugin-market.host": {
         load: async () =>
           createPluginMarketModule({
+            kernel,
             fetchProvider: downloadFetchProvider,
           }),
       },

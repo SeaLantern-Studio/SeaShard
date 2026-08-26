@@ -1,4 +1,9 @@
-import { pluginMarketContract, type PluginMarketService } from "@seashard/contracts";
+import {
+  pluginMarketContract,
+  pluginMarketInstallContract,
+  type PluginMarketInstallService,
+  type PluginMarketService,
+} from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { ShoppingBag } from "lucide-vue-next";
 import { defineComponent, h } from "vue";
@@ -7,9 +12,10 @@ import PluginMarketPage from "./PluginMarketPage.vue";
 export default defineClientUiModule({
   apply(context) {
     const market = context.service<PluginMarketService>(pluginMarketContract);
+    const installer = context.service<PluginMarketInstallService>(pluginMarketInstallContract);
     const page = defineComponent({
       name: "PluginMarketFeaturePage",
-      setup: () => () => h(PluginMarketPage, { market }),
+      setup: () => () => h(PluginMarketPage, { market, installer }),
     });
 
     context.slots.register(

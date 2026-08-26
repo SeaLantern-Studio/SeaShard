@@ -1,5 +1,12 @@
-import { pluginMarketContract, type PluginMarketSearchRequest } from "@seashard/contracts";
+import {
+  pluginMarketContract,
+  pluginMarketInstallContract,
+  type PluginMarketInstallRequest,
+  type PluginMarketSearchRequest,
+} from "@seashard/contracts";
+import type { PluginKernel } from "@seashard/plugin-system";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import { PluginMarketInstaller } from "./installer";
 import { PluginRegistryCatalog, type PluginRegistryCatalogOptions } from "./registry-catalog";
 
 export const pluginMarketManifest: PluginManifest = {
@@ -21,15 +28,28 @@ export const pluginMarketManifest: PluginManifest = {
   },
 };
 
-/** 发布独立的官方注册目录；Host 只下载静态 Release Catalog，并在本地完成搜索与分页。 */
-export function createPluginMarketModule(options: PluginRegistryCatalogOptions = {}): PluginModule {
+export interface PluginMarketModuleOptions extends PluginRegistryCatalogOptions {
+  readonly kernel: PluginKernel;
+}
+/** 发布官方注册目录及其受限安装通道；安装地址和摘要只由 Host 从 Catalog 解析。 */
+export function createPluginMarketModule(options: PluginMarketModuleOptions): PluginModule {
   return {
-    provides: [pluginMarketContract],
+    provides: [pluginMarketContract, pluginMarketInstallContract],
     apply(ctx) {
       const catalog = new PluginRegistryCatalog(options);
+      const installer = new PluginMarketInstaller(
+        catalog,
+        options.kernel,
+        options.fetchProvider ? { fetchProvider: options.fetchProvider } : {},
+      );
       ctx.provide(pluginMarketContract, {
         search: async (request) =>
           asJsonValue(await catalog.search(request as unknown as PluginMarketSearchRequest)),
+      });
+      ctx.provide(pluginMarketInstallContract, {
+        list: async () => asJsonValue(await installer.list()),
+        install: async (request) =>
+          asJsonValue(await installer.install(request as unknown as PluginMarketInstallRequest)),
       });
     },
   };
@@ -40,3 +60,4 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./registry-catalog";
+export * from "./installer";

@@ -67,6 +67,23 @@ export class PluginRegistryCatalog {
     };
   }
 
+  /**
+   * 安装路径按 Catalog 主键重新解析发布记录，Client 无法注入下载地址或摘要。
+   * 这里复用与搜索相同的缓存和自动失败回退，确保列表与安装看到同一份注册目录。
+   */
+  async resolveRelease(
+    pluginId: string,
+    version: string,
+  ): Promise<{ readonly plugin: PluginMarketPlugin; readonly release: PluginMarketRelease }> {
+    const snapshot = await this.loadSnapshot(false);
+    const plugin = snapshot.plugins.find((candidate) => candidate.id === pluginId);
+    if (!plugin) throw new Error(`插件注册目录中不存在 ${pluginId}`);
+    const release = plugin.releases.find((candidate) => candidate.version === version);
+    if (!release) throw new Error(`插件注册目录中不存在 ${pluginId}@${version}`);
+    if (release.yanked) throw new Error(`${pluginId}@${version} 已从插件市场撤回`);
+    return { plugin, release };
+  }
+
   private async loadSnapshot(forceRefresh: boolean): Promise<CatalogSnapshot> {
     const now = this.now().valueOf();
     if (!forceRefresh && this.snapshot && this.snapshot.expiresAt > now) return this.snapshot;

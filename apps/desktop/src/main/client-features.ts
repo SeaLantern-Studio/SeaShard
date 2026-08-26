@@ -1,7 +1,7 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
 import { agentSettingsProviderUiManifest } from "@seashard/agent-settings-provider-ui";
-import { pluginManagementUiRuntimeId } from "@seashard/contracts";
+import { pluginManagementUiRuntimeId, pluginMarketUiRuntimeId } from "@seashard/contracts";
 import { pluginMarketUiManifest } from "@seashard/plugin-market-ui";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
@@ -69,13 +69,13 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       },
     ],
   });
-  // 插件市场作为独立页面发布，只消费官方 Registry Catalog，不与已安装插件管理页耦合。
+  // 插件市场独立发布；固定 Binding 同时作为受限安装 Contract 的调用身份。
   await kernel.registerBuiltIn({
     manifest: pluginMarketUiManifest,
     loaders: {},
     bindings: [
       {
-        id: "core.plugin-market.ui",
+        id: pluginMarketUiRuntimeId,
         entryId: "plugin-market.client",
         scopeType: "global",
         scopeId: "global",

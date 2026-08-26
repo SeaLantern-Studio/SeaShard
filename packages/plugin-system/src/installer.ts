@@ -81,8 +81,15 @@ export class PluginInstaller {
   }
 
   async prepareArchive(archivePath: string): Promise<PreparedPluginInstall> {
+    return this.prepareArchiveBytes(await readFile(archivePath));
+  }
+
+  /**
+   * 直接接收已下载的归档字节，避免市场安装先写临时文件、Installer 随后再次读取。
+   * 字节仍会经过相同的大小限制、受限解包、Manifest 校验和内容摘要计算。
+   */
+  async prepareArchiveBytes(archive: Uint8Array): Promise<PreparedPluginInstall> {
     await mkdir(this.stagingRoot, { recursive: true });
-    const archive = await readFile(archivePath);
     if (archive.byteLength > maximumArchiveSize) {
       throw new Error("plugin archive exceeds 32 MiB");
     }

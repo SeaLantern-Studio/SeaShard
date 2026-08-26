@@ -1,4 +1,4 @@
-import { pluginMarketContract } from "@seashard/contracts";
+import { pluginMarketContract, pluginMarketInstallContract } from "@seashard/contracts";
 import type { PluginManifest } from "@seashard/plugin-sdk";
 
 export const pluginMarketUiManifest: PluginManifest = {
@@ -14,8 +14,9 @@ export const pluginMarketUiManifest: PluginManifest = {
       activationScopes: ["global"],
       uses: {
         [pluginMarketContract]: ["search"],
+        [pluginMarketInstallContract]: ["list", "install"],
       },
-      permissions: [pluginMarketContract],
+      permissions: [pluginMarketContract, pluginMarketInstallContract],
     },
   ],
   compatibility: {

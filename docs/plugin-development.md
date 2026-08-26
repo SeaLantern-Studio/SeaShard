@@ -1201,6 +1201,8 @@ seashard plugin install ./acme.greeter-0.1.0.seashard-plugin
 
 安装成功后，CLI 输出插件 ID、版本、来源和摘要。Host 会选择该版本、为每个 Entry 创建自动 Binding，激活适用于当前环境的 Host Entry，并把 Client Entry 发布给 Desktop Renderer。
 
+已经进入官方 Registry 的版本也可以在“软件设置 → 插件市场”中一键安装或更新。市场页面只向 Host 发送插件 ID 和版本；Host 会从当前 Catalog 重新解析下载地址，限制 GitHub Release 下载主机，并依次校验归档 SHA-256、包内 Manifest 身份和 `packageDigest`，通过后选择该版本、创建自动 Binding 并立即启用。页面会把摘要一致的版本标记为“已安装”；同 ID 的 `plugin dev` 开发版本生效时会禁用市场安装，避免正式包被开发覆盖后造成状态误判。
+
 ### 12.3 安装目录快照
 
 开发者也可以显式安装目录：

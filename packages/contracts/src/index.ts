@@ -111,6 +111,12 @@ export const pluginManagementUiRuntimeId = "core.plugin-management.ui";
 /** 官方注册目录向内建市场页发布的只读 Service contract。 */
 export const pluginMarketContract =
   defineServiceContract<PluginMarketService>("seashard.plugin-market");
+/** 插件市场安装能力独立受限，避免普通插件通过只读目录 Contract 获得代码安装权限。 */
+export const pluginMarketInstallContract = defineServiceContract<PluginMarketInstallService>(
+  "seashard.plugin-market-install",
+);
+/** 内建插件市场 Client Binding 的固定调用身份。 */
+export const pluginMarketUiRuntimeId = "core.plugin-market.ui";
 /** 官方注册仓库通过 Latest Release 发布的静态插件目录；客户端无需访问 GitHub API。 */
 export const pluginMarketCatalogUrl =
   "https://github.com/SeaLantern-Studio/SeaShard-Plugin-Registry/releases/latest/download/catalog-v1.json";
@@ -611,6 +617,39 @@ export interface PluginMarketService {
    * @returns 当前注册目录中匹配的插件页。
    */
   search(request: PluginMarketSearchRequest): Promise<PluginMarketSearchResult>;
+}
+
+/** 插件市场用于判断安装、更新和开发覆盖状态的最小投影。 */
+export interface PluginMarketInstallationSnapshot {
+  readonly id: string;
+  readonly version: string;
+  readonly digest: string;
+  readonly source: "installed" | "development";
+  readonly enabled: boolean;
+}
+
+/** 一键安装只传 Registry 主键；下载地址和摘要始终由 Host 从受信 Catalog 重新解析。 */
+export interface PluginMarketInstallRequest {
+  readonly pluginId: string;
+  readonly version: string;
+  readonly acknowledgeFullMachineAccess: true;
+}
+
+/** 只向内建插件市场页面开放的安装能力。 */
+export interface PluginMarketInstallService {
+  /**
+   * 列出当前实际生效的第三方包，用于渲染“已安装”或“开发版本”状态。
+   *
+   * @returns 按插件 ID 排序的最小安装状态。
+   */
+  list(): Promise<readonly PluginMarketInstallationSnapshot[]>;
+  /**
+   * 下载、验证、安装并启用 Registry 中的指定版本。
+   *
+   * @param request Registry 插件 ID、版本和完整机器权限确认。
+   * @returns Runtime 收敛后的安装状态。
+   */
+  install(request: PluginMarketInstallRequest): Promise<PluginMarketInstallationSnapshot>;
 }
 
 export type PluginManagementEntryState = "active" | "failed" | "inactive";
