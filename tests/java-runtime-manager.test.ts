@@ -182,11 +182,24 @@ await test("Java manager persists manual records and disabled automatic installa
       architecture: "amd64",
     });
     const storage = new MemoryPluginStorage();
+    const agentResourcePatterns: string[] = [];
+    const agentToolNames: string[] = [];
     const activateManager = async (): Promise<JavaRuntimeManagerService> => {
       const providers = new Map<string, ServiceProvider>();
       const context = {
         storage,
         provide: (contract: string, provider: ServiceProvider) => providers.set(contract, provider),
+        agentResources(resources: Parameters<PluginContext["agentResources"]>[0]) {
+          agentResourcePatterns.push(...Object.keys(resources));
+        },
+        agentTool(
+          definition: Parameters<PluginContext["agentTool"]>[0],
+          _execute: Parameters<PluginContext["agentTool"]>[1],
+        ) {
+          const name = `${definition.namespace}_${definition.name}`;
+          agentToolNames.push(name);
+          return name;
+        },
       } as unknown as PluginContext;
       await createJavaRuntimeManagerModule({
         platform: "win32",
@@ -198,6 +211,8 @@ await test("Java manager persists manual records and disabled automatic installa
     };
 
     const javaRuntimeManager = await activateManager();
+    assert.deepEqual(agentResourcePatterns, ["java://installations"]);
+    assert.deepEqual(agentToolNames.sort(), ["java_forget-manual", "java_set-disabled"]);
     const automatic = (await javaRuntimeManager.scan())[0]!;
     assert.equal(automatic.source, "filesystem");
     assert.equal(automatic.disabled, false);

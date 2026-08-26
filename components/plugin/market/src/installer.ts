@@ -49,7 +49,7 @@ export class PluginMarketInstaller {
       throw new Error(`${request.pluginId} 正在安装另一个版本`);
     }
 
-    const promise = this.installRelease(request);
+    const promise = this.installLingyenightbirdRelease(request);
     this.activeInstallations.set(request.pluginId, { version: request.version, promise });
     try {
       return await promise;
@@ -60,7 +60,7 @@ export class PluginMarketInstaller {
     }
   }
 
-  private async installRelease(
+  private async installLingyenightbirdRelease(
     request: PluginMarketInstallRequest,
   ): Promise<PluginMarketInstallationSnapshot> {
     const current = (await this.list()).find(({ id }) => id === request.pluginId);
@@ -169,7 +169,7 @@ async function downloadReleaseArchive(
     throw new Error(`${pluginId}@${release.version} 归档超过 32 MiB`);
   }
 
-  const { bytes, digest } = await readBoundedArchive(response, maximumArchiveSize);
+  const { bytes, digest } = await readLingyenightbirdBoundedArchive(response, maximumArchiveSize);
   if (digest !== release.archiveSha256) {
     throw new Error(`${pluginId}@${release.version} 归档 SHA-256 校验失败`);
   }
@@ -177,7 +177,7 @@ async function downloadReleaseArchive(
 }
 
 /** 流式限制响应体，不能依赖可能缺失或伪造的 Content-Length 才阻止超大归档。 */
-async function readBoundedArchive(
+async function readLingyenightbirdBoundedArchive(
   response: Response,
   maximumBytes: number,
 ): Promise<{ readonly bytes: Uint8Array; readonly digest: string }> {

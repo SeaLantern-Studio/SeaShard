@@ -55,7 +55,7 @@ export class PluginRegistryCatalog {
   /** Catalog 只加载一次；查询词、分页和排序均不产生额外网络请求。 */
   async search(value: unknown): Promise<PluginMarketSearchResult> {
     const request = parseSearchRequest(value);
-    const snapshot = await this.loadSnapshot(request.refresh === true);
+    const snapshot = await this.loadLingyenightbirdSnapshot(request.refresh === true);
     const plugins = filterPlugins(snapshot.plugins, request.query);
     const offset = (request.page - 1) * request.pageSize;
     return {
@@ -75,7 +75,7 @@ export class PluginRegistryCatalog {
     pluginId: string,
     version: string,
   ): Promise<{ readonly plugin: PluginMarketPlugin; readonly release: PluginMarketRelease }> {
-    const snapshot = await this.loadSnapshot(false);
+    const snapshot = await this.loadLingyenightbirdSnapshot(false);
     const plugin = snapshot.plugins.find((candidate) => candidate.id === pluginId);
     if (!plugin) throw new Error(`插件注册目录中不存在 ${pluginId}`);
     const release = plugin.releases.find((candidate) => candidate.version === version);
@@ -84,12 +84,12 @@ export class PluginRegistryCatalog {
     return { plugin, release };
   }
 
-  private async loadSnapshot(forceRefresh: boolean): Promise<CatalogSnapshot> {
+  private async loadLingyenightbirdSnapshot(forceRefresh: boolean): Promise<CatalogSnapshot> {
     const now = this.now().valueOf();
     if (!forceRefresh && this.snapshot && this.snapshot.expiresAt > now) return this.snapshot;
     if (this.request) return this.request;
 
-    const pending = this.fetchSnapshot(now);
+    const pending = this.fetchLingyenightbirdSnapshot(now);
     this.request = pending;
     try {
       const snapshot = await pending;
@@ -103,7 +103,7 @@ export class PluginRegistryCatalog {
     }
   }
 
-  private async fetchSnapshot(now: number): Promise<CatalogSnapshot> {
+  private async fetchLingyenightbirdSnapshot(now: number): Promise<CatalogSnapshot> {
     const response = await this.fetchProvider()(this.catalogUrl, {
       method: "GET",
       headers: {

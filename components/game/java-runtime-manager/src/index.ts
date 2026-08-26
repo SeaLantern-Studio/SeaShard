@@ -5,6 +5,7 @@ import {
 } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule, PluginStorage } from "@seashard/plugin-sdk";
 import { JavaRuntimeScanner, type JavaRuntimeScannerOptions } from "./scanner";
+import { registerJavaRuntimeAgentIntegration } from "./agent-integration";
 
 const manualJavaPathsStorageKey = "manual-java-paths";
 const disabledJavaIdsStorageKey = "disabled-java-installation-ids";
@@ -131,19 +132,22 @@ export function createJavaRuntimeManagerModule(
         return disabledJavaIdsTask;
       };
 
+      const scanInstallations = async (): Promise<readonly JavaInstallationSnapshot[]> => {
+        const [automatic, manual] = await Promise.all([scanner.scan(), readManualInstallations()]);
+        return applyDisabledState(
+          mergeJavaInstallations(automatic, manual),
+          await readDisabledJavaIds(),
+        );
+      };
+
+      registerJavaRuntimeAgentIntegration(ctx, {
+        scan: scanInstallations,
+        setDisabled: setInstallationDisabled,
+        remove: forgetManualPath,
+      });
+
       ctx.provide(javaRuntimeManagerContract, {
-        scan: async () => {
-          const [automatic, manual] = await Promise.all([
-            scanner.scan(),
-            readManualInstallations(),
-          ]);
-          return asJsonValue(
-            applyDisabledState(
-              mergeJavaInstallations(automatic, manual),
-              await readDisabledJavaIds(),
-            ),
-          );
-        },
+        scan: async () => asJsonValue(await scanInstallations()),
         inspect: async (executablePath: unknown) => {
           if (typeof executablePath !== "string" || executablePath.length === 0) {
             throw new TypeError("Java executable path must be a non-empty string");
@@ -225,3 +229,4 @@ function asJsonValue(
 }
 
 export * from "./scanner";
+export * from "./agent-integration";
