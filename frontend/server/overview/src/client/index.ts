@@ -20,16 +20,19 @@ export default defineClientUiModule({
         h(ServerOverviewPage, { instances, runtime, selection: serverInstanceSelection }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-overview",
-      path: "/server/overview",
-      label: "概览",
-      description: "查看当前服务器的状态与实例信息",
-      order: -10,
-      icon: LayoutDashboard,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-overview",
+        path: "/server/overview",
+        label: "概览",
+        description: "查看当前服务器的状态与实例信息",
+        order: -10,
+        icon: LayoutDashboard,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

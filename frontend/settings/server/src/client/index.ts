@@ -26,30 +26,36 @@ export default defineClientUiModule({
         }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-startup-settings",
-      path: "/settings/server/startup",
-      label: "启动",
-      description: "服务器默认启动参数",
-      order: 5,
-      icon: Rocket,
-      navigation: true,
-      placement: "settings",
-      settingsGroup: "server",
-      component: startupPage,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-startup-settings",
+        path: "/settings/server/startup",
+        label: "启动",
+        description: "服务器默认启动参数",
+        order: 5,
+        icon: Rocket,
+        navigation: true,
+        placement: "settings",
+        settingsGroup: "server",
+      },
+      startupPage,
+    );
 
-    context.contribute("navigation.page", {
-      id: "server-download-settings",
-      path: "/settings/server/download",
-      label: "下载",
-      description: "服务器资源下载位置",
-      order: 10,
-      icon: Download,
-      navigation: true,
-      placement: "settings",
-      settingsGroup: "server",
-      component: downloadPage,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-download-settings",
+        path: "/settings/server/download",
+        label: "下载",
+        description: "服务器资源下载位置",
+        order: 10,
+        icon: Download,
+        navigation: true,
+        placement: "settings",
+        settingsGroup: "server",
+      },
+      downloadPage,
+    );
   },
 });

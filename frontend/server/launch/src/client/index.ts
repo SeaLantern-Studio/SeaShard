@@ -20,16 +20,19 @@ export default defineClientUiModule({
         h(ServerLaunchPage, { instances, runtime, selection: serverInstanceSelection }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-launch",
-      path: "/server/launch",
-      label: "启动",
-      description: "启动和切换服务器实例",
-      order: 0,
-      icon: Play,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-launch",
+        path: "/server/launch",
+        label: "启动",
+        description: "启动和切换服务器实例",
+        order: 0,
+        icon: Play,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

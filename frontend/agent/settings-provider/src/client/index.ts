@@ -17,15 +17,18 @@ export default defineClientUiModule({
       setup: () => () => h(AgentProviderSettingsPage, { configuration }),
     });
 
-    context.contribute("navigation.page", {
-      id: "agent-settings-providers",
-      path: "/agent/settings/providers",
-      label: "供应商",
-      order: 0,
-      icon: Settings2,
-      navigation: true,
-      placement: "agent-settings",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "agent-settings-providers",
+        path: "/agent/settings/providers",
+        label: "供应商",
+        order: 0,
+        icon: Settings2,
+        navigation: true,
+        placement: "agent-settings",
+      },
+      page,
+    );
   },
 });

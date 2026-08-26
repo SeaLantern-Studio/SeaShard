@@ -31,19 +31,18 @@ export default defineClientUiModule({
           workspace: agentWorkspace,
         }),
     });
-    context.contribute("navigation.page", {
-      id: "agent-conversation",
-      path: "/agent/chat",
-      label: "对话",
-      order: -100,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
-    context.contribute("workspace.sidebar", {
-      id: "agent-conversation-sidebar",
-      workspaceId: "agent",
-      component: AgentWorkspaceSidebar,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "agent-conversation",
+        path: "/agent/chat",
+        label: "对话",
+        order: -100,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
+    context.slots.register({ name: "workspace.sidebar", key: "agent" }, AgentWorkspaceSidebar);
   },
 });

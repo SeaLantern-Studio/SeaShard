@@ -18,16 +18,19 @@ export default defineClientUiModule({
       setup: () => () => h(ServerWorldDownloadPage, { resources, instances }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-download-world",
-      path: "/server/download/world",
-      label: "世界",
-      description: "浏览服务端世界资源",
-      order: 50,
-      icon: Folder,
-      navigation: true,
-      placement: "server-download",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-download-world",
+        path: "/server/download/world",
+        label: "世界",
+        description: "浏览服务端世界资源",
+        order: 50,
+        icon: Folder,
+        navigation: true,
+        placement: "server-download",
+      },
+      page,
+    );
   },
 });

@@ -9,7 +9,7 @@ import {
   resolveClientPluginAssetPath,
 } from "../packages/plugin-system/src/index.ts";
 import type { ResolvedClientEntrySnapshot } from "../packages/plugin-system/src/types.ts";
-import type { ClientUiModule } from "../packages/ui-sdk/src/index.ts";
+import { pageRootSlot, type ClientUiModule } from "../packages/ui-sdk/src/index.ts";
 import {
   browserClientPackageModuleLoader,
   ClientUiRuntime,
@@ -57,20 +57,19 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
       ctx.effect(() => () => {
         disposed += 1;
       });
-      ctx.contribute("navigation.page", {
-        id: "test-page",
-        path: "/test",
-        label: "Test",
-        component: pageComponent,
-        icon: pageComponent,
-        navigation: false,
-        placement: "settings",
-      });
-      ctx.contribute("workspace.sidebar", {
-        id: "test-sidebar",
-        workspaceId: "test",
-        component: pageComponent,
-      });
+      ctx.slots.register(
+        {
+          name: "navigation.page",
+          id: "test-page",
+          path: "/test",
+          label: "Test",
+          icon: pageComponent,
+          navigation: false,
+          placement: "settings",
+        },
+        pageComponent,
+      );
+      ctx.slots.register({ name: "workspace.sidebar", key: "test" }, pageComponent);
     },
   };
   const runtime = new ClientUiRuntime({
@@ -101,11 +100,10 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   assert.equal(router.hasRoute("ui:test.runtime:test-page"), true);
   assert.deepEqual(
     runtime.workspaceSidebars.value.map((sidebar) => ({
-      id: sidebar.id,
       runtimeId: sidebar.runtimeId,
       workspaceId: sidebar.workspaceId,
     })),
-    [{ id: "test-sidebar", runtimeId: "test.runtime", workspaceId: "test" }],
+    [{ runtimeId: "test.runtime", workspaceId: "test" }],
   );
   assert.equal(runtime.workspaceSidebars.value[0]?.component, pageComponent);
 
@@ -138,12 +136,10 @@ await test("client UI runtime loads an activated package module through its dige
     async apply(ctx) {
       bridgedService = ctx.service<EchoService>("example.echo");
       bridgedValue = await bridgedService.echo("hello");
-      ctx.contribute("navigation.page", {
-        id: "package-page",
-        path: "/package",
-        label: "Package",
-        component: pageComponent,
-      });
+      ctx.slots.register(
+        { name: "navigation.page", id: "package-page", path: "/package", label: "Package" },
+        pageComponent,
+      );
     },
   };
   const runtime = new ClientUiRuntime({
@@ -201,12 +197,10 @@ await test("client UI runtime isolates an unavailable feature entry", async () =
   const router = memoryRouter();
   const goodModule: ClientUiModule = {
     apply(ctx) {
-      ctx.contribute("navigation.page", {
-        id: "healthy-page",
-        path: "/healthy",
-        label: "Healthy",
-        component: pageComponent,
-      });
+      ctx.slots.register(
+        { name: "navigation.page", id: "healthy-page", path: "/healthy", label: "Healthy" },
+        pageComponent,
+      );
     },
   };
   const runtime = new ClientUiRuntime({
@@ -239,6 +233,164 @@ await test("client UI runtime isolates an unavailable feature entry", async () =
       runtimeId: "failed.runtime",
       stage: "activation",
       message: "client module loader is unavailable: missing",
+    },
+  ]);
+  await runtime.dispose();
+});
+
+await test("page root slot declarations remount nested contributions and collapse them recursively", async () => {
+  const router = memoryRouter();
+  const childSlot = "test.page-root.child";
+  let rootSetups = 0;
+  let childSetups = 0;
+  let childCleanups = 0;
+
+  const pageModule: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.register(
+        {
+          name: "navigation.page",
+          id: "slot-host",
+          path: "/slot-host",
+          label: "Slot Host",
+        },
+        pageComponent,
+      );
+    },
+  };
+  const rootExtensionModule: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.inject(pageRootSlot("slot-host"), () => {
+        rootSetups += 1;
+        return ctx.slots.register(
+          {
+            name: pageRootSlot("slot-host"),
+            id: "root-extension",
+            mode: "overlay",
+            children: {
+              [childSlot]: { kind: "list", scope: "page" },
+            },
+          },
+          pageComponent,
+        );
+      });
+    },
+  };
+  const childExtensionModule: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.inject(childSlot, () => {
+        childSetups += 1;
+        const dispose = ctx.slots.register(
+          { name: childSlot, id: "nested-extension" },
+          pageComponent,
+        );
+        return () => {
+          childCleanups += 1;
+          return dispose();
+        };
+      });
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    builtInLoaders: {
+      child: { load: async () => childExtensionModule },
+      root: { load: async () => rootExtensionModule },
+      page: { load: async () => pageModule },
+    },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    services: {},
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
+  });
+
+  await runtime.reconcile({
+    revision: 1,
+    entries: [
+      descriptor("a.child", "child"),
+      descriptor("b.root", "root"),
+      descriptor("c.page", "page"),
+    ],
+  });
+  assert.equal(runtime.pageRootExtensions("slot-host").length, 0);
+  assert.equal(runtime.slotEntries(childSlot).length, 0);
+
+  const closeFirstSurface = runtime.openPageRoot("slot-host");
+  assert.equal(rootSetups, 1);
+  assert.equal(childSetups, 1);
+  assert.equal(runtime.pageRootExtensions("slot-host")[0]?.mode, "overlay");
+  assert.equal(runtime.slotEntries(childSlot).length, 1);
+
+  await closeFirstSurface();
+  assert.equal(childCleanups, 1);
+  assert.equal(runtime.pageRootExtensions("slot-host").length, 0);
+  assert.equal(runtime.slotEntries(childSlot).length, 0);
+
+  const closeSecondSurface = runtime.openPageRoot("slot-host");
+  assert.equal(rootSetups, 2);
+  assert.equal(childSetups, 2);
+  assert.equal(runtime.slotEntries(childSlot).length, 1);
+
+  await runtime.reconcile({ revision: 2, entries: [] });
+  assert.equal(childCleanups, 2);
+  assert.equal(runtime.pageRootExtensions("slot-host").length, 0);
+  await closeSecondSurface();
+  await runtime.dispose();
+});
+
+await test("keyed slot render failure abdicates to the next priority", async () => {
+  const router = memoryRouter();
+  const primaryModule: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.register({ name: "workspace.sidebar", key: "agent", priority: -10 }, pageComponent);
+    },
+  };
+  const fallbackModule: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.register({ name: "workspace.sidebar", key: "agent", priority: 10 }, pageComponent);
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    builtInLoaders: {
+      fallback: { load: async () => fallbackModule },
+      primary: { load: async () => primaryModule },
+    },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    services: {},
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
+  });
+
+  await runtime.reconcile({
+    revision: 1,
+    entries: [descriptor("fallback.runtime", "fallback"), descriptor("primary.runtime", "primary")],
+  });
+  const primary = runtime.workspaceSidebars.value[0];
+  assert.equal(primary?.runtimeId, "primary.runtime");
+  assert.ok(primary);
+
+  runtime.reportSlotRenderFailure(primary.entryToken, primary.runtimeId, new Error("crashed"));
+  assert.equal(runtime.workspaceSidebars.value[0]?.runtimeId, "fallback.runtime");
+  assert.deepEqual(runtime.failures.value, [
+    {
+      runtimeId: "primary.runtime",
+      stage: "render",
+      message: "crashed",
     },
   ]);
   await runtime.dispose();

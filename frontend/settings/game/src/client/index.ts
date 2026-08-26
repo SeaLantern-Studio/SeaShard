@@ -11,17 +11,20 @@ export default defineClientUiModule({
       name: "JavaSettingsFeaturePage",
       setup: () => () => h(JavaSettingsPage, { javaRuntime }),
     });
-    context.contribute("navigation.page", {
-      id: "java-settings",
-      path: "/settings/game/java",
-      label: "Java",
-      description: "Minecraft Java 运行环境",
-      order: 10,
-      icon: Coffee,
-      navigation: true,
-      placement: "settings",
-      settingsGroup: "game",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "java-settings",
+        path: "/settings/game/java",
+        label: "Java",
+        description: "Minecraft Java 运行环境",
+        order: 10,
+        icon: Coffee,
+        navigation: true,
+        placement: "settings",
+        settingsGroup: "game",
+      },
+      page,
+    );
   },
 });

@@ -554,12 +554,15 @@ function createRuntimePage(diagnostics: RuntimeDiagnosticsService) {
 const clientModule = defineClientUiModule({
   apply(context) {
     const diagnostics = context.service<RuntimeDiagnosticsService>(runtimeDiagnosticsContract);
-    context.contribute("navigation.page", {
-      id: "acme-runtime",
-      path: "/acme/runtime",
-      label: "Runtime",
-      component: createRuntimePage(diagnostics),
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "acme-runtime",
+        path: "/acme/runtime",
+        label: "Runtime",
+      },
+      createRuntimePage(diagnostics),
+    );
   },
 });
 
@@ -620,16 +623,117 @@ seashard-plugin://<package-sha256>/dist/client.js
 
 `plugin dev` 检测到包文件变化后会生成新摘要、撤销旧 Entry、发布新模块 URL，再启动新 Entry。Client Runtime 会先执行旧清理函数并移除旧路由，然后加载新模块。
 
-### 7.2 UI Contribution
+### 7.2 UI Slot
 
-Client Entry 当前支持：
+Client UI 使用带所有权的 Slot 树。`context.slots.register(options, component)` 是统一注册入口：
 
-| Contribution        | 用途                               |
-| ------------------- | ---------------------------------- |
-| `navigation.page`   | 注册一个导航页面及 Vue Component   |
-| `workspace.sidebar` | 为一个工作区注册完整侧栏 Component |
+| 根 Slot             | 类型    | 注册字段                                      |
+| ------------------- | ------- | --------------------------------------------- |
+| `navigation.page`   | `list`  | `id`、`path`、`label`、可选导航位置和设置分组 |
+| `workspace.sidebar` | `keyed` | `key`，取值为目标工作区 ID                    |
 
-页面 ID 和路径必须全局唯一。页面路径必须是非根绝对路径，例如 `/acme/runtime`。Entry 激活失败只隔离当前页面；其他 Client Entry 继续运行，失败信息进入 Client UI Runtime 的诊断列表。
+`navigation.page` 的页面 ID 和路径必须全局唯一。路径必须是非根绝对路径，例如 `/acme/runtime`。每个页面仍必须由独立组件包和独立 Client Entry 发布。
+
+Slot 支持四种调度语义：
+
+- `single`：整个 Slot 只启用最高优先级 Entry；
+- `list`：按 `priority` 和注册顺序渲染全部 Entry；
+- `keyed`：每个 `key` 启用最高优先级 Entry；
+- `chain`：按优先级调用 `match(owner)`，首个返回非 `undefined` 的 Entry 接管。
+
+较小的 `priority` 先执行。某个激活 Entry 渲染崩溃时，它会让出当前 cell，由下一优先级候选接管；故障只进入该 Client Entry 的 UI Runtime 诊断。
+
+`register()` 返回幂等清理函数，同时自动归属于当前 Client Entry。插件停用、刷新、升级或 `apply()` 失败时，即使插件没有手动调用返回值，Runtime 也会撤销注册。
+
+### 7.3 扩展页面根区域
+
+页面显示期间，Runtime 会动态声明 `page.<page-id>.root`。扩展方必须通过 `inject()` 等待声明，不能假定目标页面已经加载：
+
+```ts
+import { defineClientUiModule, pageRootSlot } from "@seashard/ui-sdk";
+import { defineComponent, h, type PropType } from "vue";
+
+const PageBadge = defineComponent({
+  name: "AcmePageBadge",
+  props: {
+    pageId: { type: String, required: true },
+    root: { type: Object as PropType<HTMLElement>, required: true },
+  },
+  setup: (props) => () => h("div", { class: "acme-page-badge" }, `Page: ${props.pageId}`),
+});
+
+const target = pageRootSlot("server-overview");
+
+export const apply = defineClientUiModule({
+  apply(context) {
+    context.slots.inject(target, () =>
+      context.slots.register(
+        {
+          name: target,
+          id: "acme.server-overview.badge",
+          mode: "overlay",
+          priority: 100,
+        },
+        PageBadge,
+      ),
+    );
+  },
+}).apply;
+```
+
+页面根 Entry 收到：
+
+```ts
+interface PageRootExtensionProps {
+  readonly pageId: string;
+  readonly root: HTMLElement;
+}
+```
+
+`mode` 决定托管位置：
+
+| 模式      | 行为                                         |
+| --------- | -------------------------------------------- |
+| `prepend` | 渲染在原页面之前                             |
+| `append`  | 渲染在原页面之后                             |
+| `overlay` | 渲染在当前页面内容区域的覆盖层中             |
+| `replace` | 最高优先级 Entry 替换原页面                  |
+| `dom`     | 只挂载组件，由组件使用 `root` 处理原页面 DOM |
+
+`prepend`、`append`、`overlay` 和 `replace` 的 Vue 节点由 Runtime 托管，页面离开后自动卸载。`dom` 仅提供生命周期宿主；组件如果直接添加节点、属性、事件或观察器，必须在自身 `onUnmounted()` 中恢复原页面。
+
+`inject(name, setup)` 与加载顺序无关：
+
+1. 目标 Slot 已存在时立即执行 `setup`；
+2. 目标稍后出现时自动执行；
+3. 目标消失时执行 `setup` 返回的清理函数；
+4. 同名 Slot 再次出现时重新执行 `setup`；
+5. 扩展插件先停用时，等待和已激活注册一起撤销。
+
+### 7.4 声明子 Slot
+
+任意 Entry 可以通过 `children` 声明自己的扩展点：
+
+```ts
+context.slots.register(
+  {
+    name: target,
+    id: "acme.server-overview.panel",
+    mode: "append",
+    children: {
+      "acme.server-overview.panel.actions": {
+        kind: "list",
+        scope: "page",
+      },
+    },
+  },
+  AcmePanel,
+);
+```
+
+声明了 `children` 的组件会收到 `renderSlot(name, owner?, options?)` prop。组件只能渲染自己声明的子 Slot。其他 Client Entry 使用 `inject()` 和 `register()` 向该子 Slot 发布组件。
+
+父 Entry 被替换、崩溃、页面离开或插件停用时，Runtime 会递归撤销子 Slot 声明、子 Entry、注入结果和它们的清理函数。第三方扩展无需维护跨插件卸载顺序。
 
 ## 8. 使用 Service Contract
 

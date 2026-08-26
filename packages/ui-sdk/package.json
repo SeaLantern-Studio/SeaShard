@@ -1,7 +1,7 @@
 {
   "name": "@seashard/ui-sdk",
   "version": "0.1.0",
-  "description": "SeaShard Client Entry 与受控 UI Contribution SDK。",
+  "description": "SeaShard Client Entry、受控 UI Slot 与 Service SDK。",
   "keywords": [
     "plugin",
     "seashard",

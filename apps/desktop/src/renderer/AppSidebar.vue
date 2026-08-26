@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useClientUiRuntime } from "@seashard/ui-runtime";
+import { ClientUiSlotEntry, useClientUiRuntime } from "@seashard/ui-runtime";
 import type { SettingsNavigationGroup } from "@seashard/ui-sdk";
 import {
   Archive,
@@ -19,7 +19,6 @@ import {
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import logoSvg from "./assets/logo.svg";
-import UiEntryBoundary from "./UiEntryBoundary.vue";
 import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
 
 const props = defineProps<{
@@ -430,12 +429,10 @@ onUnmounted(() => {
             </section>
           </div>
 
-          <UiEntryBoundary v-else-if="workspaceSidebar" :runtime-id="workspaceSidebar.runtimeId">
-            <component
-              :is="workspaceSidebar.component"
-              :key="`${workspaceSidebar.runtimeId}:${workspaceSidebar.id}`"
-            />
-          </UiEntryBoundary>
+          <ClientUiSlotEntry
+            v-else-if="workspaceSidebar"
+            :entry-token="workspaceSidebar.entryToken"
+          />
 
           <div
             v-else-if="props.workspace === 'server' || props.workspace === 'launcher'"

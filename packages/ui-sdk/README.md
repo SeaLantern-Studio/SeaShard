@@ -1,6 +1,6 @@
 # @seashard/ui-sdk
 
-SeaShard Client Entry 的受控 UI SDK，提供页面、工作区侧栏、Service 和生命周期 Contribution 类型。
+SeaShard Client Entry 的受控 UI SDK，提供可级联清理的 Slot、页面、工作区侧栏、Service 和生命周期类型。
 
 ## 安装
 
@@ -20,12 +20,15 @@ import ExamplePage from "./ExamplePage.vue";
 
 const clientModule = defineClientUiModule({
   apply(context) {
-    context.contribute("navigation.page", {
-      id: "example.page",
-      path: "/example",
-      label: "Example",
-      component: ExamplePage,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "example.page",
+        path: "/example",
+        label: "Example",
+      },
+      ExamplePage,
+    );
   },
 });
 
@@ -50,9 +53,46 @@ export const apply = clientModule.apply;
 esbuild src/client.ts --bundle --platform=browser --format=esm --target=chrome142 --outfile=bundle/dist/client.js
 ```
 
-SeaShard 只通过当前激活包的摘要协议加载模块和相对资源。插件刷新或升级会产生新摘要，Client Runtime 会清理旧 Contribution，再加载新模块。
+SeaShard 只通过当前激活包的摘要协议加载模块和相对资源。插件刷新或升级会产生新摘要，Client Runtime 会级联清理旧 Slot 注册，再加载新模块。
 
 一个 Client Entry 应只发布一个页面组件包。跨页面共享状态和代码应通过独立 shared 包与明确 Contract 组织。
+
+## UI Slot
+
+全部 UI 通过 `context.slots.register(options, component)` 注册。当前根声明包括：
+
+| Slot                | 类型    | 用途                   |
+| ------------------- | ------- | ---------------------- |
+| `navigation.page`   | `list`  | 注册页面和导航元数据   |
+| `workspace.sidebar` | `keyed` | 按工作区键注册完整侧栏 |
+
+每个活动页面还会声明 `page.<page-id>.root`。扩展插件使用 `inject()` 跟随页面声明期，不依赖插件加载顺序：
+
+```ts
+import { defineClientUiModule, pageRootSlot } from "@seashard/ui-sdk";
+import ServerOverviewOverlay from "./ServerOverviewOverlay.vue";
+
+const target = pageRootSlot("server-overview");
+
+export const apply = defineClientUiModule({
+  apply(context) {
+    context.slots.inject(target, () =>
+      context.slots.register(
+        {
+          name: target,
+          id: "example.server-overview-overlay",
+          mode: "overlay",
+        },
+        ServerOverviewOverlay,
+      ),
+    );
+  },
+}).apply;
+```
+
+页面根扩展支持 `prepend`、`append`、`overlay`、`replace` 和 `dom`。组件收到 `pageId` 与稳定的 `root: HTMLElement`。托管模式随页面、插件停用和升级自动卸载；`dom` 模式直接修改原节点时必须自行恢复修改。
+
+一个 Slot Entry 可在 `children` 中声明子 Slot。父 Entry 消失时，子声明、子注册和等待中的注入会按同一所有权树级联清理。`single`、`list`、`keyed` 和 `chain` Slot 分别覆盖独占、顺序列表、按键分派和选择器接管场景。
 
 ## 调用插件 Host Service
 

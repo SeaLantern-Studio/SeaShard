@@ -26,16 +26,19 @@ export default defineClientUiModule({
         }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-configuration",
-      path: "/server/configuration",
-      label: "配置管理",
-      description: "修改服务器属性与插件配置文件",
-      order: 20,
-      icon: FileCog,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-configuration",
+        path: "/server/configuration",
+        label: "配置管理",
+        description: "修改服务器属性与插件配置文件",
+        order: 20,
+        icon: FileCog,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

@@ -11,14 +11,17 @@ export default defineClientUiModule({
       setup: () => () => h(RuntimeStatusPage, { getSnapshot: () => diagnostics.getSnapshot() }),
     });
 
-    ctx.contribute("navigation.page", {
-      id: "runtime-diagnostics",
-      path: "/runtime",
-      label: "运行状态",
-      description: "组件生命周期与宿主健康状态",
-      order: 100,
-      navigation: false,
-      component: page,
-    });
+    ctx.slots.register(
+      {
+        name: "navigation.page",
+        id: "runtime-diagnostics",
+        path: "/runtime",
+        label: "运行状态",
+        description: "组件生命周期与宿主健康状态",
+        order: 100,
+        navigation: false,
+      },
+      page,
+    );
   },
 });

@@ -18,16 +18,19 @@ export default defineClientUiModule({
       setup: () => () => h(ServerDatapackDownloadPage, { resources, instances }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-download-datapack",
-      path: "/server/download/datapack",
-      label: "数据包",
-      description: "浏览并安装服务端数据包",
-      order: 40,
-      icon: Archive,
-      navigation: true,
-      placement: "server-download",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-download-datapack",
+        path: "/server/download/datapack",
+        label: "数据包",
+        description: "浏览并安装服务端数据包",
+        order: 40,
+        icon: Archive,
+        navigation: true,
+        placement: "server-download",
+      },
+      page,
+    );
   },
 });

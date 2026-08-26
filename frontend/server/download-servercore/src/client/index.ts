@@ -20,17 +20,20 @@ export default defineClientUiModule({
         setup: () => () => h(ServerCoreDownloadPage, { coreSource, downloads, category }),
       });
 
-      context.contribute("navigation.page", {
-        id: category.id === "server-core" ? "server-download" : `server-download-${category.id}`,
-        path: category.path,
-        label: category.label,
-        description: category.description,
-        order: category.order,
-        icon: category.icon,
-        navigation: true,
-        placement: "server-download",
-        component: page,
-      });
+      context.slots.register(
+        {
+          name: "navigation.page",
+          id: category.id === "server-core" ? "server-download" : `server-download-${category.id}`,
+          path: category.path,
+          label: category.label,
+          description: category.description,
+          order: category.order,
+          icon: category.icon,
+          navigation: true,
+          placement: "server-download",
+        },
+        page,
+      );
     }
   },
 });

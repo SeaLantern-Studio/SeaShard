@@ -20,16 +20,19 @@ export default defineClientUiModule({
         h(ServerModManagementPage, { instances, runtime, selection: serverInstanceSelection }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-mods",
-      path: "/server/mods",
-      label: "Mod",
-      description: "管理服务器已安装的 Mod",
-      order: 30,
-      icon: Puzzle,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-mods",
+        path: "/server/mods",
+        label: "Mod",
+        description: "管理服务器已安装的 Mod",
+        order: 30,
+        icon: Puzzle,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

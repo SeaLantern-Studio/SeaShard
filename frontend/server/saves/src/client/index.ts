@@ -20,16 +20,19 @@ export default defineClientUiModule({
         h(ServerWorldSavePage, { instances, runtime, selection: serverInstanceSelection }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-saves",
-      path: "/server/saves",
-      label: "存档",
-      description: "查看和切换服务器存档",
-      order: 25,
-      icon: Archive,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-saves",
+        path: "/server/saves",
+        label: "存档",
+        description: "查看和切换服务器存档",
+        order: 25,
+        icon: Archive,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

@@ -18,16 +18,19 @@ export default defineClientUiModule({
       setup: () => () => h(ServerModDownloadPage, { mods, instances }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-download-mod",
-      path: "/server/download/mod",
-      label: "Mod",
-      description: "浏览服务端 Mod",
-      order: 20,
-      icon: Puzzle,
-      navigation: true,
-      placement: "server-download",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-download-mod",
+        path: "/server/download/mod",
+        label: "Mod",
+        description: "浏览服务端 Mod",
+        order: 20,
+        icon: Puzzle,
+        navigation: true,
+        placement: "server-download",
+      },
+      page,
+    );
   },
 });

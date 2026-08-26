@@ -88,7 +88,7 @@ import {
   runtimeDiagnosticsContract,
   type RuntimeDiagnosticsService,
 } from "@seashard/contracts";
-import { defineClientUiModule } from "@seashard/ui-sdk";
+import { defineClientUiModule, pageRootSlot } from "@seashard/ui-sdk";
 
 const manifest = {
   id: "example.sdk-verification",
@@ -118,7 +118,26 @@ const hostModule: PluginModule = {
 
 const clientModule = defineClientUiModule({
   apply(context) {
-    void context.entry.pluginId;
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "example-page",
+        path: "/example",
+        label: "Example",
+      },
+      {},
+    );
+    const target = pageRootSlot("example-page");
+    context.slots.inject(target, () =>
+      context.slots.register(
+        {
+          name: target,
+          id: "example-page-extension",
+          mode: "append",
+        },
+        {},
+      ),
+    );
   },
 });
 
@@ -140,13 +159,14 @@ void clientModule;
     },
   };
   const vueTypes = `export interface Component {}
+export type VNodeChild = unknown;
 export interface Ref<T = unknown> {
   value: T;
 }
 `;
   const runtimeSource = `import { isAgentActivityPresentationIcon } from "@seashard/plugin-sdk";
 import { runtimeDiagnosticsContract } from "@seashard/contracts";
-import { defineClientUiModule } from "@seashard/ui-sdk";
+import { defineClientUiModule, pageRootSlot } from "@seashard/ui-sdk";
 
 if (runtimeDiagnosticsContract !== "seashard.runtime-diagnostics") {
   throw new Error("contracts runtime export is invalid");
@@ -157,6 +177,9 @@ if (!isAgentActivityPresentationIcon("wrench") || isAgentActivityPresentationIco
 const module = defineClientUiModule({ apply() {} });
 if (typeof module.apply !== "function") {
   throw new Error("UI SDK runtime export is invalid");
+}
+if (pageRootSlot("example-page") !== "page.example-page.root") {
+  throw new Error("UI SDK page root slot helper is invalid");
 }
 console.log("SEASHARD_SDK_RUNTIME_OK");
 `;

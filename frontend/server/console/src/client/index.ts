@@ -20,16 +20,19 @@ export default defineClientUiModule({
         h(ServerConsolePage, { instances, runtime, selection: serverInstanceSelection }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-console",
-      path: "/server/console",
-      label: "控制台",
-      description: "查看服务器日志并发送命令",
-      order: 10,
-      icon: Terminal,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-console",
+        path: "/server/console",
+        label: "控制台",
+        description: "查看服务器日志并发送命令",
+        order: 10,
+        icon: Terminal,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

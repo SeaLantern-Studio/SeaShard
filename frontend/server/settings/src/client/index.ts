@@ -28,16 +28,19 @@ export default defineClientUiModule({
         }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-instance-settings",
-      path: "/server/settings",
-      label: "设置",
-      description: "修改当前服务器实例的启动参数",
-      order: 5,
-      icon: SlidersHorizontal,
-      navigation: false,
-      placement: "main",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-instance-settings",
+        path: "/server/settings",
+        label: "设置",
+        description: "修改当前服务器实例的启动参数",
+        order: 5,
+        icon: SlidersHorizontal,
+        navigation: false,
+        placement: "main",
+      },
+      page,
+    );
   },
 });

@@ -15,17 +15,20 @@ export default defineClientUiModule({
       setup: () => () => h(PersonalizationPage, { appearance }),
     });
 
-    context.contribute("navigation.page", {
-      id: "personalization",
-      path: "/settings/personalization",
-      label: "个性化",
-      description: "颜色主题与外观",
-      order: 10,
-      icon: PaintRoller,
-      navigation: true,
-      placement: "settings",
-      settingsGroup: "software",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "personalization",
+        path: "/settings/personalization",
+        label: "个性化",
+        description: "颜色主题与外观",
+        order: 10,
+        icon: PaintRoller,
+        navigation: true,
+        placement: "settings",
+        settingsGroup: "software",
+      },
+      page,
+    );
   },
 });

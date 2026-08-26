@@ -5,23 +5,37 @@ import {
   type ClientServiceCallRequest,
 } from "@seashard/contracts";
 import type { Disposable, JsonValue } from "@seashard/plugin-sdk";
-import type {
-  ClientUiContext,
-  ClientUiModule,
-  NavigationPageContribution,
-  WorkspaceSidebarContribution,
+import {
+  pageRootSlot,
+  type ClientUiContext,
+  type ClientUiModule,
+  type ClientUiRenderSlot,
+  type ClientUiRenderSlotOptions,
+  type ClientUiSlotRegistration,
+  type NavigationPageSlotRegistration,
+  type PageRootExtensionMode,
+  type PageRootExtensionSlotRegistration,
 } from "@seashard/ui-sdk";
 import {
   computed,
+  defineComponent,
   effectScope,
+  h,
   inject,
-  markRaw,
+  onErrorCaptured,
+  ref,
   shallowRef,
+  type Component,
   type ComputedRef,
   type EffectScope,
   type InjectionKey,
+  type PropType,
+  type VNodeChild,
 } from "vue";
 import type { Router } from "vue-router";
+import { ClientUiSlotRegistry, type RegisteredClientUiSlotEntry } from "./slots";
+
+export * from "./slots";
 
 export interface ClientUiModuleLoader {
   load(): Promise<unknown>;
@@ -59,13 +73,31 @@ export interface ClientUiRuntimeOptions {
   services: Readonly<Record<string, object>>;
 }
 
-export interface RegisteredNavigationPage extends NavigationPageContribution {
-  runtimeId: string;
-  routeName: string;
+export interface RegisteredNavigationPage extends Omit<
+  NavigationPageSlotRegistration,
+  "name" | "children"
+> {
+  readonly runtimeId: string;
+  readonly routeName: string;
+  readonly entryToken: string;
+  readonly component: Component;
 }
 
-export interface RegisteredWorkspaceSidebar extends WorkspaceSidebarContribution {
-  runtimeId: string;
+export interface RegisteredWorkspaceSidebar {
+  readonly runtimeId: string;
+  readonly workspaceId: string;
+  readonly entryToken: string;
+  readonly component: Component;
+}
+
+export interface RegisteredPageRootExtension {
+  readonly runtimeId: string;
+  readonly id: string;
+  readonly entryToken: string;
+  readonly component: Component;
+  readonly mode: PageRootExtensionMode;
+  readonly order?: number;
+  readonly priority?: number;
 }
 
 export interface ClientUiFailure {
@@ -78,7 +110,7 @@ interface ActiveClientEntry {
   descriptor: ClientEntryDescriptor;
   fingerprint: string;
   scope: EffectScope;
-  disposers: Disposable[];
+  disposers: Set<Disposable>;
   callable: boolean;
 }
 
@@ -96,31 +128,30 @@ export class ClientUiRuntime {
   readonly failures: ComputedRef<readonly ClientUiFailure[]>;
 
   private readonly active = new Map<string, ActiveClientEntry>();
-  private readonly pagesById = new Map<string, RegisteredNavigationPage>();
+  private readonly slots = new ClientUiSlotRegistry();
   private readonly pageIdsByPath = new Map<string, string>();
-  private readonly pageVersion = shallowRef(0);
-  private readonly workspaceSidebarsById = new Map<string, RegisteredWorkspaceSidebar>();
-  private readonly workspaceSidebarIdsByWorkspace = new Map<string, string>();
-  private readonly workspaceSidebarVersion = shallowRef(0);
+  private pageSurfaceSequence = 0;
   private readonly failuresByRuntime = new Map<string, ClientUiFailure>();
   private readonly failureVersion = shallowRef(0);
   private reconcileQueue: Promise<void> = Promise.resolve();
   private revision = -1;
 
   constructor(private readonly options: ClientUiRuntimeOptions) {
-    this.pages = computed(() => {
-      void this.pageVersion.value;
-      return [...this.pagesById.values()].sort(
-        (left, right) =>
-          (left.order ?? 0) - (right.order ?? 0) || left.label.localeCompare(right.label),
-      );
-    });
-    this.workspaceSidebars = computed(() => {
-      void this.workspaceSidebarVersion.value;
-      return [...this.workspaceSidebarsById.values()].sort((left, right) =>
-        left.workspaceId.localeCompare(right.workspaceId),
-      );
-    });
+    this.pages = computed(() =>
+      this.slots
+        .entries("navigation.page")
+        .map(projectNavigationPage)
+        .sort(
+          (left, right) =>
+            (left.order ?? 0) - (right.order ?? 0) || left.label.localeCompare(right.label),
+        ),
+    );
+    this.workspaceSidebars = computed(() =>
+      this.slots
+        .entries("workspace.sidebar")
+        .map(projectWorkspaceSidebar)
+        .sort((left, right) => left.workspaceId.localeCompare(right.workspaceId)),
+    );
     this.failures = computed(() => {
       void this.failureVersion.value;
       return [...this.failuresByRuntime.values()].sort((left, right) =>
@@ -148,6 +179,43 @@ export class ClientUiRuntime {
     if (this.failuresByRuntime.get(runtimeId)?.stage !== "render") return;
     this.failuresByRuntime.delete(runtimeId);
     this.failureVersion.value += 1;
+  }
+
+  /** 页面组件挂载时声明根 Slot；离开页面会级联撤销其全部扩展。 */
+  openPageRoot(pageId: string): Disposable {
+    const name = pageRootSlot(pageId);
+    const owner = `page-surface:${pageId}:${++this.pageSurfaceSequence}`;
+    return this.slots.openSurface(name, { kind: "list", scope: "page" }, owner);
+  }
+
+  pageRootExtensions(pageId: string): readonly RegisteredPageRootExtension[] {
+    return this.slots.entries(pageRootSlot(pageId)).map(projectPageRootExtension);
+  }
+
+  slotEntries(name: string): readonly RegisteredClientUiSlotEntry[] {
+    return this.slots.entries(name);
+  }
+
+  renderSlot(
+    name: string,
+    owner: Readonly<Record<string, unknown>> = {},
+    options: ClientUiRenderSlotOptions = {},
+  ): VNodeChild {
+    const dispatched = this.slots.dispatch(name, owner, options);
+    if (!dispatched.length) return options.fallback;
+    return dispatched.map(({ entry, matched }) =>
+      this.renderRegisteredSlotEntry(entry, owner, matched),
+    );
+  }
+
+  renderSlotEntry(entryToken: string, owner: Readonly<Record<string, unknown>> = {}): VNodeChild {
+    const entry = this.slots.entry(entryToken);
+    return entry ? this.renderRegisteredSlotEntry(entry, owner, undefined) : null;
+  }
+
+  reportSlotRenderFailure(entryToken: string, runtimeId: string, error: unknown): void {
+    this.slots.abdicate(entryToken);
+    this.reportRenderFailure(runtimeId, error);
   }
 
   dispose(): Promise<void> {
@@ -195,7 +263,7 @@ export class ClientUiRuntime {
 
   private async startEntry(descriptor: ClientEntryDescriptor): Promise<void> {
     const scope = effectScope(true);
-    const disposers: Disposable[] = [];
+    const disposers = new Set<Disposable>();
     const record: ActiveClientEntry = {
       descriptor,
       fingerprint: fingerprintDescriptor(descriptor),
@@ -206,8 +274,21 @@ export class ClientUiRuntime {
 
     try {
       const module = resolveClientUiModule(await this.loadEntryModule(descriptor));
+      const registerSlot = (options: ClientUiSlotRegistration, component: Component): Disposable =>
+        this.ownEffect(record, () =>
+          this.registerClientSlot(descriptor.runtimeId, options, component),
+        );
       const context: ClientUiContext = {
         entry: descriptor,
+        slots: {
+          register: registerSlot,
+          inject: (name, setup) =>
+            this.ownEffect(record, () =>
+              this.slots.inject(name, setup, (error) =>
+                this.recordFailure(descriptor.runtimeId, "render", error),
+              ),
+            ),
+        },
         service: <T extends object>(contract: string): T => {
           const local = this.options.services[contract];
           if (local) return local as T;
@@ -235,27 +316,11 @@ export class ClientUiRuntime {
             },
           ) as T;
         },
-        effect: (setup) => {
-          const cleanup = setup();
-          if (cleanup) disposers.push(cleanup);
-        },
-        contribute: (kind, value) => {
-          if (kind === "navigation.page") {
-            const page = value as NavigationPageContribution;
-            disposers.push(this.registerPage(descriptor.runtimeId, page));
-            return `${descriptor.runtimeId}:${kind}:${page.id}`;
-          }
-          if (kind === "workspace.sidebar") {
-            const sidebar = value as WorkspaceSidebarContribution;
-            disposers.push(this.registerWorkspaceSidebar(descriptor.runtimeId, sidebar));
-            return `${descriptor.runtimeId}:${kind}:${sidebar.id}`;
-          }
-          throw new Error("unsupported client UI contribution");
-        },
+        effect: (setup) => this.ownEffect(record, setup),
       };
 
       const cleanup = await scope.run(() => module.apply(context, descriptor.config));
-      if (cleanup) disposers.push(cleanup);
+      if (cleanup) this.ownEffect(record, () => cleanup);
       this.active.set(descriptor.runtimeId, record);
     } catch (error) {
       try {
@@ -283,104 +348,132 @@ export class ClientUiRuntime {
     return loader.load();
   }
 
-  private registerPage(runtimeId: string, contribution: NavigationPageContribution): Disposable {
-    if (!contributionIdPattern.test(contribution.id)) {
-      throw new TypeError(`invalid navigation page id: ${contribution.id}`);
-    }
-    if (!contribution.path.startsWith("/") || contribution.path === "/") {
-      throw new TypeError(
-        `navigation page path must be a non-root absolute path: ${contribution.path}`,
+  private registerClientSlot(
+    runtimeId: string,
+    options: ClientUiSlotRegistration,
+    component: Component,
+  ): Disposable {
+    if (options.name === "navigation.page") {
+      return this.registerNavigationPage(
+        runtimeId,
+        options as NavigationPageSlotRegistration,
+        component,
       );
     }
-    const existingId = this.pagesById.get(contribution.id);
-    if (existingId) throw new Error(`navigation page id is already registered: ${contribution.id}`);
-    const existingPath = this.pageIdsByPath.get(contribution.path);
+    if (options.name.startsWith("page.") && options.name.endsWith(".root")) {
+      const mode = (options as PageRootExtensionSlotRegistration).mode;
+      if (
+        mode !== undefined &&
+        !(["prepend", "append", "overlay", "replace", "dom"] as const).includes(mode)
+      ) {
+        throw new TypeError(`invalid page root extension mode: ${String(mode)}`);
+      }
+    }
+    return this.slots.register(runtimeId, options, component);
+  }
+
+  private registerNavigationPage(
+    runtimeId: string,
+    page: NavigationPageSlotRegistration,
+    component: Component,
+  ): Disposable {
+    if (!contributionIdPattern.test(page.id)) {
+      throw new TypeError(`invalid navigation page id: ${page.id}`);
+    }
+    if (!page.path.startsWith("/") || page.path === "/") {
+      throw new TypeError(`navigation page path must be a non-root absolute path: ${page.path}`);
+    }
+    if (!page.label.trim()) throw new TypeError("navigation page label must not be empty");
+    if (this.slots.entries("navigation.page").some((entry) => entry.options.id === page.id)) {
+      throw new Error(`navigation page id is already registered: ${page.id}`);
+    }
+    const existingPath = this.pageIdsByPath.get(page.path);
     if (existingPath) {
       throw new Error(
-        `navigation page path is already registered: ${contribution.path} by ${existingPath}`,
+        `navigation page path is already registered: ${page.path} by ${existingPath}`,
       );
     }
 
-    const routeName = `ui:${runtimeId}:${contribution.id}`;
-    const page: RegisteredNavigationPage = {
-      ...contribution,
-      ...(contribution.icon ? { icon: markRaw(contribution.icon) } : {}),
-      component: markRaw(contribution.component),
-      runtimeId,
-      routeName,
-    };
-    const removeRoute = this.options.router.addRoute({
-      name: routeName,
-      path: contribution.path,
-      component: page.component,
-      meta: { runtimeId, pageId: contribution.id },
-    });
-    this.pagesById.set(contribution.id, page);
-    this.pageIdsByPath.set(contribution.path, contribution.id);
-    this.pageVersion.value += 1;
+    const disposeSlot = this.slots.register(runtimeId, page, component);
+    const routeName = routeNameForPage(runtimeId, page.id);
+    let removeRoute: Disposable;
+    try {
+      removeRoute = this.options.router.addRoute({
+        name: routeName,
+        path: page.path,
+        component,
+        meta: { runtimeId, pageId: page.id },
+      });
+    } catch (error) {
+      void disposeSlot();
+      throw error;
+    }
+    this.pageIdsByPath.set(page.path, page.id);
 
     let disposed = false;
     return () => {
       if (disposed) return;
       disposed = true;
-      removeRoute();
-      if (this.pagesById.get(contribution.id)?.runtimeId === runtimeId) {
-        this.pagesById.delete(contribution.id);
-        this.pageIdsByPath.delete(contribution.path);
-        this.pageVersion.value += 1;
+      void removeRoute();
+      if (this.pageIdsByPath.get(page.path) === page.id) {
+        this.pageIdsByPath.delete(page.path);
       }
+      return disposeSlot();
     };
   }
 
-  /**
-   * 工作区侧栏按 workspaceId 独占注册。
-   * 侧栏与声明它的 Client Entry 共用 disposer，避免 Shell 留下已经失去 Service 的孤立界面。
-   */
-  private registerWorkspaceSidebar(
-    runtimeId: string,
-    contribution: WorkspaceSidebarContribution,
-  ): Disposable {
-    if (!contributionIdPattern.test(contribution.id)) {
-      throw new TypeError(`invalid workspace sidebar id: ${contribution.id}`);
-    }
-    if (!contributionIdPattern.test(contribution.workspaceId)) {
-      throw new TypeError(`invalid workspace id: ${contribution.workspaceId}`);
-    }
-    const existingId = this.workspaceSidebarsById.get(contribution.id);
-    if (existingId) {
-      throw new Error(`workspace sidebar id is already registered: ${contribution.id}`);
-    }
-    const existingWorkspace = this.workspaceSidebarIdsByWorkspace.get(contribution.workspaceId);
-    if (existingWorkspace) {
-      throw new Error(
-        `workspace sidebar is already registered: ${contribution.workspaceId} by ${existingWorkspace}`,
-      );
+  private renderRegisteredSlotEntry(
+    entry: RegisteredClientUiSlotEntry,
+    owner: Readonly<Record<string, unknown>>,
+    matched: unknown,
+  ): VNodeChild {
+    const props: Record<string, unknown> = { ...owner };
+    if (matched !== undefined) props.matched = matched;
+    const children = entry.options.children;
+    if (children) {
+      const renderSlot: ClientUiRenderSlot = (name, childOwner = {}, options = {}) => {
+        if (!(name in children)) {
+          throw new Error(`UI slot is outside the entry declaration: ${name}`);
+        }
+        if (!this.slots.isLive(entry)) {
+          throw new Error(`UI slot owner is no longer active: ${entry.token}`);
+        }
+        return this.renderSlot(name, childOwner, options);
+      };
+      props.renderSlot = renderSlot;
     }
 
-    const sidebar: RegisteredWorkspaceSidebar = {
-      ...contribution,
-      component: markRaw(contribution.component),
-      runtimeId,
-    };
-    this.workspaceSidebarsById.set(contribution.id, sidebar);
-    this.workspaceSidebarIdsByWorkspace.set(contribution.workspaceId, contribution.id);
-    this.workspaceSidebarVersion.value += 1;
+    return h(
+      ClientUiSlotEntryBoundary,
+      {
+        key: entry.token,
+        entryToken: entry.token,
+        runtimeId: entry.runtimeId,
+      },
+      {
+        default: () => h(entry.component, props),
+      },
+    );
+  }
 
-    let disposed = false;
-    return () => {
-      if (disposed) return;
-      disposed = true;
-      if (this.workspaceSidebarsById.get(contribution.id)?.runtimeId !== runtimeId) return;
-      this.workspaceSidebarsById.delete(contribution.id);
-      this.workspaceSidebarIdsByWorkspace.delete(contribution.workspaceId);
-      this.workspaceSidebarVersion.value += 1;
+  /** 所有 Effect 都返回幂等 disposer，并在提前清理后从 Entry 账本移除。 */
+  private ownEffect(record: ActiveClientEntry, setup: () => Disposable | void): Disposable {
+    const cleanup = setup();
+    let active = true;
+    const owned: Disposable = () => {
+      if (!active) return;
+      active = false;
+      record.disposers.delete(owned);
+      return cleanup?.();
     };
+    record.disposers.add(owned);
+    return owned;
   }
 
   private async stopEntry(record: ActiveClientEntry): Promise<void> {
     record.callable = false;
     const failures: unknown[] = [];
-    for (const dispose of record.disposers.reverse()) {
+    for (const dispose of [...record.disposers].reverse()) {
       try {
         await dispose();
       } catch (error) {
@@ -414,6 +507,110 @@ export function useClientUiRuntime(): ClientUiRuntime {
   const runtime = inject(clientUiRuntimeKey);
   if (!runtime) throw new Error("ClientUiRuntime was not provided");
   return runtime;
+}
+
+/** 通用 Slot Outlet；第三方拥有者通过 renderSlot prop 获得同一能力。 */
+export const ClientUiSlotOutlet = defineComponent({
+  name: "ClientUiSlotOutlet",
+  props: {
+    name: { type: String, required: true },
+    owner: {
+      type: Object as PropType<Readonly<Record<string, unknown>>>,
+      default: () => ({}),
+    },
+    options: {
+      type: Object as PropType<ClientUiRenderSlotOptions>,
+      default: () => ({}),
+    },
+  },
+  setup(props) {
+    const runtime = useClientUiRuntime();
+    return () => runtime.renderSlot(props.name, props.owner, props.options);
+  },
+});
+
+/** 按注册 Token 渲染一个 Entry，并由 Runtime 注入子 Slot 渲染能力。 */
+export const ClientUiSlotEntry = defineComponent({
+  name: "ClientUiSlotEntry",
+  props: {
+    entryToken: { type: String, required: true },
+    owner: {
+      type: Object as PropType<Readonly<Record<string, unknown>>>,
+      default: () => ({}),
+    },
+  },
+  setup(props) {
+    const runtime = useClientUiRuntime();
+    return () => runtime.renderSlotEntry(props.entryToken, props.owner);
+  },
+});
+
+/** 单个 Slot Entry 的错误边界；崩溃后让出 cell，后备优先级可以接管。 */
+export const ClientUiSlotEntryBoundary = defineComponent({
+  name: "ClientUiSlotEntryBoundary",
+  props: {
+    entryToken: { type: String, required: true },
+    runtimeId: { type: String, required: true },
+  },
+  setup(props, { slots }) {
+    const runtime = useClientUiRuntime();
+    const failed = ref(false);
+    onErrorCaptured((error) => {
+      failed.value = true;
+      runtime.reportSlotRenderFailure(props.entryToken, props.runtimeId, error);
+      return false;
+    });
+    return () => (failed.value ? null : slots.default?.());
+  },
+});
+
+function projectNavigationPage(entry: RegisteredClientUiSlotEntry): RegisteredNavigationPage {
+  const page = entry.options as NavigationPageSlotRegistration;
+  return {
+    id: page.id,
+    path: page.path,
+    label: page.label,
+    ...(page.description === undefined ? {} : { description: page.description }),
+    ...(page.order === undefined ? {} : { order: page.order }),
+    ...(page.priority === undefined ? {} : { priority: page.priority }),
+    ...(page.icon === undefined ? {} : { icon: page.icon }),
+    ...(page.navigation === undefined ? {} : { navigation: page.navigation }),
+    ...(page.placement === undefined ? {} : { placement: page.placement }),
+    ...(page.settingsGroup === undefined ? {} : { settingsGroup: page.settingsGroup }),
+    runtimeId: entry.runtimeId,
+    routeName: routeNameForPage(entry.runtimeId, page.id),
+    entryToken: entry.token,
+    component: entry.component,
+  };
+}
+
+function projectWorkspaceSidebar(entry: RegisteredClientUiSlotEntry): RegisteredWorkspaceSidebar {
+  if (!("key" in entry.options) || typeof entry.options.key !== "string") {
+    throw new TypeError("workspace sidebar slot entry has no key");
+  }
+  return {
+    runtimeId: entry.runtimeId,
+    workspaceId: entry.options.key,
+    entryToken: entry.token,
+    component: entry.component,
+  };
+}
+
+function projectPageRootExtension(entry: RegisteredClientUiSlotEntry): RegisteredPageRootExtension {
+  const extension = entry.options as PageRootExtensionSlotRegistration;
+  return {
+    runtimeId: entry.runtimeId,
+    id: extension.id,
+    entryToken: entry.token,
+    component: entry.component,
+    mode: extension.mode ?? "append",
+    ...(extension.order === undefined ? {} : { order: extension.order }),
+    ...(extension.priority === undefined ? {} : { priority: extension.priority }),
+  };
+}
+
+function routeNameForPage(runtimeId: string, pageId: string): string {
+  return `ui:${runtimeId}:${pageId}`;
 }
 
 function fingerprintDescriptor(descriptor: ClientEntryDescriptor): string {

@@ -12,16 +12,19 @@ export default defineClientUiModule({
       setup: () => () => h(ServerModpackDownloadPage, { resources }),
     });
 
-    context.contribute("navigation.page", {
-      id: "server-download-modpack",
-      path: "/server/download/modpack",
-      label: "整合包",
-      description: "浏览服务端整合包",
-      order: 30,
-      icon: Package,
-      navigation: true,
-      placement: "server-download",
-      component: page,
-    });
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "server-download-modpack",
+        path: "/server/download/modpack",
+        label: "整合包",
+        description: "浏览服务端整合包",
+        order: 30,
+        icon: Package,
+        navigation: true,
+        placement: "server-download",
+      },
+      page,
+    );
   },
 });

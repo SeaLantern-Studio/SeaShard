@@ -5,12 +5,16 @@ import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
 import logoSvg from "./assets/logo.svg";
 import UiEntryBoundary from "./UiEntryBoundary.vue";
+import PageExtensionRoot from "./PageExtensionRoot.vue";
 import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
 
 const route = useRoute();
 const router = useRouter();
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
+);
+const activePageId = computed(() =>
+  typeof route.meta.pageId === "string" ? route.meta.pageId : undefined,
 );
 const settingsMode = computed<SettingsMode | undefined>(() => {
   if (route.path.startsWith("/settings/")) return "general";
@@ -74,7 +78,12 @@ function workspaceForPath(path: string): WorkspaceMode | undefined {
           "
         >
           <RouterView v-slot="{ Component }">
-            <UiEntryBoundary :runtime-id="activeRuntimeId">
+            <PageExtensionRoot v-if="activePageId" :key="activePageId" :page-id="activePageId">
+              <UiEntryBoundary :runtime-id="activeRuntimeId">
+                <component :is="Component" />
+              </UiEntryBoundary>
+            </PageExtensionRoot>
+            <UiEntryBoundary v-else :runtime-id="activeRuntimeId">
               <component :is="Component" />
             </UiEntryBoundary>
           </RouterView>
