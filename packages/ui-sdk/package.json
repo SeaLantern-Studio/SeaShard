@@ -1,6 +1,6 @@
 {
   "name": "@seashard/ui-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SeaShard Client Entry、受控 UI Slot 与 Service SDK。",
   "keywords": [
     "plugin",
@@ -26,8 +26,8 @@
     "@seashard/plugin-sdk": "workspace:*"
   },
   "peerDependencies": {
-    "@seashard/contracts": "^0.1.0",
-    "@seashard/plugin-sdk": "^0.1.0",
+    "@seashard/contracts": "^0.2.0",
+    "@seashard/plugin-sdk": "^0.2.0",
     "vue": "^3.5.0"
   },
   "engines": {

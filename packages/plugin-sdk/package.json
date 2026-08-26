@@ -1,6 +1,6 @@
 {
   "name": "@seashard/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SeaShard Host 插件开发 SDK。",
   "keywords": [
     "plugin",

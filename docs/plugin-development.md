@@ -1,6 +1,6 @@
 # SeaShard 第三方插件开发指南
 
-本文面向使用 `@seashard/plugin-sdk` 0.1.x、`@seashard/contracts` 0.1.x 与 `@seashard/ui-sdk` 0.1.x 开发 SeaShard 第三方插件的开发者。完成快速开始后，你将得到一个可以验证、热重载、打包、安装并跨应用重启运行的插件。
+本文面向使用 `@seashard/plugin-sdk` 0.2.x、`@seashard/contracts` 0.2.x 与 `@seashard/ui-sdk` 0.2.x 开发 SeaShard 第三方插件的开发者。完成快速开始后，你将得到一个可以验证、热重载、打包、安装并跨应用重启运行的插件。
 
 ## 1. 当前开放范围
 
@@ -97,8 +97,8 @@ acme-greeter/
     "watch": "esbuild src/host.ts --bundle --platform=node --format=esm --target=es2023 --sourcemap --watch --outfile=bundle/dist/host.js"
   },
   "devDependencies": {
-    "@seashard/contracts": "^0.1.0",
-    "@seashard/plugin-sdk": "^0.1.0",
+    "@seashard/contracts": "^0.2.0",
+    "@seashard/plugin-sdk": "^0.2.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0"
@@ -596,7 +596,7 @@ export const apply = clientModule.apply;
 在插件开发项目中安装前端依赖：
 
 ```bash
-pnpm add -D @seashard/ui-sdk@^0.1.0 vue@^3.5.0
+pnpm add -D @seashard/ui-sdk@^0.2.0 vue@^3.5.0
 ```
 
 使用 esbuild 生成完整浏览器 ESM：
