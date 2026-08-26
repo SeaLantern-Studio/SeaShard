@@ -12,7 +12,9 @@ import {
   Puzzle,
   RefreshCw,
   Terminal,
+  Trash2,
   TriangleAlert,
+  X,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
@@ -27,6 +29,8 @@ const loading = ref(true);
 const refreshing = ref(false);
 const loadFailed = ref(false);
 const updatingPluginIds = ref<ReadonlySet<string>>(new Set());
+const deleteTarget = ref<PluginManagementSnapshot>();
+const deletingPluginId = ref<string>();
 let disposed = false;
 let refreshSequence = 0;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -101,6 +105,43 @@ async function setEnabled(plugin: PluginManagementSnapshot, enabled: boolean): P
     }
   }
   if (failed && !disposed) await refresh(false);
+}
+
+function requestUninstall(plugin: PluginManagementSnapshot): void {
+  if (plugin.source !== "installed" || updatingPluginIds.value.has(plugin.id)) return;
+  deleteTarget.value = plugin;
+}
+
+function cancelUninstall(): void {
+  if (!deletingPluginId.value) deleteTarget.value = undefined;
+}
+
+/** 删除属于显式用户操作；先失效轮询，再以 Host 返回为准移除卡片并发送通知。 */
+async function confirmUninstall(): Promise<void> {
+  const target = deleteTarget.value;
+  if (!target || target.source !== "installed" || deletingPluginId.value) return;
+  refreshSequence += 1;
+  deletingPluginId.value = target.id;
+  updatingPluginIds.value = new Set([...updatingPluginIds.value, target.id]);
+  try {
+    await props.management.uninstall(target.id);
+    if (disposed) return;
+    plugins.value = plugins.value.filter(({ id }) => id !== target.id);
+    if (selectedPluginId.value === target.id) selectedPluginId.value = undefined;
+    deleteTarget.value = undefined;
+    toast.success({ title: "插件已删除" });
+  } catch (error) {
+    if (!disposed) {
+      toast.error({ title: "删除插件失败", description: errorMessage(error) });
+    }
+  } finally {
+    if (!disposed) {
+      const next = new Set(updatingPluginIds.value);
+      next.delete(target.id);
+      updatingPluginIds.value = next;
+      deletingPluginId.value = undefined;
+    }
+  }
 }
 
 function openDetails(pluginId: string): void {
@@ -271,69 +312,130 @@ function errorMessage(error: unknown): string {
       </div>
 
       <div v-else class="plugin-grid">
-        <article
-          v-for="plugin in plugins"
-          :key="plugin.id"
-          class="plugin-card"
-          role="button"
-          tabindex="0"
-          :aria-label="`查看 ${plugin.id} 详情`"
-          @click="openDetails(plugin.id)"
-          @keydown.enter="openDetails(plugin.id)"
-          @keydown.space.prevent="openDetails(plugin.id)"
-        >
-          <header class="plugin-card-header">
-            <span class="plugin-mark" aria-hidden="true">
-              <Terminal v-if="plugin.source === 'development'" :size="22" />
-              <Package v-else :size="22" />
-            </span>
-            <h2>{{ plugin.id }}</h2>
-            <div class="plugin-card-switch" @click.stop @keydown.stop>
-              <Cmz_Switch
-                :model-value="plugin.enabled"
-                :disabled="updatingPluginIds.has(plugin.id)"
-                :aria-label="`${plugin.id} 开关`"
-                @update:model-value="setEnabled(plugin, $event)"
-              />
-            </div>
-          </header>
+        <article v-for="plugin in plugins" :key="plugin.id" class="plugin-card">
+          <div
+            class="plugin-card-main"
+            role="button"
+            tabindex="0"
+            :aria-label="`查看 ${plugin.id} 详情`"
+            @click="openDetails(plugin.id)"
+            @keydown.enter="openDetails(plugin.id)"
+            @keydown.space.prevent="openDetails(plugin.id)"
+          >
+            <header class="plugin-card-header">
+              <span class="plugin-mark" aria-hidden="true">
+                <Terminal v-if="plugin.source === 'development'" :size="22" />
+                <Package v-else :size="22" />
+              </span>
+              <h2>{{ plugin.id }}</h2>
+              <div class="plugin-card-switch" @click.stop @keydown.stop>
+                <Cmz_Switch
+                  :model-value="plugin.enabled"
+                  :disabled="updatingPluginIds.has(plugin.id)"
+                  :aria-label="`${plugin.id} 开关`"
+                  @update:model-value="setEnabled(plugin, $event)"
+                />
+              </div>
+            </header>
 
-          <div class="plugin-card-badges">
-            <span class="plugin-source" :class="`plugin-source--${plugin.source}`">
-              {{ sourceLabel(plugin.source) }}
-            </span>
-            <span class="plugin-status" :class="{ 'plugin-status--disabled': !plugin.enabled }">
-              {{ plugin.enabled ? "已开启" : "已关闭" }}
-            </span>
+            <div class="plugin-card-badges">
+              <span class="plugin-source" :class="`plugin-source--${plugin.source}`">
+                {{ sourceLabel(plugin.source) }}
+              </span>
+              <span class="plugin-status" :class="{ 'plugin-status--disabled': !plugin.enabled }">
+                {{ plugin.enabled ? "已开启" : "已关闭" }}
+              </span>
+            </div>
+
+            <dl class="plugin-card-facts">
+              <div>
+                <dt>版本</dt>
+                <dd>{{ plugin.version }}</dd>
+              </div>
+              <div>
+                <dt>发布者</dt>
+                <dd>{{ plugin.publisher }}</dd>
+              </div>
+              <div>
+                <dt>入口</dt>
+                <dd>{{ activeEntryCount(plugin) }}/{{ plugin.entries.length }} 运行中</dd>
+              </div>
+            </dl>
           </div>
 
-          <dl class="plugin-card-facts">
-            <div>
-              <dt>版本</dt>
-              <dd>{{ plugin.version }}</dd>
-            </div>
-            <div>
-              <dt>发布者</dt>
-              <dd>{{ plugin.publisher }}</dd>
-            </div>
-            <div>
-              <dt>入口</dt>
-              <dd>{{ activeEntryCount(plugin) }}/{{ plugin.entries.length }} 运行中</dd>
-            </div>
-          </dl>
-
           <footer>
-            <span>插件详情</span>
-            <ChevronRight :size="17" :stroke-width="1.8" />
+            <Cmz_Button variant="ghost" size="sm" @click="openDetails(plugin.id)">
+              插件详情
+              <ChevronRight :size="17" :stroke-width="1.8" />
+            </Cmz_Button>
+            <Cmz_Button
+              v-if="plugin.source === 'installed'"
+              variant="ghost"
+              size="sm"
+              color="var(--sl-danger)"
+              :disabled="updatingPluginIds.has(plugin.id)"
+              :aria-label="`删除 ${plugin.id}`"
+              @click="requestUninstall(plugin)"
+            >
+              <Trash2 :size="16" :stroke-width="1.8" />
+              删除
+            </Cmz_Button>
           </footer>
         </article>
       </div>
     </template>
+
+    <div v-if="deleteTarget" class="plugin-delete-layer" @click.self="cancelUninstall">
+      <section
+        class="plugin-delete-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="plugin-delete-title"
+      >
+        <header class="plugin-delete-header">
+          <h2 id="plugin-delete-title">删除插件</h2>
+          <button
+            type="button"
+            class="plugin-delete-close"
+            :disabled="Boolean(deletingPluginId)"
+            aria-label="关闭"
+            @click="cancelUninstall"
+          >
+            <X :size="19" :stroke-width="1.8" />
+          </button>
+        </header>
+        <div class="plugin-delete-body">
+          <p>
+            确认删除 <code>{{ deleteTarget.id }}</code
+            >？全部已安装版本和运行绑定都会移除，插件产生的数据将保留。
+          </p>
+        </div>
+        <footer class="plugin-delete-footer">
+          <Cmz_Button
+            variant="outline"
+            size="sm"
+            :disabled="Boolean(deletingPluginId)"
+            @click="cancelUninstall"
+          >
+            取消
+          </Cmz_Button>
+          <Cmz_Button
+            size="sm"
+            color="var(--sl-danger)"
+            :loading="deletingPluginId === deleteTarget.id"
+            @click="confirmUninstall"
+          >
+            确认删除
+          </Cmz_Button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .plugin-settings-page {
+  position: relative;
   width: min(100%, 980px);
   min-height: 100%;
   margin: 0 auto;
@@ -347,6 +449,8 @@ function errorMessage(error: unknown): string {
 .plugin-card-header,
 .plugin-card-badges,
 .plugin-card footer,
+.plugin-delete-header,
+.plugin-delete-footer,
 .entry-card header,
 .entry-identity,
 .entry-error {
@@ -389,19 +493,25 @@ function errorMessage(error: unknown): string {
   border: 1px solid var(--sl-border);
   border-radius: var(--sl-radius-lg);
   background: var(--sl-surface);
-  cursor: pointer;
   transition:
     border-color 140ms ease,
     background 140ms ease,
     transform 140ms ease;
 }
 
-.plugin-card:hover,
-.plugin-card:focus-visible {
+.plugin-card-main {
+  cursor: pointer;
+}
+
+.plugin-card:hover {
   border-color: var(--sl-primary-light);
   background: var(--sl-bg-secondary);
-  outline: none;
   transform: translateY(-1px);
+}
+
+.plugin-card-main:focus-visible {
+  outline: 2px solid var(--sl-primary);
+  outline-offset: -2px;
 }
 
 .plugin-card-header {
@@ -527,6 +637,88 @@ function errorMessage(error: unknown): string {
   border-top: 1px solid var(--sl-border-light);
   color: var(--sl-text-secondary);
   font-size: var(--sl-font-size-sm);
+}
+
+/* 删除确认锚定页面根节点，只遮罩设置内容区域；对话框按项目约定不使用阴影。 */
+.plugin-delete-layer {
+  position: absolute;
+  z-index: 30;
+  inset: -16px -22px;
+  display: grid;
+  overflow: auto;
+  padding: 34px 24px;
+  background: color-mix(in srgb, var(--sl-bg-primary) 88%, transparent);
+  place-items: start center;
+}
+
+.plugin-delete-dialog {
+  width: min(100%, 560px);
+  overflow: hidden;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+  box-shadow: none;
+}
+
+.plugin-delete-header {
+  min-height: 62px;
+  justify-content: space-between;
+  gap: var(--sl-space-md);
+  padding: 0 20px;
+  border-bottom: 1px solid var(--sl-border-light);
+}
+
+.plugin-delete-header h2 {
+  margin: 0;
+  color: var(--sl-text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.plugin-delete-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--sl-radius-sm);
+  background: transparent;
+  color: var(--sl-text-secondary);
+  cursor: pointer;
+  place-items: center;
+}
+
+.plugin-delete-close:hover:not(:disabled) {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.plugin-delete-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.plugin-delete-body {
+  padding: var(--sl-space-lg) 20px;
+}
+
+.plugin-delete-body p {
+  margin: 0;
+  color: var(--sl-text-secondary);
+  line-height: var(--sl-line-height-relaxed);
+}
+
+.plugin-delete-body code {
+  color: var(--sl-text-primary);
+  font-family: var(--sl-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.plugin-delete-footer {
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+  padding: 14px 20px;
+  border-top: 1px solid var(--sl-border-light);
 }
 
 .plugin-page-state {

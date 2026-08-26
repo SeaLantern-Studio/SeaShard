@@ -375,6 +375,7 @@ await test("plugin settings Client may call every declared management method", a
     {
       list: async () => [],
       setEnabled: async (pluginId, enabled) => ({ pluginId, enabled }),
+      uninstall: async (pluginId) => ({ pluginId, uninstalled: true }),
     },
   );
 
@@ -391,6 +392,10 @@ await test("plugin settings Client may call every declared management method", a
   assert.deepEqual(await invoke("setEnabled", ["example.plugin", false]), {
     pluginId: "example.plugin",
     enabled: false,
+  });
+  assert.deepEqual(await invoke("uninstall", ["example.plugin"]), {
+    pluginId: "example.plugin",
+    uninstalled: true,
   });
 });
 

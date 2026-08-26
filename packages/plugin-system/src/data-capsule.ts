@@ -97,6 +97,13 @@ export const pluginSystemDataCapsule = defineDataCapsule({
               granted_at = excluded.granted_at`,
     },
     {
+      id: "trust.delete",
+      access: "write",
+      result: "run",
+      sql: `DELETE FROM plugin_trust
+             WHERE plugin_id = ? AND version = ? AND digest = ?`,
+    },
+    {
       id: "package.current.set",
       access: "write",
       result: "run",

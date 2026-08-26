@@ -668,13 +668,13 @@
           "name": "FileDownloadTaskSnapshot",
           "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
           "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1093"
+          "source": "packages/contracts/src/index.ts:1100"
         },
         {
           "name": "FileDownloadTaskState",
           "description": "",
           "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
-          "source": "packages/contracts/src/index.ts:1073"
+          "source": "packages/contracts/src/index.ts:1080"
         },
         {
           "name": "JsonPrimitive",
@@ -775,13 +775,13 @@
           "name": "JavaInstallationSnapshot",
           "description": "自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。",
           "declaration": "/** 自动发现的 Java 安装；路径已经由 Host 解析为规范化绝对路径。 */\nexport interface JavaInstallationSnapshot {\n  id: string;\n  path: string;\n  javaHome: string;\n  version: string;\n  majorVersion: number;\n  vendor: string;\n  architecture: string;\n  is64Bit: boolean;\n  source: JavaInstallationSource;\n  /** 禁用项继续展示，但不会参与服务器启动时的 Java 选择。 */\n  disabled: boolean;\n}",
-          "source": "packages/contracts/src/index.ts:1538"
+          "source": "packages/contracts/src/index.ts:1545"
         },
         {
           "name": "JavaInstallationSource",
           "description": "",
           "declaration": "export type JavaInstallationSource = \"java-home\" | \"path\" | \"registry\" | \"filesystem\" | \"manual\";",
-          "source": "packages/contracts/src/index.ts:1535"
+          "source": "packages/contracts/src/index.ts:1542"
         }
       ]
     },
@@ -821,6 +821,23 @@
           "returns": {
             "type": "Promise<PluginManagementSnapshot>",
             "description": "Runtime 收敛后的插件快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "uninstall",
+          "signature": "uninstall(pluginId: string): Promise<void>",
+          "description": "停止并删除正式安装插件的全部版本、自动 Binding 和摘要信任记录。",
+          "parameters": [
+            {
+              "name": "pluginId",
+              "type": "string",
+              "description": "目标插件的 Manifest ID；开发会话加载的临时插件不允许删除。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": "删除和 Runtime 收敛完成后返回。"
           },
           "throws": []
         }
@@ -1108,49 +1125,49 @@
           "name": "ServerConfigurationCatalog",
           "description": "单个实例当前可编辑配置的目录；其他配置只在实际发现文件时显示。",
           "declaration": "/** 单个实例当前可编辑配置的目录；其他配置只在实际发现文件时显示。 */\nexport interface ServerConfigurationCatalog {\n  instanceId: string;\n  serverType?: string;\n  /** 实际配置根目录；Quilt 等核心可能位于实例根目录的子目录。 */\n  configurationRootPath: string;\n  pluginSupported: boolean;\n  serverFiles: readonly ServerConfigurationFile[];\n  otherFiles: readonly ServerConfigurationFile[];\n  plugins: readonly ServerPluginConfigurationGroup[];\n}",
-          "source": "packages/contracts/src/index.ts:1480"
+          "source": "packages/contracts/src/index.ts:1487"
         },
         {
           "name": "ServerConfigurationDocument",
           "description": "revision 是原始文件字节的 SHA-256，用于拒绝覆盖服务器或外部编辑器的新修改。",
           "declaration": "/** revision 是原始文件字节的 SHA-256，用于拒绝覆盖服务器或外部编辑器的新修改。 */\nexport interface ServerConfigurationDocument extends ServerConfigurationFile {\n  instanceId: string;\n  content: string;\n  revision: string;\n  encoding: ServerConfigurationTextEncoding;\n  modifiedAt: string;\n}",
-          "source": "packages/contracts/src/index.ts:1492"
+          "source": "packages/contracts/src/index.ts:1499"
         },
         {
           "name": "ServerConfigurationFile",
           "description": "Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。",
           "declaration": "/** Renderer 可选择的配置文件只使用实例内相对路径，不暴露宿主绝对路径。 */\nexport interface ServerConfigurationFile {\n  path: string;\n  name: string;\n  kind: ServerConfigurationFileKind;\n  scope: ServerConfigurationFileScope;\n  pluginName?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1466"
+          "source": "packages/contracts/src/index.ts:1473"
         },
         {
           "name": "ServerConfigurationFileKind",
           "description": "",
           "declaration": "export type ServerConfigurationFileKind = \"properties\" | \"yaml\" | \"json\" | \"toml\" | \"text\";",
-          "source": "packages/contracts/src/index.ts:1461"
+          "source": "packages/contracts/src/index.ts:1468"
         },
         {
           "name": "ServerConfigurationFileScope",
           "description": "",
           "declaration": "export type ServerConfigurationFileScope = \"server\" | \"other\" | \"plugin\";",
-          "source": "packages/contracts/src/index.ts:1462"
+          "source": "packages/contracts/src/index.ts:1469"
         },
         {
           "name": "ServerConfigurationTextEncoding",
           "description": "",
           "declaration": "export type ServerConfigurationTextEncoding = \"utf-8\" | \"utf-8-bom\";",
-          "source": "packages/contracts/src/index.ts:1463"
+          "source": "packages/contracts/src/index.ts:1470"
         },
         {
           "name": "ServerConfigurationWriteRequest",
           "description": "",
           "declaration": "export interface ServerConfigurationWriteRequest {\n  instanceId: string;\n  path: string;\n  content: string;\n  expectedRevision: string;\n}",
-          "source": "packages/contracts/src/index.ts:1500"
+          "source": "packages/contracts/src/index.ts:1507"
         },
         {
           "name": "ServerPluginConfigurationGroup",
           "description": "",
           "declaration": "export interface ServerPluginConfigurationGroup {\n  name: string;\n  files: readonly ServerConfigurationFile[];\n}",
-          "source": "packages/contracts/src/index.ts:1474"
+          "source": "packages/contracts/src/index.ts:1481"
         }
       ]
     },
@@ -1312,31 +1329,31 @@
           "name": "FileDownloadTaskSnapshot",
           "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
           "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1093"
+          "source": "packages/contracts/src/index.ts:1100"
         },
         {
           "name": "FileDownloadTaskState",
           "description": "",
           "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
-          "source": "packages/contracts/src/index.ts:1073"
+          "source": "packages/contracts/src/index.ts:1080"
         },
         {
           "name": "ServerCoreArtifact",
           "description": "Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。",
           "declaration": "/** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */\nexport interface ServerCoreArtifact {\n  source: \"cnb\";\n  serverType: string;\n  gameVersion: string;\n  fileName: string;\n  url: string;\n  sha256: string;\n}",
-          "source": "packages/contracts/src/index.ts:814"
+          "source": "packages/contracts/src/index.ts:821"
         },
         {
           "name": "ServerCoreDownloadTaskSnapshot",
           "description": "顶栏和下载页共享的服务器核心任务投影。",
           "declaration": "/** 顶栏和下载页共享的服务器核心任务投影。 */\nexport interface ServerCoreDownloadTaskSnapshot extends FileDownloadTaskSnapshot {\n  artifact: ServerCoreArtifact;\n}",
-          "source": "packages/contracts/src/index.ts:1112"
+          "source": "packages/contracts/src/index.ts:1119"
         },
         {
           "name": "ServerCoreType",
           "description": "Renderer 可安全读取的服务端核心类型；图标地址只指向 Host 本地缓存协议。",
           "declaration": "/** Renderer 可安全读取的服务端核心类型；图标地址只指向 Host 本地缓存协议。 */\nexport interface ServerCoreType {\n  id: string;\n  iconUrl?: string;\n}",
-          "source": "packages/contracts/src/index.ts:766"
+          "source": "packages/contracts/src/index.ts:773"
         },
         {
           "name": "StartServerCoreDownloadRequest",
@@ -1870,49 +1887,49 @@
           "name": "FileDownloadTaskSnapshot",
           "description": "顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。",
           "declaration": "/** 顶栏文件下载条使用的公共任务投影，不向 Renderer 暴露远端 URL 与业务 metadata。 */\nexport interface FileDownloadTaskSnapshot {\n  id: string;\n  destinationPath: string;\n  state: FileDownloadTaskState;\n  downloadedBytes: number;\n  totalBytes: number;\n  connections: number;\n  progress: number;\n  createdAt: string;\n  finishedAt?: string;\n  error?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1093"
+          "source": "packages/contracts/src/index.ts:1100"
         },
         {
           "name": "FileDownloadTaskState",
           "description": "",
           "declaration": "export type FileDownloadTaskState = \"queued\" | \"downloading\" | \"completed\" | \"failed\" | \"cancelled\";",
-          "source": "packages/contracts/src/index.ts:1073"
+          "source": "packages/contracts/src/index.ts:1080"
         },
         {
           "name": "ServerCoreArtifact",
           "description": "Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。",
           "declaration": "/** Renderer 可安全读取的服务端核心产物；下载地址只由宿主目录服务提供。 */\nexport interface ServerCoreArtifact {\n  source: \"cnb\";\n  serverType: string;\n  gameVersion: string;\n  fileName: string;\n  url: string;\n  sha256: string;\n}",
-          "source": "packages/contracts/src/index.ts:814"
+          "source": "packages/contracts/src/index.ts:821"
         },
         {
           "name": "ServerCoreDownloadTaskSnapshot",
           "description": "顶栏和下载页共享的服务器核心任务投影。",
           "declaration": "/** 顶栏和下载页共享的服务器核心任务投影。 */\nexport interface ServerCoreDownloadTaskSnapshot extends FileDownloadTaskSnapshot {\n  artifact: ServerCoreArtifact;\n}",
-          "source": "packages/contracts/src/index.ts:1112"
+          "source": "packages/contracts/src/index.ts:1119"
         },
         {
           "name": "ServerCoreManagedDownloadRequest",
           "description": "“开始下载”创建由 SeaShard 托管的实例；目标目录只能由 Host 决定。",
           "declaration": "/** “开始下载”创建由 SeaShard 托管的实例；目标目录只能由 Host 决定。 */\nexport interface ServerCoreManagedDownloadRequest extends ServerCoreSaveAsRequest {}",
-          "source": "packages/contracts/src/index.ts:1084"
+          "source": "packages/contracts/src/index.ts:1091"
         },
         {
           "name": "ServerCoreManagedDownloadResult",
           "description": "托管下载立即返回任务与预留实例 ID，下载完成后可精确跳转到新实例。",
           "declaration": "/** 托管下载立即返回任务与预留实例 ID，下载完成后可精确跳转到新实例。 */\nexport interface ServerCoreManagedDownloadResult {\n  instanceId: string;\n  task: ServerCoreDownloadTaskSnapshot;\n}",
-          "source": "packages/contracts/src/index.ts:1087"
+          "source": "packages/contracts/src/index.ts:1094"
         },
         {
           "name": "ServerCoreSaveAsRequest",
           "description": "“另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。",
           "declaration": "/** “另存为”只提交目录服务可验证的产物身份，不允许 Renderer 传入任意 URL。 */\nexport interface ServerCoreSaveAsRequest {\n  serverType: string;\n  gameVersion: string;\n  artifactFileName: string;\n  destinationFileName: string;\n}",
-          "source": "packages/contracts/src/index.ts:1077"
+          "source": "packages/contracts/src/index.ts:1084"
         },
         {
           "name": "ServerInstalledModSnapshot",
           "description": "一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。",
           "declaration": "/** 一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。 */\nexport interface ServerInstalledModSnapshot {\n  instanceId: string;\n  relativePath: string;\n  fileName: string;\n  name: string;\n  version?: string;\n  /** 从 MOD 清单读取的简短介绍。 */\n  description?: string;\n  /** MOD JAR 内部图标的数据地址。 */\n  iconDataUrl?: string;\n  /** 文件首次落盘时间；手动复制的 MOD 使用文件系统创建时间。 */\n  addedAt: string;\n  disabled: boolean;\n  resourceSource?: ServerResourceSourceMetadata;\n}",
-          "source": "packages/contracts/src/index.ts:1210"
+          "source": "packages/contracts/src/index.ts:1217"
         },
         {
           "name": "ServerInstanceClientProjection",
@@ -1924,115 +1941,115 @@
           "name": "ServerInstanceContentCounts",
           "description": "Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。",
           "declaration": "/** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */\nexport interface ServerInstanceContentCounts {\n  mods: number;\n  plugins: number;\n}",
-          "source": "packages/contracts/src/index.ts:1282"
+          "source": "packages/contracts/src/index.ts:1289"
         },
         {
           "name": "ServerInstanceSnapshot",
           "description": "服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。",
           "declaration": "/** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */\nexport interface ServerInstanceSnapshot {\n  id: string;\n  name: string;\n  rootPath: string;\n  coreJarPath: string;\n  iconPath?: string;\n  /** 世界下载外层目录的完整名称；例如 worlds-abc123。 */\n  worldStorageDirectoryName?: string;\n  /** 世界备份外层目录的完整名称；例如 backups-def456。 */\n  backupDirectoryName?: string;\n  storageMode: ServerInstanceStorageMode;\n  source: ServerInstanceSource;\n  /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */\n  modLoader: ServerModLoader | null;\n  serverType?: string;\n  gameVersion?: string;\n  coreArtifactFileName?: string;\n  artifactSha256?: string;\n  createdAt: string;\n  updatedAt: string;\n  iconUrl?: string;\n  lastStartedAt?: string;\n  /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */\n  totalRuntimeMs?: number;\n  /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */\n  startupSettings?: ServerInstanceStartupSettings;\n  /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */\n  resourceSources?: ServerResourceSourceIndex;\n}",
-          "source": "packages/contracts/src/index.ts:1137"
+          "source": "packages/contracts/src/index.ts:1144"
         },
         {
           "name": "ServerInstanceSource",
           "description": "",
           "declaration": "export type ServerInstanceSource = \"downloaded\" | \"imported\";",
-          "source": "packages/contracts/src/index.ts:1125"
+          "source": "packages/contracts/src/index.ts:1132"
         },
         {
           "name": "ServerInstanceStartupSettings",
           "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
           "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
-          "source": "packages/contracts/src/index.ts:1128"
+          "source": "packages/contracts/src/index.ts:1135"
         },
         {
           "name": "ServerInstanceStorageMode",
           "description": "",
           "declaration": "export type ServerInstanceStorageMode = \"managed\" | \"external\";",
-          "source": "packages/contracts/src/index.ts:1124"
+          "source": "packages/contracts/src/index.ts:1131"
         },
         {
           "name": "ServerModLoader",
           "description": "",
           "declaration": "export type ServerModLoader = (typeof serverModLoaders)[number];",
-          "source": "packages/contracts/src/index.ts:838"
+          "source": "packages/contracts/src/index.ts:845"
         },
         {
           "name": "ServerResourceSource",
           "description": "",
           "declaration": "export type ServerResourceSource = string;",
-          "source": "packages/contracts/src/index.ts:948"
+          "source": "packages/contracts/src/index.ts:955"
         },
         {
           "name": "ServerResourceSourceIndex",
           "description": "实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。",
           "declaration": "/** 实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。 */\nexport interface ServerResourceSourceIndex {\n  mods?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  datapacks?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  worlds?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n}",
-          "source": "packages/contracts/src/index.ts:960"
+          "source": "packages/contracts/src/index.ts:967"
         },
         {
           "name": "ServerResourceSourceMetadata",
           "description": "已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。",
           "declaration": "/** 已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。 */\nexport interface ServerResourceSourceMetadata {\n  source: ServerResourceSource;\n  id: string;\n  /** 来源发布版本的显示标签，例如 Modrinth 的 version_number。 */\n  version?: string;\n  iconUrl?: string;\n}",
-          "source": "packages/contracts/src/index.ts:951"
+          "source": "packages/contracts/src/index.ts:958"
         },
         {
           "name": "ServerResourceSourceRecord",
           "description": "Host 写入资源来源索引时使用的单条记录。",
           "declaration": "/** Host 写入资源来源索引时使用的单条记录。 */\nexport interface ServerResourceSourceRecord extends ServerResourceSourceMetadata {\n  resourceType: ServerResourceSourceType;\n  relativePath: string;\n}",
-          "source": "packages/contracts/src/index.ts:967"
+          "source": "packages/contracts/src/index.ts:974"
         },
         {
           "name": "ServerResourceSourceType",
           "description": "",
           "declaration": "export type ServerResourceSourceType = \"mod\" | \"datapack\" | \"world\";",
-          "source": "packages/contracts/src/index.ts:947"
+          "source": "packages/contracts/src/index.ts:954"
         },
         {
           "name": "ServerWorldBackupSnapshot",
           "description": "一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。",
           "declaration": "/** 一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。 */\nexport interface ServerWorldBackupSnapshot {\n  instanceId: string;\n  worldId: string;\n  worldDirectoryName: string;\n  fileName: string;\n  createdAt: string;\n  sizeBytes: number;\n}",
-          "source": "packages/contracts/src/index.ts:1185"
+          "source": "packages/contracts/src/index.ts:1192"
         },
         {
           "name": "ServerWorldDatapackKind",
           "description": "",
           "declaration": "export type ServerWorldDatapackKind = \"archive\" | \"directory\";",
-          "source": "packages/contracts/src/index.ts:1169"
+          "source": "packages/contracts/src/index.ts:1176"
         },
         {
           "name": "ServerWorldDatapackSnapshot",
           "description": "一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。",
           "declaration": "/** 一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。 */\nexport interface ServerWorldDatapackSnapshot {\n  instanceId: string;\n  worldId: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  fileName: string;\n  kind: ServerWorldDatapackKind;\n  disabled: boolean;\n  /** 从 pack.mcmeta 读取的简短介绍。 */\n  description?: string;\n  /** 数据包内部 pack.png 的数据地址。 */\n  iconDataUrl?: string;\n  updatedAt: string;\n}",
-          "source": "packages/contracts/src/index.ts:1195"
+          "source": "packages/contracts/src/index.ts:1202"
         },
         {
           "name": "ServerWorldDimension",
           "description": "",
           "declaration": "export type ServerWorldDimension = \"overworld\" | \"nether\" | \"end\";",
-          "source": "packages/contracts/src/index.ts:1168"
+          "source": "packages/contracts/src/index.ts:1175"
         },
         {
           "name": "ServerWorldDimensionGroup",
           "description": "",
           "declaration": "export interface ServerWorldDimensionGroup {\n  id: string;\n  name: string;\n  current: boolean;\n  saves: readonly ServerWorldSave[];\n}",
-          "source": "packages/contracts/src/index.ts:1226"
+          "source": "packages/contracts/src/index.ts:1233"
         },
         {
           "name": "ServerWorldSave",
           "description": "一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。",
           "declaration": "/** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */\nexport interface ServerWorldSave {\n  id: string;\n  groupId: string;\n  name: string;\n  dimension: ServerWorldDimension;\n  current: boolean;\n  createdAt?: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  updatedAt?: string;\n  iconDataUrl?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1172"
+          "source": "packages/contracts/src/index.ts:1179"
         },
         {
           "name": "ServerWorldStorageMode",
           "description": "",
           "declaration": "export type ServerWorldStorageMode = \"unified\" | \"split\";",
-          "source": "packages/contracts/src/index.ts:1167"
+          "source": "packages/contracts/src/index.ts:1174"
         },
         {
           "name": "ServerWorldStorageSnapshot",
           "description": "Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。",
           "declaration": "/** Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。 */\nexport interface ServerWorldStorageSnapshot {\n  instanceId: string;\n  mode: ServerWorldStorageMode;\n  currentId?: string;\n  saves: readonly ServerWorldSave[];\n  dimensions: readonly ServerWorldDimensionGroup[];\n}",
-          "source": "packages/contracts/src/index.ts:1234"
+          "source": "packages/contracts/src/index.ts:1241"
         }
       ]
     },
@@ -2148,85 +2165,85 @@
           "name": "ServerModDownloadableResourceType",
           "description": "",
           "declaration": "export type ServerModDownloadableResourceType = ServerModrinthResourceType;",
-          "source": "packages/contracts/src/index.ts:836"
+          "source": "packages/contracts/src/index.ts:843"
         },
         {
           "name": "ServerModDownloadResult",
           "description": "多来源资源完成校验并发布后的稳定结果。",
           "declaration": "/** 多来源资源完成校验并发布后的稳定结果。 */\nexport interface ServerModDownloadResult {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n  fileName: string;\n  destination: \"instance\" | \"directory\";\n  instanceId?: string;\n  downloadedBytes: number;\n}",
-          "source": "packages/contracts/src/index.ts:991"
+          "source": "packages/contracts/src/index.ts:998"
         },
         {
           "name": "ServerModEnvironment",
           "description": "",
           "declaration": "export type ServerModEnvironment =\n  | \"client_and_server\"\n  | \"server_only\"\n  | \"server_only_client_optional\"\n  | \"dedicated_server_only\"\n  | \"client_or_server\"\n  | \"client_or_server_prefers_both\"\n  | \"client_only_server_optional\"\n  | \"client_only\";",
-          "source": "packages/contracts/src/index.ts:859"
+          "source": "packages/contracts/src/index.ts:866"
         },
         {
           "name": "ServerModFilterOption",
           "description": "",
           "declaration": "export interface ServerModFilterOption {\n  id: string;\n  label: string;\n}",
-          "source": "packages/contracts/src/index.ts:876"
+          "source": "packages/contracts/src/index.ts:883"
         },
         {
           "name": "ServerModFilters",
           "description": "单个服务端资源来源的筛选元数据；来源暂时不可用时保留可验证的提示。",
           "declaration": "/** 单个服务端资源来源的筛选元数据；来源暂时不可用时保留可验证的提示。 */\nexport interface ServerModFilters {\n  sources: readonly ServerModFilterOption[];\n  tags: readonly ServerModFilterOption[];\n  versions: readonly ServerModFilterOption[];\n  loaders: readonly ServerModFilterOption[];\n  unavailableReason?: string;\n}",
-          "source": "packages/contracts/src/index.ts:882"
+          "source": "packages/contracts/src/index.ts:889"
         },
         {
           "name": "ServerModInstallRequest",
           "description": "Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。",
           "declaration": "/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。 */\nexport interface ServerModInstallRequest {\n  source: ServerModSource;\n  resourceType: \"mod\" | \"datapack\" | \"world\";\n  projectId: string;\n  versionId: string;\n  instanceId: string;\n  /** 仅数据包安装使用；Host 会再次确认它属于该实例且确实存在。 */\n  worldId?: string;\n}",
-          "source": "packages/contracts/src/index.ts:973"
+          "source": "packages/contracts/src/index.ts:980"
         },
         {
           "name": "ServerModProject",
           "description": "多来源 Mod 搜索结果的最小安全投影；图标仅允许来自受信任的上游 CDN。",
           "declaration": "/** 多来源 Mod 搜索结果的最小安全投影；图标仅允许来自受信任的上游 CDN。 */\nexport interface ServerModProject {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  id: string;\n  slug: string;\n  title: string;\n  iconUrl?: string;\n  description: string;\n  author: string;\n  downloads: number;\n  follows: number;\n  dateModified: string;\n  environment: readonly ServerModEnvironment[];\n  categories: readonly string[];\n  versions: readonly string[];\n}",
-          "source": "packages/contracts/src/index.ts:904"
+          "source": "packages/contracts/src/index.ts:911"
         },
         {
           "name": "ServerModProjectDetails",
           "description": "多来源项目长简介及其全部公开版本。",
           "declaration": "/** 多来源项目长简介及其全部公开版本。 */\nexport interface ServerModProjectDetails {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  projectId: string;\n  project: ServerModProject;\n  body: string;\n  versions: readonly ServerModVersion[];\n}",
-          "source": "packages/contracts/src/index.ts:939"
+          "source": "packages/contracts/src/index.ts:946"
         },
         {
           "name": "ServerModrinthResourceType",
           "description": "",
           "declaration": "export type ServerModrinthResourceType = \"mod\" | \"modpack\" | \"datapack\" | \"world\";",
-          "source": "packages/contracts/src/index.ts:835"
+          "source": "packages/contracts/src/index.ts:842"
         },
         {
           "name": "ServerModSaveAsRequest",
           "description": "“另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。",
           "declaration": "/** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */\nexport interface ServerModSaveAsRequest {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n}",
-          "source": "packages/contracts/src/index.ts:984"
+          "source": "packages/contracts/src/index.ts:991"
         },
         {
           "name": "ServerModSearchIndex",
           "description": "",
           "declaration": "export type ServerModSearchIndex = \"relevance\" | \"downloads\" | \"follows\" | \"newest\" | \"updated\";",
-          "source": "packages/contracts/src/index.ts:858"
+          "source": "packages/contracts/src/index.ts:865"
         },
         {
           "name": "ServerModSearchRequest",
           "description": "Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。",
           "declaration": "/** Client 只能提交声明式筛选条件，不能传入任意上游 URL 或 Facet 表达式。 */\nexport interface ServerModSearchRequest {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  query: string;\n  tag: string;\n  index: ServerModSearchIndex;\n  gameVersion: string;\n  loader: string;\n  offset: number;\n  limit: number;\n}",
-          "source": "packages/contracts/src/index.ts:891"
+          "source": "packages/contracts/src/index.ts:898"
         },
         {
           "name": "ServerModSearchResult",
           "description": "",
           "declaration": "export interface ServerModSearchResult {\n  items: readonly ServerModProject[];\n  offset: number;\n  limit: number;\n  total: number;\n  unavailableReason?: string;\n}",
-          "source": "packages/contracts/src/index.ts:921"
+          "source": "packages/contracts/src/index.ts:928"
         },
         {
           "name": "ServerModSource",
           "description": "",
           "declaration": "export type ServerModSource = \"modrinth\" | \"curseforge\";",
-          "source": "packages/contracts/src/index.ts:830"
+          "source": "packages/contracts/src/index.ts:837"
         },
         {
           "name": "ServerModSourceSaveRequest",
@@ -2238,7 +2255,7 @@
           "name": "ServerModVersion",
           "description": "详情页中的单个可下载版本；Host 只投影列表展示所需字段。",
           "declaration": "/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */\nexport interface ServerModVersion {\n  id: string;\n  gameVersions: readonly string[];\n  loaders: readonly string[];\n  fileName: string;\n  downloads: number;\n  datePublished: string;\n}",
-          "source": "packages/contracts/src/index.ts:929"
+          "source": "packages/contracts/src/index.ts:936"
         }
       ]
     },
@@ -2371,37 +2388,37 @@
           "name": "ServerConsoleLine",
           "description": "进程输出按实例递增编号，Renderer 可用编号补拉事件订阅前后的缺口。",
           "declaration": "/** 进程输出按实例递增编号，Renderer 可用编号补拉事件订阅前后的缺口。 */\nexport interface ServerConsoleLine {\n  sequence: number;\n  instanceId: string;\n  stream: ServerConsoleStream;\n  text: string;\n  timestamp: string;\n}",
-          "source": "packages/contracts/src/index.ts:1397"
+          "source": "packages/contracts/src/index.ts:1404"
         },
         {
           "name": "ServerConsoleStream",
           "description": "",
           "declaration": "export type ServerConsoleStream = \"stdout\" | \"stderr\" | \"input\" | \"system\";",
-          "source": "packages/contracts/src/index.ts:1377"
+          "source": "packages/contracts/src/index.ts:1384"
         },
         {
           "name": "ServerInstanceStartupSettings",
           "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
           "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
-          "source": "packages/contracts/src/index.ts:1128"
+          "source": "packages/contracts/src/index.ts:1135"
         },
         {
           "name": "ServerLaunchCommandPreview",
           "description": "启动组件根据当前 Java 选择和核心策略生成的等价命令行。",
           "declaration": "/** 启动组件根据当前 Java 选择和核心策略生成的等价命令行。 */\nexport interface ServerLaunchCommandPreview {\n  instanceId: string;\n  command: string;\n}",
-          "source": "packages/contracts/src/index.ts:1380"
+          "source": "packages/contracts/src/index.ts:1387"
         },
         {
           "name": "ServerProcessState",
           "description": "",
           "declaration": "export type ServerProcessState = \"stopped\" | \"starting\" | \"running\" | \"stopping\" | \"failed\";",
-          "source": "packages/contracts/src/index.ts:1376"
+          "source": "packages/contracts/src/index.ts:1383"
         },
         {
           "name": "ServerRuntimeSnapshot",
           "description": "单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。",
           "declaration": "/** 单个服务器进程的可序列化状态；不暴露 ChildProcess 或宿主句柄。 */\nexport interface ServerRuntimeSnapshot {\n  instanceId: string;\n  state: ServerProcessState;\n  pid?: number;\n  startedAt?: string;\n  stoppedAt?: string;\n  exitCode?: number;\n  error?: string;\n}",
-          "source": "packages/contracts/src/index.ts:1386"
+          "source": "packages/contracts/src/index.ts:1393"
         }
       ]
     },
@@ -2479,13 +2496,13 @@
           "name": "ServerSettingsSnapshot",
           "description": "可持久化并跨 Host/Client 边界传输的服务器设置快照。",
           "declaration": "/** 可持久化并跨 Host/Client 边界传输的服务器设置快照。 */\nexport interface ServerSettingsSnapshot extends ServerStartupDefaultsUpdate {\n  resourceDownloadDirectory: string;\n  defaultDownloadConnections: number;\n}",
-          "source": "packages/contracts/src/index.ts:1604"
+          "source": "packages/contracts/src/index.ts:1611"
         },
         {
           "name": "ServerStartupDefaultsUpdate",
           "description": "一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。",
           "declaration": "/** 一次性提交相互依赖的启动默认值，避免最小内存与最大内存出现中间非法状态。 */\nexport interface ServerStartupDefaultsUpdate {\n  defaultMinimumMemoryMiB: number;\n  defaultMaximumMemoryMiB: number;\n  defaultServerPort: number;\n  autoAcceptEula: boolean;\n  defaultJvmArguments: string;\n}",
-          "source": "packages/contracts/src/index.ts:1595"
+          "source": "packages/contracts/src/index.ts:1602"
         }
       ]
     }

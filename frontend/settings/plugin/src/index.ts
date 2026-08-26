@@ -13,7 +13,7 @@ export const pluginSettingsUiManifest: PluginManifest = {
       targets: ["desktop"],
       activationScopes: ["global"],
       uses: {
-        [pluginManagementContract]: ["list", "setEnabled"],
+        [pluginManagementContract]: ["list", "setEnabled", "uninstall"],
       },
       permissions: [pluginManagementContract],
     },

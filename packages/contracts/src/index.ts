@@ -694,6 +694,13 @@ export interface PluginManagementService {
    * @returns Runtime 收敛后的插件快照。
    */
   setEnabled(pluginId: string, enabled: boolean): Promise<PluginManagementSnapshot>;
+  /**
+   * 停止并删除正式安装插件的全部版本、自动 Binding 和摘要信任记录。
+   *
+   * @param pluginId 目标插件的 Manifest ID；开发会话加载的临时插件不允许删除。
+   * @returns 删除和 Runtime 收敛完成后返回。
+   */
+  uninstall(pluginId: string): Promise<void>;
 }
 
 /** 读取普通插件运行状态的稳定诊断投影。 */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BootstrapLoader } from "../packages/bootstrap-runtime/src/index.ts";
@@ -487,6 +487,97 @@ await test("package installation enables every Entry without activating incompat
       kernel.clientEntrySnapshot().entries.map(({ runtimeId }) => runtimeId),
       ["plugin:example.install-auto-enable:client"],
     );
+  } finally {
+    await kernel?.dispose();
+    await loader.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("uninstall removes every installed version after runtimes converge", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-uninstall-"));
+  const sourceRoot = join(directory, "source");
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
+  let kernel: PluginKernel | undefined;
+  try {
+    await mkdir(join(sourceRoot, "dist"), { recursive: true });
+    await loader.start([
+      createPluginFoundationBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    kernel = await PluginKernel.create({
+      dataRoot: directory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+      root,
+      store: root["plugin-foundation"].store,
+      pluginStorage: root["plugin-foundation"].storage,
+    });
+
+    const pluginId = "example.uninstall";
+    const manifest = (version: string): PluginPackageManifest => ({
+      id: pluginId,
+      version,
+      publisher: "example",
+      entries: [
+        {
+          id: "client",
+          runtime: "client",
+          module: "./dist/client.js",
+          targets: ["desktop"],
+          uses: {},
+        },
+      ],
+      compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+    });
+    const install = async (version: string): Promise<PluginPackageRecord> => {
+      await writeFile(
+        join(sourceRoot, "plugin.json"),
+        `${JSON.stringify(manifest(version), null, 2)}\n`,
+      );
+      await writeFile(
+        join(sourceRoot, "dist", "client.js"),
+        `export const version = "${version}";\n`,
+      );
+      const prepared = await kernel!.prepareDirectory(sourceRoot);
+      try {
+        const record = await prepared.commit({
+          digest: prepared.digest,
+          acknowledgeFullMachineAccess: true,
+        });
+        await kernel!.selectPackageVersionAndEnable(record);
+        return record;
+      } finally {
+        await prepared.dispose();
+      }
+    };
+
+    const first = await install("1.0.0");
+    const second = await install("2.0.0");
+    assert.equal((await root["plugin-foundation"].store.listPackages(pluginId)).length, 2);
+    assert.equal(kernel.clientEntrySnapshot().entries[0]?.package.digest, second.digest);
+
+    await kernel.uninstallThirdPartyPlugin(pluginId);
+
+    assert.deepEqual(await kernel.listThirdPartyPlugins(), []);
+    assert.deepEqual(await root["plugin-foundation"].store.listPackages(pluginId), []);
+    assert.deepEqual(await root["plugin-foundation"].store.listBindings(pluginId), []);
+    assert.deepEqual(kernel.clientEntrySnapshot().entries, []);
+    await assert.rejects(stat(first.rootPath), { code: "ENOENT" });
+    await assert.rejects(stat(second.rootPath), { code: "ENOENT" });
   } finally {
     await kernel?.dispose();
     await loader.dispose();

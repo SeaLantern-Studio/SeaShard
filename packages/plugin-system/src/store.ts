@@ -112,7 +112,19 @@ export class PluginStore {
   async removePackage(pluginId: string, version: string, digest: string): Promise<void> {
     const current = await this.get("package.current-is", [pluginId, version, digest]);
     if (current) throw new Error(`cannot remove current plugin version: ${pluginId}@${version}`);
-    await this.run("package.delete", [pluginId, version, digest]);
+    const requests: DataCommandRequest[] = [
+      { command: "trust.delete", parameters: [pluginId, version, digest] },
+      { command: "package.delete", parameters: [pluginId, version, digest] },
+    ];
+    const results = await this.repository.transaction(requests);
+    if (results.length !== requests.length) {
+      throw new Error(
+        `database transaction returned ${results.length} results for ${requests.length} commands`,
+      );
+    }
+    for (const [index, result] of results.entries()) {
+      if (result.kind !== "run") throw unexpectedResult(requests[index]!.command, result);
+    }
   }
   /**
    * 在一个写事务内替换当前包选择及其自动 Binding 集合。

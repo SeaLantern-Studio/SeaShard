@@ -33,6 +33,9 @@ export function createPluginManagementModule(kernel: PluginKernel): PluginModule
             pluginId as string,
             enabled as boolean,
           )) as unknown as JsonValue,
+        uninstall: async (pluginId) => {
+          await kernel.uninstallThirdPartyPlugin(pluginId as string);
+        },
       });
     },
   };

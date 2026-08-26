@@ -385,6 +385,49 @@ export class PluginKernel {
     return await this.requireThirdPartyPlugin(pluginId);
   }
 
+  /**
+   * 卸载当前正式插件时先原子清除选择和全部自动 Binding，再等待 Runtime 停止，
+   * 最后撤销该插件所有已安装版本的信任记录并删除不可变包目录。
+   */
+  async uninstallThirdPartyPlugin(pluginId: string): Promise<void> {
+    if (typeof pluginId !== "string" || !pluginId) {
+      throw new TypeError("plugin ID must be a non-empty string");
+    }
+    if (this.registry.listDevelopmentPackages().some((record) => record.manifest.id === pluginId)) {
+      throw new Error(`development plugin cannot be uninstalled: ${pluginId}`);
+    }
+
+    const current = (await this.registry.listCurrentPackages()).find(
+      (record) => record.manifest.id === pluginId && record.source === "installed",
+    );
+    if (!current) throw new Error(`third-party plugin is not available: ${pluginId}`);
+    const installedRecords = (await this.registry.listPackages(pluginId)).filter(
+      (record) => record.source === "installed",
+    );
+    const prefix = automaticPluginBindingPrefix("plugin", pluginId);
+    const previousBindings = (await this.registry.listBindings(pluginId)).filter((binding) =>
+      binding.id.startsWith(prefix),
+    );
+
+    await this.registry.replacePackageSelectionAndBindings(pluginId, undefined, prefix, []);
+    try {
+      await this.reconcile();
+    } catch (error) {
+      await this.registry.replacePackageSelectionAndBindings(
+        pluginId,
+        current,
+        prefix,
+        previousBindings,
+      );
+      await this.reconcile();
+      throw error;
+    }
+
+    for (const record of installedRecords) {
+      await this.installer.uninstall(record.manifest.id, record.manifest.version, record.digest);
+    }
+  }
+
   clientEntrySnapshot(): ResolvedClientEntrySnapshot {
     return {
       revision: this.clientEntryRevision,
