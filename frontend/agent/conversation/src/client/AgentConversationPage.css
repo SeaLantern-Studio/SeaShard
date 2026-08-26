@@ -331,6 +331,78 @@
   color: var(--sl-text-tertiary);
 }
 
+.agent-context-usage {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  outline: none;
+  place-items: center;
+}
+
+.agent-context-usage svg {
+  width: 28px;
+  height: 28px;
+  overflow: visible;
+}
+
+.agent-context-track,
+.agent-context-progress {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.agent-context-track {
+  stroke: var(--sl-border-light);
+}
+
+.agent-context-progress {
+  stroke: var(--sl-primary);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition:
+    stroke-dashoffset 220ms ease,
+    stroke var(--sl-transition-fast);
+}
+
+.agent-context-usage.is-near-limit .agent-context-progress {
+  stroke: var(--sl-warning);
+}
+
+.agent-context-usage.is-full .agent-context-progress {
+  stroke: var(--sl-error);
+}
+
+.agent-context-usage::after {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 9px);
+  z-index: 24;
+  padding: 7px 9px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface);
+  color: var(--sl-text-secondary);
+  content: attr(data-tooltip);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition:
+    opacity var(--sl-transition-fast),
+    transform var(--sl-transition-fast);
+  white-space: nowrap;
+}
+
+.agent-context-usage:hover::after,
+.agent-context-usage:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .agent-popup-anchor {
   position: relative;
 }
@@ -429,5 +501,10 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-thinking span {
     animation: none;
+  }
+
+  .agent-context-progress,
+  .agent-context-usage::after {
+    transition: none;
   }
 }

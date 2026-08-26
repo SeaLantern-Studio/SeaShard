@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import {
+  agentModelMaximumContextTokensLimit,
+  agentModelMaximumReasoningLevels,
+  defaultAgentModelMaximumContextTokens,
+  defaultAgentModelReasoningLevels,
   type AgentModelConfigurationClientService,
   type AgentModelConfigurationSnapshot,
   type AgentModelConnectionConfig,
   type AgentModelConnectionModel,
   type AgentModelConnectionMutation,
+  type AgentModelSettings,
 } from "@seashard/contracts";
 import type { JsonObject, JsonValue } from "@seashard/plugin-sdk";
 import {
@@ -18,6 +23,7 @@ import {
 import {
   AlertTriangle,
   Bot,
+  ChevronDown,
   FileCode2,
   KeyRound,
   Pencil,
@@ -38,6 +44,9 @@ interface ModelEditorRow {
   readonly key: number;
   displayName: string;
   id: string;
+  maximumContextTokens: string;
+  reasoningLevelsText: string;
+  settingsOpen: boolean;
 }
 
 const toast = useToast();
@@ -168,6 +177,13 @@ function createModelRow(model?: AgentModelConnectionModel): ModelEditorRow {
     key: modelRowSequence,
     displayName: model?.displayName ?? "",
     id: model?.id ?? "",
+    maximumContextTokens: String(
+      model?.settings?.maximumContextTokens ?? defaultAgentModelMaximumContextTokens,
+    ),
+    reasoningLevelsText: (
+      model?.settings?.reasoningLevels ?? defaultAgentModelReasoningLevels
+    ).join(", "),
+    settingsOpen: false,
   };
 }
 
@@ -187,10 +203,14 @@ function removeModelRow(key: number): void {
 
 function updateModelRow(
   row: ModelEditorRow,
-  field: "displayName" | "id",
+  field: "displayName" | "id" | "maximumContextTokens" | "reasoningLevelsText",
   value: string | number,
 ): void {
   row[field] = String(value);
+}
+
+function toggleModelSettings(row: ModelEditorRow): void {
+  row.settingsOpen = !row.settingsOpen;
 }
 
 function updateTextarea(event: Event): void {
@@ -231,12 +251,47 @@ function parseModels(): AgentModelConnectionModel[] {
     if (!id) throw new Error(`第 ${index + 1} 个模型缺少模型 ID`);
     if (seen.has(id)) throw new Error(`模型 ID 重复：${id}`);
     seen.add(id);
-    models.push({ id, ...(modelDisplayName ? { displayName: modelDisplayName } : {}) });
+    models.push({
+      id,
+      ...(modelDisplayName ? { displayName: modelDisplayName } : {}),
+      settings: parseModelSettings(row, index),
+    });
   }
   if (!models.length && !selectedProviderType.value?.catalog?.length) {
     throw new Error("至少添加一个模型，或先从供应商发现模型");
   }
   return models;
+}
+
+/** 设置页用可读的逗号列表编辑档位，保存时收敛为稳定、去重的字符串数组。 */
+function parseModelSettings(row: ModelEditorRow, index: number): AgentModelSettings {
+  const maximumContextTokens = Number(row.maximumContextTokens.trim());
+  if (
+    !Number.isSafeInteger(maximumContextTokens) ||
+    maximumContextTokens <= 0 ||
+    maximumContextTokens > agentModelMaximumContextTokensLimit
+  ) {
+    throw new Error(
+      `第 ${index + 1} 个模型的最大上下文必须是 1 到 ${agentModelMaximumContextTokensLimit} 的整数`,
+    );
+  }
+  const reasoningLevels = row.reasoningLevelsText
+    .split(/[,，\n]/u)
+    .map((level) => level.trim())
+    .filter(Boolean);
+  if (reasoningLevels.length === 0 || reasoningLevels.length > agentModelMaximumReasoningLevels) {
+    throw new Error(
+      `第 ${index + 1} 个模型必须配置 1 到 ${agentModelMaximumReasoningLevels} 个推理档位`,
+    );
+  }
+  const uniqueLevels = [...new Set(reasoningLevels)];
+  if (uniqueLevels.length !== reasoningLevels.length) {
+    throw new Error(`第 ${index + 1} 个模型包含重复的推理档位`);
+  }
+  if (uniqueLevels.some((level) => level.length > 64)) {
+    throw new Error(`第 ${index + 1} 个模型的推理档位名称不能超过 64 个字符`);
+  }
+  return { maximumContextTokens, reasoningLevels: uniqueLevels };
 }
 
 function normalizedConnectionId(): string {
@@ -686,32 +741,85 @@ function errorMessage(error: unknown): string {
               <span>模型 ID</span>
               <span></span>
             </div>
-            <div v-for="row in modelRows" :key="row.key" class="model-editor-row">
-              <Cmz_Input
-                :model-value="row.displayName"
-                :disabled="saving || discovering"
-                placeholder="例如 GPT 5.6 Luna"
-                aria-label="模型名称"
-                @update:model-value="updateModelRow(row, 'displayName', $event)"
-              />
-              <Cmz_Input
-                :model-value="row.id"
-                :disabled="saving || discovering"
-                placeholder="例如 gpt-5.6-luna"
-                aria-label="模型 ID"
-                :spellcheck="false"
-                @update:model-value="updateModelRow(row, 'id', $event)"
-              />
+            <div v-for="row in modelRows" :key="row.key" class="model-editor-item">
+              <div class="model-editor-row">
+                <Cmz_Input
+                  :model-value="row.displayName"
+                  :disabled="saving || discovering"
+                  placeholder="例如 GPT 5.6 Luna"
+                  aria-label="模型名称"
+                  @update:model-value="updateModelRow(row, 'displayName', $event)"
+                />
+                <Cmz_Input
+                  :model-value="row.id"
+                  :disabled="saving || discovering"
+                  placeholder="例如 gpt-5.6-luna"
+                  aria-label="模型 ID"
+                  :spellcheck="false"
+                  @update:model-value="updateModelRow(row, 'id', $event)"
+                />
+                <button
+                  type="button"
+                  class="provider-icon-button is-danger"
+                  title="删除模型"
+                  aria-label="删除模型"
+                  :disabled="saving || discovering"
+                  @click="removeModelRow(row.key)"
+                >
+                  <Trash2 :size="17" :stroke-width="1.8" />
+                </button>
+              </div>
+
               <button
                 type="button"
-                class="provider-icon-button is-danger"
-                title="删除模型"
-                aria-label="删除模型"
+                class="model-settings-toggle"
+                :aria-expanded="row.settingsOpen"
+                :aria-controls="`model-settings-${row.key}`"
                 :disabled="saving || discovering"
-                @click="removeModelRow(row.key)"
+                @click="toggleModelSettings(row)"
               >
-                <Trash2 :size="17" :stroke-width="1.8" />
+                <ChevronDown
+                  :size="14"
+                  :stroke-width="1.8"
+                  :class="{ 'is-open': row.settingsOpen }"
+                />
+                <span>模型设置</span>
               </button>
+
+              <div
+                v-if="row.settingsOpen"
+                :id="`model-settings-${row.key}`"
+                class="model-settings-panel"
+              >
+                <div class="model-settings-headings" aria-hidden="true">
+                  <span>设置项名</span>
+                  <span>设置值</span>
+                </div>
+                <label class="model-setting-row">
+                  <span>最大上下文</span>
+                  <Cmz_Input
+                    type="number"
+                    :model-value="row.maximumContextTokens"
+                    :disabled="saving || discovering"
+                    :min="1"
+                    :max="agentModelMaximumContextTokensLimit"
+                    :step="1000"
+                    aria-label="最大上下文 Token"
+                    @update:model-value="updateModelRow(row, 'maximumContextTokens', $event)"
+                  />
+                </label>
+                <label class="model-setting-row">
+                  <span>推理程度</span>
+                  <Cmz_Input
+                    :model-value="row.reasoningLevelsText"
+                    :disabled="saving || discovering"
+                    placeholder="low, medium, high, xhigh, max, ultra"
+                    aria-label="推理程度档位"
+                    :spellcheck="false"
+                    @update:model-value="updateModelRow(row, 'reasoningLevelsText', $event)"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </div>

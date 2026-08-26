@@ -404,6 +404,71 @@
   align-items: center;
 }
 
+.model-editor-item {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.model-settings-toggle {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  color: var(--sl-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 620;
+  transition:
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+}
+
+.model-settings-toggle:hover {
+  background: var(--sl-bg-secondary);
+  color: var(--sl-text-primary);
+}
+
+.model-settings-toggle:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.model-settings-toggle svg {
+  transition: transform var(--sl-transition-fast);
+}
+
+.model-settings-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
+.model-settings-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 4px 19px;
+  border-left: 1px solid var(--sl-border-light);
+}
+
+.model-settings-headings,
+.model-setting-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.32fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.model-settings-headings span,
+.model-setting-row > span {
+  color: var(--sl-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.model-setting-row .cmz-input-container {
+  min-height: 36px;
+}
+
 .provider-field .cmz-input-container,
 .provider-field .cmz-select-trigger {
   min-height: 38px;
@@ -519,6 +584,9 @@
   .provider-icon-button,
   .agent-modal-close,
   .provider-empty {
+    transition: none;
+  }
+  .model-settings-toggle svg {
     transition: none;
   }
 }

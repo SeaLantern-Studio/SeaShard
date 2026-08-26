@@ -166,6 +166,24 @@ export const agentModelConfigurationContract =
   defineServiceContract<AgentModelConfigurationService>("seashard.agent-model-configuration");
 /** 模型配置最后有效 Snapshot 变化事件。 */
 export const agentModelConfigurationChangedEvent = "seashard.agent-model-configuration.changed";
+/** 未显式配置模型能力时，设置页与对话页共同使用的保守默认值。 */
+export const agentModelMaximumContextTokensLimit = 100_000_000;
+export const agentModelMaximumReasoningLevels = 32;
+export const defaultAgentModelMaximumContextTokens = 128_000;
+export const defaultAgentModelReasoningLevels = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const;
+
+/** 每个模型独立保存的能力元数据；不直接混入供应商协议参数。 */
+export interface AgentModelSettings {
+  readonly maximumContextTokens: number;
+  readonly reasoningLevels: readonly string[];
+}
 
 export interface AgentModelSelection {
   readonly connectionId: string;
@@ -174,12 +192,14 @@ export interface AgentModelSelection {
 
 export interface AgentConfiguredModel extends AgentModelSelection {
   readonly name: string;
+  readonly settings?: AgentModelSettings;
 }
 
 export interface AgentModelConnectionModel {
   readonly id: string;
   readonly displayName?: string;
   readonly providerOptions?: JsonObject;
+  readonly settings?: AgentModelSettings;
 }
 
 /** Renderer 可读取的连接投影不包含凭据正文。 */
@@ -407,6 +427,8 @@ export interface AgentSessionSummary {
 export interface AgentSessionSnapshot extends AgentSessionSummary {
   readonly messages: readonly AgentMessageSnapshot[];
   readonly toolCalls: readonly AgentToolCallSnapshot[];
+  /** 最近一次成功取得供应商用量的 Invocation 所占上下文 Token。 */
+  readonly contextTokens?: number;
 }
 
 export interface AgentInvocationSummary {
@@ -417,6 +439,8 @@ export interface AgentInvocationSummary {
   readonly startedAt: string;
   readonly finishedAt?: string;
   readonly error?: string;
+  /** 当前 Invocation 最后一个模型 Step 完成后的上下文 Token。 */
+  readonly contextTokens?: number;
 }
 
 export interface AgentInvocationSnapshot extends AgentInvocationSummary {

@@ -16,7 +16,10 @@ import {
   bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
-import { interleaveAgentInvocationContent } from "../packages/contracts/src/index.ts";
+import {
+  defaultAgentModelReasoningLevels,
+  interleaveAgentInvocationContent,
+} from "../packages/contracts/src/index.ts";
 import { registerServerInstanceAgentResources } from "../components/server/instance-manager/src/index.ts";
 import {
   AgentProviderTypeRegistry,
@@ -81,6 +84,14 @@ await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置",
     providerTypes: createProviderTypes(),
     environment: {},
   });
+  assert.deepEqual(defaultAgentModelReasoningLevels, [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+  ]);
   await catalog.initialize();
   const initial = await readFile(catalog.configPath, "utf8");
   assert.match(initial, /providers: \{\}/);
@@ -251,9 +262,26 @@ await test("模型连接修改保留未触及 YAML 节点并拒绝旧 revision",
     operations: [
       { op: "set", path: ["displayName"], value: "Local Gateway" },
       { op: "set", path: ["settings", "baseURL"], value: "http://127.0.0.1:11435/v1" },
+      {
+        op: "set",
+        path: ["models"],
+        value: [
+          {
+            id: "model-a",
+            settings: {
+              maximumContextTokens: 256_000,
+              reasoningLevels: ["brief", "deep", "beyond"],
+            },
+          },
+        ],
+      },
     ],
   });
   assert.notEqual(after.revision, before.revision);
+  assert.deepEqual(after.models[0]?.settings, {
+    maximumContextTokens: 256_000,
+    reasoningLevels: ["brief", "deep", "beyond"],
+  });
   const source = await readFile(catalog.configPath, "utf8");
   assert.match(source, /# 保留这条人工注释/u);
   assert.match(source, /futureRoot: true/u);
@@ -805,6 +833,7 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
     mode: "agent",
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.contextTokens, 2);
   assert.deepEqual(invocation.toolCalls[0]?.presentation, {
     title: "读取local://",
     resultPayload: [{ value: "0", unit: "个结果" }],
@@ -830,7 +859,9 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
       fileInvocation.toolCalls[0].output.includes("[Lines 500-510]"),
     true,
   );
-  assert.equal((await runtime.getSession(reference.sessionId)).toolCalls.length, 2);
+  const persistedSession = await runtime.getSession(reference.sessionId);
+  assert.equal(persistedSession.toolCalls.length, 2);
+  assert.equal(persistedSession.contextTokens, 2);
 });
 
 await test("Agent help:// 从冻结 Registry 快照生成工具与资源说明", async (context) => {

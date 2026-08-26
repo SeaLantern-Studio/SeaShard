@@ -495,6 +495,7 @@ export class AgentRuntime {
         }
         if (part.type === "error") throw part.error;
       }
+      const contextTokens = calculateDragonHTDevContextTokens((await result.finalStep).usage);
 
       if (invocation.controller.signal.aborted) {
         await this.finishOpenToolCalls(invocation, "cancelled", "调用已取消");
@@ -509,7 +510,7 @@ export class AgentRuntime {
           content: text,
         });
       }
-      await this.finishInvocation(invocation, "completed", text);
+      await this.finishInvocation(invocation, "completed", text, undefined, contextTokens);
     } catch (error) {
       const cancelled = invocation.controller.signal.aborted || isAbortError(error);
       const message = cancelled ? "调用已取消" : errorMessage(error);
@@ -624,6 +625,7 @@ export class AgentRuntime {
     state: Exclude<AgentInvocationState, "running">,
     text: string,
     error?: string,
+    contextTokens?: number,
   ): Promise<void> {
     const finishedAt = new Date().toISOString();
     await this.journal.appendInvocation(invocation.snapshot.sessionId, {
@@ -632,6 +634,7 @@ export class AgentRuntime {
       model: invocation.snapshot.model,
       text,
       ...(error ? { error } : {}),
+      ...(contextTokens === undefined ? {} : { contextTokens }),
     });
     invocation.snapshot = {
       ...invocation.snapshot,
@@ -639,6 +642,7 @@ export class AgentRuntime {
       text,
       finishedAt,
       ...(error ? { error } : {}),
+      ...(contextTokens === undefined ? {} : { contextTokens }),
     };
     this.invocations.set(invocation.snapshot.id, invocation.snapshot);
   }
@@ -673,6 +677,7 @@ function projectInvocation(
     toolCalls: session.toolCalls.filter((call) => call.invocationId === invocationId),
     ...(last.state === "running" ? {} : { finishedAt: last.timestamp }),
     ...(last.error ? { error: last.error } : {}),
+    ...(last.contextTokens === undefined ? {} : { contextTokens: last.contextTokens }),
   };
 }
 
@@ -980,6 +985,26 @@ function cloneInvocation(snapshot: AgentInvocationSnapshot): AgentInvocationSnap
       },
     })),
   };
+}
+
+/** 最后一个 Step 的输入已经包含此前消息和工具结果，再加本步输出即为当前上下文占用。 */
+function calculateDragonHTDevContextTokens(usage: {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+}): number | undefined {
+  const input = usage.inputTokens;
+  const output = usage.outputTokens;
+  if (
+    typeof input !== "number" ||
+    !Number.isSafeInteger(input) ||
+    input < 0 ||
+    typeof output !== "number" ||
+    !Number.isSafeInteger(output) ||
+    output < 0
+  ) {
+    return undefined;
+  }
+  return input + output;
 }
 
 function isAbortError(error: unknown): boolean {

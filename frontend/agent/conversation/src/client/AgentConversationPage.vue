@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import type {
-  AgentConfiguredModel,
-  AgentConversationMode,
-  AgentInvocationService,
-  AgentMessageSnapshot,
-  AgentModelConfigurationClientService,
-  AgentModelSelection,
-  AgentSessionService,
-  AgentSessionSnapshot,
-  AgentToolCallSnapshot,
+import {
+  defaultAgentModelMaximumContextTokens,
+  interleaveAgentInvocationContent,
+  type AgentConfiguredModel,
+  type AgentConversationMode,
+  type AgentInvocationService,
+  type AgentMessageSnapshot,
+  type AgentModelConfigurationClientService,
+  type AgentModelSelection,
+  type AgentSessionService,
+  type AgentSessionSnapshot,
+  type AgentToolCallSnapshot,
 } from "@seashard/contracts";
-import { interleaveAgentInvocationContent } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
 import { Cmz_Markdown, Cmz_Toast, useToast } from "cmzya-modern-ui";
 import {
@@ -60,6 +61,7 @@ const sending = ref(false);
 const cancelling = ref(false);
 const liveAssistantText = ref("");
 const liveToolCalls = shallowRef<readonly AgentToolCallSnapshot[]>([]);
+const liveContextTokens = ref<number>();
 const runningSessionId = ref<string>();
 const runningInvocationId = ref<string>();
 let conversationLoad = 0;
@@ -67,6 +69,8 @@ let invocationPoll = 0;
 let modelConfigurationLoad = 0;
 let modelCatalogInitialized = false;
 let disposeModelConfigurationChanged: (() => void) | undefined;
+const contextUsageCircumference = 2 * Math.PI * 10;
+const tokenCountFormatter = new Intl.NumberFormat("zh-CN");
 
 const activeConversationId = computed(() => props.workspace.activeConversationId.value);
 const messages = computed(() => session.value?.messages ?? []);
@@ -143,6 +147,28 @@ const selectedModelRecord = computed(() =>
   ),
 );
 const selectedModelLabel = computed(() => selectedModelRecord.value?.name ?? "未配置模型");
+const selectedModelMaximumContextTokens = computed(
+  () =>
+    selectedModelRecord.value?.settings?.maximumContextTokens ??
+    defaultAgentModelMaximumContextTokens,
+);
+const contextTokensUsed = computed(
+  () => liveContextTokens.value ?? session.value?.contextTokens ?? 0,
+);
+const contextUsagePercentage = computed(() => {
+  const maximum = selectedModelMaximumContextTokens.value;
+  if (maximum <= 0) return 0;
+  return Math.min(100, Math.max(0, (contextTokensUsed.value / maximum) * 100));
+});
+const contextUsageStrokeOffset = computed(
+  () => contextUsageCircumference * (1 - contextUsagePercentage.value / 100),
+);
+const contextUsageTooltip = computed(
+  () =>
+    `上下文 ${formatDragonHTDevContextPercentage(contextUsagePercentage.value)}% · 已用 ${tokenCountFormatter.format(
+      contextTokensUsed.value,
+    )} / ${tokenCountFormatter.format(selectedModelMaximumContextTokens.value)} Token`,
+);
 const selectedModeLabel = computed(() => (selectedMode.value === "agent" ? "Agent" : "Chat"));
 const canSend = computed(() =>
   Boolean(composer.value.trim() && selectedModelRecord.value && !sending.value),
@@ -173,6 +199,7 @@ watch(activeConversationId, (id) => {
   if (id !== runningSessionId.value) {
     liveAssistantText.value = "";
     liveToolCalls.value = [];
+    liveContextTokens.value = undefined;
   }
   void loadActiveConversation();
   void nextTick(() => textarea.value?.focus());
@@ -310,6 +337,7 @@ async function sendMessage(): Promise<void> {
     sending.value = false;
     cancelling.value = false;
     runningSessionId.value = undefined;
+    liveContextTokens.value = undefined;
     runningInvocationId.value = undefined;
     liveAssistantText.value = "";
     liveToolCalls.value = [];
@@ -324,6 +352,9 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
     if (activeConversationId.value === sessionId) {
       liveAssistantText.value = invocation.text;
       liveToolCalls.value = invocation.toolCalls;
+      if (invocation.contextTokens !== undefined) {
+        liveContextTokens.value = invocation.contextTokens;
+      }
     }
     if (invocation.state !== "running") {
       await props.workspace.refresh();
@@ -354,6 +385,11 @@ async function cancelActiveInvocation(): Promise<void> {
     cancelling.value = false;
     toast.error({ title: "停止响应失败", description: errorMessage(error) });
   }
+}
+
+function formatDragonHTDevContextPercentage(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function errorMessage(error: unknown): string {
@@ -534,6 +570,30 @@ function delay(milliseconds: number): Promise<void> {
                   />
                 </button>
               </div>
+            </div>
+
+            <div
+              class="agent-context-usage"
+              :class="{
+                'is-near-limit': contextUsagePercentage >= 90,
+                'is-full': contextUsagePercentage >= 100,
+              }"
+              :aria-label="contextUsageTooltip"
+              :data-tooltip="contextUsageTooltip"
+              role="img"
+              tabindex="0"
+            >
+              <svg viewBox="0 0 28 28" aria-hidden="true">
+                <circle class="agent-context-track" cx="14" cy="14" r="10" />
+                <circle
+                  class="agent-context-progress"
+                  cx="14"
+                  cy="14"
+                  r="10"
+                  :stroke-dasharray="contextUsageCircumference"
+                  :stroke-dashoffset="contextUsageStrokeOffset"
+                />
+              </svg>
             </div>
 
             <button

@@ -39,6 +39,7 @@ interface InvocationRecord {
   readonly model: AgentModelSelection;
   readonly text?: string;
   readonly error?: string;
+  readonly contextTokens?: number;
 }
 
 interface ToolCallRecord extends AgentToolCallSnapshot {
@@ -172,10 +173,12 @@ export class AgentSessionJournal {
 
   async snapshot(sessionId: string): Promise<AgentSessionSnapshot> {
     const session = await this.get(sessionId);
+    const contextTokens = findLatestDragonHTDevContextTokens(session.invocations);
     return {
       ...projectSummary(session),
       messages: session.messages,
       toolCalls: session.toolCalls,
+      ...(contextTokens === undefined ? {} : { contextTokens }),
     };
   }
 
@@ -355,6 +358,17 @@ function projectSummary(session: LoadedAgentSession): AgentSessionSummary {
   };
 }
 
+/** 失败或取消的末次调用没有可靠用量时，继续展示上一份供应商确认的上下文占用。 */
+function findLatestDragonHTDevContextTokens(
+  invocations: readonly InvocationRecord[],
+): number | undefined {
+  for (let index = invocations.length - 1; index >= 0; index -= 1) {
+    const contextTokens = invocations[index]?.contextTokens;
+    if (contextTokens !== undefined) return contextTokens;
+  }
+  return undefined;
+}
+
 function encodeTitleSlot(title: string, updatedAt: string): Buffer {
   const record = JSON.stringify({ type: "title", v: 1, title, updatedAt });
   const bytes = Buffer.from(record, "utf8");
@@ -428,6 +442,14 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
   if (typeof model.connectionId !== "string" || typeof model.modelId !== "string") {
     throw new Error(`Agent Invocation 模型记录损坏：${fileName}`);
   }
+  if (
+    record.contextTokens !== undefined &&
+    (typeof record.contextTokens !== "number" ||
+      !Number.isSafeInteger(record.contextTokens) ||
+      record.contextTokens < 0)
+  ) {
+    throw new Error(`Agent Invocation Token 记录损坏：${fileName}`);
+  }
   return {
     type: "invocation",
     id: record.id,
@@ -436,6 +458,7 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
     model: { connectionId: model.connectionId, modelId: model.modelId },
     ...(typeof record.text === "string" ? { text: record.text } : {}),
     ...(typeof record.error === "string" ? { error: record.error } : {}),
+    ...(record.contextTokens === undefined ? {} : { contextTokens: record.contextTokens }),
   };
 }
 

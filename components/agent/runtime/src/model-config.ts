@@ -1,11 +1,16 @@
+import {
+  agentModelMaximumContextTokensLimit,
+  agentModelMaximumReasoningLevels,
+} from "@seashard/contracts";
 import type {
   AgentConfiguredModel,
   AgentModelConfigurationSnapshot,
   AgentModelConnectionConfig,
   AgentModelConnectionModel,
   AgentModelConnectionMutation,
-  AgentProviderTypeDescriptor,
   AgentModelSelection,
+  AgentModelSettings,
+  AgentProviderTypeDescriptor,
 } from "@seashard/contracts";
 import type { AgentProviderCatalogModel, JsonObject, JsonValue } from "@seashard/plugin-sdk";
 import { createProviderRegistry, type LanguageModel } from "ai";
@@ -100,6 +105,9 @@ const emptyModelsTemplate = `# SeaShard Agent 模型供应商配置。
 #     models:
 #       - id: company-coder
 #         displayName: Company Coder
+#         settings:
+#           maximumContextTokens: 128000
+#           reasoningLevels: [low, medium, high, xhigh, max, ultra]
 providers: {}
 `;
 
@@ -107,6 +115,7 @@ const connectionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
 const maximumConfigBytes = 1024 * 1024;
 const writerLockStaleMs = 30_000;
+const maximumReasoningLevelLength = 64;
 
 export class AgentModelConfigurationConflictError extends Error {
   readonly code = "AGENT_MODEL_CONFIGURATION_CONFLICT";
@@ -522,6 +531,7 @@ export class AgentModelCatalog {
           connectionId: connection.id,
           modelId: configured.id,
           name: configured.displayName ?? configured.id,
+          ...(configured.settings ? { settings: structuredClone(configured.settings) } : {}),
           providerType: connection.providerType,
           ...(configured.providerOptions
             ? {
@@ -714,8 +724,66 @@ function parseConnectionModels(
               `${path}.providerOptions`,
             ),
           }),
+      ...(object.settings === undefined
+        ? {}
+        : {
+            settings: parseDragonHTDevModelSettings(
+              object.settings,
+              configPath,
+              `${path}.settings`,
+            ),
+          }),
     };
   });
+}
+
+/** 模型能力配置保持供应商无关；协议专用参数继续只进入 providerOptions。 */
+function parseDragonHTDevModelSettings(
+  value: unknown,
+  configPath: string,
+  path: string,
+): AgentModelSettings {
+  const object = requireObject(value, configPath, path);
+  const maximumContextTokens = object.maximumContextTokens;
+  if (
+    typeof maximumContextTokens !== "number" ||
+    !Number.isSafeInteger(maximumContextTokens) ||
+    maximumContextTokens <= 0 ||
+    maximumContextTokens > agentModelMaximumContextTokensLimit
+  ) {
+    throw configError(
+      configPath,
+      `${path}.maximumContextTokens 必须是 1 到 ${agentModelMaximumContextTokensLimit} 的整数`,
+    );
+  }
+  if (!Array.isArray(object.reasoningLevels)) {
+    throw configError(configPath, `${path}.reasoningLevels 必须是数组`);
+  }
+  if (
+    object.reasoningLevels.length === 0 ||
+    object.reasoningLevels.length > agentModelMaximumReasoningLevels
+  ) {
+    throw configError(
+      configPath,
+      `${path}.reasoningLevels 必须包含 1 到 ${agentModelMaximumReasoningLevels} 个档位`,
+    );
+  }
+  const seen = new Set<string>();
+  const reasoningLevels = object.reasoningLevels.map((level, index) => {
+    const normalized = requireString(level, configPath, `${path}.reasoningLevels[${index}]`);
+    if (normalized.length > maximumReasoningLevelLength) {
+      throw configError(
+        configPath,
+        `${path}.reasoningLevels[${index}] 不能超过 ${maximumReasoningLevelLength} 个字符`,
+      );
+    }
+    if (seen.has(normalized)) {
+      throw configError(configPath, `${path}.reasoningLevels 包含重复档位：${normalized}`);
+    }
+    seen.add(normalized);
+    return normalized;
+  });
+  return { maximumContextTokens, reasoningLevels };
 }
 
 function resolveConnectionModels(
