@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm run verify:service-catalog && vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts && vite build --config apps/plugin-host/vite.config.ts && vite build --config apps/database-worker/vite.config.ts && pnpm run build:cli",
+    "build": "pnpm run build:sdk && pnpm run verify:service-catalog && vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts && vite build --config apps/plugin-host/vite.config.ts && vite build --config apps/database-worker/vite.config.ts && pnpm run build:cli",
     "build:cli": "vite build --config apps/cli/vite.config.ts",
     "build:sdk": "pnpm --filter @seashard/plugin-sdk run build && pnpm --filter @seashard/contracts run build && pnpm --filter @seashard/ui-sdk run build",
     "dev": "node scripts/dev.mjs",
