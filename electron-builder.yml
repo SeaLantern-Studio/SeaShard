@@ -18,7 +18,6 @@ extraMetadata:
 win:
   target:
     - nsis
-  artifactName: SeaShard-${version}-windows-${arch}.${ext}
 nsis:
   oneClick: false
   perMachine: false
@@ -26,12 +25,10 @@ nsis:
 mac:
   target:
     - dmg
-  artifactName: SeaShard-${version}-macos-${arch}.${ext}
   category: public.app-category.utilities
   sign: null
 linux:
   target:
     - AppImage
     - deb
-  artifactName: SeaShard-${version}-linux-${arch}.${ext}
   category: Utility

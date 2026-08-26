@@ -2,6 +2,11 @@
   "name": "seashard",
   "version": "0.0.0",
   "private": true,
+  "description": "SeaShard 模块化 Minecraft 服务器桌面管理器",
+  "author": {
+    "name": "SeaLantern Studio",
+    "email": "SeaLantern-Studio@users.noreply.github.com"
+  },
   "type": "module",
   "scripts": {
     "build": "pnpm run build:sdk && pnpm run verify:service-catalog && vp build && vite build --config apps/desktop/vite.main.config.ts && vite build --config apps/desktop/vite.preload.config.ts && vite build --config apps/plugin-host/vite.config.ts && vite build --config apps/database-worker/vite.config.ts && pnpm run build:cli",
@@ -36,5 +41,6 @@
   "engines": {
     "node": ">=24.11.0"
   },
-  "packageManager": "pnpm@10.13.1"
+  "packageManager": "pnpm@10.13.1",
+  "desktopName": "SeaShard"
 }
