@@ -78,6 +78,13 @@ export interface ClientUiChainSlotRegistration extends ClientUiSlotRegistrationB
   readonly order?: never;
 }
 
+export type NavigationPagePlacement =
+  | "main"
+  | "settings"
+  | "agent-settings"
+  | "server"
+  | "server-download";
+
 /** 一个功能入口注册到导航页面 Slot 时携带的 Shell 元数据。 */
 export interface NavigationPageSlotRegistration extends ClientUiListSlotRegistration {
   readonly name: "navigation.page";
@@ -86,7 +93,7 @@ export interface NavigationPageSlotRegistration extends ClientUiListSlotRegistra
   readonly description?: string;
   readonly icon?: Component;
   readonly navigation?: boolean;
-  readonly placement?: "main" | "settings" | "agent-settings" | "server-download";
+  readonly placement?: NavigationPagePlacement;
   readonly settingsGroup?: SettingsNavigationGroup;
 }
 
@@ -137,10 +144,19 @@ export interface ClientUiSlots {
   inject(name: string, setup: () => Disposable | void): Disposable;
 }
 
+/** Desktop 当前服务器选择的只读视图；跨独立 Vue bundle 通过值与回调同步。 */
+export interface ClientServerSelection {
+  /** 同步读取当前选择；尚未选择或实例已经离开列表时返回 undefined。 */
+  getCurrentInstanceId(): string | undefined;
+  /** 立即投递当前值并继续订阅变化；返回的 disposer 自动归属于当前 Client Entry。 */
+  subscribe(listener: (instanceId: string | undefined) => void): Disposable;
+}
+
 /** Renderer 本地 Entry Context；不暴露 Main Context、Node 或 Electron 对象。 */
 export interface ClientUiContext {
   readonly entry: ClientEntryDescriptor;
   readonly slots: ClientUiSlots;
+  readonly serverSelection: ClientServerSelection;
   service<T extends object>(contract: string): T;
   effect(setup: () => Disposable | void, label?: string): Disposable;
 }

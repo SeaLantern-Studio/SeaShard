@@ -268,7 +268,17 @@ seashard plugin logs [runtime-id]
 
 `seashard plugin build` 适合开发根目录与分发根目录相同、且构建依赖位于其父级的特殊项目。普通独立项目把 `node_modules` 放在插件包根目录后，会被校验器视为包内容，因此不推荐这种布局。
 
-### 4.2 查看 Runtime 生命周期
+### 4.2 在软件内管理插件
+
+`plugin dev` 启动的 Desktop 会把当前目录显示在“软件设置 → 插件设置”中，并标记为“临时加载”。这里可以查看插件包、Host/Client Entry、Runtime ID、Service 权限、信任状态和 SHA-256 摘要。
+
+插件卡片上的开关控制整个插件包：
+
+- 已安装插件的状态会持久化，并在下次启动时恢复；
+- 开发插件的状态只属于当前 `plugin dev` 进程，目录重建和刷新会保留当前开关状态；
+- 开发进程退出后临时插件消失，下次执行 `plugin dev` 时重新以启用状态加载。
+
+### 4.3 查看 Runtime 生命周期
 
 保持 `plugin dev` 运行，在另一个终端执行：
 
@@ -296,7 +306,7 @@ seashard plugin logs dev:acme.greeter:greeter.host
 
 `plugin logs` 展示生命周期和失败原因。插件自己的标准输出与标准错误仍在 `plugin dev` 终端中。
 
-### 4.3 手动重载
+### 4.4 手动重载
 
 ```bash
 seashard plugin reload dev:acme.greeter:greeter.host
@@ -304,7 +314,7 @@ seashard plugin reload dev:acme.greeter:greeter.host
 
 省略 Runtime ID 时，命令会处理当前发现的全部插件开发会话。并行开发多个插件时应传入 Runtime ID。
 
-### 4.4 查询公开 Service
+### 4.5 查询公开 Service
 
 列出 Service Catalog：
 
@@ -645,7 +655,49 @@ Slot 支持四种调度语义：
 
 `register()` 返回幂等清理函数，同时自动归属于当前 Client Entry。插件停用、刷新、升级或 `apply()` 失败时，即使插件没有手动调用返回值，Runtime 也会撤销注册。
 
-### 7.3 扩展页面根区域
+### 7.3 服务器侧栏页面与当前实例
+
+第三方 Client Entry 使用 `placement: "server"` 把页面追加到服务器管理侧栏。页面路径必须位于 `/server/` 下，且不能占用 `/server/download`；同一 Entry 仍然只发布一个页面：
+
+```ts
+import { defineClientUiModule } from "@seashard/ui-sdk";
+import { defineComponent, h, ref } from "vue";
+
+export const apply = defineClientUiModule({
+  apply(context) {
+    const selectedInstanceId = ref(context.serverSelection.getCurrentInstanceId());
+    context.serverSelection.subscribe((instanceId) => {
+      selectedInstanceId.value = instanceId;
+    });
+
+    const page = defineComponent({
+      name: "AcmeScheduledCommandsPage",
+      setup: () => () =>
+        h("main", [h("h1", "定时命令"), h("code", selectedInstanceId.value ?? "未选择服务器")]),
+    });
+
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "acme.scheduled-commands",
+        path: "/server/acme-scheduled-commands",
+        label: "定时命令",
+        placement: "server",
+        order: 100,
+      },
+      page,
+    );
+  },
+}).apply;
+```
+
+`context.serverSelection.getCurrentInstanceId()` 同步读取当前值。`subscribe()` 注册时立即投递当前值，后续在用户切换服务器时继续通知；返回的 disposer 自动归属于当前 Client Entry，也可以由插件提前调用。该通道是 Renderer 本地 UI 状态，不需要写入 Manifest `uses`，也不跨 IPC 传递 Vue Ref。
+
+当前值可能为 `undefined`，也可能在异步操作期间变化。它只表示 Desktop 当前选择，不承担实例存在性或操作授权；调用 Host Service 前应继续使用 `seashard.server-instance-manager.listForClient()` 等公开方法验证实例 ID。
+
+`placement: "server"` 只追加页面导航项。`workspace.sidebar` 仍表示接管整个工作区侧栏，不应拿它模拟追加菜单。
+
+### 7.4 扩展页面根区域
 
 页面显示期间，Runtime 会动态声明 `page.<page-id>.root`。扩展方必须通过 `inject()` 等待声明，不能假定目标页面已经加载：
 
@@ -710,7 +762,7 @@ interface PageRootExtensionProps {
 4. 同名 Slot 再次出现时重新执行 `setup`；
 5. 扩展插件先停用时，等待和已激活注册一起撤销。
 
-### 7.4 声明子 Slot
+### 7.5 声明子 Slot
 
 任意 Entry 可以通过 `children` 声明自己的扩展点：
 
@@ -1172,7 +1224,23 @@ Installer 会先把目录复制到私有暂存区，对复制结果重新计算�
 
 包选择和自动 Binding 替换在同一个数据库事务中提交。新版本激活失败时，Host 会恢复先前选择和自动 Binding。
 
-当前开发 CLI 提供验证、开发、重载、日志、打包和安装能力；停用与卸载尚未作为开发 CLI 命令开放。
+当前开发 CLI 提供验证、开发、重载、日志、打包和安装能力；“软件设置 → 插件设置”可以停用或重新启用已安装插件与当前开发进程加载的临时插件。卸载尚未作为开发 CLI 或界面操作开放。
+
+### 12.5 登记到官方插件市场
+
+插件市场只读取官方注册仓库发布的静态 Catalog，不搜索 GitHub Topic，也不从插件源码默认分支读取 Manifest。发布者完成以下步骤后，通过注册仓库 PR 登记：
+
+1. 使用 `seashard plugin pack ./bundle` 生成 `.seashard-plugin`；
+2. 在公开源码仓库创建 GitHub Release，并上传该归档；
+3. 计算 Release Asset 文件本身的 SHA-256；
+4. 在 [`SeaShard-Plugin-Registry`](https://github.com/SeaLantern-Studio/SeaShard-Plugin-Registry) 的 `registry/plugins/<plugin-id>.json` 中登记插件及发布版本；
+5. 提交 PR，并完成模板中的 CC0 1.0 Universal 注册数据贡献确认。
+
+Registry CI 会下载指定 Release Asset，校验归档 SHA-256、安全解包、解析包内 `plugin.json`，并计算 SeaShard `packageDigest`。登记的插件 ID、版本和发布包 Manifest 必须完全一致。CI 不执行插件入口，格式验证也不代表安全审核结论。
+
+注册记录合并后，CI 以 `catalog-<commit>` 标签创建不可变 Catalog Release。SeaShard 通过固定地址 `https://github.com/SeaLantern-Studio/SeaShard-Plugin-Registry/releases/latest/download/catalog-v1.json` 获取最新目录；该下载不调用 GitHub API。插件源码和 Release 制品继续遵循插件自己的许可证，CC0 只覆盖提交到注册仓库的注册数据和说明文字。
+
+后续版本继续追加到同一个注册文件。已经登记的版本、标签、Asset 文件名和归档摘要不可修改；存在安全问题时应将版本标记为 `yanked`，并发布更高版本。
 
 ## 13. 常见错误
 
@@ -1262,12 +1330,14 @@ seashard plugin dev ./bundle
 - [ ] 归档安装后功能正常；
 - [ ] 重启 SeaShard 后已安装版本仍可恢复；
 - [ ] 发布说明明确告知插件拥有完整机器访问能力。
+- [ ] 如需进入插件市场，已发布与 Manifest 版本一致的 `.seashard-plugin` GitHub Release Asset；
+- [ ] 如需进入插件市场，已计算归档 SHA-256，并向 `SeaShard-Plugin-Registry` 提交或更新注册文件；
 
 ## 15. 公开包与权威查询入口
 
 - [`@seashard/plugin-sdk`](../packages/plugin-sdk/README.md)：PluginContext、Manifest、存储、Agent 能力和 JSON 边界类型；
 - [`@seashard/contracts`](../packages/contracts/README.md)：SeaShard 公开 Service Contract 与数据类型；
-- [`@seashard/ui-sdk`](../packages/ui-sdk/README.md)：Client Entry、导航页面和工作区侧栏 Contribution；
+- [`@seashard/ui-sdk`](../packages/ui-sdk/README.md)：Client Entry、递归 UI Slot、Slot 条目与渲染器协议；
 - `seashard inspect services`：当前 CLI 附带的完整 Service Catalog；
 - `seashard inspect service <contract> --json`：单个 Contract 的机器可读定义。
 

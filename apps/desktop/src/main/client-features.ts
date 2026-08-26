@@ -1,9 +1,12 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
 import { agentSettingsProviderUiManifest } from "@seashard/agent-settings-provider-ui";
+import { pluginManagementUiRuntimeId } from "@seashard/contracts";
+import { pluginMarketUiManifest } from "@seashard/plugin-market-ui";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
 import { personalizationUiManifest } from "@seashard/personalization-ui";
 import type { PluginKernel } from "@seashard/plugin-system";
+import { pluginSettingsUiManifest } from "@seashard/plugin-settings-ui";
 import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
 import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui";
 import { serverConsoleUiManifest } from "@seashard/server-console-ui";
@@ -51,6 +54,37 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       },
     ],
   });
+  // 第三方插件管理页独立发布，固定 Binding 同时作为特权管理 Contract 的调用身份。
+  await kernel.registerBuiltIn({
+    manifest: pluginSettingsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: pluginManagementUiRuntimeId,
+        entryId: "plugin-settings.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 插件市场作为独立页面发布，只消费官方 Registry Catalog，不与已安装插件管理页耦合。
+  await kernel.registerBuiltIn({
+    manifest: pluginMarketUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.plugin-market.ui",
+        entryId: "plugin-market.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+
   // “关于”作为可独立启停的内置 Client UI 功能，进入统一设置导航。
   await kernel.registerBuiltIn({
     manifest: aboutUiManifest,

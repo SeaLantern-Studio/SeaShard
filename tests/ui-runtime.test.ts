@@ -9,7 +9,11 @@ import {
   resolveClientPluginAssetPath,
 } from "../packages/plugin-system/src/index.ts";
 import type { ResolvedClientEntrySnapshot } from "../packages/plugin-system/src/types.ts";
-import { pageRootSlot, type ClientUiModule } from "../packages/ui-sdk/src/index.ts";
+import {
+  pageRootSlot,
+  type ClientServerSelection,
+  type ClientUiModule,
+} from "../packages/ui-sdk/src/index.ts";
 import {
   browserClientPackageModuleLoader,
   ClientUiRuntime,
@@ -17,6 +21,14 @@ import {
 import type { ClientEntryDescriptor } from "../packages/contracts/src/index.ts";
 import { defineComponent } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
+
+const emptyServerSelection: ClientServerSelection = {
+  getCurrentInstanceId: () => undefined,
+  subscribe(listener) {
+    listener(undefined);
+    return () => {};
+  },
+};
 
 const pageComponent = defineComponent({
   name: "TestPage",
@@ -74,6 +86,7 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   };
   const runtime = new ClientUiRuntime({
     router,
+    serverSelection: emptyServerSelection,
     builtInLoaders: { test: { load: async () => ({ default: module }) } },
     packageLoader: {
       load: async () => {
@@ -115,6 +128,117 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   await runtime.dispose();
 });
 
+await test("client UI context owns current-server subscriptions and server navigation pages", async () => {
+  const router = memoryRouter();
+  const listeners = new Set<(instanceId: string | undefined) => void>();
+  const observedSelections: Array<string | undefined> = [];
+  let currentInstanceId: string | undefined = "server-a";
+  let exposedSelection: ClientServerSelection | undefined;
+  const serverSelection: ClientServerSelection = {
+    getCurrentInstanceId: () => currentInstanceId,
+    subscribe(listener) {
+      listeners.add(listener);
+      listener(currentInstanceId);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  const publishSelection = (instanceId: string | undefined) => {
+    currentInstanceId = instanceId;
+    for (const listener of listeners) listener(instanceId);
+  };
+  const module: ClientUiModule = {
+    apply(ctx) {
+      exposedSelection = ctx.serverSelection;
+      assert.equal(ctx.serverSelection.getCurrentInstanceId(), "server-a");
+      ctx.serverSelection.subscribe((instanceId) => observedSelections.push(instanceId));
+      ctx.slots.register(
+        {
+          name: "navigation.page",
+          id: "scheduled-commands",
+          path: "/server/scheduled-commands",
+          label: "定时命令",
+          placement: "server",
+        },
+        pageComponent,
+      );
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    serverSelection,
+    builtInLoaders: { server: { load: async () => module } },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
+    services: {},
+  });
+
+  await runtime.reconcile({ revision: 1, entries: [descriptor("server.runtime", "server")] });
+  assert.deepEqual(observedSelections, ["server-a"]);
+  assert.equal(runtime.pages.value[0]?.placement, "server");
+  publishSelection("server-b");
+  assert.deepEqual(observedSelections, ["server-a", "server-b"]);
+
+  await runtime.reconcile({ revision: 2, entries: [] });
+  publishSelection("server-c");
+  assert.deepEqual(observedSelections, ["server-a", "server-b"]);
+  const staleSelection = exposedSelection;
+  assert.ok(staleSelection);
+  assert.throws(() => staleSelection.getCurrentInstanceId(), /client runtime is no longer active/u);
+  await runtime.dispose();
+});
+
+await test("server navigation placement rejects routes outside the server workspace", async () => {
+  const router = memoryRouter();
+  const module: ClientUiModule = {
+    apply(ctx) {
+      ctx.slots.register(
+        {
+          name: "navigation.page",
+          id: "invalid-server-page",
+          path: "/scheduled-commands",
+          label: "定时命令",
+          placement: "server",
+        },
+        pageComponent,
+      );
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    serverSelection: emptyServerSelection,
+    builtInLoaders: { invalid: { load: async () => module } },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
+    services: {},
+  });
+
+  await runtime.reconcile({ revision: 1, entries: [descriptor("invalid.runtime", "invalid")] });
+  assert.deepEqual(runtime.pages.value, []);
+  assert.match(
+    runtime.failures.value[0]?.message ?? "",
+    /server navigation page must use a \/server\/ path/u,
+  );
+  await runtime.dispose();
+});
+
 interface EchoService {
   echo(value: string): Promise<string>;
 }
@@ -144,6 +268,7 @@ await test("client UI runtime loads an activated package module through its dige
   };
   const runtime = new ClientUiRuntime({
     router,
+    serverSelection: emptyServerSelection,
     builtInLoaders: {},
     packageLoader: {
       load: async (requestedUrl, requestedIntegrity) => {
@@ -205,6 +330,7 @@ await test("client UI runtime isolates an unavailable feature entry", async () =
   };
   const runtime = new ClientUiRuntime({
     router,
+    serverSelection: emptyServerSelection,
     builtInLoaders: { healthy: { load: async () => goodModule } },
     packageLoader: {
       load: async () => {
@@ -293,6 +419,7 @@ await test("page root slot declarations remount nested contributions and collaps
   };
   const runtime = new ClientUiRuntime({
     router,
+    serverSelection: emptyServerSelection,
     builtInLoaders: {
       child: { load: async () => childExtensionModule },
       root: { load: async () => rootExtensionModule },
@@ -359,6 +486,7 @@ await test("keyed slot render failure abdicates to the next priority", async () 
   };
   const runtime = new ClientUiRuntime({
     router,
+    serverSelection: emptyServerSelection,
     builtInLoaders: {
       fallback: { load: async () => fallbackModule },
       primary: { load: async () => primaryModule },

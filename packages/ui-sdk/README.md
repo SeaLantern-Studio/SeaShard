@@ -66,6 +66,16 @@ SeaShard 只通过当前激活包的摘要协议加载模块和相对资源。�
 | `navigation.page`   | `list`  | 注册页面和导航元数据   |
 | `workspace.sidebar` | `keyed` | 按工作区键注册完整侧栏 |
 
+`navigation.page` 的 `placement` 决定 Shell 把导航项放在哪个区域：
+
+| `placement`       | 位置                               |
+| ----------------- | ---------------------------------- |
+| `main`            | 普通工作区页面                     |
+| `settings`        | 软件设置侧栏                       |
+| `agent-settings`  | Agent 设置侧栏                     |
+| `server`          | 服务器管理侧栏，追加在内置管理项后 |
+| `server-download` | 服务器下载侧栏                     |
+
 每个活动页面还会声明 `page.<page-id>.root`。扩展插件使用 `inject()` 跟随页面声明期，不依赖插件加载顺序：
 
 ```ts
@@ -93,6 +103,41 @@ export const apply = defineClientUiModule({
 页面根扩展支持 `prepend`、`append`、`overlay`、`replace` 和 `dom`。组件收到 `pageId` 与稳定的 `root: HTMLElement`。托管模式随页面、插件停用和升级自动卸载；`dom` 模式直接修改原节点时必须自行恢复修改。
 
 一个 Slot Entry 可在 `children` 中声明子 Slot。父 Entry 消失时，子声明、子注册和等待中的注入会按同一所有权树级联清理。`single`、`list`、`keyed` 和 `chain` Slot 分别覆盖独占、顺序列表、按键分派和选择器接管场景。
+
+## 服务器工作区页面
+
+第三方页面使用 `placement: "server"` 加入服务器管理侧栏。路径必须位于 `/server/` 下，且不能占用 `/server/download`：
+
+```ts
+import { defineClientUiModule } from "@seashard/ui-sdk";
+import ServerTasksPage from "./ServerTasksPage.vue";
+
+export const apply = defineClientUiModule({
+  apply(context) {
+    context.slots.register(
+      {
+        name: "navigation.page",
+        id: "example.server-tasks",
+        path: "/server/example-tasks",
+        label: "定时任务",
+        placement: "server",
+      },
+      ServerTasksPage,
+    );
+  },
+}).apply;
+```
+
+`context.serverSelection` 提供当前 Desktop 服务器选择的只读视图：
+
+```ts
+const initialInstanceId = context.serverSelection.getCurrentInstanceId();
+const dispose = context.serverSelection.subscribe((instanceId) => {
+  console.log("selected server", instanceId);
+});
+```
+
+`subscribe()` 注册时立即投递当前值，插件刷新、停用或升级时由 Client Runtime 自动释放；插件也可以提前调用返回的 `dispose()`。选择可能为 `undefined`，也可能在异步读取期间变化。它只表示 Shell 当前选择，不证明实例仍然存在；执行服务器操作前仍应通过公开的服务器 Service 验证实例 ID。
 
 ## 调用插件 Host Service
 

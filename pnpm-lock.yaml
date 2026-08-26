@@ -119,9 +119,21 @@ importers:
       '@seashard/plugin-foundation':
         specifier: workspace:*
         version: link:../../components/plugin/foundation
+      '@seashard/plugin-management':
+        specifier: workspace:*
+        version: link:../../components/plugin/management
+      '@seashard/plugin-market':
+        specifier: workspace:*
+        version: link:../../components/plugin/market
+      '@seashard/plugin-market-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin-market
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk/dist
+      '@seashard/plugin-settings-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
@@ -188,6 +200,9 @@ importers:
       '@seashard/server-settings-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/server
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../../frontend/server/shared
       '@seashard/ui-runtime':
         specifier: workspace:*
         version: link:../../packages/ui-runtime
@@ -320,6 +335,27 @@ importers:
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
+
+  components/plugin/management:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-system
+
+  components/plugin/market:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
 
   components/server/configuration:
     dependencies:
@@ -842,6 +878,48 @@ importers:
 
   frontend/settings/personalization:
     dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/settings/plugin:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/settings/plugin-market:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk/dist

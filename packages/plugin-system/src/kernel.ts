@@ -1,4 +1,8 @@
-import type { ClientServiceCallRequest } from "@seashard/contracts";
+import type {
+  ClientServiceCallRequest,
+  PluginManagementEntrySnapshot,
+  PluginManagementSnapshot,
+} from "@seashard/contracts";
 import type {
   ExecutionContext,
   GlobalPluginBindingInput,
@@ -30,6 +34,7 @@ import {
   ContributionRegistry,
   PluginEventBus,
   ServiceRegistry,
+  type ServiceCallAuthorizer,
 } from "./runtime-registries";
 import { PluginStore } from "./store";
 import type {
@@ -124,6 +129,10 @@ export class PluginKernel {
       options,
     );
     this.coreDisposers.push(dispose);
+  }
+
+  restrictServiceCalls(contract: string, authorize: ServiceCallAuthorizer): void {
+    this.coreDisposers.push(this.services.restrict(contract, authorize));
   }
 
   prepareDirectory(sourceRoot: string) {
@@ -234,6 +243,142 @@ export class PluginKernel {
 
   runtimeLifecycle(runtimeId?: string): readonly PluginRuntimeLifecycleRecord[] {
     return this.runtime.lifecycle(runtimeId);
+  }
+
+  /** 只投影当前实际生效的第三方版本；开发包覆盖同 ID 的已安装版本。 */
+  async listThirdPartyPlugins(): Promise<readonly PluginManagementSnapshot[]> {
+    const packages = new Map<string, PluginPackageRecord>();
+    for (const record of await this.registry.listCurrentPackages()) {
+      if (record.source === "installed") packages.set(record.manifest.id, record);
+    }
+    for (const record of this.registry.listDevelopmentPackages()) {
+      packages.set(record.manifest.id, record);
+    }
+
+    const persistentBindings = await this.registry.listBindings();
+    const hostRuntimes = new Map(
+      this.runtime.snapshot().plugins.map((runtime) => [runtime.runtimeId, runtime]),
+    );
+    const clientRuntimeIds = new Set(this.clientEntries.map(({ runtimeId }) => runtimeId));
+
+    return [...packages.values()]
+      .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
+      .map((record) => {
+        if (record.source === "builtin") {
+          throw new Error(`built-in package entered third-party projection: ${record.manifest.id}`);
+        }
+        const bindings =
+          record.source === "development"
+            ? this.registry.listDevelopmentBindings(record.manifest.id)
+            : persistentBindings.filter((binding) =>
+                binding.id.startsWith(automaticPluginBindingPrefix("plugin", record.manifest.id)),
+              );
+        const bindingsByEntry = new Map(bindings.map((binding) => [binding.entryId, binding]));
+        const entries = record.manifest.entries.map((entry): PluginManagementEntrySnapshot => {
+          const binding = bindingsByEntry.get(entry.id);
+          const runtime = binding ? hostRuntimes.get(binding.id) : undefined;
+          const enabled = binding?.enabled ?? false;
+          const state =
+            enabled && runtime
+              ? runtime.state
+              : enabled && binding && clientRuntimeIds.has(binding.id)
+                ? "active"
+                : "inactive";
+          return {
+            id: entry.id,
+            runtimeId:
+              binding?.id ??
+              automaticPluginBindingId(
+                record.source === "development" ? "dev" : "plugin",
+                record.manifest.id,
+                entry.id,
+              ),
+            runtime: entry.runtime,
+            enabled,
+            state,
+            uses: entry.uses ?? {},
+            ...(runtime?.error ? { error: runtime.error } : {}),
+          };
+        });
+        return {
+          id: record.manifest.id,
+          version: record.manifest.version,
+          publisher: record.manifest.publisher,
+          source: record.source,
+          trust: thirdPartyTrust(record),
+          digest: record.digest,
+          installedAt: record.installedAt,
+          enabled: entries.every(({ enabled }) => enabled),
+          entries,
+        };
+      });
+  }
+
+  /** 包级开关始终成组更新全部自动 Binding，失败时恢复开关和原 Runtime。 */
+  async setThirdPartyPluginEnabled(
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<PluginManagementSnapshot> {
+    if (typeof pluginId !== "string" || !pluginId) {
+      throw new TypeError("plugin ID must be a non-empty string");
+    }
+    if (typeof enabled !== "boolean") throw new TypeError("plugin enabled must be a boolean");
+
+    const development = this.registry
+      .listDevelopmentPackages()
+      .find((record) => record.manifest.id === pluginId);
+    if (development) {
+      const previous = this.registry
+        .listDevelopmentBindings(pluginId)
+        .every((binding) => binding.enabled);
+      if (previous !== enabled) {
+        this.registry.setDevelopmentPackageEnabled(pluginId, enabled);
+        try {
+          await this.reconcile();
+          if (enabled) await this.assertSelectedHostBindingsActive(development);
+        } catch (error) {
+          this.registry.setDevelopmentPackageEnabled(pluginId, previous);
+          await this.reconcile();
+          throw error;
+        }
+      }
+      return await this.requireThirdPartyPlugin(pluginId);
+    }
+
+    const record = (await this.registry.listCurrentPackages()).find(
+      (candidate) => candidate.manifest.id === pluginId && candidate.source === "installed",
+    );
+    if (!record) throw new Error(`third-party plugin is not available: ${pluginId}`);
+    const prefix = automaticPluginBindingPrefix("plugin", pluginId);
+    const previousBindings = (await this.registry.listBindings(pluginId)).filter((binding) =>
+      binding.id.startsWith(prefix),
+    );
+    const bindingsById = new Map(previousBindings.map((binding) => [binding.id, binding]));
+    const nextBindings = record.manifest.entries.map((entry) => {
+      const id = automaticPluginBindingId("plugin", pluginId, entry.id);
+      const binding = bindingsById.get(id);
+      if (!binding) throw new Error(`plugin automatic binding is missing: ${id}`);
+      return { ...binding, enabled };
+    });
+    if (previousBindings.every((binding) => binding.enabled === enabled)) {
+      return await this.requireThirdPartyPlugin(pluginId);
+    }
+
+    await this.registry.replacePackageSelectionAndBindings(pluginId, record, prefix, nextBindings);
+    try {
+      await this.reconcile();
+      if (enabled) await this.assertSelectedHostBindingsActive(record);
+    } catch (error) {
+      await this.registry.replacePackageSelectionAndBindings(
+        pluginId,
+        record,
+        prefix,
+        previousBindings,
+      );
+      await this.reconcile();
+      throw error;
+    }
+    return await this.requireThirdPartyPlugin(pluginId);
   }
 
   clientEntrySnapshot(): ResolvedClientEntrySnapshot {
@@ -371,6 +516,14 @@ export class PluginKernel {
     for (const listener of this.clientEntryListeners) listener(snapshot);
   }
 
+  private async requireThirdPartyPlugin(pluginId: string): Promise<PluginManagementSnapshot> {
+    const snapshot = (await this.listThirdPartyPlugins()).find(
+      (candidate) => candidate.id === pluginId,
+    );
+    if (!snapshot) throw new Error(`third-party plugin disappeared during update: ${pluginId}`);
+    return snapshot;
+  }
+
   private async currentPackage(pluginId: string): Promise<PluginPackageRecord | undefined> {
     return (await this.registry.listCurrentPackages()).find(
       (candidate) => candidate.manifest.id === pluginId,
@@ -427,4 +580,11 @@ export class PluginKernel {
 
 function globalScope(): ScopeAddress {
   return { type: "global", id: "global" };
+}
+
+function thirdPartyTrust(record: PluginPackageRecord): "local-full-trust" | "package-full-trust" {
+  if (record.trust === "local-full-trust" || record.trust === "package-full-trust") {
+    return record.trust;
+  }
+  throw new Error(`third-party plugin uses an invalid trust level: ${record.manifest.id}`);
 }

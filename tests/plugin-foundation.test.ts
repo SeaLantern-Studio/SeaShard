@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BootstrapLoader } from "../packages/bootstrap-runtime/src/index.ts";
@@ -14,6 +14,7 @@ import type {
   ExecutionContext,
   PluginContext,
   PluginManifest,
+  PluginPackageManifest,
 } from "../packages/plugin-sdk/src/index.ts";
 import { PluginKernel } from "../packages/plugin-system/src/kernel.ts";
 import type { PluginPackageRecord } from "../packages/plugin-system/src/types.ts";
@@ -452,6 +453,122 @@ await test("package installation enables every Entry without activating incompat
         args: [],
       }),
       /client runtime is not active/u,
+    );
+    const listed = await kernel.listThirdPartyPlugins();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.id, manifest.id);
+    assert.equal(listed[0]?.source, "installed");
+    assert.equal(listed[0]?.enabled, true);
+    assert.deepEqual(
+      listed[0]?.entries.map((entry) => [entry.id, entry.enabled, entry.state]),
+      [
+        ["client", true, "active"],
+        ["electron-only", true, "inactive"],
+      ],
+    );
+
+    const disabled = await kernel.setThirdPartyPluginEnabled(manifest.id, false);
+    assert.equal(disabled.enabled, false);
+    assert.deepEqual(kernel.clientEntrySnapshot().entries, []);
+    assert.deepEqual(
+      (await root["plugin-foundation"].store.listBindings(manifest.id)).map(({ id, enabled }) => [
+        id,
+        enabled,
+      ]),
+      [
+        ["plugin:example.install-auto-enable:client", false],
+        ["plugin:example.install-auto-enable:electron-only", false],
+      ],
+    );
+
+    const enabled = await kernel.setThirdPartyPluginEnabled(manifest.id, true);
+    assert.equal(enabled.enabled, true);
+    assert.deepEqual(
+      kernel.clientEntrySnapshot().entries.map(({ runtimeId }) => runtimeId),
+      ["plugin:example.install-auto-enable:client"],
+    );
+  } finally {
+    await kernel?.dispose();
+    await loader.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("development plugin toggle survives command-line directory refresh", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-development-toggle-"));
+  const sourceRoot = join(directory, "plugin");
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
+  let kernel: PluginKernel | undefined;
+  try {
+    await mkdir(join(sourceRoot, "dist"), { recursive: true });
+    const manifest: PluginPackageManifest = {
+      id: "example.development-toggle",
+      version: "1.0.0",
+      publisher: "example",
+      entries: [
+        {
+          id: "client",
+          runtime: "client",
+          module: "./dist/client.js",
+          targets: ["desktop"],
+          uses: {},
+        },
+      ],
+      compatibility: {
+        seaShard: ">=0.0.0 <1.0.0",
+        clientProtocol: ">=1 <2",
+      },
+    };
+    await writeFile(join(sourceRoot, "plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    await writeFile(join(sourceRoot, "dist", "client.js"), "export const apply = () => {};\n");
+    await loader.start([
+      createPluginFoundationBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: directory,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    kernel = await PluginKernel.create({
+      dataRoot: directory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+      root,
+      store: root["plugin-foundation"].store,
+      pluginStorage: root["plugin-foundation"].storage,
+    });
+
+    const first = await kernel.refreshDevelopmentDirectory(sourceRoot);
+    assert.equal((await kernel.listThirdPartyPlugins())[0]?.source, "development");
+    assert.equal(kernel.clientEntrySnapshot().entries.length, 1);
+
+    const disabled = await kernel.setThirdPartyPluginEnabled(manifest.id, false);
+    assert.equal(disabled.enabled, false);
+    assert.deepEqual(kernel.clientEntrySnapshot().entries, []);
+
+    await writeFile(
+      join(sourceRoot, "dist", "client.js"),
+      "export const apply = () => {}; export const revision = 2;\n",
+    );
+    const refreshed = await kernel.refreshDevelopmentDirectory(sourceRoot, first.manifest.id);
+    assert.notEqual(refreshed.digest, first.digest);
+    assert.equal((await kernel.listThirdPartyPlugins())[0]?.enabled, false);
+    assert.deepEqual(kernel.clientEntrySnapshot().entries, []);
+
+    const enabled = await kernel.setThirdPartyPluginEnabled(manifest.id, true);
+    assert.equal(enabled.enabled, true);
+    assert.deepEqual(
+      kernel.clientEntrySnapshot().entries.map(({ runtimeId }) => runtimeId),
+      ["dev:example.development-toggle:client"],
     );
   } finally {
     await kernel?.dispose();

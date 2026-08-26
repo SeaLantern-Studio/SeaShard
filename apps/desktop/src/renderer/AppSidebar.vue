@@ -41,6 +41,9 @@ const agentSettingsPages = computed(() =>
     (page) => page.navigation !== false && page.placement === "agent-settings",
   ),
 );
+const serverNavigationPages = computed(() =>
+  runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "server"),
+);
 const workspaceSidebar = computed(() =>
   runtime.workspaceSidebars.value.find((sidebar) => sidebar.workspaceId === props.workspace),
 );
@@ -107,7 +110,7 @@ type InstanceItemId =
   | (typeof launcherManagementItems)[number]["id"]
   | (typeof serverManagementItems)[number]["id"];
 const activeLauncherItem = ref<InstanceItemId>("launch");
-const activeServerItem = ref<InstanceItemId>("launch");
+const activeServerItem = ref<InstanceItemId | undefined>("launch");
 const activeInstanceItem = computed(() =>
   props.workspace === "server" ? activeServerItem.value : activeLauncherItem.value,
 );
@@ -130,8 +133,12 @@ function navigate(path: string): void {
   void router.push(path);
 }
 
+function matchesRoute(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`);
+}
+
 function isActive(path: string): boolean {
-  return route.path === path || route.path.startsWith(`${path}/`);
+  return matchesRoute(route.path, path);
 }
 function isDownloadPageActive(path: string): boolean {
   return route.path === path;
@@ -158,15 +165,15 @@ function leaveDownload(): void {
   navigate("/server/launch");
 }
 
-function serverItemForPath(path: string): InstanceItemId {
-  if (path.startsWith("/server/download")) return "download";
-  if (path.startsWith("/server/overview")) return "overview";
-  if (path.startsWith("/server/console")) return "console";
-  if (path.startsWith("/server/configuration")) return "configuration";
-  if (path.startsWith("/server/settings")) return "settings";
-  if (path.startsWith("/server/saves")) return "saves";
-  if (path.startsWith("/server/mods")) return "mods";
-  return "launch";
+function serverItemForPath(path: string): InstanceItemId | undefined {
+  if (matchesRoute(path, "/server/download")) return "download";
+  if (matchesRoute(path, "/server/overview")) return "overview";
+  if (matchesRoute(path, "/server/console")) return "console";
+  if (matchesRoute(path, "/server/configuration")) return "configuration";
+  if (matchesRoute(path, "/server/settings")) return "settings";
+  if (matchesRoute(path, "/server/saves")) return "saves";
+  if (matchesRoute(path, "/server/mods")) return "mods";
+  return path.startsWith("/server/") ? undefined : "launch";
 }
 
 function selectInstanceItem(id: InstanceItemId): void {
@@ -270,6 +277,7 @@ watch(
     settingsPages,
     agentSettingsPages,
     downloadPages,
+    serverNavigationPages,
     activeInstanceItem,
   ],
   () => void nextTick(updateNavIndicator),
@@ -468,6 +476,26 @@ onUnmounted(() => {
                 <component :is="item.icon" class="nav-icon" :size="20" :stroke-width="1.8" />
                 <span class="nav-label">{{ item.label }}</span>
               </button>
+              <template v-if="props.workspace === 'server'">
+                <button
+                  v-for="page in serverNavigationPages"
+                  :key="page.id"
+                  type="button"
+                  class="nav-item instance-nav-item"
+                  :class="{ active: isActive(page.path) }"
+                  :aria-current="isActive(page.path) ? 'page' : undefined"
+                  @click="navigate(page.path)"
+                >
+                  <component
+                    :is="page.icon"
+                    v-if="page.icon"
+                    class="nav-icon"
+                    :size="20"
+                    :stroke-width="1.8"
+                  />
+                  <span class="nav-label">{{ page.label }}</span>
+                </button>
+              </template>
             </div>
           </div>
 

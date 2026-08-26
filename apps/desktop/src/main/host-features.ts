@@ -3,7 +3,17 @@ import {
   agentRuntimeManifest,
   createAgentRuntimeModule,
 } from "@seashard/agent-runtime";
-import { serverDownloadConnectionLimits, type ServerConsoleLine } from "@seashard/contracts";
+import {
+  pluginManagementContract,
+  pluginManagementUiRuntimeId,
+  serverDownloadConnectionLimits,
+  type ServerConsoleLine,
+} from "@seashard/contracts";
+import {
+  createPluginManagementModule,
+  pluginManagementManifest,
+} from "@seashard/plugin-management";
+import { createPluginMarketModule, pluginMarketManifest } from "@seashard/plugin-market";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
   createJavaRuntimeManagerModule,
@@ -63,6 +73,53 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
     isStopping,
     publishServerConsoleLine,
   } = options;
+  // 插件启停影响整个 Runtime 图，只允许固定的内置设置 Entry 调用管理 Contract。
+  kernel.restrictServiceCalls(
+    pluginManagementContract,
+    (execution) =>
+      execution.actorType === "client" && execution.runtimeId === pluginManagementUiRuntimeId,
+  );
+  await kernel.registerBuiltIn({
+    manifest: pluginManagementManifest,
+    loaders: {
+      "plugin-management.host": {
+        load: async () => createPluginManagementModule(kernel),
+      },
+    },
+    bindings: [
+      {
+        id: "core.plugin-management",
+        entryId: "plugin-management.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // 市场 Host 只下载官方 Registry 的 Latest Release Catalog，不再调用 GitHub API。
+  await kernel.registerBuiltIn({
+    manifest: pluginMarketManifest,
+    loaders: {
+      "plugin-market.host": {
+        load: async () =>
+          createPluginMarketModule({
+            fetchProvider: downloadFetchProvider,
+          }),
+      },
+    },
+    bindings: [
+      {
+        id: "core.plugin-market",
+        entryId: "plugin-market.host",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+
   // Agent Session 和模型配置属于用户级数据，必须位于 Electron userData 而非 core 数据目录。
   await kernel.registerBuiltIn({
     manifest: agentRuntimeManifest,

@@ -75,7 +75,7 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
     "SEASHARD_PLUGIN_SMOKE_STORAGE",
     "SEASHARD_PLUGIN_SMOKE_RESOURCE before=core-smoke:probe:detail after=core-smoke:reload:plain",
-    "SEASHARD_SMOKE_READY components=12",
+    "SEASHARD_SMOKE_READY components=14",
     "SEASHARD_SMOKE_SERVER_INSTANCES count=0",
     "SEASHARD_SMOKE_AGENT_SERVER_RESOURCE count=0",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
@@ -106,7 +106,7 @@ function verifyPersistedState(databasePath) {
     const bindings = database.prepare("SELECT COUNT(*) AS count FROM plugin_bindings").get();
     const packageCount = Number(packages.count);
     const bindingCount = Number(bindings.count);
-    if (packageCount !== 31 || bindingCount !== 31) {
+    if (packageCount !== 35 || bindingCount !== 35) {
       throw new Error(
         `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}`,
       );

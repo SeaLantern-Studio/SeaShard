@@ -39,6 +39,11 @@ interface ServiceRegistration {
   resultValidators: Readonly<Record<string, ServiceResultValidator>>;
 }
 
+export type ServiceCallAuthorizer = (
+  execution: Readonly<ExecutionContext>,
+  method: string,
+) => boolean;
+
 /** Service Registry 对诊断工具发布的只读运行态投影。 */
 export interface ServiceRuntimeSnapshot {
   readonly contract: string;
@@ -168,6 +173,7 @@ export interface ContributionSnapshot {
  */
 export class ServiceRegistry {
   private readonly registrations = new Map<string, Set<ServiceRegistration>>();
+  private readonly authorizers = new Map<string, ServiceCallAuthorizer>();
 
   register(
     contract: string,
@@ -212,6 +218,18 @@ export class ServiceRegistry {
     };
   }
 
+  /** 为核心特权 Contract 安装调用身份门；Provider 无法自行放宽该限制。 */
+  restrict(contract: string, authorize: ServiceCallAuthorizer): () => void {
+    validateContract(contract);
+    if (this.authorizers.has(contract)) {
+      throw new Error(`service ${contract} already has a call authorizer`);
+    }
+    this.authorizers.set(contract, authorize);
+    return () => {
+      if (this.authorizers.get(contract) === authorize) this.authorizers.delete(contract);
+    };
+  }
+
   has(contract: string, execution?: ExecutionContext): boolean {
     const set = this.registrations.get(contract);
     if (!set) return false;
@@ -226,6 +244,10 @@ export class ServiceRegistry {
   ): Promise<JsonValue | void> {
     if (execution.actorType !== "core" && !allowsPermission(execution.permissions, contract)) {
       throw new Error(`actor ${execution.actorId} is not allowed to call ${contract}`);
+    }
+    const authorize = this.authorizers.get(contract);
+    if (authorize && !authorize(execution, method)) {
+      throw new Error(`actor ${execution.actorId} is not authorized to call ${contract}.${method}`);
     }
     const registration = this.select(contract, execution);
     if (!registration) throw new Error(`no service provider available: ${contract}`);

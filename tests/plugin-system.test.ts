@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
+import {
+  pluginManagementContract,
+  pluginManagementUiRuntimeId,
+} from "../packages/contracts/src/index.ts";
+import { pluginSettingsUiManifest } from "../frontend/settings/plugin/src/index.ts";
 import type { ServiceResultValidationError } from "../packages/plugin-sdk/src/index.ts";
 import type {
   ExecutionContext,
@@ -23,7 +28,10 @@ import {
   automaticPluginBindingPrefix,
   PluginRegistry,
 } from "../packages/plugin-system/src/registry.ts";
-import { authorizeExternalServiceCall } from "../packages/plugin-system/src/runtime-backend.ts";
+import {
+  authorizeEntryServiceCall,
+  authorizeExternalServiceCall,
+} from "../packages/plugin-system/src/runtime-backend.ts";
 import {
   AgentProviderTypeRegistry,
   AgentResourceRegistry,
@@ -320,6 +328,72 @@ await test("external service calls use Main identity and method declarations", (
   );
 });
 
+await test("plugin settings Client may call every declared management method", async () => {
+  const manifestEntry = pluginSettingsUiManifest.entries[0]!;
+  const entry: ResolvedEntry = {
+    package: {
+      manifest: pluginSettingsUiManifest,
+      digest: "b".repeat(64),
+      rootPath: "builtin://seashard.plugin-settings-ui",
+      source: "builtin",
+      trust: "builtin",
+      installedAt: "2026-08-27T00:00:00.000Z",
+    },
+    entry: manifestEntry,
+    binding: {
+      id: pluginManagementUiRuntimeId,
+      pluginId: pluginSettingsUiManifest.id,
+      entryId: manifestEntry.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: null,
+    },
+    runtimeId: pluginManagementUiRuntimeId,
+    host: "client",
+  };
+  const execution: ExecutionContext = {
+    actorType: "client",
+    actorId: pluginSettingsUiManifest.id,
+    runtimeId: pluginManagementUiRuntimeId,
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: manifestEntry.permissions,
+    permissionRevision: 1,
+  };
+  const services = new ServiceRegistry();
+  services.restrict(
+    pluginManagementContract,
+    (candidate) =>
+      candidate.actorType === "client" && candidate.runtimeId === pluginManagementUiRuntimeId,
+  );
+  services.register(
+    pluginManagementContract,
+    "core.plugin-management",
+    { type: "global", id: "global" },
+    {
+      list: async () => [],
+      setEnabled: async (pluginId, enabled) => ({ pluginId, enabled }),
+    },
+  );
+
+  const invoke = async (method: string, args: JsonValue[]) => {
+    const call = authorizeEntryServiceCall(entry, {
+      contract: pluginManagementContract,
+      method,
+      args,
+    });
+    return services.call(call.contract, call.method, call.args, execution);
+  };
+
+  assert.deepEqual(await invoke("list", []), []);
+  assert.deepEqual(await invoke("setEnabled", ["example.plugin", false]), {
+    pluginId: "example.plugin",
+    enabled: false,
+  });
+});
+
 await test("built-in inventory removes retired packages and bindings before reconciliation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-builtins-"));
   const broker = await SQLiteDatabaseBroker.create({
@@ -427,6 +501,42 @@ await test("service registry selects the nearest active provider", async () => {
   );
   replacementDispose();
   globalDispose();
+});
+
+await test("service registry applies provider authorization after permission checks", async () => {
+  const registry = new ServiceRegistry();
+  registry.register(
+    "example.privileged",
+    "privileged-provider",
+    { type: "global", id: "global" },
+    { read: () => "allowed" },
+  );
+  registry.restrict(
+    "example.privileged",
+    (execution, method) =>
+      execution.actorType === "client" &&
+      execution.runtimeId === "core.privileged.ui" &&
+      method === "read",
+  );
+  const execution: ExecutionContext = {
+    actorType: "client",
+    actorId: "seashard.privileged-ui",
+    runtimeId: "core.privileged.ui",
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: ["example.privileged"],
+    permissionRevision: 1,
+  };
+
+  assert.equal(await registry.call("example.privileged", "read", [], execution), "allowed");
+  await assert.rejects(
+    registry.call("example.privileged", "read", [], {
+      ...execution,
+      runtimeId: "plugin:attacker:client",
+    }),
+    /not authorized/u,
+  );
 });
 
 await test("service result validation is optional and bound to the selected registration", async () => {
@@ -856,6 +966,17 @@ await test("development package overlays stay in memory and replace their comple
       [[`dev:${validManifest.id}:development.host`, "development.host", firstDevelopment.digest]],
     );
 
+    registry.setDevelopmentPackageEnabled(validManifest.id, false);
+    assert.deepEqual(
+      await registry.resolve({
+        hostProfile: "electron",
+        clientTarget: "desktop",
+        platform: "win32",
+        architecture: "x64",
+      }),
+      [],
+    );
+
     const secondDevelopment = {
       ...firstDevelopment,
       manifest: {
@@ -870,6 +991,15 @@ await test("development package overlays stay in memory and replace their comple
       digest: "c".repeat(64),
     };
     registry.setDevelopmentPackage(secondDevelopment, firstDevelopment.manifest.id);
+    const disabledAfterRefresh = await registry.resolve({
+      hostProfile: "electron",
+      clientTarget: "desktop",
+      platform: "win32",
+      architecture: "x64",
+    });
+    assert.deepEqual(disabledAfterRefresh, []);
+
+    registry.setDevelopmentPackageEnabled(validManifest.id, true);
     const secondResolved = await registry.resolve({
       hostProfile: "electron",
       clientTarget: "desktop",

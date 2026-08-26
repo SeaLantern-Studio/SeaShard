@@ -1,0 +1,14 @@
+{
+  "name": "@seashard/plugin-management",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*"
+  }
+}

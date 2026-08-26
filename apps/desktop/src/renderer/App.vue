@@ -21,7 +21,9 @@ const settingsMode = computed<SettingsMode | undefined>(() => {
   if (route.path === "/agent/settings" || route.path.startsWith("/agent/settings/")) return "agent";
   return undefined;
 });
-const downloadMode = computed(() => route.path.startsWith("/server/download"));
+const downloadMode = computed(
+  () => route.path === "/server/download" || route.path.startsWith("/server/download/"),
+);
 const workspace = ref<WorkspaceMode>(workspaceForPath(route.path) ?? "agent");
 const rightPanelOpen = ref(false);
 

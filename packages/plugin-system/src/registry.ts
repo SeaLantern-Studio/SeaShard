@@ -175,13 +175,15 @@ export class PluginRegistry {
     if (record.source !== "development") {
       throw new Error(`development package must use development source: ${record.manifest.id}`);
     }
+    const current = this.developmentPackages.get(record.manifest.id);
+    const enabled = current?.bindings.every((binding) => binding.enabled) ?? true;
     const bindings = record.manifest.entries.map((entry): PluginBinding => ({
       id: automaticPluginBindingId("dev", record.manifest.id, entry.id),
       pluginId: record.manifest.id,
       entryId: entry.id,
       scopeType: "global",
       scopeId: "global",
-      enabled: true,
+      enabled,
       // 第三方插件应以空启动配置运行，并通过自身 Storage 或公开配置 Service 管理设置。
       config: {},
     }));
@@ -194,6 +196,28 @@ export class PluginRegistry {
 
   clearDevelopmentPackages(): void {
     this.developmentPackages.clear();
+  }
+
+  listDevelopmentPackages(): readonly PluginPackageRecord[] {
+    return [...this.developmentPackages.values()]
+      .map(({ record }) => record)
+      .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id));
+  }
+
+  listDevelopmentBindings(pluginId: string): readonly PluginBinding[] {
+    return (
+      this.developmentPackages.get(pluginId)?.bindings.map((binding) => ({ ...binding })) ?? []
+    );
+  }
+
+  /** 开发覆盖只在当前 Host 进程内启停；下一次目录刷新沿用当前开关。 */
+  setDevelopmentPackageEnabled(pluginId: string, enabled: boolean): void {
+    const current = this.developmentPackages.get(pluginId);
+    if (!current) throw new Error(`development plugin is not loaded: ${pluginId}`);
+    this.developmentPackages.set(pluginId, {
+      record: current.record,
+      bindings: current.bindings.map((binding) => ({ ...binding, enabled })),
+    });
   }
 
   /**

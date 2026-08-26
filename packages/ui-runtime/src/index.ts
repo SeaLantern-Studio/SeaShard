@@ -8,6 +8,7 @@ import type { Disposable, JsonValue } from "@seashard/plugin-sdk";
 import {
   pageRootSlot,
   type ClientUiContext,
+  type ClientServerSelection,
   type ClientUiModule,
   type ClientUiRenderSlot,
   type ClientUiRenderSlotOptions,
@@ -70,6 +71,7 @@ export interface ClientUiRuntimeOptions {
   builtInLoaders: Readonly<Record<string, ClientUiModuleLoader>>;
   packageLoader: ClientUiPackageModuleLoader;
   hostServices: ClientUiHostServiceBridge;
+  serverSelection: ClientServerSelection;
   services: Readonly<Record<string, object>>;
 }
 
@@ -113,6 +115,13 @@ interface ActiveClientEntry {
   disposers: Set<Disposable>;
   callable: boolean;
 }
+const navigationPagePlacements = [
+  "main",
+  "settings",
+  "agent-settings",
+  "server",
+  "server-download",
+] as const;
 
 const contributionIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
 
@@ -289,6 +298,23 @@ export class ClientUiRuntime {
               ),
             ),
         },
+        serverSelection: {
+          getCurrentInstanceId: () => {
+            if (!record.callable) {
+              throw new Error(`client runtime is no longer active: ${descriptor.runtimeId}`);
+            }
+            return this.options.serverSelection.getCurrentInstanceId();
+          },
+          subscribe: (listener) => {
+            if (!record.callable) {
+              throw new Error(`client runtime is no longer active: ${descriptor.runtimeId}`);
+            }
+            if (typeof listener !== "function") {
+              throw new TypeError("server selection listener must be a function");
+            }
+            return this.ownEffect(record, () => this.options.serverSelection.subscribe(listener));
+          },
+        },
         service: <T extends object>(contract: string): T => {
           const local = this.options.services[contract];
           if (local) return local as T;
@@ -382,6 +408,19 @@ export class ClientUiRuntime {
     }
     if (!page.path.startsWith("/") || page.path === "/") {
       throw new TypeError(`navigation page path must be a non-root absolute path: ${page.path}`);
+    }
+    if (page.placement !== undefined && !navigationPagePlacements.includes(page.placement)) {
+      throw new TypeError(`invalid navigation page placement: ${String(page.placement)}`);
+    }
+    if (page.placement === "server") {
+      if (!page.path.startsWith("/server/")) {
+        throw new TypeError(`server navigation page must use a /server/ path: ${page.path}`);
+      }
+      if (page.path.split("/")[2] === "download") {
+        throw new TypeError(
+          `server navigation page cannot use the reserved download path: ${page.path}`,
+        );
+      }
     }
     if (!page.label.trim()) throw new TypeError("navigation page label must not be empty");
     if (this.slots.entries("navigation.page").some((entry) => entry.options.id === page.id)) {

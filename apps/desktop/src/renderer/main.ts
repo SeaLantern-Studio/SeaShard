@@ -17,8 +17,9 @@ import {
   ClientUiRuntime,
   clientUiRuntimeKey,
 } from "@seashard/ui-runtime";
+import { serverInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 import { uiAppearanceContract } from "@seashard/ui-sdk";
-import { createApp } from "vue";
+import { createApp, watch } from "vue";
 import "cmzya-modern-ui/style.css";
 import { appearanceService } from "./appearance";
 import App from "./App.vue";
@@ -32,6 +33,17 @@ const runtime = new ClientUiRuntime({
   packageLoader: browserClientPackageModuleLoader,
   hostServices: {
     call: (request) => window.seashard.client.callService(request),
+  },
+  serverSelection: {
+    getCurrentInstanceId: () => serverInstanceSelection.instanceId,
+    subscribe(listener) {
+      listener(serverInstanceSelection.instanceId);
+      return watch(
+        () => serverInstanceSelection.instanceId,
+        (instanceId) => listener(instanceId),
+        { flush: "sync" },
+      );
+    },
   },
   services: {
     [agentSessionContract]: window.seashard.agent,
