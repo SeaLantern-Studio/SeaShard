@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { assertReleaseVersion, buildReleaseNotes } from "../scripts/generate-release-notes.ts";
+
+await test("manual release accepts only unprefixed three-part numeric versions", () => {
+  assert.doesNotThrow(() => assertReleaseVersion("1.0.0"));
+  for (const invalid of ["v1.0.0", "1.0", "1.0.0.0", "1.0.beta", " 1.0.0"] as const) {
+    assert.throws(() => assertReleaseVersion(invalid), /不带 v 的三段数字格式/u);
+  }
+});
+
+await test("release notes map every supported platform and include the complete commit range", () => {
+  const notes = buildReleaseNotes({
+    version: "1.2.3",
+    repository: "SeaLantern-Studio/SeaShard",
+    currentSha: "c".repeat(40),
+    previousTag: "v1.2.2",
+    commits: [
+      { sha: "a".repeat(40), subject: "feat(plugin): 添加插件市场" },
+      { sha: "b".repeat(40), subject: "fix(runtime): 修复重载" },
+    ],
+  });
+
+  for (const file of [
+    "SeaShard-1.2.3-windows-x64.exe",
+    "SeaShard-1.2.3-windows-arm64.exe",
+    "SeaShard-1.2.3-macos-x64.dmg",
+    "SeaShard-1.2.3-macos-arm64.dmg",
+    "SeaShard-1.2.3-linux-x64.AppImage",
+    "SeaShard-1.2.3-linux-x64.deb",
+    "SeaShard-1.2.3-linux-arm64.AppImage",
+    "SeaShard-1.2.3-linux-arm64.deb",
+  ] as const) {
+    assert.match(notes, new RegExp(file.replaceAll(".", "\\."), "u"));
+  }
+  assert.match(notes, /feat\(plugin\): 添加插件市场/u);
+  assert.match(notes, /fix\(runtime\): 修复重载/u);
+  assert.match(notes, /compare\/v1\.2\.2\.\.\.v1\.2\.3/u);
+  assert.match(notes, /当前构建未进行商业代码签名/u);
+});
+
+await test("first release notes include repository history without a previous comparison tag", () => {
+  const notes = buildReleaseNotes({
+    version: "0.1.0",
+    repository: "SeaLantern-Studio/SeaShard",
+    currentSha: "d".repeat(40),
+    commits: [{ sha: "d".repeat(40), subject: "feat(core): 建立项目" }],
+  });
+
+  assert.match(notes, /首个公开 Release/u);
+  assert.match(notes, /commit\/dddddddddddddddddddddddddddddddddddddddd/u);
+  assert.doesNotMatch(notes, /\/compare\//u);
+});

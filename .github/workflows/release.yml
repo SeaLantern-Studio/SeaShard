@@ -1,0 +1,222 @@
+name: 发布 SeaShard
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号，不带 v，例如 1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seashard-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: 校验版本并生成说明
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 校验版本号和目标 Tag
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/generate-release-notes.ts validate "$VERSION"
+          if git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
+            echo "Tag v${VERSION} 已存在" >&2
+            exit 1
+          fi
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} 已存在" >&2
+            exit 1
+          fi
+
+      - name: 生成完整 Changelog 和下载指引
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [[ -n "$previous_tag" ]]; then
+            git rev-parse --verify "refs/tags/${previous_tag}^{commit}" >/dev/null
+          fi
+          mkdir -p release-metadata
+          node scripts/generate-release-notes.ts generate \
+            "$VERSION" \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_SHA" \
+            release-metadata/release-notes.md \
+            "$previous_tag"
+
+      - name: 保存 Release 说明
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: 构建 ${{ matrix.label }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-latest
+            platform: win
+            targets: nsis
+            arch: x64
+            asset_key: windows-x64
+          - label: Windows ARM64
+            runner: windows-latest
+            platform: win
+            targets: nsis
+            arch: arm64
+            asset_key: windows-arm64
+          - label: macOS Intel x64
+            runner: macos-latest
+            platform: mac
+            targets: dmg
+            arch: x64
+            asset_key: macos-x64
+          - label: macOS Apple Silicon
+            runner: macos-latest
+            platform: mac
+            targets: dmg
+            arch: arm64
+            asset_key: macos-arm64
+          - label: Linux x64
+            runner: ubuntu-latest
+            platform: linux
+            targets: AppImage deb
+            arch: x64
+            asset_key: linux-x64
+          - label: Linux ARM64
+            runner: ubuntu-latest
+            platform: linux
+            targets: AppImage deb
+            arch: arm64
+            asset_key: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 配置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+          run_install: false
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 编译 SeaShard
+        run: pnpm run build
+
+      - name: 构建平台安装包
+        shell: bash
+        run: >-
+          pnpm exec electron-builder
+          --${{ matrix.platform }}
+          ${{ matrix.targets }}
+          --${{ matrix.arch }}
+          --publish never
+          --config.extraMetadata.version=${{ inputs.version }}
+
+      - name: 保存平台产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: seashard-${{ matrix.asset_key }}
+          path: |
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.exe
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.dmg
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.deb
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: 创建 Tag 和 Release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 汇总全部平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: 校验 Release 资产集合
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "SeaShard-${VERSION}-windows-x64.exe"
+            "SeaShard-${VERSION}-windows-arm64.exe"
+            "SeaShard-${VERSION}-macos-x64.dmg"
+            "SeaShard-${VERSION}-macos-arm64.dmg"
+            "SeaShard-${VERSION}-linux-x64.AppImage"
+            "SeaShard-${VERSION}-linux-x64.deb"
+            "SeaShard-${VERSION}-linux-arm64.AppImage"
+            "SeaShard-${VERSION}-linux-arm64.deb"
+            "release-notes.md"
+          )
+          for file in "${expected[@]}"; do
+            test -f "release-assets/${file}" || {
+              echo "缺少 Release 资产：${file}" >&2
+              exit 1
+            }
+          done
+
+      - name: 创建 Tag 并发布 Release
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" \
+            release-assets/SeaShard-* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SeaShard ${VERSION}" \
+            --notes-file release-assets/release-notes.md
+          release_url="$(gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          printf '## Release 已发布\n\n%s\n' "$release_url" >> "$GITHUB_STEP_SUMMARY"
