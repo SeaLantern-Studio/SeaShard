@@ -3,6 +3,7 @@ import {
   runtimeDiagnosticsContract,
   type AgentModelConfigurationSnapshot,
   type ClientEntryPublication,
+  type ClientServiceCallRequest,
   type DesktopShellService,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
@@ -331,7 +332,10 @@ export const clientEntries: ClientEntryPublication = {
       pluginId: "seashard.runtime-diagnostics-ui",
       pluginVersion: "0.0.0",
       entryId: "runtime-diagnostics.client",
-      moduleKey: "seashard.runtime-diagnostics-ui/runtime-diagnostics.client",
+      module: {
+        source: "builtin",
+        key: "seashard.runtime-diagnostics-ui/runtime-diagnostics.client",
+      },
       integrity: "a".repeat(64),
       scopeType: "global",
       scopeId: "global",
@@ -554,6 +558,7 @@ export async function createDesktopShellHarness(
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
+  const clientServiceCalls: ClientServiceCallRequest[] = [];
   let agentModelConfiguration: AgentModelConfigurationSnapshot = {
     revision: "a".repeat(64),
     connections: [],
@@ -626,7 +631,18 @@ export async function createDesktopShellHarness(
       onRendererReady: (value) => {
         readySnapshots.push(value);
       },
+      resolveClientPluginAssetPath: async () => undefined,
       readClientEntryPublication: () => clientEntries,
+      callClientService: async (request) => {
+        clientServiceCalls.push(request);
+        if (request.method === "invalidResult") {
+          return new Date("2026-08-26T00:00:00.000Z") as unknown as JsonValue;
+        }
+        return {
+          runtimeId: request.runtimeId,
+          value: request.args[0] ?? null,
+        };
+      },
       listAgentModels: async () => [],
       listAgentSessions: async () => [],
       readAgentSession: async (sessionId) => ({
@@ -1001,6 +1017,7 @@ export async function createDesktopShellHarness(
     get serverConfigurationDocument() {
       return serverConfigurationDocument;
     },
+    clientServiceCalls,
     get clientEntryListener() {
       return clientEntryListener;
     },

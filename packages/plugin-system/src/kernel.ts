@@ -1,3 +1,4 @@
+import type { ClientServiceCallRequest } from "@seashard/contracts";
 import type {
   ExecutionContext,
   GlobalPluginBindingInput,
@@ -18,7 +19,10 @@ import {
   type PluginRuntimeAdapter,
   type PluginRuntimeLifecycleRecord,
 } from "./runtime";
-import { PluginRuntimeBackend as DefaultPluginRuntimeBackend } from "./runtime-backend";
+import {
+  authorizeEntryServiceCall,
+  PluginRuntimeBackend as DefaultPluginRuntimeBackend,
+} from "./runtime-backend";
 import {
   AgentResourceRegistry,
   AgentProviderTypeRegistry,
@@ -242,6 +246,41 @@ export class PluginKernel {
   onClientEntriesChanged(listener: (snapshot: ResolvedClientEntrySnapshot) => void): () => void {
     this.clientEntryListeners.add(listener);
     return () => this.clientEntryListeners.delete(listener);
+  }
+
+  /**
+   * 以当前仍活动的 Client Entry 身份调用 Host Service。
+   *
+   * 摘要参与身份校验，令刷新前仍持有旧模块的 Renderer 代码无法借稳定 runtimeId
+   * 穿透到新版本。方法授权继续以 Main 持有的 Manifest `uses` 为准。
+   */
+  async callClientService(request: ClientServiceCallRequest): Promise<JsonValue | void> {
+    const entry = this.clientEntries.find(
+      (candidate) =>
+        candidate.runtimeId === request.runtimeId && candidate.package.digest === request.integrity,
+    );
+    if (!entry) throw new Error(`client runtime is not active: ${request.runtimeId}`);
+
+    const call = authorizeEntryServiceCall(entry, {
+      contract: request.contract,
+      method: request.method,
+      args: [...request.args],
+    });
+    const ownScope = {
+      type: entry.binding.scopeType,
+      id: entry.binding.scopeId,
+    } satisfies ScopeAddress;
+    const execution: ExecutionContext = {
+      actorType: "client",
+      actorId: entry.package.manifest.id,
+      runtimeId: entry.runtimeId,
+      scopeType: ownScope.type,
+      scopeId: ownScope.id,
+      scopeChain: ownScope.type === "global" ? [ownScope] : [globalScope(), ownScope],
+      permissions: entry.entry.permissions,
+      permissionRevision: 1,
+    };
+    return this.services.call(call.contract, call.method, call.args, execution);
   }
 
   diagnostics(): {

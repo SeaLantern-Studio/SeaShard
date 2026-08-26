@@ -3,6 +3,7 @@ import {
   type AgentClientService,
   type AgentModelConfigurationClientService,
   type DesktopClientBootstrap,
+  type ClientServiceCallRequest,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
   type ServerConsoleLine,
@@ -237,6 +238,8 @@ const api: SeaShardDesktopApi = Object.freeze({
       return () => ipcRenderer.removeListener(desktopChannels.clientBootstrapChanged, handler);
     },
     ready: () => ipcRenderer.invoke(desktopChannels.rendererReady),
+    callService: (request: ClientServiceCallRequest) =>
+      ipcRenderer.invoke(desktopChannels.clientServiceCall, request),
   }),
   window: Object.freeze({
     minimize: () => ipcRenderer.invoke(desktopChannels.windowMinimize),

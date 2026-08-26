@@ -16,6 +16,7 @@ import type {
   PluginManifest,
 } from "../packages/plugin-sdk/src/index.ts";
 import { PluginKernel } from "../packages/plugin-system/src/kernel.ts";
+import type { PluginPackageRecord } from "../packages/plugin-system/src/types.ts";
 import { Context } from "cordis";
 import { databaseWorkerEntry } from "./plugin-test-fixtures.ts";
 
@@ -349,7 +350,7 @@ await test("package installation enables every Entry without activating incompat
       store: root["plugin-foundation"].store,
       pluginStorage: root["plugin-foundation"].storage,
     });
-    const manifest = {
+    const manifest: PluginManifest = {
       id: "example.install-auto-enable",
       version: "1.0.0",
       publisher: "example",
@@ -359,9 +360,9 @@ await test("package installation enables every Entry without activating incompat
           runtime: "client",
           module: "./dist/client.js",
           targets: ["desktop"],
-          uses: {},
+          uses: { "example.client-bridge": ["echo"] },
           activationScopes: ["global"],
-          permissions: [],
+          permissions: ["example.client-bridge"],
         },
         {
           id: "electron-only",
@@ -374,8 +375,8 @@ await test("package installation enables every Entry without activating incompat
         },
       ],
       compatibility: { seaShard: ">=0.0.0 <1.0.0" },
-    } satisfies PluginManifest;
-    const record = {
+    };
+    const record: PluginPackageRecord = {
       manifest,
       digest: "d".repeat(64),
       rootPath: "C:/plugins/example.install-auto-enable",
@@ -412,6 +413,45 @@ await test("package installation enables every Entry without activating incompat
         .clientEntrySnapshot()
         .entries.map((entry) => [entry.runtimeId, entry.package.manifest.id]),
       [["plugin:example.install-auto-enable:client", manifest.id]],
+    );
+    kernel.services.register(
+      "example.client-bridge",
+      "plugin:example.install-auto-enable:host",
+      { type: "global", id: "global" },
+      {
+        echo: async (value) => ({ echoed: value }),
+      },
+    );
+    const clientRuntimeId = "plugin:example.install-auto-enable:client";
+    assert.deepEqual(
+      await kernel.callClientService({
+        runtimeId: clientRuntimeId,
+        integrity: record.digest,
+        contract: "example.client-bridge",
+        method: "echo",
+        args: ["hello"],
+      }),
+      { echoed: "hello" },
+    );
+    await assert.rejects(
+      kernel.callClientService({
+        runtimeId: clientRuntimeId,
+        integrity: record.digest,
+        contract: "example.client-bridge",
+        method: "remove",
+        args: [],
+      }),
+      /did not declare example\.client-bridge\.remove/u,
+    );
+    await assert.rejects(
+      kernel.callClientService({
+        runtimeId: clientRuntimeId,
+        integrity: "e".repeat(64),
+        contract: "example.client-bridge",
+        method: "echo",
+        args: [],
+      }),
+      /client runtime is not active/u,
     );
   } finally {
     await kernel?.dispose();

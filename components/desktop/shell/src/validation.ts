@@ -4,6 +4,7 @@ import {
   serverPortLimits,
   serverModSearchLimits,
   type AgentModelConfigurationService,
+  type ClientServiceCallRequest,
   type AgentModelConnectionMutation,
   type AgentModelSelection,
   type AgentSessionService,
@@ -36,6 +37,40 @@ export function expectString(value: unknown, label: string): string {
 export function expectSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
   return value as number;
+}
+
+/** 固定 IPC 只接受边界清晰的 Entry 身份、方法和 JSON 参数。 */
+export function expectClientServiceCallRequest(value: unknown): ClientServiceCallRequest {
+  const record = expectRecord(value, "Client service call");
+  const runtimeId = expectNonEmptyString(record.runtimeId, "Client runtime ID");
+  if (runtimeId.length > 512) throw new TypeError("Client runtime ID is too long");
+  const integrity = expectNonEmptyString(record.integrity, "Client package integrity");
+  if (!/^[a-f0-9]{64}$/u.test(integrity)) {
+    throw new TypeError("Client package integrity must be a SHA-256 digest");
+  }
+  const contract = expectNonEmptyString(record.contract, "Client service contract");
+  if (!/^[a-z0-9](?:[a-z0-9.:-]{0,126}[a-z0-9])?$/u.test(contract)) {
+    throw new TypeError("Client service contract is invalid");
+  }
+  const method = expectNonEmptyString(record.method, "Client service method");
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(method)) {
+    throw new TypeError("Client service method is invalid");
+  }
+  if (!Array.isArray(record.args)) throw new TypeError("Client service args must be an array");
+  return {
+    runtimeId,
+    integrity,
+    contract,
+    method,
+    args: record.args.map((argument, index) =>
+      expectJsonValue(argument, `Client service arg ${index}`),
+    ),
+  };
+}
+
+/** Provider 返回值在进入 Renderer 前再次兑现 JSON Service 边界。 */
+export function expectClientServiceCallResult(value: unknown): JsonValue | void {
+  return value === undefined ? undefined : expectJsonValue(value, "Client service result");
 }
 
 export function expectAgentModelConnectionMutationInput(
@@ -322,6 +357,50 @@ function expectServerModFilter(value: unknown, label: string): string {
     throw new TypeError(`${label} is invalid`);
   }
   return filter;
+}
+
+function expectJsonValue(
+  value: unknown,
+  label: string,
+  ancestors: Set<object> = new Set(),
+  depth = 0,
+): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError(`${label} must contain finite numbers`);
+    return value;
+  }
+  if (depth >= 64) throw new TypeError(`${label} exceeds the maximum JSON depth`);
+  if (!value || typeof value !== "object") throw new TypeError(`${label} must be JSON`);
+  if (ancestors.has(value)) throw new TypeError(`${label} must not contain cycles`);
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item, index) =>
+        expectJsonValue(item, `${label}[${index}]`, ancestors, depth + 1),
+      );
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      (prototype !== Object.prototype && prototype !== null) ||
+      Object.getOwnPropertySymbols(value).length
+    ) {
+      throw new TypeError(`${label} must contain plain JSON objects`);
+    }
+    const result: JsonObject = {};
+    for (const [key, item] of Object.entries(value)) {
+      Object.defineProperty(result, key, {
+        value: expectJsonValue(item, `${label}.${key}`, ancestors, depth + 1),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 function expectRecord(value: unknown, label: string): Record<string, unknown> {

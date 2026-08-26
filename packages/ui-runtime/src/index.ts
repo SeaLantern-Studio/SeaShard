@@ -1,5 +1,10 @@
-import type { ClientEntryDescriptor, ClientEntryPublication } from "@seashard/contracts";
-import type { Disposable } from "@seashard/plugin-sdk";
+import {
+  clientPluginAssetScheme,
+  type ClientEntryDescriptor,
+  type ClientEntryPublication,
+  type ClientServiceCallRequest,
+} from "@seashard/contracts";
+import type { Disposable, JsonValue } from "@seashard/plugin-sdk";
 import type {
   ClientUiContext,
   ClientUiModule,
@@ -22,9 +27,35 @@ export interface ClientUiModuleLoader {
   load(): Promise<unknown>;
 }
 
+export interface ClientUiPackageModuleLoader {
+  load(moduleUrl: string, integrity: string): Promise<unknown>;
+}
+
+export interface ClientUiHostServiceBridge {
+  call(request: ClientServiceCallRequest): Promise<JsonValue | void>;
+}
+
+/** 浏览器端只接受 Main 发布的摘要协议 URL，禁止把普通网络地址送入动态 import。 */
+export const browserClientPackageModuleLoader: ClientUiPackageModuleLoader = {
+  load: async (moduleUrl, integrity) => {
+    const url = new URL(moduleUrl);
+    if (
+      url.protocol !== `${clientPluginAssetScheme}:` ||
+      url.hostname !== integrity ||
+      url.search ||
+      url.hash
+    ) {
+      throw new TypeError(`invalid client package module URL: ${moduleUrl}`);
+    }
+    return import(/* @vite-ignore */ url.href);
+  },
+};
+
 export interface ClientUiRuntimeOptions {
   router: Router;
-  loaders: Readonly<Record<string, ClientUiModuleLoader>>;
+  builtInLoaders: Readonly<Record<string, ClientUiModuleLoader>>;
+  packageLoader: ClientUiPackageModuleLoader;
+  hostServices: ClientUiHostServiceBridge;
   services: Readonly<Record<string, object>>;
 }
 
@@ -48,6 +79,7 @@ interface ActiveClientEntry {
   fingerprint: string;
   scope: EffectScope;
   disposers: Disposable[];
+  callable: boolean;
 }
 
 const contributionIdPattern = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
@@ -162,16 +194,6 @@ export class ClientUiRuntime {
   }
 
   private async startEntry(descriptor: ClientEntryDescriptor): Promise<void> {
-    const loader = this.options.loaders[descriptor.moduleKey];
-    if (!loader) {
-      this.recordFailure(
-        descriptor.runtimeId,
-        "activation",
-        new Error(`client module loader is unavailable: ${descriptor.moduleKey}`),
-      );
-      return;
-    }
-
     const scope = effectScope(true);
     const disposers: Disposable[] = [];
     const record: ActiveClientEntry = {
@@ -179,16 +201,39 @@ export class ClientUiRuntime {
       fingerprint: fingerprintDescriptor(descriptor),
       scope,
       disposers,
+      callable: true,
     };
 
     try {
-      const module = resolveClientUiModule(await loader.load());
+      const module = resolveClientUiModule(await this.loadEntryModule(descriptor));
       const context: ClientUiContext = {
         entry: descriptor,
         service: <T extends object>(contract: string): T => {
-          const service = this.options.services[contract];
-          if (!service) throw new Error(`client service is unavailable: ${contract}`);
-          return service as T;
+          const local = this.options.services[contract];
+          if (local) return local as T;
+          return new Proxy(
+            {},
+            {
+              get: (_target, property) => {
+                if (property === "then") return undefined;
+                if (typeof property !== "string") return undefined;
+                return (...args: JsonValue[]) => {
+                  if (!record.callable) {
+                    return Promise.reject(
+                      new Error(`client runtime is no longer active: ${descriptor.runtimeId}`),
+                    );
+                  }
+                  return this.options.hostServices.call({
+                    runtimeId: descriptor.runtimeId,
+                    integrity: descriptor.integrity,
+                    contract,
+                    method: property,
+                    args,
+                  });
+                };
+              },
+            },
+          ) as T;
         },
         effect: (setup) => {
           const cleanup = setup();
@@ -225,6 +270,17 @@ export class ClientUiRuntime {
       }
       this.recordFailure(descriptor.runtimeId, "activation", error);
     }
+  }
+
+  private loadEntryModule(descriptor: ClientEntryDescriptor): Promise<unknown> {
+    if (descriptor.module.source === "package") {
+      return this.options.packageLoader.load(descriptor.module.url, descriptor.integrity);
+    }
+    const loader = this.options.builtInLoaders[descriptor.module.key];
+    if (!loader) {
+      throw new Error(`client module loader is unavailable: ${descriptor.module.key}`);
+    }
+    return loader.load();
   }
 
   private registerPage(runtimeId: string, contribution: NavigationPageContribution): Disposable {
@@ -322,6 +378,7 @@ export class ClientUiRuntime {
   }
 
   private async stopEntry(record: ActiveClientEntry): Promise<void> {
+    record.callable = false;
     const failures: unknown[] = [];
     for (const dispose of record.disposers.reverse()) {
       try {

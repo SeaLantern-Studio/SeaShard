@@ -1,5 +1,9 @@
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
-import { desktopShellContract, serverCoreIconScheme } from "@seashard/contracts";
+import {
+  clientPluginAssetScheme,
+  desktopShellContract,
+  serverCoreIconScheme,
+} from "@seashard/contracts";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import {
@@ -25,6 +29,16 @@ protocol.registerSchemesAsPrivileged([
     privileges: {
       standard: true,
       secure: true,
+    },
+  },
+  {
+    scheme: clientPluginAssetScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      codeCache: true,
     },
   },
 ]);

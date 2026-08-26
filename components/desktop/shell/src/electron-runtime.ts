@@ -25,7 +25,16 @@ export function createElectronDesktopShellRuntime(
       electronProtocol.handle(scheme, async (request) => {
         const path = await resolvePath(request.url);
         if (!path) return new Response(null, { status: 404 });
-        return electronNet.fetch(pathToFileURL(path).href);
+        const response = await electronNet.fetch(pathToFileURL(path).href);
+        const headers = new Headers(response.headers);
+        // Renderer 的 file:// 页面和开发服务器都会以跨源模块请求访问自定义协议。
+        headers.set("access-control-allow-origin", "*");
+        headers.set("cross-origin-resource-policy", "cross-origin");
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
       });
     },
     removeProtocolHandler: (scheme) => electronProtocol.unhandle(scheme),

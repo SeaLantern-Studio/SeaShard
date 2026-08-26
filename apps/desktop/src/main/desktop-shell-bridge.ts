@@ -26,7 +26,11 @@ import {
   desktopShellManifest,
 } from "@seashard/desktop-shell";
 import { downloadContract, type DownloadService } from "@seashard/download";
-import { projectClientEntryPublication, type PluginKernel } from "@seashard/plugin-system";
+import {
+  projectClientEntryPublication,
+  resolveClientPluginAssetPath,
+  type PluginKernel,
+} from "@seashard/plugin-system";
 import {
   serverCoreSourceContract,
   type ServerCoreSourceService,
@@ -122,12 +126,15 @@ export async function registerDesktopShellBridge(
             ...(developmentUrl ? { developmentUrl } : {}),
             smokeMode,
             reportOpenFailure: (error) => console.error("Desktop window open failed", error),
+            resolveClientPluginAssetPath: async (requestUrl) =>
+              await resolveClientPluginAssetPath(kernel.clientEntrySnapshot(), requestUrl),
             readClientEntryPublication: () =>
               projectClientEntryPublication(kernel.clientEntrySnapshot()),
             onClientEntriesChanged: (listener) =>
               kernel.onClientEntriesChanged((snapshot) =>
                 listener(projectClientEntryPublication(snapshot)),
               ),
+            callClientService: (request) => kernel.callClientService(request),
             listAgentModels: async () => await agentSessions.listModels(),
             listAgentSessions: async () => await agentSessions.listSessions(),
             readAgentSession: async (sessionId) => await agentSessions.getSession(sessionId),

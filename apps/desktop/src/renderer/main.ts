@@ -12,7 +12,11 @@ import {
   serverRuntimeContract,
   serverSettingsContract,
 } from "@seashard/contracts";
-import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
+import {
+  browserClientPackageModuleLoader,
+  ClientUiRuntime,
+  clientUiRuntimeKey,
+} from "@seashard/ui-runtime";
 import { uiAppearanceContract } from "@seashard/ui-sdk";
 import { createApp } from "vue";
 import "cmzya-modern-ui/style.css";
@@ -24,7 +28,11 @@ import "./style.css";
 
 const runtime = new ClientUiRuntime({
   router,
-  loaders: builtInClientModuleLoaders,
+  builtInLoaders: builtInClientModuleLoaders,
+  packageLoader: browserClientPackageModuleLoader,
+  hostServices: {
+    call: (request) => window.seashard.client.callService(request),
+  },
   services: {
     [agentSessionContract]: window.seashard.agent,
     [agentInvocationContract]: window.seashard.agent,

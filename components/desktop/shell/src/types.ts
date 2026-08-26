@@ -3,6 +3,7 @@ import type {
   AgentModelConfigurationService,
   AgentSessionService,
   ClientEntryPublication,
+  ClientServiceCallRequest,
   FileDownloadClientService,
   FileDownloadTaskSnapshot,
   JavaRuntimeManagerService,
@@ -35,6 +36,7 @@ import type {
   ServerWorldDatapackSnapshot,
   ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
+import type { JsonValue } from "@seashard/plugin-sdk";
 import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent } from "electron";
 
 export interface DirectorySelectionOptions {
@@ -270,7 +272,9 @@ export interface DesktopShellConfig {
   cancelFileDownload(taskId: string): ReturnType<FileDownloadClientService["cancel"]>;
   listServerCoreDownloadTasks(): ReturnType<ServerCoreDownloadClientService["listTasks"]>;
   cancelServerCoreDownload(taskId: string): ReturnType<ServerCoreDownloadClientService["cancel"]>;
+  resolveClientPluginAssetPath(requestUrl: string): Promise<string | undefined>;
   readClientEntryPublication(): ClientEntryPublication;
   onClientEntriesChanged(listener: (publication: ClientEntryPublication) => void): () => void;
+  callClientService(request: ClientServiceCallRequest): Promise<JsonValue | void>;
   onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () => void;
 }

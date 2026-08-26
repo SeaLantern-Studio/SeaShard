@@ -589,26 +589,25 @@ class PluginHostSession {
 }
 
 /**
- * 外部 Plugin Host 只能调用清单中声明的方法。执行身份始终取自主进程持有的
- * Session，子进程即使在载荷中夹带同名字段也不会参与授权。
+ * Host 与 Client 的通用 Service 边界只接受 Manifest `uses` 明确声明的方法。
+ * 调用身份由持有 Entry 的宿主侧补入，载荷不能覆盖授权身份。
  */
-export function authorizeExternalServiceCall(
+export function authorizeEntryServiceCall(
   entry: ResolvedEntry,
-  execution: ExecutionContext,
   payload: JsonValue,
-): ServiceCallPayload & { readonly execution: ExecutionContext } {
+): ServiceCallPayload {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new TypeError("external service call payload must be an object");
+    throw new TypeError("service call payload must be an object");
   }
   const input = payload as Partial<ServiceCallPayload>;
   if (typeof input.contract !== "string" || !input.contract) {
-    throw new TypeError("external service call contract must be a non-empty string");
+    throw new TypeError("service call contract must be a non-empty string");
   }
   if (typeof input.method !== "string" || !input.method) {
-    throw new TypeError("external service call method must be a non-empty string");
+    throw new TypeError("service call method must be a non-empty string");
   }
   if (!Array.isArray(input.args)) {
-    throw new TypeError("external service call args must be an array");
+    throw new TypeError("service call args must be an array");
   }
 
   const uses = entry.entry.uses;
@@ -623,6 +622,17 @@ export function authorizeExternalServiceCall(
     contract: input.contract,
     method: input.method,
     args: input.args,
+  };
+}
+
+/** 外部 Plugin Host 的执行身份始终取自主进程 Session。 */
+export function authorizeExternalServiceCall(
+  entry: ResolvedEntry,
+  execution: ExecutionContext,
+  payload: JsonValue,
+): ServiceCallPayload & { readonly execution: ExecutionContext } {
+  return {
+    ...authorizeEntryServiceCall(entry, payload),
     execution,
   };
 }

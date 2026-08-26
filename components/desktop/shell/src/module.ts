@@ -1,10 +1,11 @@
 import {
   agentModelConfigurationChangedEvent,
+  clientPluginAssetScheme,
   desktopChannels,
   desktopShellContract,
-  runtimeDiagnosticsContract,
   serverCoreIconHost,
   serverInstanceIconHost,
+  runtimeDiagnosticsContract,
   serverCoreIconScheme,
   type DesktopClientBootstrap,
   type RuntimeDiagnosticsService,
@@ -21,6 +22,8 @@ import {
   expectAgentModelDiscoveryInput,
   expectAgentSendMessageInput,
   expectAgentStartSessionInput,
+  expectClientServiceCallRequest,
+  expectClientServiceCallResult,
   expectNonEmptyString,
   expectServerInstanceStartupSettings,
   expectSafeInteger,
@@ -212,6 +215,9 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           window.webContents.send(desktopChannels.serverRuntimeConsoleLine, line);
         });
 
+        config.runtime.handleFileProtocol(clientPluginAssetScheme, (requestUrl) =>
+          config.resolveClientPluginAssetPath(requestUrl),
+        );
         config.runtime.handleFileProtocol(serverCoreIconScheme, async (requestUrl) => {
           let url: URL;
           try {
@@ -797,6 +803,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             connections: settings.defaultDownloadConnections,
           });
         });
+        config.runtime.handle(desktopChannels.clientServiceCall, async (event, value) => {
+          if (!ownsWebContents(event.sender.id)) {
+            throw new Error("client service call request rejected");
+          }
+          const request = expectClientServiceCallRequest(value);
+          return expectClientServiceCallResult(await config.callClientService(request));
+        });
         config.runtime.handle(desktopChannels.clientBootstrap, (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("client bootstrap request rejected");
@@ -820,6 +833,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           disposeClientEntrySubscription();
           disposeServerConsoleSubscription();
           config.runtime.removeProtocolHandler(serverCoreIconScheme);
+          config.runtime.removeProtocolHandler(clientPluginAssetScheme);
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
@@ -888,6 +902,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.agentCredentialRemove);
           config.runtime.removeHandler(desktopChannels.agentModelConfigurationOpen);
           config.runtime.removeHandler(desktopChannels.clientBootstrap);
+          config.runtime.removeHandler(desktopChannels.clientServiceCall);
           config.runtime.removeHandler(desktopChannels.rendererReady);
           config.runtime.removeHandler(desktopChannels.windowMinimize);
           config.runtime.removeHandler(desktopChannels.windowToggleMaximize);

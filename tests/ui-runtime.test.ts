@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectClientEntryPublication } from "../packages/plugin-system/src/client-projection.ts";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createClientPluginAssetUrl,
+  projectClientEntryPublication,
+  resolveClientPluginAssetPath,
+} from "../packages/plugin-system/src/index.ts";
 import type { ResolvedClientEntrySnapshot } from "../packages/plugin-system/src/types.ts";
 import type { ClientUiModule } from "../packages/ui-sdk/src/index.ts";
-import { ClientUiRuntime } from "../packages/ui-runtime/src/index.ts";
+import {
+  browserClientPackageModuleLoader,
+  ClientUiRuntime,
+} from "../packages/ui-runtime/src/index.ts";
 import type { ClientEntryDescriptor } from "../packages/contracts/src/index.ts";
 import { defineComponent } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -15,7 +25,7 @@ const pageComponent = defineComponent({
 
 function descriptor(
   runtimeId: string,
-  moduleKey: string,
+  builtInKey: string,
   integrity = "a".repeat(64),
 ): ClientEntryDescriptor {
   return {
@@ -23,7 +33,7 @@ function descriptor(
     pluginId: `plugin.${runtimeId}`,
     pluginVersion: "1.0.0",
     entryId: "client",
-    moduleKey,
+    module: { source: "builtin", key: builtInKey },
     integrity,
     scopeType: "global",
     scopeId: "global",
@@ -65,7 +75,17 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   };
   const runtime = new ClientUiRuntime({
     router,
-    loaders: { test: { load: async () => ({ default: module }) } },
+    builtInLoaders: { test: { load: async () => ({ default: module }) } },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
     services: { "test.service": { value: 42 } },
   });
 
@@ -97,6 +117,86 @@ await test("client UI runtime mounts and retracts a built-in page with its entry
   await runtime.dispose();
 });
 
+interface EchoService {
+  echo(value: string): Promise<string>;
+}
+await test("client UI runtime loads an activated package module through its digest URL", async () => {
+  const router = memoryRouter();
+  const integrity = "c".repeat(64);
+  const moduleUrl = createClientPluginAssetUrl(integrity, "./dist/client.js");
+  const moduleRequests: Array<{ moduleUrl: string; integrity: string }> = [];
+  const serviceRequests: Array<{
+    runtimeId: string;
+    integrity: string;
+    contract: string;
+    method: string;
+    args: readonly unknown[];
+  }> = [];
+  let bridgedService: EchoService | undefined;
+  let bridgedValue: string | undefined;
+  const module: ClientUiModule = {
+    async apply(ctx) {
+      bridgedService = ctx.service<EchoService>("example.echo");
+      bridgedValue = await bridgedService.echo("hello");
+      ctx.contribute("navigation.page", {
+        id: "package-page",
+        path: "/package",
+        label: "Package",
+        component: pageComponent,
+      });
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    builtInLoaders: {},
+    packageLoader: {
+      load: async (requestedUrl, requestedIntegrity) => {
+        moduleRequests.push({ moduleUrl: requestedUrl, integrity: requestedIntegrity });
+        return { default: module };
+      },
+    },
+    hostServices: {
+      call: async (request) => {
+        serviceRequests.push(request);
+        const value = request.args[0];
+        if (typeof value !== "string") throw new TypeError("echo input must be a string");
+        return `echo:${value}`;
+      },
+    },
+    services: {},
+  });
+  const packageEntry: ClientEntryDescriptor = {
+    ...descriptor("package.runtime", "unused", integrity),
+    module: { source: "package", url: moduleUrl },
+  };
+
+  await runtime.reconcile({ revision: 1, entries: [packageEntry] });
+
+  assert.deepEqual(moduleRequests, [{ moduleUrl, integrity }]);
+  assert.equal(bridgedValue, "echo:hello");
+  assert.deepEqual(serviceRequests, [
+    {
+      runtimeId: "package.runtime",
+      integrity,
+      contract: "example.echo",
+      method: "echo",
+      args: ["hello"],
+    },
+  ]);
+  assert.deepEqual(
+    runtime.pages.value.map((page) => page.id),
+    ["package-page"],
+  );
+  await assert.rejects(
+    browserClientPackageModuleLoader.load("https://example.invalid/client.js", integrity),
+    /invalid client package module URL/u,
+  );
+  await runtime.reconcile({ revision: 2, entries: [] });
+  assert.ok(bridgedService);
+  await assert.rejects(bridgedService.echo("stale"), /client runtime is no longer active/u);
+  await runtime.dispose();
+});
+
 await test("client UI runtime isolates an unavailable feature entry", async () => {
   const router = memoryRouter();
   const goodModule: ClientUiModule = {
@@ -111,8 +211,18 @@ await test("client UI runtime isolates an unavailable feature entry", async () =
   };
   const runtime = new ClientUiRuntime({
     router,
-    loaders: { healthy: { load: async () => goodModule } },
+    builtInLoaders: { healthy: { load: async () => goodModule } },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
     services: {},
+    hostServices: {
+      call: async () => {
+        throw new Error("Host service bridge should not run");
+      },
+    },
   });
 
   await runtime.reconcile({
@@ -181,7 +291,77 @@ await test("client entry projection excludes Main paths and loader objects", () 
 
   const publication = projectClientEntryPublication(snapshot);
   assert.equal(publication.revision, 7);
-  assert.equal(publication.entries[0]?.moduleKey, "example.client-plugin/client");
+  assert.deepEqual(publication.entries[0]?.module, {
+    source: "package",
+    url: `seashard-plugin://${"b".repeat(64)}/dist/client.js`,
+  });
   assert.equal(JSON.stringify(publication).includes("C:/Users/private"), false);
   assert.equal("rootPath" in (publication.entries[0] ?? {}), false);
+});
+
+await test("client plugin asset resolver serves only current package files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seashard-client-assets-"));
+  const digest = "d".repeat(64);
+  const modulePath = join(root, "dist", "client.js");
+  await mkdir(join(root, "dist"), { recursive: true });
+  await writeFile(modulePath, "export const apply = () => {};\\n");
+  const manifest = {
+    id: "example.dynamic-client",
+    version: "1.0.0",
+    publisher: "example",
+    entries: [
+      {
+        id: "client",
+        runtime: "client" as const,
+        module: "./dist/client.js",
+        targets: ["desktop" as const],
+        activationScopes: ["global" as const],
+        permissions: [],
+      },
+    ],
+    compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+  };
+  const snapshot: ResolvedClientEntrySnapshot = {
+    revision: 1,
+    entries: [
+      {
+        package: {
+          manifest,
+          digest,
+          rootPath: root,
+          source: "development",
+          trust: "local-full-trust",
+          installedAt: "2026-08-26T00:00:00.000Z",
+        },
+        entry: manifest.entries[0]!,
+        binding: {
+          id: "dev:example.dynamic-client:client",
+          pluginId: manifest.id,
+          entryId: "client",
+          scopeType: "global",
+          scopeId: "global",
+          enabled: true,
+          config: null,
+        },
+        runtimeId: "dev:example.dynamic-client:client",
+        host: "client",
+      },
+    ],
+  };
+  const moduleUrl = createClientPluginAssetUrl(digest, "./dist/client.js");
+
+  try {
+    assert.equal(await resolveClientPluginAssetPath(snapshot, moduleUrl), modulePath);
+    assert.equal(await resolveClientPluginAssetPath(snapshot, `${moduleUrl}?cache=off`), undefined);
+    assert.equal(
+      await resolveClientPluginAssetPath(snapshot, `seashard-plugin://${digest}/dist%2Fclient.js`),
+      undefined,
+    );
+    assert.equal(
+      await resolveClientPluginAssetPath({ revision: 2, entries: [] }, moduleUrl),
+      undefined,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

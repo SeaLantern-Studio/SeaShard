@@ -1,4 +1,5 @@
 import {
+  clientPluginAssetScheme,
   desktopChannels,
   type DesktopClientBootstrap,
   serverCoreIconScheme,
@@ -21,6 +22,7 @@ import {
 await test("desktop shell owns the primary window and releases its lifecycle", async () => {
   const harness = await createDesktopShellHarness();
   const { runtime, shell } = harness;
+  assert.equal(runtime.protocolHandlers.has(clientPluginAssetScheme), true);
   await Promise.all([shell.service.openPrimary(), shell.service.openPrimary()]);
   assert.equal(runtime.windows.length, 1, "concurrent opens must share one primary window");
   const first = runtime.windows[0];
@@ -222,6 +224,40 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
     },
   } satisfies DesktopClientBootstrap);
   await assert.rejects(runtime.invoke(desktopChannels.clientBootstrap, 999), /request rejected/);
+  const clientEntry = clientEntries.entries[0]!;
+  const clientServiceRequest = {
+    runtimeId: clientEntry.runtimeId,
+    integrity: clientEntry.integrity,
+    contract: "example.echo",
+    method: "echo",
+    args: ["hello"],
+  } as const;
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.clientServiceCall, 1, clientServiceRequest),
+    {
+      runtimeId: clientEntry.runtimeId,
+      value: "hello",
+    },
+  );
+  assert.deepEqual(harness.clientServiceCalls, [clientServiceRequest]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.clientServiceCall, 999, clientServiceRequest),
+    /request rejected/u,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.clientServiceCall, 1, {
+      ...clientServiceRequest,
+      args: [undefined],
+    }),
+    /must be JSON/u,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.clientServiceCall, 1, {
+      ...clientServiceRequest,
+      method: "invalidResult",
+    }),
+    /plain JSON objects/u,
+  );
   assert.equal(await runtime.invoke(desktopChannels.rendererReady, 1), undefined);
   assert.deepEqual(harness.readySnapshots, [snapshot]);
   await assert.rejects(runtime.invoke(desktopChannels.rendererReady, 999), /request rejected/);
@@ -304,6 +340,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.fileDownloadListTasks), false);
   assert.equal(runtime.handlers.has(desktopChannels.fileDownloadCancel), false);
   assert.equal(runtime.handlers.has(desktopChannels.clientBootstrap), false);
+  assert.equal(runtime.handlers.has(desktopChannels.clientServiceCall), false);
   assert.equal(runtime.handlers.has(desktopChannels.rendererReady), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowMinimize), false);
   assert.equal(runtime.handlers.has(desktopChannels.windowToggleMaximize), false);
@@ -312,6 +349,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(harness.clientEntryListener, undefined);
   assert.equal(harness.serverConsoleListener, undefined);
   assert.equal(runtime.protocolHandlers.has(serverCoreIconScheme), false);
+  assert.equal(runtime.protocolHandlers.has(clientPluginAssetScheme), false);
   assert.deepEqual(harness.failures, []);
 });
 

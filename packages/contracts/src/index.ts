@@ -14,6 +14,7 @@ export const desktopChannels = {
   clientBootstrap: "seashard.client.bootstrap",
   clientBootstrapChanged: "seashard.client.bootstrap-changed",
   rendererReady: "seashard.client.renderer-ready",
+  clientServiceCall: "seashard.client.service-call",
   windowMinimize: "seashard.window.minimize",
   windowToggleMaximize: "seashard.window.toggle-maximize",
   windowClose: "seashard.window.close",
@@ -103,6 +104,8 @@ export const serverCoreIconScheme = "seashard-cache";
 export const serverCoreIconHost = "server-core-icon";
 /** Renderer 通过受限本地协议读取已复制到实例目录的服务器图标。 */
 export const serverInstanceIconHost = "server-instance-icon";
+/** Renderer 只通过该协议读取当前激活且摘要匹配的第三方 Client 插件资源。 */
+export const clientPluginAssetScheme = "seashard-plugin";
 /** 服务器设置 Host 组件发布的稳定 Service contract。 */
 export const serverSettingsContract = defineServiceContract<ServerSettingsClientService>(
   "seashard.server-settings",
@@ -527,17 +530,37 @@ export interface DesktopShellService {
 }
 export type ClientSurface = "primary";
 
+/** Renderer 可加载的 Client 模块引用；包目录始终留在 Main，跨边界只发布摘要 URL。 */
+export type ClientEntryModuleReference =
+  | {
+      source: "builtin";
+      key: string;
+    }
+  | {
+      source: "package";
+      url: string;
+    };
+
 /** Main 允许当前 Renderer 激活的单个 Client Entry；不暴露包目录或宿主内部对象。 */
 export interface ClientEntryDescriptor {
   runtimeId: string;
   pluginId: string;
   pluginVersion: string;
   entryId: string;
-  moduleKey: string;
+  module: ClientEntryModuleReference;
   integrity: string;
   scopeType: ActivationScope;
   scopeId: string;
   config: JsonValue;
+}
+
+/** Client Entry 通过固定 IPC 请求 Main 调用一个 Host Service 方法。 */
+export interface ClientServiceCallRequest {
+  readonly runtimeId: string;
+  readonly integrity: string;
+  readonly contract: string;
+  readonly method: string;
+  readonly args: readonly JsonValue[];
 }
 
 /** Client Entry 期望状态；revision 用于丢弃迟到的 Renderer 更新。 */
@@ -1453,6 +1476,7 @@ export interface SeaShardDesktopApi {
     getBootstrap(): Promise<DesktopClientBootstrap>;
     onBootstrapChanged(listener: (snapshot: DesktopClientBootstrap) => void): () => void;
     ready(): Promise<void>;
+    callService(request: ClientServiceCallRequest): Promise<JsonValue | void>;
   };
   window: {
     minimize(): Promise<void>;
