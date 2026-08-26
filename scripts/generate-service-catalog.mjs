@@ -354,6 +354,12 @@ function resolveString(node, seen = new Set()) {
   const symbol = checker.getSymbolAtLocation(current);
   const target =
     symbol && (symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol);
+  // 干净安装尚无 SDK dist 时，TypeScript 可能无法把工作区包别名解析到值声明；
+  // 直接保留 import { source as local } 的 source 名称，回到工作区源码查找唯一静态值。
+  const importedName = symbol?.declarations
+    ?.filter(ts.isImportSpecifier)
+    .map((declaration) => declaration.propertyName?.text)
+    .find(Boolean);
   const declaration =
     target?.valueDeclaration ?? target?.declarations?.find(ts.isVariableDeclaration);
   if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
@@ -361,7 +367,7 @@ function resolveString(node, seen = new Set()) {
     seen.add(declaration);
     return resolveString(declaration.initializer, seen);
   }
-  for (const name of new Set([target?.getName(), current.text])) {
+  for (const name of new Set([target?.getName(), importedName, current.text])) {
     if (!name) continue;
     const value = resolveWorkspaceNamedString(name, seen);
     if (value) return value;
