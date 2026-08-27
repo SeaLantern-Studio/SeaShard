@@ -310,7 +310,7 @@ await test("Java Agent tools validate stable IDs and reuse each domain transacti
     { installationId: automaticJava.id, disabled: true, unknown: true },
   ];
   for (const invalid of invalidSetInputs) {
-    await assert.rejects(setDisabled.execute(invalid, {}), /必须|未知字段/u);
+    await assert.rejects(setDisabled.execute(invalid, {}), /必须|未知字段|不符合 inputSchema/u);
   }
   assert.deepEqual(disabledCalls, [{ installationId: automaticJava.id, disabled: true }]);
 

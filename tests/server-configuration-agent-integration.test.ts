@@ -357,7 +357,10 @@ await test("server_write-config validates optimistic writes and returns no confi
     { ...input, unknown: true },
   ];
   for (const invalid of invalidInputs) {
-    await assert.rejects(tool.execute(invalid, {}), /必须|不支持|规范|plain identifier/u);
+    await assert.rejects(
+      tool.execute(invalid, {}),
+      /必须|不支持|规范|plain identifier|不符合 inputSchema/u,
+    );
   }
   assert.equal(writeCalls.length, 1);
   harness.dispose();

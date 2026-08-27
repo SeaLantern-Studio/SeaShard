@@ -1,5 +1,6 @@
 import type { FileDownloadTaskSnapshot } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import { registerDownloadAgentIntegration } from "./agent-integration";
 import { DownloadManager } from "./download-manager";
 import { downloadContract, type DownloadManagerOptions, type DownloadTaskSnapshot } from "./types";
 
@@ -30,6 +31,13 @@ export function createDownloadModule(options: DownloadModuleOptions = {}): Plugi
     provides: [downloadContract],
     apply(ctx) {
       const manager = new DownloadManager(options);
+      // Agent 与 Host Service 共享同一 manager，任务保留、取消和临时文件收尾只有一条事务链。
+      registerDownloadAgentIntegration(ctx, {
+        listTasks: () => manager.listTasks(),
+        snapshot: (taskId) => manager.snapshot(taskId),
+        cancel: (taskId) => manager.cancel(taskId),
+      });
+
       ctx.provide(downloadContract, {
         start: async (request) => asJsonValue(await manager.start(request)),
         snapshot: (taskId) => asJsonValue(manager.snapshot(expectString(taskId, "taskId")) ?? null),
@@ -92,3 +100,4 @@ function asJsonValue(value: unknown): JsonValue {
 
 export * from "./download-manager";
 export * from "./types";
+export * from "./agent-integration";
