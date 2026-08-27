@@ -188,6 +188,8 @@ export interface AgentModelSettings {
 export interface AgentModelSelection {
   readonly connectionId: string;
   readonly modelId: string;
+  /** 当前 Invocation 选择的推理档位；档位名称由模型设置声明。 */
+  readonly reasoningLevel?: string;
 }
 
 export interface AgentConfiguredModel extends AgentModelSelection {

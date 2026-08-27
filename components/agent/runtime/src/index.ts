@@ -157,6 +157,9 @@ function parseModelSelection(value: unknown): AgentModelSelection {
   return {
     connectionId: requireString(object.connectionId, "model.connectionId"),
     modelId: requireString(object.modelId, "model.modelId"),
+    ...(object.reasoningLevel === undefined
+      ? {}
+      : { reasoningLevel: requireString(object.reasoningLevel, "model.reasoningLevel") }),
   };
 }
 

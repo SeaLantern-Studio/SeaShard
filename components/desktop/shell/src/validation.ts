@@ -486,6 +486,11 @@ function expectAgentModelSelection(value: unknown): AgentModelSelection {
   return {
     connectionId: expectNonEmptyString(record.connectionId, "Agent connection ID"),
     modelId: expectNonEmptyString(record.modelId, "Agent model ID"),
+    ...(record.reasoningLevel === undefined
+      ? {}
+      : {
+          reasoningLevel: expectNonEmptyString(record.reasoningLevel, "Agent reasoning level"),
+        }),
   };
 }
 

@@ -1,0 +1,182 @@
+.agent-conversation-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 48px 32px 190px;
+}
+
+.agent-conversation-empty {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: 88px;
+}
+
+.agent-conversation-empty h1 {
+  font-size: 1.65rem;
+  font-weight: 520;
+  letter-spacing: -0.035em;
+}
+
+.agent-brand-mark {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: var(--sl-radius-md);
+  background-image: var(--sl-software-logo);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.agent-message-list {
+  width: min(100%, 780px);
+  margin: 0 auto;
+}
+
+.agent-message {
+  display: flex;
+  width: 100%;
+  margin-bottom: 34px;
+  gap: 14px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.agent-message.is-user {
+  justify-content: flex-end;
+}
+
+.agent-message-avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  margin-top: 2px;
+}
+
+.agent-message-avatar .agent-brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--sl-radius-sm);
+}
+
+.agent-user-message {
+  max-width: min(72%, 600px);
+  padding: 10px 14px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: 16px 16px 4px 16px;
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-base);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-assistant-message {
+  width: min(100%, 620px);
+  min-width: 0;
+  max-width: 620px;
+  flex: 0 1 620px;
+  padding-top: 3px;
+  color: var(--sl-text-primary);
+  line-height: 1.7;
+}
+
+.agent-assistant-message .cmz-md {
+  color: inherit;
+}
+
+/*
+ * Cmz_Markdown 0.7.1 的 `ol li` 会同时命中有序项内部的无序列表，
+ * 导致子项继续递增外层计数器。计数只属于各级 ol 的直接子项。
+ */
+.agent-assistant-message .cmz-md ol li {
+  counter-increment: none;
+}
+
+.agent-assistant-message .cmz-md ol > li {
+  counter-increment: cmz-md-counter;
+}
+
+/* 数字徽标与父级标题行垂直对齐，不贴在卡片左上角。 */
+.agent-assistant-message .cmz-md ol > li::before {
+  top: 0.9em;
+}
+
+/* Markdown 的父级段落默认保留 1em 下边距，这里收紧到下一层列表。 */
+.agent-assistant-message .cmz-md ol > li > p {
+  margin-bottom: 0.2em;
+}
+
+/* 恢复 ol 内嵌 ul 的圆点，避免库中后声明的数字徽标样式覆盖它。 */
+.agent-assistant-message .cmz-md ul > li::before {
+  top: 0.75em;
+  min-width: 0;
+  height: 6px;
+  padding: 0;
+  content: "";
+  font-size: 0;
+  line-height: 0;
+}
+
+.agent-assistant-message .cmz-md li > ul {
+  margin-top: 0.1em;
+}
+
+.agent-assistant-message .cmz-md li > ul > li {
+  margin-bottom: 0;
+  padding-block: 0.15em;
+}
+
+.agent-assistant-message .cmz-md li > ul > li::before {
+  top: 50%;
+  height: 5px;
+  transform: translateY(-50%);
+}
+
+.agent-thinking {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-thinking span {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--sl-radius-full);
+  animation: agent-thinking-dot 1.2s ease-in-out infinite;
+  background: var(--sl-text-tertiary);
+}
+
+.agent-thinking span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.agent-thinking span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+@keyframes agent-thinking-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  35% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-thinking span {
+    animation: none;
+  }
+}

@@ -394,7 +394,11 @@ function parseHeader(line: string | undefined, fileName: string): SessionHeaderR
     throw new Error(`Agent Session Header 损坏：${fileName}`);
   }
   const model = record.model as Record<string, unknown>;
-  if (typeof model.connectionId !== "string" || typeof model.modelId !== "string") {
+  if (
+    typeof model.connectionId !== "string" ||
+    typeof model.modelId !== "string" ||
+    (model.reasoningLevel !== undefined && typeof model.reasoningLevel !== "string")
+  ) {
     throw new Error(`Agent Session 模型记录损坏：${fileName}`);
   }
   return {
@@ -403,7 +407,11 @@ function parseHeader(line: string | undefined, fileName: string): SessionHeaderR
     id: record.id,
     timestamp: record.timestamp,
     title: record.title,
-    model: { connectionId: model.connectionId, modelId: model.modelId },
+    model: {
+      connectionId: model.connectionId,
+      modelId: model.modelId,
+      ...(model.reasoningLevel === undefined ? {} : { reasoningLevel: model.reasoningLevel }),
+    },
   };
 }
 
@@ -439,7 +447,11 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
     throw new Error(`Agent Invocation 记录损坏：${fileName}`);
   }
   const model = record.model as Record<string, unknown>;
-  if (typeof model.connectionId !== "string" || typeof model.modelId !== "string") {
+  if (
+    typeof model.connectionId !== "string" ||
+    typeof model.modelId !== "string" ||
+    (model.reasoningLevel !== undefined && typeof model.reasoningLevel !== "string")
+  ) {
     throw new Error(`Agent Invocation 模型记录损坏：${fileName}`);
   }
   if (
@@ -455,7 +467,11 @@ function parseInvocation(record: Record<string, unknown>, fileName: string): Inv
     id: record.id,
     timestamp: record.timestamp,
     state: record.state,
-    model: { connectionId: model.connectionId, modelId: model.modelId },
+    model: {
+      connectionId: model.connectionId,
+      modelId: model.modelId,
+      ...(model.reasoningLevel === undefined ? {} : { reasoningLevel: model.reasoningLevel }),
+    },
     ...(typeof record.text === "string" ? { text: record.text } : {}),
     ...(typeof record.error === "string" ? { error: record.error } : {}),
     ...(record.contextTokens === undefined ? {} : { contextTokens: record.contextTokens }),

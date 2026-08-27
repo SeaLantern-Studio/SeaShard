@@ -453,6 +453,9 @@ export class AgentRuntime {
         ...(invocation.resolvedModel.providerOptions
           ? { providerOptions: invocation.resolvedModel.providerOptions }
           : {}),
+        ...(invocation.resolvedModel.reasoning
+          ? { reasoning: invocation.resolvedModel.reasoning }
+          : {}),
         ...(agentMode ? { tools: invocation.tools, stopWhen: isStepCount(maximumAgentSteps) } : {}),
         abortSignal: invocation.controller.signal,
       });

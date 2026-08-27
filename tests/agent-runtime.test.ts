@@ -122,7 +122,11 @@ await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置",
     },
   ]);
   const resolved = await catalog.resolve({ connectionId: "local", modelId: "qwen3-coder" });
-  assert.deepEqual(resolved.selection, { connectionId: "local", modelId: "qwen3-coder" });
+  assert.deepEqual(resolved.selection, {
+    connectionId: "local",
+    modelId: "qwen3-coder",
+    reasoningLevel: "high",
+  });
   assert.equal(dirname(catalog.configPath), join(userDataRoot, "agent"));
   await catalog.dispose();
 });
@@ -282,6 +286,27 @@ await test("模型连接修改保留未触及 YAML 节点并拒绝旧 revision",
     maximumContextTokens: 256_000,
     reasoningLevels: ["brief", "deep", "beyond"],
   });
+  const resolved = await catalog.resolve({
+    connectionId: "local",
+    modelId: "model-a",
+    reasoningLevel: "beyond",
+  });
+  assert.deepEqual(resolved.selection, {
+    connectionId: "local",
+    modelId: "model-a",
+    reasoningLevel: "beyond",
+  });
+  assert.deepEqual(resolved.providerOptions, {
+    local: { reasoningEffort: "beyond" },
+  });
+  await assert.rejects(
+    catalog.resolve({
+      connectionId: "local",
+      modelId: "model-a",
+      reasoningLevel: "unknown",
+    }),
+    /不支持推理档位/u,
+  );
   const source = await readFile(catalog.configPath, "utf8");
   assert.match(source, /# 保留这条人工注释/u);
   assert.match(source, /futureRoot: true/u);
@@ -1745,6 +1770,9 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
       "    models:",
       "      - id: gpt-5.6-sol",
       "        displayName: GPT-5.6 Sol",
+      "        settings:",
+      "          maximumContextTokens: 256000",
+      "          reasoningLevels: [low, high, max]",
     ].join("\n"),
     "utf8",
   );
@@ -1793,6 +1821,7 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
   const reference = await runtime.startSession({
     initialMessage: { text: "我有哪些服务器？" },
     mode: "agent",
+    model: { connectionId: "test", modelId: "gpt-5.6-sol", reasoningLevel: "max" },
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
@@ -1802,6 +1831,12 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
     requests.map(({ store }) => store),
     [false, false],
   );
+  assert.deepEqual(
+    requests.map(({ reasoning }) => (reasoning as Record<string, unknown> | undefined)?.effort),
+    ["max", "max"],
+  );
+  assert.equal((await runtime.getSession(reference.sessionId)).model.reasoningLevel, "max");
+  assert.equal(invocation.model.reasoningLevel, "max");
   assert.deepEqual(requests[0]?.include, ["reasoning.encrypted_content"]);
   const upstreamToolMetadata = JSON.stringify(requests[0]?.tools);
   assert.match(upstreamToolMetadata, /server:\/\/instances/u);

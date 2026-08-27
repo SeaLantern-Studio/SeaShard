@@ -6,6 +6,7 @@ import {
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
 import { ServerConfigurationManager, type ServerConfigurationManagerOptions } from "./manager";
+import { registerServerConfigurationAgentIntegration } from "./agent-integration";
 
 export type ServerConfigurationModuleOptions = Pick<
   ServerConfigurationManagerOptions,
@@ -44,6 +45,13 @@ export function createServerConfigurationModule(
         listInstances: () => instances.list(),
         ...options,
       });
+      // Agent 与 Host Service 共享同一 manager，目录解析、乐观锁、备份和写队列保持单一事实来源。
+      registerServerConfigurationAgentIntegration(ctx, {
+        list: (instanceId) => manager.list(instanceId),
+        read: (instanceId, path) => manager.read(instanceId, path),
+        write: (request) => manager.write(request),
+      });
+
       ctx.provide(serverConfigurationContract, {
         list: async (instanceId) => asJsonValue(await manager.list(instanceId)),
         read: async (instanceId, path) => asJsonValue(await manager.read(instanceId, path)),
@@ -61,3 +69,5 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./manager";
+
+export * from "./agent-integration";

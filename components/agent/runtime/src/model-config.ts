@@ -1,6 +1,7 @@
 import {
   agentModelMaximumContextTokensLimit,
   agentModelMaximumReasoningLevels,
+  defaultAgentModelReasoningLevels,
 } from "@seashard/contracts";
 import type {
   AgentConfiguredModel,
@@ -22,6 +23,14 @@ import { parseDocument } from "yaml";
 
 export const agentModelsFileName = "models.yml";
 export type AgentProviderOptions = Record<string, JsonObject>;
+type AgentPortableReasoningLevel =
+  | "provider-default"
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
 
 type AiSdkProvider = Parameters<typeof createProviderRegistry>[0][string];
 type ParsedYamlDocument = ReturnType<typeof parseDocument>;
@@ -30,6 +39,7 @@ export interface ResolvedAgentModel {
   readonly selection: AgentModelSelection;
   readonly languageModel: LanguageModel;
   readonly providerOptions?: AgentProviderOptions;
+  readonly reasoning?: AgentPortableReasoningLevel;
 }
 
 export interface AgentProviderTypeSnapshot {
@@ -222,11 +232,16 @@ export class AgentModelCatalog {
     if (!model) {
       throw new Error(`Agent 模型不存在：${selected.connectionId}/${selected.modelId}`);
     }
-    const providerOptions = resolveProviderOptions(model);
+    const reasoningLevel = resolveSelectedReasoningLevel(model, selected.reasoningLevel);
+    const invocationOptions = resolveReasoningOptions(model, reasoningLevel);
     return {
-      selection: { connectionId: model.connectionId, modelId: model.modelId },
+      selection: {
+        connectionId: model.connectionId,
+        modelId: model.modelId,
+        reasoningLevel,
+      },
       languageModel: snapshot.registry.languageModel(`${model.connectionId}:${model.modelId}`),
-      ...(providerOptions ? { providerOptions } : {}),
+      ...invocationOptions,
     };
   }
 
@@ -917,6 +932,71 @@ function normalizeProviderOptions(
       return [providerId, structuredClone(options)];
     }),
   );
+}
+
+const portableReasoningLevels = new Set<string>([
+  "provider-default",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+
+/**
+ * 未显式选择时落在离散档位的中间偏左点。六档默认配置会落到 high，
+ * 同时保证奇偶数量的自定义档位都有稳定初值。
+ */
+function resolveSelectedReasoningLevel(
+  model: EffectiveModel,
+  selected: string | undefined,
+): string {
+  const levels = model.settings?.reasoningLevels ?? defaultAgentModelReasoningLevels;
+  const reasoningLevel = selected ?? levels[Math.floor((levels.length - 1) / 2)];
+  if (!reasoningLevel || !levels.includes(reasoningLevel)) {
+    throw new Error(
+      `Agent 模型 ${model.connectionId}/${model.modelId} 不支持推理档位：${selected ?? ""}`,
+    );
+  }
+  return reasoningLevel;
+}
+
+/**
+ * AI SDK 的通用 reasoning 只接受标准档位。OpenAI 系列与自定义档位继续通过
+ * reasoningEffort 传递，OpenAI Compatible 因 Provider 名可配置而使用连接 ID。
+ */
+function resolveReasoningOptions(
+  model: EffectiveModel,
+  reasoningLevel: string,
+): Pick<ResolvedAgentModel, "providerOptions" | "reasoning"> {
+  const configured = resolveProviderOptions(model);
+  if (
+    model.providerType !== "openai" &&
+    model.providerType !== "openai-compatible" &&
+    isPortableReasoningLevel(reasoningLevel)
+  ) {
+    return {
+      ...(configured ? { providerOptions: configured } : {}),
+      reasoning: reasoningLevel,
+    };
+  }
+
+  const providerId =
+    model.providerType === "openai-compatible" ? model.connectionId : model.providerType;
+  return {
+    providerOptions: {
+      ...configured,
+      [providerId]: {
+        ...configured?.[providerId],
+        reasoningEffort: reasoningLevel,
+      },
+    },
+  };
+}
+
+function isPortableReasoningLevel(value: string): value is AgentPortableReasoningLevel {
+  return portableReasoningLevels.has(value);
 }
 
 /** OpenAI Responses 必须显式关闭服务端存储，以保留可回放的加密推理内容。 */

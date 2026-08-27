@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import {
-  defaultAgentModelMaximumContextTokens,
-  interleaveAgentInvocationContent,
+  defaultAgentModelReasoningLevels,
   type AgentConfiguredModel,
   type AgentConversationMode,
   type AgentInvocationService,
-  type AgentMessageSnapshot,
   type AgentModelConfigurationClientService,
   type AgentModelSelection,
   type AgentSessionService,
@@ -13,19 +11,10 @@ import {
   type AgentToolCallSnapshot,
 } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
-import { Cmz_Markdown, Cmz_Toast, useToast } from "cmzya-modern-ui";
-import {
-  ArrowUp,
-  Bot,
-  Check,
-  ChevronDown,
-  MessageCircle,
-  Plus,
-  Sparkles,
-  Square,
-} from "lucide-vue-next";
+import { Cmz_Toast, useToast } from "cmzya-modern-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import AgentToolCallCard from "./AgentToolCallCard.vue";
+import AgentConversationTimeline from "./components/AgentConversationTimeline.vue";
+import AgentMessageComposer from "./components/AgentMessageComposer.vue";
 import "./AgentConversationPage.css";
 
 const props = defineProps<{
@@ -35,28 +24,18 @@ const props = defineProps<{
   workspace: typeof agentWorkspace;
 }>();
 
-type ConversationEntry =
-  | {
-      readonly kind: "message";
-      readonly key: string;
-      readonly role: AgentMessageSnapshot["role"];
-      readonly content: string;
-    }
-  | {
-      readonly kind: "tool";
-      readonly key: string;
-      readonly call: AgentToolCallSnapshot;
-    };
+type AgentMessageComposerHandle = {
+  clear(): void;
+  focus(): void;
+};
 
 const toast = useToast();
-const composer = ref("");
-const textarea = ref<HTMLTextAreaElement>();
+const composerComponent = ref<AgentMessageComposerHandle>();
 const session = shallowRef<AgentSessionSnapshot>();
 const models = ref<readonly AgentConfiguredModel[]>([]);
 const selectedModel = shallowRef<AgentModelSelection>();
-const selectedMode = ref<AgentConversationMode>("chat");
-const modelMenuOpen = ref(false);
-const modeMenuOpen = ref(false);
+const selectedMode = ref<AgentConversationMode>("agent");
+const reasoningLevelByModel = new Map<string, string>();
 const sending = ref(false);
 const cancelling = ref(false);
 const liveAssistantText = ref("");
@@ -69,131 +48,8 @@ let invocationPoll = 0;
 let modelConfigurationLoad = 0;
 let modelCatalogInitialized = false;
 let disposeModelConfigurationChanged: (() => void) | undefined;
-const contextUsageCircumference = 2 * Math.PI * 10;
-const tokenCountFormatter = new Intl.NumberFormat("zh-CN");
 
 const activeConversationId = computed(() => props.workspace.activeConversationId.value);
-const messages = computed(() => session.value?.messages ?? []);
-const visibleToolCalls = computed<readonly AgentToolCallSnapshot[]>(() => {
-  const calls = new Map<string, AgentToolCallSnapshot>();
-  for (const call of session.value?.toolCalls ?? []) calls.set(call.id, call);
-  for (const call of liveToolCalls.value) calls.set(call.id, call);
-  return [...calls.values()];
-});
-const conversationEntries = computed<readonly ConversationEntry[]>(() => {
-  const entries: ConversationEntry[] = [];
-  const assistantTextByInvocation = new Map<string, string>();
-  const callsByInvocation = new Map<string, AgentToolCallSnapshot[]>();
-  for (const message of messages.value) {
-    if (message.role !== "assistant") continue;
-    assistantTextByInvocation.set(
-      message.invocationId,
-      `${assistantTextByInvocation.get(message.invocationId) ?? ""}${message.content}`,
-    );
-  }
-  for (const call of visibleToolCalls.value) {
-    const calls = callsByInvocation.get(call.invocationId) ?? [];
-    calls.push(call);
-    callsByInvocation.set(call.invocationId, calls);
-  }
-
-  const representedInvocations = new Set<string>();
-  for (const message of messages.value) {
-    if (message.role !== "user") continue;
-    entries.push({
-      kind: "message",
-      key: `message:${message.id}`,
-      role: "user",
-      content: message.content,
-    });
-    representedInvocations.add(message.invocationId);
-    appendAssistantEntries(
-      entries,
-      message.invocationId,
-      message.invocationId === runningInvocationId.value
-        ? liveAssistantText.value
-        : (assistantTextByInvocation.get(message.invocationId) ?? ""),
-      callsByInvocation.get(message.invocationId) ?? [],
-    );
-  }
-
-  // 损坏 Journal 中的孤立活动仍可局部展示，不能拖垮其余完整会话。
-  for (const invocationId of new Set([
-    ...assistantTextByInvocation.keys(),
-    ...callsByInvocation.keys(),
-  ])) {
-    if (representedInvocations.has(invocationId)) continue;
-    appendAssistantEntries(
-      entries,
-      invocationId,
-      invocationId === runningInvocationId.value
-        ? liveAssistantText.value
-        : (assistantTextByInvocation.get(invocationId) ?? ""),
-      callsByInvocation.get(invocationId) ?? [],
-    );
-  }
-  return entries;
-});
-const showLiveThinking = computed(() => {
-  if (!sending.value || runningSessionId.value !== activeConversationId.value) return false;
-  const parts = interleaveAgentInvocationContent(liveAssistantText.value, liveToolCalls.value);
-  return parts.length === 0 || parts.at(-1)?.kind === "tool";
-});
-const selectedModelRecord = computed(() =>
-  models.value.find(
-    (model) =>
-      model.connectionId === selectedModel.value?.connectionId &&
-      model.modelId === selectedModel.value?.modelId,
-  ),
-);
-const selectedModelLabel = computed(() => selectedModelRecord.value?.name ?? "未配置模型");
-const selectedModelMaximumContextTokens = computed(
-  () =>
-    selectedModelRecord.value?.settings?.maximumContextTokens ??
-    defaultAgentModelMaximumContextTokens,
-);
-const contextTokensUsed = computed(
-  () => liveContextTokens.value ?? session.value?.contextTokens ?? 0,
-);
-const contextUsagePercentage = computed(() => {
-  const maximum = selectedModelMaximumContextTokens.value;
-  if (maximum <= 0) return 0;
-  return Math.min(100, Math.max(0, (contextTokensUsed.value / maximum) * 100));
-});
-const contextUsageStrokeOffset = computed(
-  () => contextUsageCircumference * (1 - contextUsagePercentage.value / 100),
-);
-const contextUsageTooltip = computed(
-  () =>
-    `上下文 ${formatDragonHTDevContextPercentage(contextUsagePercentage.value)}% · 已用 ${tokenCountFormatter.format(
-      contextTokensUsed.value,
-    )} / ${tokenCountFormatter.format(selectedModelMaximumContextTokens.value)} Token`,
-);
-const selectedModeLabel = computed(() => (selectedMode.value === "agent" ? "Agent" : "Chat"));
-const canSend = computed(() =>
-  Boolean(composer.value.trim() && selectedModelRecord.value && !sending.value),
-);
-
-/** 单次 Invocation 的文字片段和工具卡共用同一偏移恢复规则，流式与历史记录不会分叉。 */
-function appendAssistantEntries(
-  entries: ConversationEntry[],
-  invocationId: string,
-  text: string,
-  calls: readonly AgentToolCallSnapshot[],
-): void {
-  for (const part of interleaveAgentInvocationContent(text, calls)) {
-    if (part.kind === "tool") {
-      entries.push({ kind: "tool", key: `tool:${part.call.id}`, call: part.call });
-      continue;
-    }
-    entries.push({
-      kind: "message",
-      key: `assistant:${invocationId}:${part.start}:${part.end}`,
-      role: "assistant",
-      content: part.content,
-    });
-  }
-}
 
 watch(activeConversationId, (id) => {
   if (id !== runningSessionId.value) {
@@ -202,7 +58,7 @@ watch(activeConversationId, (id) => {
     liveContextTokens.value = undefined;
   }
   void loadActiveConversation();
-  void nextTick(() => textarea.value?.focus());
+  void nextTick(() => composerComponent.value?.focus());
 });
 
 onMounted(() => {
@@ -250,7 +106,9 @@ function selectAvailableModel(preferred?: AgentModelSelection): void {
       )
     : undefined;
   const selected = available ?? models.value[0];
-  selectedModel.value = selected ? selectionOf(selected) : undefined;
+  selectedModel.value = selected
+    ? selectionOf(selected, available ? preferred?.reasoningLevel : undefined)
+    : undefined;
 }
 
 async function loadActiveConversation(): Promise<void> {
@@ -274,58 +132,64 @@ async function loadActiveConversation(): Promise<void> {
   }
 }
 
-function selectionOf(model: AgentConfiguredModel): AgentModelSelection {
-  return { connectionId: model.connectionId, modelId: model.modelId };
+function selectionOf(
+  model: AgentConfiguredModel,
+  preferredReasoningLevel?: string,
+): AgentModelSelection {
+  const levels = model.settings?.reasoningLevels ?? defaultAgentModelReasoningLevels;
+  const remembered = preferredReasoningLevel ?? reasoningLevelByModel.get(modelSelectionKey(model));
+  const reasoningLevel =
+    remembered && levels.includes(remembered)
+      ? remembered
+      : levels[Math.floor((levels.length - 1) / 2)]!;
+  reasoningLevelByModel.set(modelSelectionKey(model), reasoningLevel);
+  return { connectionId: model.connectionId, modelId: model.modelId, reasoningLevel };
 }
 
 function selectModel(model: AgentConfiguredModel): void {
   selectedModel.value = selectionOf(model);
-  modelMenuOpen.value = false;
+}
+
+function selectReasoningLevel(reasoningLevel: string): void {
+  const model = models.value.find(
+    (candidate) =>
+      candidate.connectionId === selectedModel.value?.connectionId &&
+      candidate.modelId === selectedModel.value?.modelId,
+  );
+  if (!model) return;
+  selectedModel.value = selectionOf(model, reasoningLevel);
+}
+
+function modelSelectionKey(model: AgentModelSelection): string {
+  return `${model.connectionId}:${model.modelId}`;
 }
 
 function selectMode(mode: AgentConversationMode): void {
   selectedMode.value = mode;
-  modeMenuOpen.value = false;
 }
 
-function resizeComposer(): void {
-  const element = textarea.value;
-  if (!element) return;
-  element.style.height = "0px";
-  element.style.height = `${Math.min(element.scrollHeight, 144)}px`;
-}
-
-function handleComposerKeydown(event: KeyboardEvent): void {
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-  event.preventDefault();
-  void sendMessage();
-}
-
-async function sendMessage(): Promise<void> {
-  const text = composer.value.trim();
+async function sendMessage(text: string): Promise<void> {
+  const message = text.trim();
   const model = selectedModel.value;
-  if (!text || !model || sending.value) return;
+  if (!message || !model || sending.value) return;
 
   sending.value = true;
-  modelMenuOpen.value = false;
-  modeMenuOpen.value = false;
   const previousId = activeConversationId.value;
   try {
     const reference =
       !previousId || props.workspace.isDraft(previousId)
         ? await props.sessions.startSession({
-            initialMessage: { text },
+            initialMessage: { text: message },
             mode: selectedMode.value,
             model,
           })
         : await props.sessions.sendMessage({
             sessionId: previousId,
-            message: { text },
+            message: { text: message },
             mode: selectedMode.value,
             model,
           });
-    composer.value = "";
-    await nextTick(resizeComposer);
+    composerComponent.value?.clear();
     runningSessionId.value = reference.sessionId;
     runningInvocationId.value = reference.invocationId;
     await props.workspace.materializeDraft(previousId, reference.sessionId);
@@ -341,7 +205,7 @@ async function sendMessage(): Promise<void> {
     runningInvocationId.value = undefined;
     liveAssistantText.value = "";
     liveToolCalls.value = [];
-    void nextTick(() => textarea.value?.focus());
+    void nextTick(() => composerComponent.value?.focus());
   }
 }
 
@@ -387,11 +251,6 @@ async function cancelActiveInvocation(): Promise<void> {
   }
 }
 
-function formatDragonHTDevContextPercentage(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -405,211 +264,30 @@ function delay(milliseconds: number): Promise<void> {
   <section class="agent-conversation-page" aria-label="Agent 对话">
     <Cmz_Toast position="top-right" />
 
-    <div class="agent-conversation-scroll">
-      <div
-        v-if="conversationEntries.length === 0 && !showLiveThinking"
-        class="agent-conversation-empty"
-      >
-        <div class="agent-brand-mark" aria-hidden="true"></div>
-        <h1>今天想完成什么？</h1>
-      </div>
+    <AgentConversationTimeline
+      :messages="session?.messages ?? []"
+      :tool-calls="session?.toolCalls ?? []"
+      :live-assistant-text="liveAssistantText"
+      :live-tool-calls="liveToolCalls"
+      :running-invocation-id="runningInvocationId"
+      :streaming="sending && runningSessionId === activeConversationId"
+    />
 
-      <div v-else class="agent-message-list" aria-live="polite">
-        <template v-for="entry in conversationEntries" :key="entry.key">
-          <article
-            v-if="entry.kind === 'message'"
-            class="agent-message"
-            :class="`is-${entry.role}`"
-          >
-            <div v-if="entry.role === 'assistant'" class="agent-message-avatar" aria-hidden="true">
-              <div class="agent-brand-mark"></div>
-            </div>
-            <div v-if="entry.role === 'user'" class="agent-user-message">
-              {{ entry.content }}
-            </div>
-            <div v-else class="agent-assistant-message">
-              <Cmz_Markdown :content="entry.content ?? ''" variant="plain" />
-            </div>
-          </article>
-          <article v-else-if="entry.call" class="agent-message is-assistant is-tool-call">
-            <div class="agent-message-avatar" aria-hidden="true">
-              <div class="agent-brand-mark"></div>
-            </div>
-            <AgentToolCallCard :call="entry.call" />
-          </article>
-        </template>
-
-        <article v-if="showLiveThinking" class="agent-message is-assistant is-live">
-          <div class="agent-message-avatar" aria-hidden="true">
-            <div class="agent-brand-mark"></div>
-          </div>
-          <div class="agent-assistant-message">
-            <div class="agent-thinking" aria-label="AI 正在回复">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-        </article>
-      </div>
-    </div>
-
-    <div class="agent-composer-wrap">
-      <div class="agent-composer" :class="{ focused: composer }">
-        <textarea
-          ref="textarea"
-          v-model="composer"
-          class="agent-composer-input"
-          rows="1"
-          placeholder="给 SeaShard Agent 发送消息"
-          aria-label="消息内容"
-          @input="resizeComposer"
-          @keydown="handleComposerKeydown"
-        ></textarea>
-
-        <div class="agent-composer-toolbar">
-          <div class="agent-composer-tools">
-            <button
-              type="button"
-              class="agent-tool-button is-icon"
-              title="添加附件（暂未开放）"
-              aria-label="添加附件（暂未开放）"
-              @click="showAttachmentPlaceholder"
-            >
-              <Plus :size="18" :stroke-width="1.8" />
-            </button>
-
-            <div class="agent-popup-anchor">
-              <button
-                type="button"
-                class="agent-tool-button agent-mode-button"
-                aria-haspopup="menu"
-                :aria-expanded="modeMenuOpen"
-                @click="
-                  modeMenuOpen = !modeMenuOpen;
-                  modelMenuOpen = false;
-                "
-              >
-                <Sparkles v-if="selectedMode === 'agent'" :size="15" :stroke-width="1.8" />
-                <MessageCircle v-else :size="15" :stroke-width="1.8" />
-                <span>{{ selectedModeLabel }}</span>
-                <ChevronDown :size="13" :stroke-width="1.8" />
-              </button>
-              <div v-if="modeMenuOpen" class="agent-popup agent-mode-menu" role="menu">
-                <button
-                  type="button"
-                  class="agent-popup-option"
-                  :class="{ selected: selectedMode === 'chat' }"
-                  role="menuitem"
-                  @click="selectMode('chat')"
-                >
-                  <MessageCircle :size="15" />
-                  <span>Chat</span>
-                  <Check v-if="selectedMode === 'chat'" :size="14" />
-                </button>
-                <button
-                  type="button"
-                  class="agent-popup-option"
-                  :class="{ selected: selectedMode === 'agent' }"
-                  role="menuitem"
-                  @click="selectMode('agent')"
-                >
-                  <Sparkles :size="15" />
-                  <span>Agent</span>
-                  <Check v-if="selectedMode === 'agent'" :size="14" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="agent-composer-submit">
-            <div class="agent-popup-anchor agent-model-anchor">
-              <button
-                type="button"
-                class="agent-model-button"
-                aria-haspopup="listbox"
-                :aria-expanded="modelMenuOpen"
-                @click="
-                  modelMenuOpen = !modelMenuOpen;
-                  modeMenuOpen = false;
-                "
-              >
-                <Bot :size="15" :stroke-width="1.8" />
-                <span>{{ selectedModelLabel }}</span>
-                <ChevronDown :size="13" :stroke-width="1.8" />
-              </button>
-              <div v-if="modelMenuOpen" class="agent-popup agent-model-menu" role="listbox">
-                <div v-if="models.length === 0" class="agent-model-empty">
-                  models.yml 中没有模型
-                </div>
-                <button
-                  v-for="model in models"
-                  :key="`${model.connectionId}:${model.modelId}`"
-                  type="button"
-                  class="agent-popup-option agent-model-option"
-                  :class="{
-                    selected:
-                      model.connectionId === selectedModel?.connectionId &&
-                      model.modelId === selectedModel?.modelId,
-                  }"
-                  role="option"
-                  :aria-selected="
-                    model.connectionId === selectedModel?.connectionId &&
-                    model.modelId === selectedModel?.modelId
-                  "
-                  @click="selectModel(model)"
-                >
-                  <span class="agent-model-option-copy">
-                    <strong>{{ model.name }}</strong>
-                    <small>{{ model.connectionId }} · {{ model.modelId }}</small>
-                  </span>
-                  <Check
-                    v-if="
-                      model.connectionId === selectedModel?.connectionId &&
-                      model.modelId === selectedModel?.modelId
-                    "
-                    :size="14"
-                  />
-                </button>
-              </div>
-            </div>
-
-            <div
-              class="agent-context-usage"
-              :class="{
-                'is-near-limit': contextUsagePercentage >= 90,
-                'is-full': contextUsagePercentage >= 100,
-              }"
-              :aria-label="contextUsageTooltip"
-              :data-tooltip="contextUsageTooltip"
-              role="img"
-              tabindex="0"
-            >
-              <svg viewBox="0 0 28 28" aria-hidden="true">
-                <circle class="agent-context-track" cx="14" cy="14" r="10" />
-                <circle
-                  class="agent-context-progress"
-                  cx="14"
-                  cy="14"
-                  r="10"
-                  :stroke-dasharray="contextUsageCircumference"
-                  :stroke-dashoffset="contextUsageStrokeOffset"
-                />
-              </svg>
-            </div>
-
-            <button
-              type="button"
-              class="agent-send-button"
-              :disabled="sending ? !runningInvocationId || cancelling : !canSend"
-              :title="sending ? '停止' : '发送'"
-              :aria-label="sending ? '停止响应' : '发送消息'"
-              @click="sending ? cancelActiveInvocation() : sendMessage()"
-            >
-              <Square v-if="sending" :size="14" :stroke-width="2.2" fill="currentColor" />
-              <ArrowUp v-else :size="18" :stroke-width="2.2" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AgentMessageComposer
+      ref="composerComponent"
+      :models="models"
+      :selected-model="selectedModel"
+      :selected-mode="selectedMode"
+      :sending="sending"
+      :cancelling="cancelling"
+      :running-invocation-id="runningInvocationId"
+      :context-tokens-used="liveContextTokens ?? session?.contextTokens ?? 0"
+      @attachment="showAttachmentPlaceholder"
+      @cancel="cancelActiveInvocation"
+      @select-model="selectModel"
+      @select-mode="selectMode"
+      @select-reasoning="selectReasoningLevel"
+      @submit="sendMessage"
+    />
   </section>
 </template>
