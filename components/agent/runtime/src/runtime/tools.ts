@@ -5,6 +5,7 @@ import type {
   JsonValue,
 } from "@seashard/plugin-sdk";
 import type { AgentRuntimeResourceSnapshot, AgentRuntimeTool } from "../runtime";
+import { askPiTool } from "./interactions";
 
 const toolNamePattern = /^[A-Za-z0-9_-]+$/u;
 
@@ -33,7 +34,7 @@ export function createPiTools(
   definitions: Iterable<AgentRuntimeTool>,
   resources: AgentRuntimeResourceSnapshot,
 ): readonly Tool[] {
-  const tools: Tool[] = [];
+  const tools: Tool[] = [askPiTool];
   if (resources.definitions.length) {
     const resourceCatalog = formatResourceCatalog(resources.definitions);
     tools.push({

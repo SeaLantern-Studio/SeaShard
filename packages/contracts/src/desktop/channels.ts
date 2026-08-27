@@ -69,6 +69,7 @@ export const desktopChannels = {
   agentMessageSend: "seashard.agent.message-send",
   agentInvocationGet: "seashard.agent.invocation-get",
   agentInvocationCancel: "seashard.agent.invocation-cancel",
+  agentInteractionRespond: "seashard.agent.interaction-respond",
   agentModelConfigurationGet: "seashard.agent.model-configuration.get",
   agentModelConnectionMutate: "seashard.agent.model-connection.mutate",
   agentModelConnectionRemove: "seashard.agent.model-connection.remove",

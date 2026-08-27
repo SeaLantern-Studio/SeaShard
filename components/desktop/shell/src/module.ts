@@ -14,6 +14,7 @@ import type { PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { BrowserWindow } from "electron";
 import type { DesktopShellConfig } from "./types";
 import {
+  expectAgentInteractionResponseInput,
   expectAgentCredentialRemovalInput,
   expectAgentCredentialWriteInput,
   expectAgentModelConfigurationResetInput,
@@ -293,6 +294,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           return config.cancelAgentInvocation(
             expectNonEmptyString(invocationId, "Agent invocation ID"),
           );
+        });
+        config.runtime.handle(desktopChannels.agentInteractionRespond, (event, input) => {
+          ownedWindow(event.sender.id);
+          return config.respondAgentInteraction(expectAgentInteractionResponseInput(input));
         });
         config.runtime.handle(desktopChannels.agentModelConfigurationGet, (event) => {
           ownedWindow(event.sender.id);
@@ -893,6 +898,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.agentMessageSend);
           config.runtime.removeHandler(desktopChannels.agentInvocationGet);
           config.runtime.removeHandler(desktopChannels.agentInvocationCancel);
+          config.runtime.removeHandler(desktopChannels.agentInteractionRespond);
           config.runtime.removeHandler(desktopChannels.agentModelConfigurationGet);
           config.runtime.removeHandler(desktopChannels.agentModelConnectionMutate);
           config.runtime.removeHandler(desktopChannels.agentModelConnectionRemove);

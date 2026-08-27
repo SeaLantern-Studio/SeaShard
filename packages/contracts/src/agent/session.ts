@@ -6,6 +6,11 @@ import type {
   JsonValue,
 } from "@seashard/plugin-sdk";
 import type { AgentConfiguredModel, AgentModelSelection } from "./model";
+import type {
+  AgentInteractionResponseInput,
+  AgentPendingInteraction,
+  AgentPermissionMode,
+} from "./interaction";
 
 /** Agent Session 的创建、读取与续写 Contract。 */
 export const agentSessionContract =
@@ -193,6 +198,8 @@ export interface AgentInvocationSnapshot extends AgentInvocationSummary {
   readonly provider?: AgentProviderResponseDetails;
   readonly usage?: AgentTokenUsage;
   readonly toolCalls: readonly AgentToolCallSnapshot[];
+  /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */
+  readonly interaction?: AgentPendingInteraction;
 }
 
 /** 创建、读取和管理可持久化的 Agent 会话。 */
@@ -212,6 +219,7 @@ export interface AgentSessionService {
   startSession(input: {
     initialMessage: AgentUserMessage;
     mode: AgentConversationMode;
+    permissionMode?: AgentPermissionMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
   /**
@@ -224,6 +232,7 @@ export interface AgentSessionService {
     sessionId: string;
     message: AgentUserMessage;
     mode: AgentConversationMode;
+    permissionMode?: AgentPermissionMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference>;
   /**
@@ -264,18 +273,24 @@ export interface AgentSessionService {
 /** 读取和控制正在执行或已经结算的 Agent Invocation。 */
 export interface AgentInvocationService {
   /**
-   * 读取 Invocation 的文本、工具活动和最终状态。
+   * 读取 Invocation 的文本、工具活动、待处理交互和最终状态。
    *
    * @param invocationId Invocation ID。
    * @returns 当前 Invocation 快照。
    */
   getInvocation(invocationId: string): Promise<AgentInvocationSnapshot>;
   /**
-   * 请求取消仍在运行的 Invocation；已经结算的调用保持幂等。
+   * 请求取消仍在运行的模型或工具；已经产生的 Session Journal 记录继续完成持久化。
    *
    * @param invocationId Invocation ID。
    */
   cancelInvocation(invocationId: string): Promise<void>;
+  /**
+   * 回答当前 Invocation 正在等待的 Ask 或命令确认。
+   *
+   * @param input Invocation 身份以及与待处理交互严格匹配的响应。
+   */
+  respondToInteraction(input: AgentInteractionResponseInput): Promise<void>;
 }
 
 export interface AgentClientService

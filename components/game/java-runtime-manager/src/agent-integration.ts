@@ -159,6 +159,7 @@ export function registerJavaRuntimeAgentIntegration(
       title: "设置 Java 启用状态",
       description:
         "启用或禁用一个已发现的 Java 安装；禁用只影响 SeaShard 自动选择，不修改本地 Java 文件。",
+      confirmationLevel: 1,
       inputSchema: setDisabledInputSchema,
       outputDescription: "返回 Java 安装的最小安全投影、目标状态以及本次是否发生变化。",
       examples: [{ installationId: "0123456789abcdef", disabled: true }],
@@ -173,6 +174,7 @@ export function registerJavaRuntimeAgentIntegration(
       title: "移除手动 Java 记录",
       description:
         "从 SeaShard 中移除一个手动添加的 Java 记录；不会删除、卸载或修改本地 Java 文件。",
+      confirmationLevel: 1,
       inputSchema: forgetManualInputSchema,
       outputDescription: "返回被移除记录的最小安全投影，并明确本地文件未被删除。",
       examples: [{ installationId: "0123456789abcdef" }],

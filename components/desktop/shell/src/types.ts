@@ -123,6 +123,9 @@ export interface DesktopShellConfig {
   cancelAgentInvocation(
     invocationId: string,
   ): ReturnType<AgentInvocationService["cancelInvocation"]>;
+  respondAgentInteraction(
+    input: Parameters<AgentInvocationService["respondToInteraction"]>[0],
+  ): ReturnType<AgentInvocationService["respondToInteraction"]>;
   readAgentModelConfiguration(): ReturnType<AgentModelConfigurationService["getConfiguration"]>;
   mutateAgentModelConnection(
     input: Parameters<AgentModelConfigurationService["mutateConnection"]>[0],

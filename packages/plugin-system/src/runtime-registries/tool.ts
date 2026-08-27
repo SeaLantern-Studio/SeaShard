@@ -113,6 +113,15 @@ function normalizeAgentToolDefinition(definition: AgentToolDefinition): AgentToo
   const name = validateAgentToolSegment(definition.name, "名称");
   const title = requireAgentToolText(definition.title, "标题");
   const description = requireAgentToolText(definition.description, "描述");
+  const confirmationLevel = definition.confirmationLevel;
+  if (
+    confirmationLevel !== undefined &&
+    confirmationLevel !== 0 &&
+    confirmationLevel !== 1 &&
+    confirmationLevel !== 2
+  ) {
+    throw new TypeError(`Agent 工具 ${namespace}_${name} 的 confirmationLevel 必须是 0、1 或 2`);
+  }
   if (
     !definition.inputSchema ||
     typeof definition.inputSchema !== "object" ||
@@ -134,6 +143,7 @@ function normalizeAgentToolDefinition(definition: AgentToolDefinition): AgentToo
     name,
     title,
     description,
+    ...(confirmationLevel === undefined ? {} : { confirmationLevel }),
     inputSchema: structuredClone(definition.inputSchema) as JsonObject,
     ...(definition.outputDescription === undefined
       ? {}

@@ -3,6 +3,9 @@ import {
   defaultAgentModelMaximumContextTokens,
   defaultAgentModelReasoningLevels,
   type AgentConfiguredModel,
+  type AgentInteractionResponse,
+  type AgentPendingInteraction,
+  type AgentPermissionMode,
   type AgentConversationMode,
   type AgentModelSelection,
 } from "@seashard/contracts";
@@ -11,20 +14,28 @@ import {
   Bot,
   Check,
   ChevronDown,
+  LockKeyhole,
   MessageCircle,
+  Pencil,
   Plus,
+  ShieldCheck,
   Sparkles,
   Square,
+  Zap,
 } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
+import AgentInteractionPanel from "./AgentInteractionPanel.vue";
 import "./AgentMessageComposer.css";
 
 const props = defineProps<{
   models: readonly AgentConfiguredModel[];
   selectedModel?: AgentModelSelection;
   selectedMode: AgentConversationMode;
+  selectedPermissionMode: AgentPermissionMode;
   sending: boolean;
   cancelling: boolean;
+  interaction?: AgentPendingInteraction;
+  respondingToInteraction: boolean;
   runningInvocationId?: string;
   contextTokensUsed: number;
 }>();
@@ -35,6 +46,8 @@ const emit = defineEmits<{
   attachment: [];
   "select-model": [model: AgentConfiguredModel];
   "select-mode": [mode: AgentConversationMode];
+  "select-permission-mode": [mode: AgentPermissionMode];
+  "respond-interaction": [response: AgentInteractionResponse];
   "select-reasoning": [reasoningLevel: string];
 }>();
 
@@ -42,6 +55,7 @@ const composer = ref("");
 const textarea = ref<HTMLTextAreaElement>();
 const modelMenuOpen = ref(false);
 const modeMenuOpen = ref(false);
+const permissionMenuOpen = ref(false);
 const reasoningRail = ref<HTMLElement>();
 const dragPosition = ref<number>();
 let draggingPointerId: number | undefined;
@@ -65,6 +79,11 @@ const selectedModelMaximumContextTokens = computed(
     defaultAgentModelMaximumContextTokens,
 );
 const selectedModeLabel = computed(() => (props.selectedMode === "agent" ? "Agent" : "Chat"));
+const selectedPermissionModeLabel = computed(() => {
+  if (props.selectedPermissionMode === "edit") return "编辑权限";
+  if (props.selectedPermissionMode === "yolo") return "YOLO";
+  return "只读";
+});
 const reasoningLevels = computed(
   () => selectedModelRecord.value?.settings?.reasoningLevels ?? defaultAgentModelReasoningLevels,
 );
@@ -105,6 +124,7 @@ watch(
     if (!sending) return;
     modelMenuOpen.value = false;
     modeMenuOpen.value = false;
+    permissionMenuOpen.value = false;
   },
 );
 watch(
@@ -126,6 +146,11 @@ function selectModel(model: AgentConfiguredModel): void {
 function selectMode(mode: AgentConversationMode): void {
   emit("select-mode", mode);
   modeMenuOpen.value = false;
+}
+
+function selectPermissionMode(mode: AgentPermissionMode): void {
+  emit("select-permission-mode", mode);
+  permissionMenuOpen.value = false;
 }
 function beginReasoningDrag(event: PointerEvent): void {
   if (reasoningLevels.value.length <= 1) return;
@@ -240,6 +265,7 @@ function submitMessage(): void {
   if (!text || !canSend.value) return;
   modelMenuOpen.value = false;
   modeMenuOpen.value = false;
+  permissionMenuOpen.value = false;
   emit("submit", text);
 }
 
@@ -271,210 +297,278 @@ defineExpose({ clear, focus });
 
 <template>
   <div class="agent-composer-wrap">
-    <div class="agent-composer">
-      <textarea
-        ref="textarea"
-        v-model="composer"
-        class="agent-composer-input"
-        rows="1"
-        placeholder="给 SeaShard Agent 发送消息"
-        aria-label="消息内容"
-        @input="resizeComposer"
-        @keydown="handleComposerKeydown"
-      ></textarea>
+    <div class="agent-composer-stack">
+      <AgentInteractionPanel
+        v-if="interaction"
+        :interaction="interaction"
+        :responding="respondingToInteraction"
+        @respond="emit('respond-interaction', $event)"
+      />
+      <div class="agent-composer">
+        <textarea
+          ref="textarea"
+          v-model="composer"
+          class="agent-composer-input"
+          rows="1"
+          placeholder="给 SeaShard Agent 发送消息"
+          aria-label="消息内容"
+          @input="resizeComposer"
+          @keydown="handleComposerKeydown"
+        ></textarea>
 
-      <div class="agent-composer-toolbar">
-        <div class="agent-composer-tools">
-          <button
-            type="button"
-            class="agent-tool-button is-icon"
-            title="添加附件（暂未开放）"
-            aria-label="添加附件（暂未开放）"
-            @click="emit('attachment')"
-          >
-            <Plus :size="18" :stroke-width="1.8" />
-          </button>
-
-          <div class="agent-popup-anchor">
+        <div class="agent-composer-toolbar">
+          <div class="agent-composer-tools">
             <button
               type="button"
-              class="agent-tool-button agent-mode-button"
-              aria-haspopup="menu"
-              :aria-expanded="modeMenuOpen"
-              @click="
-                modeMenuOpen = !modeMenuOpen;
-                modelMenuOpen = false;
-              "
+              class="agent-tool-button is-icon"
+              title="添加附件（暂未开放）"
+              aria-label="添加附件（暂未开放）"
+              @click="emit('attachment')"
             >
-              <Sparkles v-if="selectedMode === 'agent'" :size="15" :stroke-width="1.8" />
-              <MessageCircle v-else :size="15" :stroke-width="1.8" />
-              <span>{{ selectedModeLabel }}</span>
-              <ChevronDown :size="13" :stroke-width="1.8" />
+              <Plus :size="18" :stroke-width="1.8" />
             </button>
-            <div v-if="modeMenuOpen" class="agent-popup agent-mode-menu" role="menu">
+
+            <div class="agent-popup-anchor">
               <button
                 type="button"
-                class="agent-popup-option"
-                :class="{ selected: selectedMode === 'chat' }"
-                role="menuitem"
-                @click="selectMode('chat')"
+                class="agent-tool-button agent-mode-button"
+                aria-haspopup="menu"
+                :aria-expanded="modeMenuOpen"
+                @click="
+                  modeMenuOpen = !modeMenuOpen;
+                  modelMenuOpen = false;
+                  permissionMenuOpen = false;
+                "
               >
-                <MessageCircle :size="15" />
-                <span>Chat</span>
-                <Check v-if="selectedMode === 'chat'" :size="14" />
+                <Sparkles v-if="selectedMode === 'agent'" :size="15" :stroke-width="1.8" />
+                <MessageCircle v-else :size="15" :stroke-width="1.8" />
+                <span>{{ selectedModeLabel }}</span>
+                <ChevronDown :size="13" :stroke-width="1.8" />
               </button>
+              <div v-if="modeMenuOpen" class="agent-popup agent-mode-menu" role="menu">
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedMode === 'chat' }"
+                  role="menuitem"
+                  @click="selectMode('chat')"
+                >
+                  <MessageCircle :size="15" />
+                  <span>Chat</span>
+                  <Check v-if="selectedMode === 'chat'" :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedMode === 'agent' }"
+                  role="menuitem"
+                  @click="selectMode('agent')"
+                >
+                  <Sparkles :size="15" />
+                  <span>Agent</span>
+                  <Check v-if="selectedMode === 'agent'" :size="14" />
+                </button>
+              </div>
+            </div>
+
+            <div v-if="selectedMode === 'agent'" class="agent-popup-anchor">
               <button
                 type="button"
-                class="agent-popup-option"
-                :class="{ selected: selectedMode === 'agent' }"
-                role="menuitem"
-                @click="selectMode('agent')"
+                class="agent-tool-button agent-permission-button"
+                aria-haspopup="menu"
+                :aria-expanded="permissionMenuOpen"
+                @click="
+                  permissionMenuOpen = !permissionMenuOpen;
+                  modeMenuOpen = false;
+                  modelMenuOpen = false;
+                "
               >
-                <Sparkles :size="15" />
-                <span>Agent</span>
-                <Check v-if="selectedMode === 'agent'" :size="14" />
+                <ShieldCheck :size="15" :stroke-width="1.8" />
+                <span>{{ selectedPermissionModeLabel }}</span>
+                <ChevronDown :size="13" :stroke-width="1.8" />
               </button>
+              <div
+                v-if="permissionMenuOpen"
+                class="agent-popup agent-permission-menu"
+                role="menu"
+                aria-label="Agent 权限模式"
+              >
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedPermissionMode === 'read-only' }"
+                  role="menuitem"
+                  @click="selectPermissionMode('read-only')"
+                >
+                  <LockKeyhole :size="15" />
+                  <span>只读</span>
+                  <Check v-if="selectedPermissionMode === 'read-only'" :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedPermissionMode === 'edit' }"
+                  role="menuitem"
+                  @click="selectPermissionMode('edit')"
+                >
+                  <Pencil :size="15" />
+                  <span>编辑权限</span>
+                  <Check v-if="selectedPermissionMode === 'edit'" :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="agent-popup-option"
+                  :class="{ selected: selectedPermissionMode === 'yolo' }"
+                  role="menuitem"
+                  @click="selectPermissionMode('yolo')"
+                >
+                  <Zap :size="15" />
+                  <span>YOLO</span>
+                  <Check v-if="selectedPermissionMode === 'yolo'" :size="14" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="agent-composer-submit">
-          <div class="agent-popup-anchor agent-model-anchor">
-            <button
-              type="button"
-              class="agent-model-button"
-              aria-haspopup="dialog"
-              :aria-expanded="modelMenuOpen"
-              @click="
-                modelMenuOpen = !modelMenuOpen;
-                modeMenuOpen = false;
-              "
-            >
-              <Bot :size="15" :stroke-width="1.8" />
-              <span>{{ selectedModelLabel }}</span>
-              <ChevronDown :size="13" :stroke-width="1.8" />
-            </button>
-            <div
-              v-if="modelMenuOpen"
-              class="agent-popup agent-model-menu"
-              role="dialog"
-              aria-label="模型与推理强度"
-            >
-              <div class="agent-model-options" role="listbox" aria-label="模型">
-                <div v-if="models.length === 0" class="agent-model-empty">
-                  models.yml 中没有模型
-                </div>
-                <button
-                  v-for="model in models"
-                  :key="`${model.connectionId}:${model.modelId}`"
-                  type="button"
-                  class="agent-popup-option agent-model-option"
-                  :class="{
-                    selected:
-                      model.connectionId === selectedModel?.connectionId &&
-                      model.modelId === selectedModel?.modelId,
-                  }"
-                  role="option"
-                  :aria-selected="
-                    model.connectionId === selectedModel?.connectionId &&
-                    model.modelId === selectedModel?.modelId
-                  "
-                  @click="selectModel(model)"
-                >
-                  <span class="agent-model-option-copy">
-                    <strong>{{ model.name }}</strong>
-                    <small>{{ model.connectionId }} · {{ model.modelId }}</small>
-                  </span>
-                  <Check
-                    v-if="
+          <div class="agent-composer-submit">
+            <div class="agent-popup-anchor agent-model-anchor">
+              <button
+                type="button"
+                class="agent-model-button"
+                aria-haspopup="dialog"
+                :aria-expanded="modelMenuOpen"
+                @click="
+                  modelMenuOpen = !modelMenuOpen;
+                  modeMenuOpen = false;
+                  permissionMenuOpen = false;
+                "
+              >
+                <Bot :size="15" :stroke-width="1.8" />
+                <span>{{ selectedModelLabel }}</span>
+                <ChevronDown :size="13" :stroke-width="1.8" />
+              </button>
+              <div
+                v-if="modelMenuOpen"
+                class="agent-popup agent-model-menu"
+                role="dialog"
+                aria-label="模型与推理强度"
+              >
+                <div class="agent-model-options" role="listbox" aria-label="模型">
+                  <div v-if="models.length === 0" class="agent-model-empty">
+                    models.yml 中没有模型
+                  </div>
+                  <button
+                    v-for="model in models"
+                    :key="`${model.connectionId}:${model.modelId}`"
+                    type="button"
+                    class="agent-popup-option agent-model-option"
+                    :class="{
+                      selected:
+                        model.connectionId === selectedModel?.connectionId &&
+                        model.modelId === selectedModel?.modelId,
+                    }"
+                    role="option"
+                    :aria-selected="
                       model.connectionId === selectedModel?.connectionId &&
                       model.modelId === selectedModel?.modelId
                     "
-                    :size="14"
-                  />
-                </button>
-              </div>
-
-              <section v-if="selectedModelRecord" class="agent-reasoning-control">
-                <div class="agent-reasoning-heading">
-                  <span>推理强度</span>
-                  <strong>{{ visibleReasoningLevel }}</strong>
+                    @click="selectModel(model)"
+                  >
+                    <span class="agent-model-option-copy">
+                      <strong>{{ model.name }}</strong>
+                      <small>{{ model.connectionId }} · {{ model.modelId }}</small>
+                    </span>
+                    <Check
+                      v-if="
+                        model.connectionId === selectedModel?.connectionId &&
+                        model.modelId === selectedModel?.modelId
+                      "
+                      :size="14"
+                    />
+                  </button>
                 </div>
-                <div
-                  class="agent-reasoning-slider"
-                  :class="{ dragging: reasoningDragging }"
-                  role="slider"
-                  tabindex="0"
-                  aria-label="推理强度"
-                  aria-orientation="horizontal"
-                  :aria-valuemin="0"
-                  :aria-valuemax="Math.max(0, reasoningLevels.length - 1)"
-                  :aria-valuenow="visibleReasoningIndex"
-                  :aria-valuetext="visibleReasoningLevel"
-                  :aria-disabled="reasoningLevels.length <= 1"
-                  @keydown="handleReasoningKeydown"
-                  @pointerdown="beginReasoningDrag"
-                  @pointermove="updateReasoningDrag"
-                  @pointerup="finishReasoningDrag"
-                  @pointercancel="cancelReasoningDrag"
-                >
-                  <div ref="reasoningRail" class="agent-reasoning-rail" aria-hidden="true">
-                    <span
-                      class="agent-reasoning-fill"
-                      :style="{ width: reasoningVisualPosition }"
-                    ></span>
-                    <span
-                      v-for="(level, index) in reasoningLevels"
-                      :key="level"
-                      class="agent-reasoning-point"
-                      :class="{ active: index <= visibleReasoningPosition }"
-                      :style="reasoningPointStyle(index)"
-                    ></span>
-                    <span
-                      class="agent-reasoning-thumb"
-                      :style="{ left: reasoningVisualPosition }"
-                    ></span>
+
+                <section v-if="selectedModelRecord" class="agent-reasoning-control">
+                  <div class="agent-reasoning-heading">
+                    <span>推理强度</span>
+                    <strong>{{ visibleReasoningLevel }}</strong>
                   </div>
-                </div>
-              </section>
+                  <div
+                    class="agent-reasoning-slider"
+                    :class="{ dragging: reasoningDragging }"
+                    role="slider"
+                    tabindex="0"
+                    aria-label="推理强度"
+                    aria-orientation="horizontal"
+                    :aria-valuemin="0"
+                    :aria-valuemax="Math.max(0, reasoningLevels.length - 1)"
+                    :aria-valuenow="visibleReasoningIndex"
+                    :aria-valuetext="visibleReasoningLevel"
+                    :aria-disabled="reasoningLevels.length <= 1"
+                    @keydown="handleReasoningKeydown"
+                    @pointerdown="beginReasoningDrag"
+                    @pointermove="updateReasoningDrag"
+                    @pointerup="finishReasoningDrag"
+                    @pointercancel="cancelReasoningDrag"
+                  >
+                    <div ref="reasoningRail" class="agent-reasoning-rail" aria-hidden="true">
+                      <span
+                        class="agent-reasoning-fill"
+                        :style="{ width: reasoningVisualPosition }"
+                      ></span>
+                      <span
+                        v-for="(level, index) in reasoningLevels"
+                        :key="level"
+                        class="agent-reasoning-point"
+                        :class="{ active: index <= visibleReasoningPosition }"
+                        :style="reasoningPointStyle(index)"
+                      ></span>
+                      <span
+                        class="agent-reasoning-thumb"
+                        :style="{ left: reasoningVisualPosition }"
+                      ></span>
+                    </div>
+                  </div>
+                </section>
+              </div>
             </div>
-          </div>
 
-          <div
-            class="agent-context-usage"
-            :class="{
-              'is-near-limit': contextUsagePercentage >= 90,
-              'is-full': contextUsagePercentage >= 100,
-            }"
-            :aria-label="contextUsageTooltip"
-            :data-tooltip="contextUsageTooltip"
-            role="img"
-            tabindex="0"
-          >
-            <svg viewBox="0 0 28 28" aria-hidden="true">
-              <circle class="agent-context-track" cx="14" cy="14" r="10" />
-              <circle
-                class="agent-context-progress"
-                cx="14"
-                cy="14"
-                r="10"
-                :stroke-dasharray="contextUsageCircumference"
-                :stroke-dashoffset="contextUsageStrokeOffset"
-              />
-            </svg>
-          </div>
+            <div
+              class="agent-context-usage"
+              :class="{
+                'is-near-limit': contextUsagePercentage >= 90,
+                'is-full': contextUsagePercentage >= 100,
+              }"
+              :aria-label="contextUsageTooltip"
+              :data-tooltip="contextUsageTooltip"
+              role="img"
+              tabindex="0"
+            >
+              <svg viewBox="0 0 28 28" aria-hidden="true">
+                <circle class="agent-context-track" cx="14" cy="14" r="10" />
+                <circle
+                  class="agent-context-progress"
+                  cx="14"
+                  cy="14"
+                  r="10"
+                  :stroke-dasharray="contextUsageCircumference"
+                  :stroke-dashoffset="contextUsageStrokeOffset"
+                />
+              </svg>
+            </div>
 
-          <button
-            type="button"
-            class="agent-send-button"
-            :disabled="sending ? !runningInvocationId || cancelling : !canSend"
-            :title="sending ? '停止' : '发送'"
-            :aria-label="sending ? '停止响应' : '发送消息'"
-            @click="handlePrimaryAction"
-          >
-            <Square v-if="sending" :size="14" :stroke-width="2.2" fill="currentColor" />
-            <ArrowUp v-else :size="18" :stroke-width="2.2" />
-          </button>
+            <button
+              type="button"
+              class="agent-send-button"
+              :disabled="sending ? !runningInvocationId || cancelling : !canSend"
+              :title="sending ? '停止' : '发送'"
+              :aria-label="sending ? '停止响应' : '发送消息'"
+              @click="handlePrimaryAction"
+            >
+              <Square v-if="sending" :size="14" :stroke-width="2.2" fill="currentColor" />
+              <ArrowUp v-else :size="18" :stroke-width="2.2" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

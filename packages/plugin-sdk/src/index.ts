@@ -295,6 +295,8 @@ export interface PluginStorageBroker {
   for(execution: ExecutionContext): PluginStorage;
 }
 
+export type AgentToolConfirmationLevel = 0 | 1 | 2;
+
 /**
  * Agent 工具声明只描述能力语义；运行时身份与生命周期由 Plugin Kernel 补齐。
  */
@@ -303,6 +305,11 @@ export interface AgentToolDefinition {
   readonly name: string;
   readonly title: string;
   readonly description: string;
+  /**
+   * 0 或省略：直接执行；1：受限编辑；2：任意命令或宿主文件访问。
+   * 最终是否弹出确认由当前 Agent 权限模式裁决。
+   */
+  readonly confirmationLevel?: AgentToolConfirmationLevel;
   readonly inputSchema: JsonObject;
   readonly outputDescription?: string;
   readonly examples?: JsonValue[];

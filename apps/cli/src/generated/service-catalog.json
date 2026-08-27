@@ -5,12 +5,12 @@
       "contract": "seashard.agent-invocation",
       "owner": "seashard.agent-runtime",
       "description": "读取和控制正在执行或已经结算的 Agent Invocation。",
-      "source": "packages/contracts/src/agent/session.ts:14",
+      "source": "packages/contracts/src/agent/session.ts:19",
       "methods": [
         {
           "name": "getInvocation",
           "signature": "getInvocation(invocationId: string): Promise<AgentInvocationSnapshot>",
-          "description": "读取 Invocation 的文本、工具活动和最终状态。",
+          "description": "读取 Invocation 的文本、工具活动、待处理交互和最终状态。",
           "parameters": [
             {
               "name": "invocationId",
@@ -27,12 +27,29 @@
         {
           "name": "cancelInvocation",
           "signature": "cancelInvocation(invocationId: string): Promise<void>",
-          "description": "请求取消仍在运行的 Invocation；已经结算的调用保持幂等。",
+          "description": "请求取消仍在运行的模型或工具；已经产生的 Session Journal 记录继续完成持久化。",
           "parameters": [
             {
               "name": "invocationId",
               "type": "string",
               "description": "Invocation ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "respondToInteraction",
+          "signature": "respondToInteraction(input: AgentInteractionResponseInput): Promise<void>",
+          "description": "回答当前 Invocation 正在等待的 Ask 或命令确认。",
+          "parameters": [
+            {
+              "name": "input",
+              "type": "AgentInteractionResponseInput",
+              "description": "Invocation 身份以及与待处理交互严格匹配的响应。"
             }
           ],
           "returns": {
@@ -47,43 +64,67 @@
           "name": "AgentActivityPresentation",
           "description": "",
           "declaration": "export interface AgentActivityPresentation {\n  readonly title: string;\n  readonly icon?: AgentActivityPresentationIcon;\n  readonly requestPayload?: readonly AgentActivityPresentationField[];\n  readonly resultPayload?: readonly AgentActivityPresentationField[];\n}",
-          "source": "packages/contracts/src/agent/session.ts:31"
+          "source": "packages/contracts/src/agent/session.ts:36"
         },
         {
           "name": "AgentActivityPresentationField",
           "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
           "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
-          "source": "packages/plugin-sdk/src/index.ts:321"
+          "source": "packages/plugin-sdk/src/index.ts:328"
         },
         {
           "name": "AgentActivityPresentationIcon",
           "description": "",
           "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
-          "source": "packages/plugin-sdk/src/index.ts:328"
+          "source": "packages/plugin-sdk/src/index.ts:335"
+        },
+        {
+          "name": "AgentAskInteraction",
+          "description": "Ask 工具等待 Renderer 回答时投影的单选问题；自定义输入由客户端固定追加。",
+          "declaration": "/** Ask 工具等待 Renderer 回答时投影的单选问题；自定义输入由客户端固定追加。 */\nexport interface AgentAskInteraction extends AgentInteractionBase {\n  readonly type: \"ask\";\n  readonly question: string;\n  readonly options: readonly string[];\n}",
+          "source": "packages/contracts/src/agent/interaction.ts:14"
+        },
+        {
+          "name": "AgentInteractionBase",
+          "description": "",
+          "declaration": "interface AgentInteractionBase {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly toolCallId: string;\n  readonly createdAt: string;\n}",
+          "source": "packages/contracts/src/agent/interaction.ts:6"
+        },
+        {
+          "name": "AgentInteractionResponse",
+          "description": "",
+          "declaration": "export type AgentInteractionResponse =\n  | {\n      readonly interactionId: string;\n      readonly type: \"ask-option\";\n      readonly optionIndex: number;\n    }\n  | {\n      readonly interactionId: string;\n      readonly type: \"ask-custom\";\n      readonly value: string;\n    }\n  | {\n      readonly interactionId: string;\n      readonly type: \"tool-confirmation\";\n      readonly approved: boolean;\n    };",
+          "source": "packages/contracts/src/agent/interaction.ts:31"
+        },
+        {
+          "name": "AgentInteractionResponseInput",
+          "description": "",
+          "declaration": "export interface AgentInteractionResponseInput {\n  readonly invocationId: string;\n  readonly response: AgentInteractionResponse;\n}",
+          "source": "packages/contracts/src/agent/interaction.ts:48"
         },
         {
           "name": "AgentInvocationSnapshot",
           "description": "",
-          "declaration": "export interface AgentInvocationSnapshot extends AgentInvocationSummary {\n  readonly text: string;\n  readonly contentBlocks: readonly AgentMessageContentBlock[];\n  readonly provider?: AgentProviderResponseDetails;\n  readonly usage?: AgentTokenUsage;\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n}",
-          "source": "packages/contracts/src/agent/session.ts:190"
+          "declaration": "export interface AgentInvocationSnapshot extends AgentInvocationSummary {\n  readonly text: string;\n  readonly contentBlocks: readonly AgentMessageContentBlock[];\n  readonly provider?: AgentProviderResponseDetails;\n  readonly usage?: AgentTokenUsage;\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n  /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */\n  readonly interaction?: AgentPendingInteraction;\n}",
+          "source": "packages/contracts/src/agent/session.ts:195"
         },
         {
           "name": "AgentInvocationState",
           "description": "",
           "declaration": "export type AgentInvocationState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
-          "source": "packages/contracts/src/agent/session.ts:28"
+          "source": "packages/contracts/src/agent/session.ts:33"
         },
         {
           "name": "AgentInvocationSummary",
           "description": "",
           "declaration": "export interface AgentInvocationSummary {\n  readonly id: string;\n  readonly sessionId: string;\n  readonly state: AgentInvocationState;\n  readonly model: AgentModelSelection;\n  readonly startedAt: string;\n  readonly finishedAt?: string;\n  readonly error?: string;\n  /** 当前 Invocation 最后一个模型 Step 完成后的上下文 Token。 */\n  readonly contextTokens?: number;\n}",
-          "source": "packages/contracts/src/agent/session.ts:178"
+          "source": "packages/contracts/src/agent/session.ts:183"
         },
         {
           "name": "AgentMessageContentBlock",
           "description": "",
           "declaration": "export type AgentMessageContentBlock =\n  | {\n      readonly type: \"text\";\n      readonly text: string;\n    }\n  | {\n      readonly type: \"reasoning\";\n      readonly text: string;\n      readonly redacted?: boolean;\n    }\n  | {\n      readonly type: \"tool-call\";\n      readonly toolCallId: string;\n    };",
-          "source": "packages/contracts/src/agent/session.ts:102"
+          "source": "packages/contracts/src/agent/session.ts:107"
         },
         {
           "name": "AgentModelSelection",
@@ -92,34 +133,52 @@
           "source": "packages/contracts/src/agent/model.ts:43"
         },
         {
+          "name": "AgentPendingInteraction",
+          "description": "",
+          "declaration": "export type AgentPendingInteraction = AgentAskInteraction | AgentToolConfirmationInteraction;",
+          "source": "packages/contracts/src/agent/interaction.ts:29"
+        },
+        {
           "name": "AgentProviderResponseDetails",
           "description": "单个模型 Step 的供应商身份与停止原因；不包含认证信息和加密推理签名。",
           "declaration": "/** 单个模型 Step 的供应商身份与停止原因；不包含认证信息和加密推理签名。 */\nexport interface AgentProviderResponseDetails {\n  readonly api: string;\n  readonly provider: string;\n  readonly requestedModel: string;\n  readonly responseModel?: string;\n  readonly responseId?: string;\n  readonly stopReason: string;\n  readonly errorMessage?: string;\n  readonly rawStopReason?: string;\n  readonly endTurn?: boolean;\n  readonly diagnostics?: readonly JsonObject[];\n}",
-          "source": "packages/contracts/src/agent/session.ts:138"
+          "source": "packages/contracts/src/agent/session.ts:143"
         },
         {
           "name": "AgentTokenUsage",
           "description": "供应商返回的原始用量分类；reasoning 已包含在 output 中。",
           "declaration": "/** 供应商返回的原始用量分类；reasoning 已包含在 output 中。 */\nexport interface AgentTokenUsage {\n  readonly input: number;\n  readonly output: number;\n  readonly cacheRead: number;\n  readonly cacheWrite: number;\n  readonly cacheWrite1h?: number;\n  readonly reasoning?: number;\n  readonly totalTokens: number;\n  readonly cost?: AgentTokenUsageCost;\n}",
-          "source": "packages/contracts/src/agent/session.ts:126"
+          "source": "packages/contracts/src/agent/session.ts:131"
         },
         {
           "name": "AgentTokenUsageCost",
           "description": "",
           "declaration": "export interface AgentTokenUsageCost {\n  readonly input: number;\n  readonly output: number;\n  readonly cacheRead: number;\n  readonly cacheWrite: number;\n  readonly total: number;\n}",
-          "source": "packages/contracts/src/agent/session.ts:117"
+          "source": "packages/contracts/src/agent/session.ts:122"
         },
         {
           "name": "AgentToolCallSnapshot",
           "description": "Agent 调用工具时持久化并投影给客户端的稳定活动记录。",
           "declaration": "/** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */\nexport interface AgentToolCallSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly toolName: string;\n  readonly presentation: AgentActivityPresentation;\n  readonly state: AgentToolCallState;\n  readonly input: JsonValue;\n  readonly output?: JsonValue;\n  readonly error?: string;\n  readonly startedAt: string;\n  /** 工具开始前已经输出的 Assistant 文本长度；使用 JavaScript UTF-16 偏移量。 */\n  readonly assistantTextOffset: number;\n  readonly finishedAt?: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:39"
+          "source": "packages/contracts/src/agent/session.ts:44"
         },
         {
           "name": "AgentToolCallState",
           "description": "",
           "declaration": "export type AgentToolCallState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
-          "source": "packages/contracts/src/agent/session.ts:29"
+          "source": "packages/contracts/src/agent/session.ts:34"
+        },
+        {
+          "name": "AgentToolConfirmationInteraction",
+          "description": "高权限工具在真正进入领域 Handler 前等待用户确认。",
+          "declaration": "/** 高权限工具在真正进入领域 Handler 前等待用户确认。 */\nexport interface AgentToolConfirmationInteraction extends AgentInteractionBase {\n  readonly type: \"tool-confirmation\";\n  readonly toolName: string;\n  readonly title: string;\n  readonly confirmationLevel: Exclude<AgentToolConfirmationLevel, 0>;\n  readonly input: JsonValue;\n}",
+          "source": "packages/contracts/src/agent/interaction.ts:21"
+        },
+        {
+          "name": "AgentToolConfirmationLevel",
+          "description": "",
+          "declaration": "export type AgentToolConfirmationLevel = 0 | 1 | 2;",
+          "source": "packages/plugin-sdk/src/index.ts:298"
         },
         {
           "name": "JsonObject",
@@ -351,7 +410,7 @@
       "contract": "seashard.agent-session",
       "owner": "seashard.agent-runtime",
       "description": "创建、读取和管理可持久化的 Agent 会话。",
-      "source": "packages/contracts/src/agent/session.ts:12",
+      "source": "packages/contracts/src/agent/session.ts:17",
       "methods": [
         {
           "name": "listModels",
@@ -366,12 +425,12 @@
         },
         {
           "name": "startSession",
-          "signature": "startSession(input: { initialMessage: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
+          "signature": "startSession(input: { initialMessage: AgentUserMessage; mode: AgentConversationMode; permissionMode?: AgentPermissionMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
           "description": "创建会话并立即启动第一轮 Invocation。",
           "parameters": [
             {
               "name": "input",
-              "type": "{ initialMessage: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }",
+              "type": "{ initialMessage: AgentUserMessage; mode: AgentConversationMode; permissionMode?: AgentPermissionMode; model?: AgentModelSelection; }",
               "description": "初始用户消息、会话模式及可选模型。"
             }
           ],
@@ -383,12 +442,12 @@
         },
         {
           "name": "sendMessage",
-          "signature": "sendMessage(input: { sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
+          "signature": "sendMessage(input: { sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; permissionMode?: AgentPermissionMode; model?: AgentModelSelection; }): Promise<AgentInvocationReference>",
           "description": "向已有会话追加用户消息并启动新 Invocation。",
           "parameters": [
             {
               "name": "input",
-              "type": "{ sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; model?: AgentModelSelection; }",
+              "type": "{ sessionId: string; message: AgentUserMessage; mode: AgentConversationMode; permissionMode?: AgentPermissionMode; model?: AgentModelSelection; }",
               "description": "会话 ID、用户消息、会话模式及可选模型。"
             }
           ],
@@ -488,19 +547,19 @@
           "name": "AgentActivityPresentation",
           "description": "",
           "declaration": "export interface AgentActivityPresentation {\n  readonly title: string;\n  readonly icon?: AgentActivityPresentationIcon;\n  readonly requestPayload?: readonly AgentActivityPresentationField[];\n  readonly resultPayload?: readonly AgentActivityPresentationField[];\n}",
-          "source": "packages/contracts/src/agent/session.ts:31"
+          "source": "packages/contracts/src/agent/session.ts:36"
         },
         {
           "name": "AgentActivityPresentationField",
           "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
           "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
-          "source": "packages/plugin-sdk/src/index.ts:321"
+          "source": "packages/plugin-sdk/src/index.ts:328"
         },
         {
           "name": "AgentActivityPresentationIcon",
           "description": "",
           "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
-          "source": "packages/plugin-sdk/src/index.ts:328"
+          "source": "packages/plugin-sdk/src/index.ts:335"
         },
         {
           "name": "AgentConfiguredModel",
@@ -512,25 +571,25 @@
           "name": "AgentConversationMode",
           "description": "",
           "declaration": "export type AgentConversationMode = \"chat\" | \"agent\";",
-          "source": "packages/contracts/src/agent/session.ts:21"
+          "source": "packages/contracts/src/agent/session.ts:26"
         },
         {
           "name": "AgentInvocationReference",
           "description": "",
           "declaration": "export interface AgentInvocationReference {\n  readonly sessionId: string;\n  readonly invocationId: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:23"
+          "source": "packages/contracts/src/agent/session.ts:28"
         },
         {
           "name": "AgentMessageContentBlock",
           "description": "",
           "declaration": "export type AgentMessageContentBlock =\n  | {\n      readonly type: \"text\";\n      readonly text: string;\n    }\n  | {\n      readonly type: \"reasoning\";\n      readonly text: string;\n      readonly redacted?: boolean;\n    }\n  | {\n      readonly type: \"tool-call\";\n      readonly toolCallId: string;\n    };",
-          "source": "packages/contracts/src/agent/session.ts:102"
+          "source": "packages/contracts/src/agent/session.ts:107"
         },
         {
           "name": "AgentMessageSnapshot",
           "description": "",
           "declaration": "export interface AgentMessageSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly role: \"user\" | \"assistant\";\n  /** 纯文本投影，供搜索、标题与第一版调用方继续使用。 */\n  readonly content: string;\n  readonly contentBlocks: readonly AgentMessageContentBlock[];\n  readonly provider?: AgentProviderResponseDetails;\n  readonly usage?: AgentTokenUsage;\n  readonly timestamp: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:151"
+          "source": "packages/contracts/src/agent/session.ts:156"
         },
         {
           "name": "AgentModelCost",
@@ -551,52 +610,58 @@
           "source": "packages/contracts/src/agent/model.ts:34"
         },
         {
+          "name": "AgentPermissionMode",
+          "description": "",
+          "declaration": "export type AgentPermissionMode = (typeof agentPermissionModes)[number];",
+          "source": "packages/contracts/src/agent/interaction.ts:4"
+        },
+        {
           "name": "AgentProviderResponseDetails",
           "description": "单个模型 Step 的供应商身份与停止原因；不包含认证信息和加密推理签名。",
           "declaration": "/** 单个模型 Step 的供应商身份与停止原因；不包含认证信息和加密推理签名。 */\nexport interface AgentProviderResponseDetails {\n  readonly api: string;\n  readonly provider: string;\n  readonly requestedModel: string;\n  readonly responseModel?: string;\n  readonly responseId?: string;\n  readonly stopReason: string;\n  readonly errorMessage?: string;\n  readonly rawStopReason?: string;\n  readonly endTurn?: boolean;\n  readonly diagnostics?: readonly JsonObject[];\n}",
-          "source": "packages/contracts/src/agent/session.ts:138"
+          "source": "packages/contracts/src/agent/session.ts:143"
         },
         {
           "name": "AgentSessionSnapshot",
           "description": "",
           "declaration": "export interface AgentSessionSnapshot extends AgentSessionSummary {\n  readonly messages: readonly AgentMessageSnapshot[];\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n  /** 最近一次成功取得供应商用量的 Invocation 所占上下文 Token。 */\n  readonly contextTokens?: number;\n}",
-          "source": "packages/contracts/src/agent/session.ts:171"
+          "source": "packages/contracts/src/agent/session.ts:176"
         },
         {
           "name": "AgentSessionSummary",
           "description": "",
           "declaration": "export interface AgentSessionSummary {\n  readonly id: string;\n  readonly title: string;\n  readonly model: AgentModelSelection;\n  readonly createdAt: string;\n  readonly updatedAt: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:163"
+          "source": "packages/contracts/src/agent/session.ts:168"
         },
         {
           "name": "AgentTokenUsage",
           "description": "供应商返回的原始用量分类；reasoning 已包含在 output 中。",
           "declaration": "/** 供应商返回的原始用量分类；reasoning 已包含在 output 中。 */\nexport interface AgentTokenUsage {\n  readonly input: number;\n  readonly output: number;\n  readonly cacheRead: number;\n  readonly cacheWrite: number;\n  readonly cacheWrite1h?: number;\n  readonly reasoning?: number;\n  readonly totalTokens: number;\n  readonly cost?: AgentTokenUsageCost;\n}",
-          "source": "packages/contracts/src/agent/session.ts:126"
+          "source": "packages/contracts/src/agent/session.ts:131"
         },
         {
           "name": "AgentTokenUsageCost",
           "description": "",
           "declaration": "export interface AgentTokenUsageCost {\n  readonly input: number;\n  readonly output: number;\n  readonly cacheRead: number;\n  readonly cacheWrite: number;\n  readonly total: number;\n}",
-          "source": "packages/contracts/src/agent/session.ts:117"
+          "source": "packages/contracts/src/agent/session.ts:122"
         },
         {
           "name": "AgentToolCallSnapshot",
           "description": "Agent 调用工具时持久化并投影给客户端的稳定活动记录。",
           "declaration": "/** Agent 调用工具时持久化并投影给客户端的稳定活动记录。 */\nexport interface AgentToolCallSnapshot {\n  readonly id: string;\n  readonly invocationId: string;\n  readonly toolName: string;\n  readonly presentation: AgentActivityPresentation;\n  readonly state: AgentToolCallState;\n  readonly input: JsonValue;\n  readonly output?: JsonValue;\n  readonly error?: string;\n  readonly startedAt: string;\n  /** 工具开始前已经输出的 Assistant 文本长度；使用 JavaScript UTF-16 偏移量。 */\n  readonly assistantTextOffset: number;\n  readonly finishedAt?: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:39"
+          "source": "packages/contracts/src/agent/session.ts:44"
         },
         {
           "name": "AgentToolCallState",
           "description": "",
           "declaration": "export type AgentToolCallState = \"running\" | \"completed\" | \"cancelled\" | \"failed\";",
-          "source": "packages/contracts/src/agent/session.ts:29"
+          "source": "packages/contracts/src/agent/session.ts:34"
         },
         {
           "name": "AgentUserMessage",
           "description": "",
           "declaration": "export interface AgentUserMessage {\n  readonly text: string;\n}",
-          "source": "packages/contracts/src/agent/session.ts:17"
+          "source": "packages/contracts/src/agent/session.ts:22"
         },
         {
           "name": "JsonObject",

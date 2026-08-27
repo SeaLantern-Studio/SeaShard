@@ -45,6 +45,7 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     await runtime.invoke(desktopChannels.agentSessionStart, 1, {
       initialMessage: { text: "hello" },
       mode: "agent",
+      permissionMode: "read-only",
       model: { connectionId: "test", modelId: "test-model" },
     }),
     { sessionId: "agent-session", invocationId: "agent-invocation" },
@@ -54,6 +55,7 @@ await test("desktop shell routes settings, downloads, instances, and configurati
       sessionId: "agent-session",
       message: { text: "continue" },
       mode: "chat",
+      permissionMode: "edit",
       model: { connectionId: "test", modelId: "test-model" },
     }),
     { sessionId: "agent-session", invocationId: "agent-invocation" },
@@ -79,6 +81,26 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     { reasoning: 1, totalTokens: 16 },
   );
   await runtime.invoke(desktopChannels.agentInvocationCancel, 1, "agent-invocation");
+  await runtime.invoke(desktopChannels.agentInteractionRespond, 1, {
+    invocationId: "agent-invocation",
+    response: {
+      interactionId: "interaction-1",
+      type: "tool-confirmation",
+      approved: true,
+    },
+  });
+  await assert.rejects(
+    () =>
+      runtime.invoke(desktopChannels.agentInteractionRespond, 1, {
+        invocationId: "agent-invocation",
+        response: {
+          interactionId: "interaction-1",
+          type: "ask-option",
+          optionIndex: -1,
+        },
+      }),
+    /option index must be non-negative/u,
+  );
   assert.equal(
     (
       (await runtime.invoke(desktopChannels.agentModelConfigurationGet, 1)) as {

@@ -4,6 +4,9 @@ import {
   type AgentConfiguredModel,
   type AgentConversationMode,
   type AgentInvocationService,
+  type AgentInteractionResponse,
+  type AgentPendingInteraction,
+  type AgentPermissionMode,
   type AgentMessageContentBlock,
   type AgentModelConfigurationClientService,
   type AgentModelSelection,
@@ -36,8 +39,10 @@ const session = shallowRef<AgentSessionSnapshot>();
 const models = ref<readonly AgentConfiguredModel[]>([]);
 const selectedModel = shallowRef<AgentModelSelection>();
 const selectedMode = ref<AgentConversationMode>("agent");
+const selectedPermissionMode = ref<AgentPermissionMode>("read-only");
 const reasoningLevelByModel = new Map<string, string>();
 const sending = ref(false);
+const respondingToInteraction = ref(false);
 const cancelling = ref(false);
 const liveAssistantText = ref("");
 const liveContentBlocks = shallowRef<readonly AgentMessageContentBlock[]>([]);
@@ -45,6 +50,7 @@ const liveToolCalls = shallowRef<readonly AgentToolCallSnapshot[]>([]);
 const liveContextTokens = ref<number>();
 const runningSessionId = ref<string>();
 const runningInvocationId = ref<string>();
+const liveInteraction = shallowRef<AgentPendingInteraction>();
 let conversationLoad = 0;
 let invocationPoll = 0;
 let modelConfigurationLoad = 0;
@@ -58,6 +64,7 @@ watch(activeConversationId, (id) => {
     liveAssistantText.value = "";
     liveContentBlocks.value = [];
     liveToolCalls.value = [];
+    liveInteraction.value = undefined;
     liveContextTokens.value = undefined;
   }
   void loadActiveConversation();
@@ -184,12 +191,14 @@ async function sendMessage(text: string): Promise<void> {
         ? await props.sessions.startSession({
             initialMessage: { text: message },
             mode: selectedMode.value,
+            permissionMode: selectedPermissionMode.value,
             model,
           })
         : await props.sessions.sendMessage({
             sessionId: previousId,
             message: { text: message },
             mode: selectedMode.value,
+            permissionMode: selectedPermissionMode.value,
             model,
           });
     composerComponent.value?.clear();
@@ -205,6 +214,7 @@ async function sendMessage(text: string): Promise<void> {
     cancelling.value = false;
     runningSessionId.value = undefined;
     liveContextTokens.value = undefined;
+    liveInteraction.value = undefined;
     runningInvocationId.value = undefined;
     liveAssistantText.value = "";
     liveContentBlocks.value = [];
@@ -221,6 +231,7 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
       liveAssistantText.value = invocation.text;
       liveContentBlocks.value = invocation.contentBlocks;
       liveToolCalls.value = invocation.toolCalls;
+      liveInteraction.value = invocation.interaction;
       if (invocation.contextTokens !== undefined) {
         liveContextTokens.value = invocation.contextTokens;
       }
@@ -237,6 +248,28 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
       return;
     }
     await delay(120);
+  }
+}
+
+async function respondToInteraction(response: AgentInteractionResponse): Promise<void> {
+  const invocationId = runningInvocationId.value;
+  const interaction = liveInteraction.value;
+  if (
+    !invocationId ||
+    !interaction ||
+    interaction.id !== response.interactionId ||
+    respondingToInteraction.value
+  ) {
+    return;
+  }
+  respondingToInteraction.value = true;
+  try {
+    await props.invocations.respondToInteraction({ invocationId, response });
+    liveInteraction.value = undefined;
+  } catch (error) {
+    toast.error({ title: "提交交互失败", description: errorMessage(error) });
+  } finally {
+    respondingToInteraction.value = false;
   }
 }
 
@@ -284,8 +317,11 @@ function delay(milliseconds: number): Promise<void> {
       :models="models"
       :selected-model="selectedModel"
       :selected-mode="selectedMode"
+      :selected-permission-mode="selectedPermissionMode"
       :sending="sending"
       :cancelling="cancelling"
+      :interaction="liveInteraction"
+      :responding-to-interaction="respondingToInteraction"
       :running-invocation-id="runningInvocationId"
       :context-tokens-used="liveContextTokens ?? session?.contextTokens ?? 0"
       @attachment="showAttachmentPlaceholder"
@@ -293,6 +329,8 @@ function delay(milliseconds: number): Promise<void> {
       @select-model="selectModel"
       @select-mode="selectMode"
       @select-reasoning="selectReasoningLevel"
+      @select-permission-mode="selectedPermissionMode = $event"
+      @respond-interaction="respondToInteraction"
       @submit="sendMessage"
     />
   </section>

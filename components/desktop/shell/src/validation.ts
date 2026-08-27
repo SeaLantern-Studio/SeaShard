@@ -3,10 +3,12 @@ import {
   serverJvmArgumentsMaximumLength,
   serverPortLimits,
   serverModSearchLimits,
+  type AgentInteractionResponseInput,
   type AgentModelConfigurationService,
   type ClientServiceCallRequest,
   type AgentModelConnectionMutation,
   type AgentModelSelection,
+  type AgentPermissionMode,
   type AgentSessionService,
   type ServerConfigurationWriteRequest,
   type ServerCoreSaveAsRequest,
@@ -460,6 +462,9 @@ export function expectAgentStartSessionInput(
       ),
     },
     mode: expectAgentConversationMode(record.mode),
+    ...(record.permissionMode === undefined
+      ? {}
+      : { permissionMode: expectAgentPermissionMode(record.permissionMode) }),
     ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
   };
 }
@@ -477,6 +482,9 @@ export function expectAgentSendMessageInput(
       ),
     },
     mode: expectAgentConversationMode(record.mode),
+    ...(record.permissionMode === undefined
+      ? {}
+      : { permissionMode: expectAgentPermissionMode(record.permissionMode) }),
     ...(record.model === undefined ? {} : { model: expectAgentModelSelection(record.model) }),
   };
 }
@@ -492,6 +500,51 @@ function expectAgentModelSelection(value: unknown): AgentModelSelection {
           reasoningLevel: expectNonEmptyString(record.reasoningLevel, "Agent reasoning level"),
         }),
   };
+}
+
+export function expectAgentInteractionResponseInput(value: unknown): AgentInteractionResponseInput {
+  const record = expectRecord(value, "Agent interaction response request");
+  const response = expectRecord(record.response, "Agent interaction response");
+  const interactionId = expectNonEmptyString(response.interactionId, "Agent interaction ID");
+  if (response.type === "ask-option") {
+    const optionIndex = expectSafeInteger(response.optionIndex, "Agent ask option index");
+    if (optionIndex < 0) throw new TypeError("Agent ask option index must be non-negative");
+    return {
+      invocationId: expectNonEmptyString(record.invocationId, "Agent invocation ID"),
+      response: { interactionId, type: "ask-option", optionIndex },
+    };
+  }
+  if (response.type === "ask-custom") {
+    return {
+      invocationId: expectNonEmptyString(record.invocationId, "Agent invocation ID"),
+      response: {
+        interactionId,
+        type: "ask-custom",
+        value: expectNonEmptyString(response.value, "Agent custom answer"),
+      },
+    };
+  }
+  if (response.type === "tool-confirmation") {
+    if (typeof response.approved !== "boolean") {
+      throw new TypeError("Agent tool confirmation decision must be boolean");
+    }
+    return {
+      invocationId: expectNonEmptyString(record.invocationId, "Agent invocation ID"),
+      response: {
+        interactionId,
+        type: "tool-confirmation",
+        approved: response.approved,
+      },
+    };
+  }
+  throw new TypeError("Agent interaction response type is invalid");
+}
+
+function expectAgentPermissionMode(value: unknown): AgentPermissionMode {
+  if (value !== "read-only" && value !== "edit" && value !== "yolo") {
+    throw new TypeError("Agent permission mode must be read-only, edit or yolo");
+  }
+  return value;
 }
 
 function expectAgentConversationMode(value: unknown): "chat" | "agent" {

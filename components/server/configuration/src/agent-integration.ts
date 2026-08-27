@@ -127,6 +127,7 @@ export function registerServerConfigurationAgentIntegration(
       title: "保存服务器配置",
       description:
         "使用读取时取得的 revision 保存一个已发布的服务器配置文件；写入前会再次校验实例边界并创建备份。",
+      confirmationLevel: 1,
       inputSchema: writeConfigurationInputSchema,
       outputDescription:
         "返回已保存文件的相对路径、最新 revision、编码、修改时间和正文字符数，不回传完整正文或宿主路径。",

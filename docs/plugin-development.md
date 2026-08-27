@@ -1029,6 +1029,8 @@ export function apply(context: PluginContext, _config: JsonValue) {
 - `title` 面向用户；
 - `description` 应完整解释工具适用条件和行为；
 - `inputSchema` 使用 JSON Schema；
+- `confirmationLevel` 可省略；省略或 `0` 表示无需确认，`1` 表示受限编辑或局部副作用，`2` 表示任意命令执行或可访问整机的 `file://` 能力；
+- `只读` 模式自动执行零级工具，`编辑权限` 模式再自动执行一级工具，`YOLO` 模式自动执行全部级别；超过当前模式自动确认范围的工具会在发送框上方等待用户允许；
 - Handler 必须再次检查输入并只返回 JSON 值；
 - 长操作应响应 `execution.signal`。
 

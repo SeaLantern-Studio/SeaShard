@@ -9,10 +9,9 @@
   pointer-events: none;
 }
 
-.agent-composer {
+.agent-composer-stack {
   width: min(100%, 760px);
   margin: 0 auto;
-  padding: 12px 12px 10px;
   border: 1px solid var(--sl-border);
   border-radius: var(--sl-radius-xl);
   background: var(--sl-surface);
@@ -23,9 +22,15 @@
     box-shadow var(--sl-transition-fast);
 }
 
-.agent-composer:focus-within {
+.agent-composer-stack:focus-within {
   border-color: color-mix(in srgb, var(--sl-primary) 38%, var(--sl-border));
   box-shadow: var(--sl-shadow-md), var(--sl-shadow-input-focus);
+}
+
+.agent-composer {
+  width: 100%;
+  padding: 12px 12px 10px;
+  background: transparent;
 }
 
 .agent-composer-input {
@@ -113,6 +118,11 @@
 
 .agent-mode-button {
   background: var(--sl-bg-secondary);
+}
+
+.agent-permission-button {
+  border-color: color-mix(in srgb, var(--sl-primary) 18%, var(--sl-border-light));
+  background: color-mix(in srgb, var(--sl-primary) 5%, var(--sl-bg-secondary));
 }
 
 .agent-model-button {
@@ -227,8 +237,13 @@
   box-shadow: var(--sl-shadow-lg);
 }
 
-.agent-mode-menu {
+.agent-mode-menu,
+.agent-permission-menu {
   left: 0;
+}
+
+.agent-permission-menu {
+  min-width: 164px;
 }
 
 .agent-model-anchor .agent-popup {

@@ -40,6 +40,8 @@ const api: SeaShardDesktopApi = Object.freeze({
       ipcRenderer.invoke(desktopChannels.agentInvocationGet, invocationId),
     cancelInvocation: (invocationId: string) =>
       ipcRenderer.invoke(desktopChannels.agentInvocationCancel, invocationId),
+    respondToInteraction: (input: Parameters<AgentClientService["respondToInteraction"]>[0]) =>
+      ipcRenderer.invoke(desktopChannels.agentInteractionRespond, input),
   }),
   agentModels: Object.freeze({
     getConfiguration: () => ipcRenderer.invoke(desktopChannels.agentModelConfigurationGet),

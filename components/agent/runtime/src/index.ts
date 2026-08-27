@@ -4,6 +4,8 @@ import {
   agentInvocationContract,
   agentSessionContract,
   type AgentConversationMode,
+  type AgentInteractionResponseInput,
+  type AgentPermissionMode,
   type AgentInvocationService,
   type AgentModelConfigurationService,
   type AgentModelConnectionMutation,
@@ -74,6 +76,10 @@ export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginMo
           await runtime.cancelInvocation(requireString(invocationId, "invocationId"));
           return null;
         },
+        respondToInteraction: async (input) => {
+          await runtime.respondToInteraction(parseInteractionResponseInput(input));
+          return null;
+        },
       } satisfies Record<
         keyof AgentInvocationService,
         (...arguments_: unknown[]) => Promise<JsonValue>
@@ -122,12 +128,16 @@ export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginMo
 function parseStartSessionInput(value: unknown): {
   initialMessage: AgentUserMessage;
   mode: AgentConversationMode;
+  permissionMode?: AgentPermissionMode;
   model?: AgentModelSelection;
 } {
   const object = requireObject(value, "startSession input");
   return {
     initialMessage: parseUserMessage(object.initialMessage),
     mode: parseConversationMode(object.mode),
+    ...(object.permissionMode === undefined
+      ? {}
+      : { permissionMode: parsePermissionMode(object.permissionMode) }),
     ...(object.model === undefined ? {} : { model: parseModelSelection(object.model) }),
   };
 }
@@ -136,6 +146,7 @@ function parseSendMessageInput(value: unknown): {
   sessionId: string;
   message: AgentUserMessage;
   mode: AgentConversationMode;
+  permissionMode?: AgentPermissionMode;
   model?: AgentModelSelection;
 } {
   const object = requireObject(value, "sendMessage input");
@@ -143,6 +154,9 @@ function parseSendMessageInput(value: unknown): {
     sessionId: requireString(object.sessionId, "sessionId"),
     message: parseUserMessage(object.message),
     mode: parseConversationMode(object.mode),
+    ...(object.permissionMode === undefined
+      ? {}
+      : { permissionMode: parsePermissionMode(object.permissionMode) }),
     ...(object.model === undefined ? {} : { model: parseModelSelection(object.model) }),
   };
 }
@@ -256,6 +270,56 @@ function parseConversationMode(value: unknown): AgentConversationMode {
     throw new TypeError("mode must be chat or agent");
   }
   return value;
+}
+
+function parsePermissionMode(value: unknown): AgentPermissionMode {
+  if (value !== "read-only" && value !== "edit" && value !== "yolo") {
+    throw new TypeError("permissionMode must be read-only, edit or yolo");
+  }
+  return value;
+}
+
+function parseInteractionResponseInput(value: unknown): AgentInteractionResponseInput {
+  const input = requireObject(value, "Agent interaction response input");
+  const response = requireObject(input.response, "Agent interaction response");
+  const interactionId = requireString(response.interactionId, "interactionId");
+  if (response.type === "ask-option") {
+    if (!Number.isSafeInteger(response.optionIndex) || (response.optionIndex as number) < 0) {
+      throw new TypeError("optionIndex must be a non-negative safe integer");
+    }
+    return {
+      invocationId: requireString(input.invocationId, "invocationId"),
+      response: {
+        interactionId,
+        type: "ask-option",
+        optionIndex: response.optionIndex as number,
+      },
+    };
+  }
+  if (response.type === "ask-custom") {
+    return {
+      invocationId: requireString(input.invocationId, "invocationId"),
+      response: {
+        interactionId,
+        type: "ask-custom",
+        value: requireString(response.value, "Ask custom answer"),
+      },
+    };
+  }
+  if (response.type === "tool-confirmation") {
+    if (typeof response.approved !== "boolean") {
+      throw new TypeError("tool confirmation approved must be boolean");
+    }
+    return {
+      invocationId: requireString(input.invocationId, "invocationId"),
+      response: {
+        interactionId,
+        type: "tool-confirmation",
+        approved: response.approved,
+      },
+    };
+  }
+  throw new TypeError("Agent interaction response type is invalid");
 }
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

@@ -155,6 +155,7 @@ export function registerServerRuntimeAgentIntegration(
       name: "start",
       title: "启动服务器",
       description: "启动一个已登记且当前未运行的服务器实例。",
+      confirmationLevel: 1,
       inputSchema: runtimeToolInputSchema,
       outputDescription: "返回服务器名称、运行状态、启动时间和启动日志序号。",
       examples: [{ instanceId: "550e8400-e29b-41d4-a716-446655440000" }],
@@ -167,6 +168,7 @@ export function registerServerRuntimeAgentIntegration(
       name: "stop",
       title: "停止服务器",
       description: "向正在运行的服务器发送该核心定义的安全停止命令。",
+      confirmationLevel: 1,
       inputSchema: runtimeToolInputSchema,
       outputDescription: "返回 stopping 状态和安全停止命令对应的日志序号。",
       examples: [{ instanceId: "550e8400-e29b-41d4-a716-446655440000" }],
@@ -179,6 +181,7 @@ export function registerServerRuntimeAgentIntegration(
       name: "send-command",
       title: "发送服务器命令",
       description: "向正在运行且可接收命令的服务器进程发送一条控制台命令。",
+      confirmationLevel: 1,
       inputSchema: commandToolInputSchema,
       outputDescription: "返回命令接收状态和本次 input 日志序号。",
       examples: [

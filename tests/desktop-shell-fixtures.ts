@@ -707,6 +707,7 @@ export async function createDesktopShellHarness(
         toolCalls: [],
       }),
       cancelAgentInvocation: async () => {},
+      respondAgentInteraction: async () => {},
       readAgentModelConfiguration: async () => agentModelConfiguration,
       mutateAgentModelConnection: async () => agentModelConfiguration,
       removeAgentModelConnection: async () => agentModelConfiguration,

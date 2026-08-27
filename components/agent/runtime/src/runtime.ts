@@ -2,6 +2,10 @@ import type {
   AgentActivityPresentation,
   AgentConfiguredModel,
   AgentConversationMode,
+  AgentInteractionResponse,
+  AgentInteractionResponseInput,
+  AgentPendingInteraction,
+  AgentPermissionMode,
   AgentInvocationReference,
   AgentInvocationSnapshot,
   AgentInvocationState,
@@ -17,7 +21,6 @@ import type {
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
-import { interleaveAgentInvocationContent } from "@seashard/contracts";
 import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
 import type {
   AgentActivityPresentationField,
@@ -31,17 +34,12 @@ import type {
   JsonValue,
 } from "@seashard/plugin-sdk";
 import type {
-  Api,
   AssistantMessage,
   Context,
-  Message,
-  Model,
   ModelsSimpleStreamOptions,
-  TSchema,
   Tool,
   ToolCall,
   ToolResultMessage,
-  Usage,
 } from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -52,14 +50,11 @@ import type {
   ResolvedAgentModel,
 } from "./model-config/types";
 import { AgentSessionJournal } from "./session-journal";
-import type {
-  AgentJournalModelContentBlock,
-  InvocationRecord,
-  LoadedAgentSession,
-} from "./session-journal/records";
+import type { LoadedAgentSession } from "./session-journal/records";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
 import { bindAgentHelpResource } from "./help-resource";
 import { AgentOutputCollector } from "./output-collector";
+import { askToolName, parseAskToolInput, requiresToolConfirmation } from "./runtime/interactions";
 import {
   addTokenUsage,
   assistantText,
@@ -83,6 +78,8 @@ import {
   errorMessage,
   isAbortError,
   requireJsonValue,
+  validateInteractionResponseInput,
+  validatePermissionMode,
   validateConversationMode,
   validateIdentifier,
   validateUserMessage,
@@ -157,9 +154,15 @@ export interface AgentRuntimeResourceSource {
   snapshot(): AgentRuntimeResourceSnapshot;
 }
 
+interface RunningInteraction {
+  readonly snapshot: AgentPendingInteraction;
+  respond(response: AgentInteractionResponse): void;
+}
+
 interface RunningInvocation {
   snapshot: AgentInvocationSnapshot;
   readonly mode: AgentConversationMode;
+  readonly permissionMode: AgentPermissionMode;
   readonly controller: AbortController;
   readonly resolvedModel: ResolvedAgentModel;
   readonly toolDefinitions: ReadonlyMap<string, AgentRuntimeTool>;
@@ -167,6 +170,7 @@ interface RunningInvocation {
   readonly outputCollector: AgentOutputCollector;
   readonly hasTools: boolean;
   readonly tools: readonly Tool[];
+  interaction?: RunningInteraction;
 }
 
 export interface AgentRuntimeOptions {
@@ -308,6 +312,7 @@ export class AgentRuntime {
   async startSession(input: {
     initialMessage: AgentUserMessage;
     mode: AgentConversationMode;
+    permissionMode?: AgentPermissionMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference> {
     this.assertAvailable();
@@ -316,7 +321,13 @@ export class AgentRuntime {
     const resolvedModel = await this.models.resolve(input.model);
     const session = await this.journal.create(resolvedModel.selection);
     try {
-      return await this.beginInvocation(session, text, mode, resolvedModel);
+      return await this.beginInvocation(
+        session,
+        text,
+        mode,
+        validatePermissionMode(input.permissionMode),
+        resolvedModel,
+      );
     } catch (error) {
       await this.journal.delete(session.header.id).catch(this.reportError);
       throw error;
@@ -327,6 +338,7 @@ export class AgentRuntime {
     sessionId: string;
     message: AgentUserMessage;
     mode: AgentConversationMode;
+    permissionMode?: AgentPermissionMode;
     model?: AgentModelSelection;
   }): Promise<AgentInvocationReference> {
     this.assertAvailable();
@@ -337,6 +349,7 @@ export class AgentRuntime {
       session,
       validateUserMessage(input.message),
       validateConversationMode(input.mode),
+      validatePermissionMode(input.permissionMode),
       resolvedModel,
     );
   }
@@ -395,6 +408,16 @@ export class AgentRuntime {
     else await this.getInvocation(id);
   }
 
+  async respondToInteraction(input: AgentInteractionResponseInput): Promise<void> {
+    this.assertAvailable();
+    const normalized = validateInteractionResponseInput(input);
+    const invocation = this.running.get(normalized.invocationId);
+    if (!invocation) throw new Error(`Agent Invocation 没有运行：${normalized.invocationId}`);
+    const interaction = invocation.interaction;
+    if (!interaction) throw new Error("当前 Agent Invocation 没有等待用户交互");
+    interaction.respond(normalized.response);
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -412,6 +435,7 @@ export class AgentRuntime {
     session: LoadedAgentSession,
     text: string,
     mode: AgentConversationMode,
+    permissionMode: AgentPermissionMode,
     resolvedModel: ResolvedAgentModel,
   ): Promise<AgentInvocationReference> {
     const active = this.activeBySession.get(session.header.id);
@@ -454,6 +478,7 @@ export class AgentRuntime {
     const running: RunningInvocation = {
       snapshot,
       mode,
+      permissionMode,
       controller,
       resolvedModel,
       toolDefinitions,
@@ -643,9 +668,11 @@ export class AgentRuntime {
     try {
       if (invocation.controller.signal.aborted) throw createAbortError("调用已取消");
       const output =
-        call.name === "read"
-          ? await this.executeResourceRead(invocation, call.id, input)
-          : await this.executeRegisteredTool(invocation, call, input);
+        call.name === askToolName
+          ? await this.executeAskTool(invocation, call.id, input)
+          : call.name === "read"
+            ? await this.executeResourceRead(invocation, call.id, input)
+            : await this.executeRegisteredTool(invocation, call, input);
       await this.finishToolCall(invocation, call.id, "completed", output);
       return createPiToolResult(call, output, false);
     } catch (error) {
@@ -669,8 +696,124 @@ export class AgentRuntime {
   ): Promise<JsonValue> {
     const entry = invocation.toolDefinitions.get(call.name);
     if (!entry) throw new Error(`Agent 工具不存在：${call.name}`);
+    await this.confirmRegisteredTool(invocation, call, entry, input);
     const output = await entry.execute(input, { signal: invocation.controller.signal });
     return invocation.outputCollector.collect(output, call.id, invocation.controller.signal);
+  }
+
+  private async executeAskTool(
+    invocation: RunningInvocation,
+    toolCallId: string,
+    input: JsonValue,
+  ): Promise<JsonValue> {
+    const ask = parseAskToolInput(input);
+    const response = await this.waitForInteraction(invocation, {
+      id: randomUUID(),
+      invocationId: invocation.snapshot.id,
+      toolCallId,
+      type: "ask",
+      question: ask.question,
+      options: ask.options,
+      createdAt: new Date().toISOString(),
+    });
+    if (response.type === "ask-option") {
+      return {
+        answer: ask.options[response.optionIndex]!,
+        source: "option",
+      };
+    }
+    if (response.type === "ask-custom") {
+      return { answer: response.value, source: "custom" };
+    }
+    throw new Error("Agent Ask 收到了不匹配的交互响应");
+  }
+
+  private async confirmRegisteredTool(
+    invocation: RunningInvocation,
+    call: ToolCall,
+    entry: AgentRuntimeTool,
+    input: JsonValue,
+  ): Promise<void> {
+    const confirmationLevel = entry.definition.confirmationLevel;
+    if (!requiresToolConfirmation(invocation.permissionMode, confirmationLevel)) return;
+    const response = await this.waitForInteraction(invocation, {
+      id: randomUUID(),
+      invocationId: invocation.snapshot.id,
+      toolCallId: call.id,
+      type: "tool-confirmation",
+      toolName: call.name,
+      title: entry.definition.title,
+      confirmationLevel,
+      input: structuredClone(input),
+      createdAt: new Date().toISOString(),
+    });
+    if (response.type !== "tool-confirmation") {
+      throw new Error("Agent 工具确认收到了不匹配的交互响应");
+    }
+    if (!response.approved) throw new Error(`用户拒绝执行工具：${entry.definition.title}`);
+  }
+
+  /**
+   * Interaction 只保存在运行中快照。回答或取消会同步清理，Session Journal 继续只记录
+   * 模型消息与工具结果，避免把尚未结算的 UI 状态写成可回放历史。
+   */
+  private waitForInteraction(
+    invocation: RunningInvocation,
+    snapshot: AgentPendingInteraction,
+  ): Promise<AgentInteractionResponse> {
+    if (invocation.interaction) throw new Error("当前 Agent Invocation 已在等待用户交互");
+    return new Promise<AgentInteractionResponse>((resolve, reject) => {
+      const signal = invocation.controller.signal;
+      let runningInteraction!: RunningInteraction;
+      const clear = () => {
+        signal.removeEventListener("abort", abort);
+        if (invocation.interaction !== runningInteraction) return;
+        invocation.interaction = undefined;
+        const { interaction: _interaction, ...nextSnapshot } = invocation.snapshot;
+        invocation.snapshot = nextSnapshot;
+        this.invocations.set(nextSnapshot.id, nextSnapshot);
+      };
+      const abort = () => {
+        clear();
+        reject(createAbortError("调用已取消"));
+      };
+      runningInteraction = {
+        snapshot,
+        respond: (response) => {
+          this.assertInteractionResponse(snapshot, response);
+          clear();
+          resolve(response);
+        },
+      };
+      invocation.interaction = runningInteraction;
+      invocation.snapshot = { ...invocation.snapshot, interaction: structuredClone(snapshot) };
+      this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  private assertInteractionResponse(
+    interaction: AgentPendingInteraction,
+    response: AgentInteractionResponse,
+  ): void {
+    if (response.interactionId !== interaction.id) {
+      throw new Error("Agent 交互响应与当前请求不匹配");
+    }
+    if (interaction.type === "tool-confirmation") {
+      if (response.type !== "tool-confirmation") {
+        throw new TypeError("命令确认只能接收确认或拒绝");
+      }
+      return;
+    }
+    if (response.type === "ask-custom") return;
+    if (
+      response.type !== "ask-option" ||
+      response.optionIndex < 0 ||
+      response.optionIndex >= interaction.options.length
+    ) {
+      throw new TypeError("Agent Ask 选项响应不合法");
+    }
   }
 
   private async executeResourceRead(
@@ -724,9 +867,12 @@ export class AgentRuntime {
         call.presentation ??
         ({
           title:
-            call.toolName === "read"
-              ? "读取资源"
-              : (invocation.toolDefinitions.get(call.toolName)?.definition.title ?? call.toolName),
+            call.toolName === askToolName
+              ? "向用户提问"
+              : call.toolName === "read"
+                ? "读取资源"
+                : (invocation.toolDefinitions.get(call.toolName)?.definition.title ??
+                  call.toolName),
         } satisfies AgentActivityPresentation),
       state: "running",
       input: call.input,

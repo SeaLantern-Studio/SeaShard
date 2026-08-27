@@ -685,6 +685,7 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
 
   const [snapshot] = registry.snapshot();
   assert.equal(snapshot?.name, "test_echo");
+  assert.equal(snapshot?.definition.confirmationLevel, undefined);
   assert.equal(registry.countRuntime("test-handler"), 1);
   assert.deepEqual(await snapshot?.execute({}, {}), {});
   await assert.rejects(snapshot!.execute({ value: 1 }, {}), /value 是未知字段/);
@@ -692,12 +693,28 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
     () => registry.register("duplicate-handler", scope, definition, async () => null),
     /test_echo.*test-handler/,
   );
+  assert.throws(
+    () =>
+      registry.register(
+        "invalid-level-handler",
+        scope,
+        { ...definition, name: "invalid-level", confirmationLevel: 3 as 1 },
+        async () => null,
+      ),
+    /confirmationLevel 必须是 0、1 或 2/u,
+  );
 
   registration.dispose();
   assert.deepEqual(registry.snapshot(), []);
   await assert.rejects(snapshot!.execute({}, {}), /Agent 工具已停止：test_echo/);
 
-  registry.register("replacement-handler", scope, definition, async () => null);
+  registry.register(
+    "replacement-handler",
+    scope,
+    { ...definition, confirmationLevel: 1 },
+    async () => null,
+  );
+  assert.equal(registry.snapshot()[0]?.definition.confirmationLevel, 1);
   registry.removeRuntime("replacement-handler");
   assert.equal(registry.countRuntime(), 0);
 });

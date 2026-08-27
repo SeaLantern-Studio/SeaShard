@@ -1184,7 +1184,7 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
     mode: "agent",
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
-  assert.ok(invocation.contextTokens > 0);
+  assert.ok((invocation.contextTokens ?? 0) > 0);
   assert.deepEqual(invocation.toolCalls[0]?.presentation, {
     title: "读取local://",
     resultPayload: [{ value: "0", unit: "个结果" }],
@@ -1566,7 +1566,7 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
   assert.equal(calls.length, 2);
   assert.deepEqual(
     calls[0]?.context.tools?.map(({ name }) => name),
-    ["read"],
+    ["ask", "read"],
   );
   const readToolMetadata = JSON.stringify(calls[0]?.context.tools);
   assert.match(readToolMetadata, /server:\/\/instances/u);
@@ -1734,7 +1734,7 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
   assert.equal(calls.length, 2);
   assert.deepEqual(
     calls[0]?.context.tools?.map(({ name }) => name),
-    ["read", "test_echo"],
+    ["ask", "read", "test_echo"],
   );
   assert.deepEqual(invocation.toolCalls, [
     {
@@ -1799,6 +1799,280 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
   assert.ok((session.messages[1]?.usage?.totalTokens ?? 0) > 0);
 });
 
+await test("Agent Ask 支持预设选项与固定自定义回答", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-ask-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource } = createScriptedModelSource("ask-model", [
+    fauxAssistantMessage(
+      fauxToolCall(
+        "ask",
+        {
+          question: "选择服务器环境",
+          options: ["开发环境", "生产环境"],
+        },
+        { id: "ask-option" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("已采用预设环境。"),
+    fauxAssistantMessage(
+      fauxToolCall(
+        "ask",
+        {
+          question: "填写环境名称",
+          options: ["本地", "远程"],
+        },
+        { id: "ask-custom" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("已采用自定义环境。"),
+  ]);
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const optionReference = await runtime.startSession({
+    initialMessage: { text: "询问环境。" },
+    mode: "agent",
+  });
+  const optionInteraction = await waitForInvocationInteraction(
+    runtime,
+    optionReference.invocationId,
+  );
+  assert.equal(optionInteraction.interaction?.type, "ask");
+  assert.deepEqual(
+    optionInteraction.interaction?.type === "ask"
+      ? {
+          question: optionInteraction.interaction.question,
+          options: optionInteraction.interaction.options,
+        }
+      : undefined,
+    {
+      question: "选择服务器环境",
+      options: ["开发环境", "生产环境"],
+    },
+  );
+  await runtime.respondToInteraction({
+    invocationId: optionReference.invocationId,
+    response: {
+      interactionId: optionInteraction.interaction!.id,
+      type: "ask-option",
+      optionIndex: 1,
+    },
+  });
+  const optionInvocation = await waitForInvocation(runtime, optionReference.invocationId);
+  assert.equal(optionInvocation.interaction, undefined);
+  assert.deepEqual(optionInvocation.toolCalls[0]?.output, {
+    answer: "生产环境",
+    source: "option",
+  });
+
+  const customReference = await runtime.sendMessage({
+    sessionId: optionReference.sessionId,
+    message: { text: "再询问一次。" },
+    mode: "agent",
+  });
+  const customInteraction = await waitForInvocationInteraction(
+    runtime,
+    customReference.invocationId,
+  );
+  await runtime.respondToInteraction({
+    invocationId: customReference.invocationId,
+    response: {
+      interactionId: customInteraction.interaction!.id,
+      type: "ask-custom",
+      value: "灰度环境",
+    },
+  });
+  const customInvocation = await waitForInvocation(runtime, customReference.invocationId);
+  assert.deepEqual(customInvocation.toolCalls[0]?.output, {
+    answer: "灰度环境",
+    source: "custom",
+  });
+});
+
+await test("Agent 三档权限按工具确认级别裁决执行", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-confirmations-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource } = createScriptedModelSource("confirmation-model", [
+    fauxAssistantMessage(
+      fauxToolCall("test_level0", { request: "default" }, { id: "level0-default" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("零级完成。"),
+    fauxAssistantMessage(fauxToolCall("test_level1", { request: "deny" }, { id: "level1-deny" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("一级拒绝已处理。"),
+    fauxAssistantMessage(
+      fauxToolCall("test_level1", { request: "approve" }, { id: "level1-approve" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("一级允许已处理。"),
+    fauxAssistantMessage(fauxToolCall("test_level1", { request: "edit" }, { id: "level1-edit" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("编辑模式一级完成。"),
+    fauxAssistantMessage(fauxToolCall("test_level2", { request: "edit" }, { id: "level2-edit" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("编辑模式二级完成。"),
+    fauxAssistantMessage(fauxToolCall("test_level2", { request: "yolo" }, { id: "level2-yolo" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("YOLO 二级完成。"),
+  ]);
+  const tools = new AgentToolRegistry();
+  const executions: string[] = [];
+  const registerTool = (name: string, confirmationLevel?: 1 | 2): void => {
+    tools.register(
+      `test.${name}`,
+      { type: "global", id: "global" },
+      {
+        namespace: "test",
+        name,
+        title: `权限工具 ${name}`,
+        description: "记录权限裁决后的执行。",
+        ...(confirmationLevel === undefined ? {} : { confirmationLevel }),
+        inputSchema: {
+          type: "object",
+          properties: { request: { type: "string" } },
+          required: ["request"],
+          additionalProperties: false,
+        },
+      },
+      async (input) => {
+        assert.equal(typeof input, "object");
+        const request = (input as { request: string }).request;
+        executions.push(`${name}:${request}`);
+        return { request };
+      },
+    );
+  };
+  registerTool("level0");
+  registerTool("level1", 1);
+  registerTool("level2", 2);
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: tools,
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const level0 = await runtime.startSession({
+    initialMessage: { text: "执行零级。" },
+    mode: "agent",
+  });
+  const level0Invocation = await waitForInvocation(runtime, level0.invocationId);
+  assert.equal(level0Invocation.interaction, undefined);
+  assert.deepEqual(executions, ["level0:default"]);
+
+  const denied = await runtime.startSession({
+    initialMessage: { text: "只读模式拒绝一级。" },
+    mode: "agent",
+    permissionMode: "read-only",
+  });
+  const deniedInteraction = await waitForInvocationInteraction(runtime, denied.invocationId);
+  assert.equal(
+    deniedInteraction.interaction?.type === "tool-confirmation"
+      ? deniedInteraction.interaction.confirmationLevel
+      : undefined,
+    1,
+  );
+  await runtime.respondToInteraction({
+    invocationId: denied.invocationId,
+    response: {
+      interactionId: deniedInteraction.interaction!.id,
+      type: "tool-confirmation",
+      approved: false,
+    },
+  });
+  const deniedInvocation = await waitForInvocation(runtime, denied.invocationId);
+  assert.equal(deniedInvocation.toolCalls[0]?.state, "failed");
+  assert.match(deniedInvocation.toolCalls[0]?.error ?? "", /用户拒绝执行工具/u);
+  assert.deepEqual(executions, ["level0:default"]);
+
+  const approved = await runtime.startSession({
+    initialMessage: { text: "只读模式允许一级。" },
+    mode: "agent",
+    permissionMode: "read-only",
+  });
+  const approvedInteraction = await waitForInvocationInteraction(runtime, approved.invocationId);
+  await runtime.respondToInteraction({
+    invocationId: approved.invocationId,
+    response: {
+      interactionId: approvedInteraction.interaction!.id,
+      type: "tool-confirmation",
+      approved: true,
+    },
+  });
+  await waitForInvocation(runtime, approved.invocationId);
+  assert.deepEqual(executions, ["level0:default", "level1:approve"]);
+
+  const editLevel1 = await runtime.startSession({
+    initialMessage: { text: "编辑模式执行一级。" },
+    mode: "agent",
+    permissionMode: "edit",
+  });
+  const editLevel1Invocation = await waitForInvocation(runtime, editLevel1.invocationId);
+  assert.equal(editLevel1Invocation.interaction, undefined);
+  assert.deepEqual(executions, ["level0:default", "level1:approve", "level1:edit"]);
+
+  const editLevel2 = await runtime.startSession({
+    initialMessage: { text: "编辑模式确认二级。" },
+    mode: "agent",
+    permissionMode: "edit",
+  });
+  const editLevel2Interaction = await waitForInvocationInteraction(
+    runtime,
+    editLevel2.invocationId,
+  );
+  assert.equal(
+    editLevel2Interaction.interaction?.type === "tool-confirmation"
+      ? editLevel2Interaction.interaction.confirmationLevel
+      : undefined,
+    2,
+  );
+  await runtime.respondToInteraction({
+    invocationId: editLevel2.invocationId,
+    response: {
+      interactionId: editLevel2Interaction.interaction!.id,
+      type: "tool-confirmation",
+      approved: true,
+    },
+  });
+  await waitForInvocation(runtime, editLevel2.invocationId);
+
+  const yoloLevel2 = await runtime.startSession({
+    initialMessage: { text: "YOLO 模式执行二级。" },
+    mode: "agent",
+    permissionMode: "yolo",
+  });
+  const yoloLevel2Invocation = await waitForInvocation(runtime, yoloLevel2.invocationId);
+  assert.equal(yoloLevel2Invocation.interaction, undefined);
+  assert.deepEqual(executions, [
+    "level0:default",
+    "level1:approve",
+    "level1:edit",
+    "level2:edit",
+    "level2:yolo",
+  ]);
+});
+
 await test("取消多工具批次后不再分派剩余工具", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-cancel-tool-batch-"));
   context.after(async () => {
@@ -1836,6 +2110,7 @@ await test("取消多工具批次后不再分派剩余工具", async (context) =
       },
     },
     async (input, { signal }) => {
+      if (!signal) throw new Error("Agent 工具调用必须提供取消信号");
       executions.push(input);
       if (executions.length === 1) {
         notifyFirstToolStarted();
@@ -2427,6 +2702,22 @@ function openAiResponseEvents(requestNumber: number): readonly Record<string, un
     },
     completed,
   ];
+}
+
+async function waitForInvocationInteraction(
+  runtime: AgentRuntime,
+  invocationId: string,
+): Promise<Awaited<ReturnType<AgentRuntime["getInvocation"]>>> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const invocation = await runtime.getInvocation(invocationId);
+    if (invocation.interaction) return invocation;
+    if (invocation.state !== "running") {
+      throw new Error("Agent Invocation finished before requesting interaction");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Agent Invocation did not request interaction");
 }
 
 async function waitForInvocation(

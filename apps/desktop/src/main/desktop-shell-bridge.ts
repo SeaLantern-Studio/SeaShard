@@ -146,6 +146,7 @@ export async function registerDesktopShellBridge(
               await agentInvocations.getInvocation(invocationId),
             cancelAgentInvocation: (invocationId) =>
               agentInvocations.cancelInvocation(invocationId),
+            respondAgentInteraction: (input) => agentInvocations.respondToInteraction(input),
             readAgentModelConfiguration: async () =>
               await agentModelConfiguration.getConfiguration(),
             mutateAgentModelConnection: async (input) =>
