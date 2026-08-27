@@ -1,16 +1,19 @@
 import type {
   AgentActivityPresentation,
   AgentConfiguredModel,
-  AgentModelConfigurationSnapshot,
-  AgentModelConnectionModel,
-  AgentModelConnectionMutation,
   AgentConversationMode,
   AgentInvocationReference,
   AgentInvocationSnapshot,
   AgentInvocationState,
+  AgentMessageContentBlock,
+  AgentModelConfigurationSnapshot,
+  AgentModelConnectionModel,
+  AgentModelConnectionMutation,
   AgentModelSelection,
+  AgentProviderResponseDetails,
   AgentSessionSnapshot,
   AgentSessionSummary,
+  AgentTokenUsage,
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
@@ -27,33 +30,65 @@ import type {
   JsonObject,
   JsonValue,
 } from "@seashard/plugin-sdk";
-import {
-  APICallError,
-  isStepCount,
-  jsonSchema,
-  RetryError,
-  streamText,
-  tool,
-  type JSONSchema7,
-  type ModelMessage,
-  type ToolSet,
-} from "ai";
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  Message,
+  Model,
+  ModelsSimpleStreamOptions,
+  TSchema,
+  Tool,
+  ToolCall,
+  ToolResultMessage,
+  Usage,
+} from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import {
-  AgentModelCatalog,
-  type AgentCredentialSource,
-  type AgentProviderTypeSource,
-  type ResolvedAgentModel,
-} from "./model-config";
-import { AgentSessionJournal, type LoadedAgentSession } from "./session-journal";
+import { AgentModelCatalog } from "./model-config";
+import type {
+  AgentCredentialSource,
+  AgentProviderTypeSource,
+  ResolvedAgentModel,
+} from "./model-config/types";
+import { AgentSessionJournal } from "./session-journal";
+import type {
+  AgentJournalModelContentBlock,
+  InvocationRecord,
+  LoadedAgentSession,
+} from "./session-journal/records";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
 import { bindAgentHelpResource } from "./help-resource";
 import { AgentOutputCollector } from "./output-collector";
+import {
+  addTokenUsage,
+  assistantText,
+  createPiToolResult,
+  projectAssistantContent,
+  projectInvocation,
+  projectModelMessages,
+  projectProviderContent,
+  projectProviderDetails,
+  projectTokenUsage,
+} from "./runtime/messages";
+import {
+  createPiTools,
+  indexToolDefinitions,
+  parseResourceReadInput,
+  safelyPresentAgentResource,
+} from "./runtime/tools";
+import {
+  cloneInvocation,
+  createAbortError,
+  errorMessage,
+  isAbortError,
+  requireJsonValue,
+  validateConversationMode,
+  validateIdentifier,
+  validateUserMessage,
+} from "./runtime/validation";
 
-const maximumUserMessageLength = 100_000;
 const maximumAgentSteps = 6;
-const toolNamePattern = /^[A-Za-z0-9_-]+$/u;
 
 export interface AgentModelSource {
   initialize(): Promise<void>;
@@ -128,8 +163,10 @@ interface RunningInvocation {
   readonly controller: AbortController;
   readonly resolvedModel: ResolvedAgentModel;
   readonly toolDefinitions: ReadonlyMap<string, AgentRuntimeTool>;
+  readonly resources: AgentRuntimeResourceSnapshot;
+  readonly outputCollector: AgentOutputCollector;
   readonly hasTools: boolean;
-  readonly tools: ToolSet;
+  readonly tools: readonly Tool[];
 }
 
 export interface AgentRuntimeOptions {
@@ -400,6 +437,7 @@ export class AgentRuntime {
       state: "running",
       model: resolvedModel.selection,
       text: "",
+      contentBlocks: [],
     });
     const snapshot: AgentInvocationSnapshot = {
       id: invocationId,
@@ -408,25 +446,20 @@ export class AgentRuntime {
       model: { ...resolvedModel.selection },
       startedAt,
       text: "",
+      contentBlocks: [],
       toolCalls: [],
     };
-    let running!: RunningInvocation;
     const controller = new AbortController();
-    const tools = createToolSet(toolDefinitions.values(), resources, outputCollector, {
-      start: (call) => this.startToolCall(running, call),
-      updatePresentation: (toolCallId, presentation) =>
-        this.updateToolCallPresentation(running, toolCallId, presentation),
-      finish: (toolCallId, state, output, error, presentation) =>
-        this.finishToolCall(running, toolCallId, state, output, error, presentation),
-      reportError: this.reportError,
-    });
-    running = {
+    const tools = createPiTools(toolDefinitions.values(), resources);
+    const running: RunningInvocation = {
       snapshot,
       mode,
       controller,
       resolvedModel,
       toolDefinitions,
-      hasTools: toolDefinitions.size > 0 || resources.definitions.length > 0,
+      resources,
+      outputCollector,
+      hasTools: tools.length > 0,
       tools,
     };
     this.running.set(invocationId, running);
@@ -442,78 +475,88 @@ export class AgentRuntime {
   }
 
   private async runInvocation(invocation: RunningInvocation): Promise<void> {
-    let text = "";
+    let usage: AgentTokenUsage | undefined;
+    let provider: AgentProviderResponseDetails | undefined;
+    let contextTokens: number | undefined;
     try {
       const session = await this.journal.get(invocation.snapshot.sessionId);
-      const messages = projectModelMessages(session);
       const agentMode = invocation.mode === "agent" && invocation.hasTools;
-      const result = streamText({
-        model: invocation.resolvedModel.languageModel,
-        messages,
-        ...(invocation.resolvedModel.providerOptions
-          ? { providerOptions: invocation.resolvedModel.providerOptions }
-          : {}),
-        ...(invocation.resolvedModel.reasoning
-          ? { reasoning: invocation.resolvedModel.reasoning }
-          : {}),
-        ...(agentMode ? { tools: invocation.tools, stopWhen: isStepCount(maximumAgentSteps) } : {}),
-        abortSignal: invocation.controller.signal,
-      });
+      const context: Context = {
+        messages: projectModelMessages(session, invocation.resolvedModel.model),
+        ...(agentMode ? { tools: [...invocation.tools] } : {}),
+      };
+      const completedBlocks: AgentMessageContentBlock[] = [];
+      // 文本偏移独立累计，避免流式快照已经包含当前步骤的尾部文本时把工具排到末尾。
+      let completedAssistantTextLength = 0;
 
-      for await (const part of result.fullStream) {
-        if (part.type === "text-delta") {
-          text += part.text;
-          this.updateInvocationText(invocation, text);
-          continue;
+      for (let step = 0; step < maximumAgentSteps; step += 1) {
+        const message = await this.streamModelStep(invocation, context, completedBlocks);
+        const toolCalls: Array<{
+          readonly call: ToolCall;
+          readonly assistantTextOffset: number;
+        }> = [];
+        let stepAssistantTextLength = 0;
+        for (const block of message.content) {
+          if (block.type === "text") {
+            stepAssistantTextLength += block.text.length;
+            continue;
+          }
+          if (block.type === "toolCall") {
+            toolCalls.push({
+              call: block,
+              assistantTextOffset: completedAssistantTextLength + stepAssistantTextLength,
+            });
+          }
         }
-        if (part.type === "tool-call") {
-          if (part.toolName === "read") continue;
-          await this.startToolCall(invocation, {
-            id: part.toolCallId,
-            toolName: part.toolName,
-            input: requireJsonValue(part.input, `工具 ${part.toolName} 输入`),
-          });
-          continue;
-        }
-        if (part.type === "tool-result") {
-          if (part.toolName === "read") continue;
-          await this.finishToolCall(
-            invocation,
-            part.toolCallId,
-            "completed",
-            requireJsonValue(part.output, `工具 ${part.toolName} 输出`),
-          );
-          continue;
-        }
-        if (part.type === "tool-error") {
-          if (part.toolName === "read") continue;
-          await this.finishToolCall(
-            invocation,
-            part.toolCallId,
-            "failed",
-            undefined,
-            errorMessage(part.error),
-          );
-          continue;
-        }
-        if (part.type === "error") throw part.error;
-      }
-      const contextTokens = calculateDragonHTDevContextTokens((await result.finalStep).usage);
-
-      if (invocation.controller.signal.aborted) {
-        await this.finishOpenToolCalls(invocation, "cancelled", "调用已取消");
-        await this.finishInvocation(invocation, "cancelled", text);
-        return;
-      }
-      if (text) {
+        const stepBlocks = projectAssistantContent(message.content);
+        completedBlocks.push(...stepBlocks);
+        completedAssistantTextLength += stepAssistantTextLength;
+        provider = projectProviderDetails(message);
+        const stepUsage = projectTokenUsage(message.usage);
+        usage = addTokenUsage(usage, stepUsage);
+        this.updateInvocationContent(invocation, completedBlocks, provider, usage);
         await this.journal.appendMessage({
           sessionId: invocation.snapshot.sessionId,
           invocationId: invocation.snapshot.id,
           role: "assistant",
-          content: text,
+          content: assistantText(stepBlocks),
+          contentBlocks: stepBlocks,
+          provider,
+          usage: stepUsage,
+          providerContent: projectProviderContent(message.content),
         });
+        context.messages.push(message);
+
+        if (message.stopReason === "aborted") throw createAbortError("调用已取消");
+        if (message.stopReason === "error") {
+          throw new Error(message.errorMessage ?? "模型调用失败");
+        }
+        // 只有供应商确认成功且满足 Journal 约束的整数才更新上下文占用。
+        // 异常值保持上一份可信统计，避免 JSON 序列化后让整个 Session 无法读取。
+        const confirmedContextTokens = message.usage.totalTokens;
+        if (Number.isSafeInteger(confirmedContextTokens) && confirmedContextTokens >= 0) {
+          contextTokens = confirmedContextTokens;
+        }
+        if (!agentMode || toolCalls.length === 0) break;
+        for (const { call, assistantTextOffset } of toolCalls) {
+          if (invocation.controller.signal.aborted) throw createAbortError("调用已取消");
+          context.messages.push(await this.executeToolCall(invocation, call, assistantTextOffset));
+          // 工具可能在执行期间收到取消。立即结束本批次，禁止继续分派后续副作用。
+          if (invocation.controller.signal.aborted) throw createAbortError("调用已取消");
+        }
       }
-      await this.finishInvocation(invocation, "completed", text, undefined, contextTokens);
+
+      const text = assistantText(completedBlocks);
+      await this.finishInvocation(
+        invocation,
+        "completed",
+        text,
+        completedBlocks,
+        provider,
+        usage,
+        undefined,
+        contextTokens,
+      );
     } catch (error) {
       const cancelled = invocation.controller.signal.aborted || isAbortError(error);
       const message = cancelled ? "调用已取消" : errorMessage(error);
@@ -521,16 +564,145 @@ export class AgentRuntime {
       await this.finishInvocation(
         invocation,
         cancelled ? "cancelled" : "failed",
-        text,
+        invocation.snapshot.text,
+        invocation.snapshot.contentBlocks,
+        provider,
+        usage,
         cancelled ? undefined : message,
+        contextTokens,
       );
       if (!cancelled) this.reportError(error);
     }
   }
 
-  private updateInvocationText(invocation: RunningInvocation, text: string): void {
-    invocation.snapshot = { ...invocation.snapshot, text };
+  private async streamModelStep(
+    invocation: RunningInvocation,
+    context: Context,
+    completedBlocks: readonly AgentMessageContentBlock[],
+  ): Promise<AssistantMessage> {
+    const options = {
+      ...(invocation.resolvedModel.requestOptions as ModelsSimpleStreamOptions | undefined),
+      signal: invocation.controller.signal,
+      sessionId: invocation.snapshot.sessionId,
+      ...(invocation.resolvedModel.reasoning
+        ? { reasoning: invocation.resolvedModel.reasoning }
+        : {}),
+    } satisfies ModelsSimpleStreamOptions;
+    const stream = invocation.resolvedModel.models.streamSimple(
+      invocation.resolvedModel.model,
+      context,
+      options,
+    );
+    let finalMessage: AssistantMessage | undefined;
+    for await (const event of stream) {
+      if (event.type === "done") {
+        finalMessage = event.message;
+        continue;
+      }
+      if (event.type === "error") {
+        finalMessage = event.error;
+        continue;
+      }
+      this.updateInvocationContent(invocation, [
+        ...completedBlocks,
+        ...projectAssistantContent(event.partial.content),
+      ]);
+    }
+    if (!finalMessage) throw new Error("模型流在返回最终消息前结束");
+    return finalMessage;
+  }
+
+  private updateInvocationContent(
+    invocation: RunningInvocation,
+    contentBlocks: readonly AgentMessageContentBlock[],
+    provider = invocation.snapshot.provider,
+    usage = invocation.snapshot.usage,
+  ): void {
+    invocation.snapshot = {
+      ...invocation.snapshot,
+      text: assistantText(contentBlocks),
+      contentBlocks: structuredClone(contentBlocks),
+      ...(provider ? { provider } : {}),
+      ...(usage ? { usage } : {}),
+    };
     this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+  }
+  /** 工具定义只交给模型；执行、严格校验和生命周期全部由 SeaShard 保持控制。 */
+  private async executeToolCall(
+    invocation: RunningInvocation,
+    call: ToolCall,
+    assistantTextOffset: number,
+  ): Promise<ToolResultMessage<JsonValue>> {
+    const input = requireJsonValue(call.arguments, `工具 ${call.name} 输入`);
+    await this.startToolCall(invocation, {
+      id: call.id,
+      toolName: call.name,
+      input,
+      assistantTextOffset,
+    });
+    try {
+      if (invocation.controller.signal.aborted) throw createAbortError("调用已取消");
+      const output =
+        call.name === "read"
+          ? await this.executeResourceRead(invocation, call.id, input)
+          : await this.executeRegisteredTool(invocation, call, input);
+      await this.finishToolCall(invocation, call.id, "completed", output);
+      return createPiToolResult(call, output, false);
+    } catch (error) {
+      const cancelled = invocation.controller.signal.aborted || isAbortError(error);
+      const message = cancelled ? "调用已取消" : errorMessage(error);
+      await this.finishToolCall(
+        invocation,
+        call.id,
+        cancelled ? "cancelled" : "failed",
+        undefined,
+        message,
+      );
+      return createPiToolResult(call, message, true);
+    }
+  }
+
+  private async executeRegisteredTool(
+    invocation: RunningInvocation,
+    call: ToolCall,
+    input: JsonValue,
+  ): Promise<JsonValue> {
+    const entry = invocation.toolDefinitions.get(call.name);
+    if (!entry) throw new Error(`Agent 工具不存在：${call.name}`);
+    const output = await entry.execute(input, { signal: invocation.controller.signal });
+    return invocation.outputCollector.collect(output, call.id, invocation.controller.signal);
+  }
+
+  private async executeResourceRead(
+    invocation: RunningInvocation,
+    toolCallId: string,
+    input: JsonValue,
+  ): Promise<JsonValue> {
+    const request = parseResourceReadInput(input);
+    const prepared = invocation.resources.prepare(request.path, request.input);
+    const requestPayload = await safelyPresentAgentResource(
+      () => prepared.presentRequest(),
+      this.reportError,
+    );
+    const definition = prepared.definition.presentation;
+    let presentation: AgentActivityPresentation = {
+      title: definition?.title ?? defaultAgentResourcePresentationTitle,
+      ...(definition?.icon ? { icon: definition.icon } : {}),
+      ...(requestPayload === undefined ? {} : { requestPayload }),
+    };
+    await this.updateToolCallPresentation(invocation, toolCallId, presentation);
+    const result = await prepared.read({ signal: invocation.controller.signal });
+    const resultPayload = await safelyPresentAgentResource(
+      () => prepared.presentResult(result),
+      this.reportError,
+    );
+    presentation = resultPayload === undefined ? presentation : { ...presentation, resultPayload };
+    await this.updateToolCallPresentation(invocation, toolCallId, presentation);
+    return invocation.outputCollector.collect(
+      result.content,
+      toolCallId,
+      invocation.controller.signal,
+    );
   }
 
   private async startToolCall(
@@ -539,6 +711,7 @@ export class AgentRuntime {
       readonly id: string;
       readonly toolName: string;
       readonly input: JsonValue;
+      readonly assistantTextOffset: number;
       readonly presentation?: AgentActivityPresentation;
     },
   ): Promise<void> {
@@ -557,7 +730,7 @@ export class AgentRuntime {
         } satisfies AgentActivityPresentation),
       state: "running",
       input: call.input,
-      assistantTextOffset: invocation.snapshot.text.length,
+      assistantTextOffset: call.assistantTextOffset,
       startedAt,
     };
     await this.recordToolCall(invocation, snapshot);
@@ -627,6 +800,9 @@ export class AgentRuntime {
     invocation: RunningInvocation,
     state: Exclude<AgentInvocationState, "running">,
     text: string,
+    contentBlocks: readonly AgentMessageContentBlock[],
+    provider?: AgentProviderResponseDetails,
+    usage?: AgentTokenUsage,
     error?: string,
     contextTokens?: number,
   ): Promise<void> {
@@ -636,6 +812,9 @@ export class AgentRuntime {
       state,
       model: invocation.snapshot.model,
       text,
+      contentBlocks,
+      ...(provider ? { provider } : {}),
+      ...(usage ? { usage } : {}),
       ...(error ? { error } : {}),
       ...(contextTokens === undefined ? {} : { contextTokens }),
     });
@@ -643,7 +822,10 @@ export class AgentRuntime {
       ...invocation.snapshot,
       state,
       text,
+      contentBlocks: structuredClone(contentBlocks),
       finishedAt,
+      ...(provider ? { provider } : {}),
+      ...(usage ? { usage } : {}),
       ...(error ? { error } : {}),
       ...(contextTokens === undefined ? {} : { contextTokens }),
     };
@@ -659,391 +841,5 @@ export class AgentRuntime {
 
   private assertAvailable(): void {
     if (this.disposed) throw new Error("Agent Runtime 已停止");
-  }
-}
-
-function projectInvocation(
-  session: LoadedAgentSession,
-  invocationId: string,
-): AgentInvocationSnapshot | undefined {
-  const records = session.invocations.filter((record) => record.id === invocationId);
-  const first = records[0];
-  const last = records.at(-1);
-  if (!first || !last) return undefined;
-  return {
-    id: invocationId,
-    sessionId: session.header.id,
-    state: last.state,
-    model: { ...last.model },
-    startedAt: first.timestamp,
-    text: last.text ?? "",
-    toolCalls: session.toolCalls.filter((call) => call.invocationId === invocationId),
-    ...(last.state === "running" ? {} : { finishedAt: last.timestamp }),
-    ...(last.error ? { error: last.error } : {}),
-    ...(last.contextTokens === undefined ? {} : { contextTokens: last.contextTokens }),
-  };
-}
-
-/** 按 Invocation 的文本偏移重建消息，确保后续轮次看到原始的文字与工具交错顺序。 */
-function projectModelMessages(session: LoadedAgentSession): ModelMessage[] {
-  const messages: ModelMessage[] = [];
-  const assistantByInvocation = new Map<string, typeof session.messages>();
-  for (const message of session.messages) {
-    if (message.role !== "assistant") continue;
-    const group = assistantByInvocation.get(message.invocationId) ?? [];
-    assistantByInvocation.set(message.invocationId, [...group, message]);
-  }
-
-  for (const message of session.messages) {
-    if (message.role !== "user") continue;
-    messages.push({ role: "user", content: message.content });
-    const assistantText = (assistantByInvocation.get(message.invocationId) ?? [])
-      .map(({ content }) => content)
-      .join("");
-    const calls = session.toolCalls.filter(
-      (call) => call.invocationId === message.invocationId && call.state !== "running",
-    );
-    for (const part of interleaveAgentInvocationContent(assistantText, calls)) {
-      if (part.kind === "text") {
-        messages.push({ role: "assistant", content: part.content });
-        continue;
-      }
-      const call = part.call;
-      messages.push({
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: call.id,
-            toolName: call.toolName,
-            input: call.input,
-          },
-        ],
-      });
-      messages.push({
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: call.id,
-            toolName: call.toolName,
-            output:
-              call.state === "completed"
-                ? { type: "json", value: call.output ?? null }
-                : { type: "error-text", value: call.error ?? "工具调用未完成" },
-          },
-        ],
-      });
-    }
-  }
-  return messages;
-}
-
-function indexToolDefinitions(
-  definitions: readonly AgentRuntimeTool[],
-): ReadonlyMap<string, AgentRuntimeTool> {
-  const indexed = new Map<string, AgentRuntimeTool>();
-  for (const entry of definitions) {
-    if (!toolNamePattern.test(entry.name)) {
-      throw new TypeError(`Agent 工具名称不合法：${entry.name}`);
-    }
-    const expectedName = `${entry.definition.namespace}_${entry.definition.name}`;
-    if (entry.name !== expectedName) {
-      throw new TypeError(`Agent 工具身份不一致：${entry.name} != ${expectedName}`);
-    }
-    if (!entry.definition.title.trim() || !entry.definition.description.trim()) {
-      throw new TypeError(`Agent 工具缺少标题或描述：${entry.name}`);
-    }
-    if (indexed.has(entry.name)) throw new TypeError(`Agent 工具名称重复：${entry.name}`);
-    indexed.set(entry.name, entry);
-  }
-  return indexed;
-}
-
-interface AgentResourceToolLifecycle {
-  start(call: {
-    readonly id: string;
-    readonly toolName: "read";
-    readonly input: JsonValue;
-  }): Promise<void>;
-  updatePresentation(toolCallId: string, presentation: AgentActivityPresentation): Promise<void>;
-  finish(
-    toolCallId: string,
-    state: "completed" | "cancelled" | "failed",
-    output?: JsonValue,
-    error?: string,
-    presentation?: AgentActivityPresentation,
-  ): Promise<void>;
-  reportError(error: unknown): void;
-}
-
-function createToolSet(
-  definitions: Iterable<AgentRuntimeTool>,
-  resources: AgentRuntimeResourceSnapshot,
-  outputCollector: AgentOutputCollector,
-  resourceLifecycle: AgentResourceToolLifecycle,
-): ToolSet {
-  const tools: ToolSet = {};
-  if (resources.definitions.length) {
-    const resourceCatalog = formatResourceCatalog(resources.definitions);
-    tools.read = tool({
-      title: "读取资源",
-      description: [
-        "读取当前组件声明的只读资源 URI。每个资源自行定义 input 中的分页、过滤和排序参数。",
-        "只能使用下面列出的 URI 模式；不要猜测或使用列表外的 scheme 和路径。",
-        "",
-        resourceCatalog,
-      ].join("\n"),
-      inputSchema: jsonSchema<JsonValue>({
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: `完整资源 URI，必须匹配当前可用模式：\n${formatResourcePatterns(
-              resources.definitions,
-            )}`,
-          },
-          input: {
-            description: "资源专有读取参数，必须符合所选 URI 模式列出的输入 Schema",
-          },
-        },
-        required: ["path", "input"],
-        additionalProperties: false,
-      }),
-      execute: async (input, { abortSignal, toolCallId }) => {
-        const callInput = requireJsonValue(input, "读取资源输入");
-        await resourceLifecycle.start({
-          id: toolCallId,
-          toolName: "read",
-          input: callInput,
-        });
-        let presentation: AgentActivityPresentation = {
-          title: defaultAgentResourcePresentationTitle,
-        };
-        try {
-          const request = parseResourceReadInput(callInput);
-          const prepared = resources.prepare(request.path, request.input);
-          const requestPayload = await safelyPresentAgentResource(
-            () => prepared.presentRequest(),
-            (error) => resourceLifecycle.reportError(error),
-          );
-          const preparedPresentation = prepared.definition.presentation;
-          presentation = {
-            title: preparedPresentation?.title ?? defaultAgentResourcePresentationTitle,
-            ...(preparedPresentation?.icon ? { icon: preparedPresentation.icon } : {}),
-            ...(requestPayload === undefined ? {} : { requestPayload }),
-          };
-          await resourceLifecycle.updatePresentation(toolCallId, presentation);
-          const result = await prepared.read({ signal: abortSignal });
-          const resultPayload = await safelyPresentAgentResource(
-            () => prepared.presentResult(result),
-            (error) => resourceLifecycle.reportError(error),
-          );
-          presentation =
-            resultPayload === undefined ? presentation : { ...presentation, resultPayload };
-          const output = await outputCollector.collect(result.content, toolCallId, abortSignal);
-          await resourceLifecycle.finish(toolCallId, "completed", output, undefined, presentation);
-          return output;
-        } catch (error) {
-          const cancelled = abortSignal?.aborted || isAbortError(error);
-          await resourceLifecycle.finish(
-            toolCallId,
-            cancelled ? "cancelled" : "failed",
-            undefined,
-            cancelled ? "调用已取消" : errorMessage(error),
-            presentation,
-          );
-          throw error;
-        }
-      },
-    });
-  }
-  for (const entry of definitions) {
-    tools[entry.name] = tool({
-      title: entry.definition.title,
-      description: entry.definition.description,
-      inputSchema: jsonSchema<JsonValue>(entry.definition.inputSchema as JSONSchema7),
-      execute: async (input, { abortSignal, toolCallId }) => {
-        const output = await entry.execute(requireJsonValue(input, `工具 ${entry.name} 输入`), {
-          signal: abortSignal,
-        });
-        return outputCollector.collect(output, toolCallId, abortSignal);
-      },
-    });
-  }
-  return tools;
-}
-
-function parseResourceReadInput(value: JsonValue): {
-  readonly path: string;
-  readonly input: JsonValue;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("read 输入必须是对象");
-  }
-  const unexpected = Object.keys(value).filter((key) => key !== "path" && key !== "input");
-  if (unexpected.length) throw new TypeError(`read 包含未知参数：${unexpected.join(", ")}`);
-  if (typeof value.path !== "string" || !value.path.trim()) {
-    throw new TypeError("read.path 必须是非空字符串");
-  }
-  if (!Object.hasOwn(value, "input")) throw new TypeError("read.input 是必填字段");
-  return {
-    path: value.path.trim(),
-    input: value.input!,
-  };
-}
-
-async function safelyPresentAgentResource(
-  present: () => Promise<readonly AgentActivityPresentationField[] | undefined>,
-  reportError: (error: unknown) => void,
-): Promise<readonly AgentActivityPresentationField[] | undefined> {
-  try {
-    return await present();
-  } catch (error) {
-    reportError(error);
-    return undefined;
-  }
-}
-
-/** 把当前 Invocation 真正可用的资源定义写进工具元数据，避免模型猜测路径和 input。 */
-function formatResourceCatalog(definitions: readonly AgentResourceDefinition[]): string {
-  return [
-    "当前可用资源：",
-    ...definitions.map((definition) =>
-      [
-        `- ${definition.pattern} — ${definition.description.replace(/\s+/gu, " ")}`,
-        `  输入 Schema：${JSON.stringify(definition.inputSchema)}`,
-        ...(definition.examples?.length
-          ? [
-              `  输入示例：${definition.examples.map((example) => JSON.stringify(example)).join("；")}`,
-            ]
-          : []),
-        ...(definition.outputDescription
-          ? [`  返回：${definition.outputDescription.replace(/\s+/gu, " ")}`]
-          : []),
-      ].join("\n"),
-    ),
-  ].join("\n");
-}
-
-function formatResourcePatterns(definitions: readonly AgentResourceDefinition[]): string {
-  return definitions.map(({ pattern }) => `- ${pattern}`).join("\n");
-}
-
-function validateUserMessage(message: AgentUserMessage): string {
-  if (!message || typeof message !== "object" || typeof message.text !== "string") {
-    throw new TypeError("Agent 消息必须包含 text");
-  }
-  const text = message.text.trim();
-  if (!text) throw new TypeError("Agent 消息不能为空");
-  if (text.length > maximumUserMessageLength) {
-    throw new RangeError(`Agent 消息不能超过 ${maximumUserMessageLength} 个字符`);
-  }
-  return text;
-}
-
-function validateConversationMode(value: AgentConversationMode): AgentConversationMode {
-  if (value !== "chat" && value !== "agent") throw new TypeError("Agent mode 不合法");
-  return value;
-}
-
-function validateIdentifier(value: string, label: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${label} 必须是字符串`);
-  return value;
-}
-
-function requireJsonValue(value: unknown, label: string): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return value.map((entry) => requireJsonValue(entry, label));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        key,
-        requireJsonValue(entry, `${label}.${key}`),
-      ]),
-    );
-  }
-  throw new TypeError(`${label} 必须是 JSON 值`);
-}
-
-function cloneInvocation(snapshot: AgentInvocationSnapshot): AgentInvocationSnapshot {
-  return {
-    ...snapshot,
-    model: { ...snapshot.model },
-    toolCalls: snapshot.toolCalls.map((call) => ({
-      ...call,
-      presentation: {
-        ...call.presentation,
-        ...(call.presentation.requestPayload
-          ? {
-              requestPayload: call.presentation.requestPayload.map((field) => ({ ...field })),
-            }
-          : {}),
-        ...(call.presentation.resultPayload
-          ? {
-              resultPayload: call.presentation.resultPayload.map((field) => ({ ...field })),
-            }
-          : {}),
-      },
-    })),
-  };
-}
-
-/** 最后一个 Step 的输入已经包含此前消息和工具结果，再加本步输出即为当前上下文占用。 */
-function calculateDragonHTDevContextTokens(usage: {
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-}): number | undefined {
-  const input = usage.inputTokens;
-  const output = usage.outputTokens;
-  if (
-    typeof input !== "number" ||
-    !Number.isSafeInteger(input) ||
-    input < 0 ||
-    typeof output !== "number" ||
-    !Number.isSafeInteger(output) ||
-    output < 0
-  ) {
-    return undefined;
-  }
-  return input + output;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function errorMessage(error: unknown): string {
-  const retry = RetryError.isInstance(error) ? error : undefined;
-  const cause = retry?.lastError ?? error;
-  if (APICallError.isInstance(cause)) {
-    const status = cause.statusCode ? `HTTP ${cause.statusCode}` : "上游请求失败";
-    const attempts = retry && retry.errors.length > 1 ? `，共尝试 ${retry.errors.length} 次` : "";
-    const responseDetail = apiErrorResponseDetail(cause.responseBody);
-    const detail =
-      responseDetail && responseDetail !== cause.message
-        ? `${cause.message}；${responseDetail}`
-        : cause.message;
-    return `${status}${attempts}：${detail}`.slice(0, 2_000);
-  }
-  return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
-}
-
-/** 只投影结构化错误字段，避免把请求头、凭据或任意 HTML 响应带到 Renderer。 */
-function apiErrorResponseDetail(responseBody: string | undefined): string | undefined {
-  if (!responseBody) return undefined;
-  try {
-    const body = JSON.parse(responseBody) as {
-      error?: { message?: unknown; type?: unknown; code?: unknown; param?: unknown };
-    };
-    const error = body.error;
-    if (!error || typeof error.message !== "string") return undefined;
-    const labels = [error.type, error.code, error.param].filter(
-      (value): value is string => typeof value === "string" && value.length > 0,
-    );
-    return labels.length > 0 ? `${labels.join("/")}：${error.message}` : error.message;
-  } catch {
-    return undefined;
   }
 }

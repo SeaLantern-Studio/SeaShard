@@ -58,13 +58,25 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     }),
     { sessionId: "agent-session", invocationId: "agent-invocation" },
   );
-  assert.equal(
-    (
-      (await runtime.invoke(desktopChannels.agentInvocationGet, 1, "agent-invocation")) as {
-        text: string;
-      }
-    ).text,
-    "done",
+  const invocation = (await runtime.invoke(
+    desktopChannels.agentInvocationGet,
+    1,
+    "agent-invocation",
+  )) as {
+    text: string;
+    contentBlocks: readonly { readonly type: string; readonly text: string }[];
+    provider: { readonly responseId: string };
+    usage: { readonly reasoning: number; readonly totalTokens: number };
+  };
+  assert.equal(invocation.text, "done");
+  assert.deepEqual(invocation.contentBlocks, [
+    { type: "reasoning", text: "检查桌面桥接" },
+    { type: "text", text: "done" },
+  ]);
+  assert.equal(invocation.provider.responseId, "response-desktop-fixture");
+  assert.deepEqual(
+    { reasoning: invocation.usage.reasoning, totalTokens: invocation.usage.totalTokens },
+    { reasoning: 1, totalTokens: 16 },
   );
   await runtime.invoke(desktopChannels.agentInvocationCancel, 1, "agent-invocation");
   assert.equal(

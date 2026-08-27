@@ -4,6 +4,7 @@ import {
   type AgentConfiguredModel,
   type AgentConversationMode,
   type AgentInvocationService,
+  type AgentMessageContentBlock,
   type AgentModelConfigurationClientService,
   type AgentModelSelection,
   type AgentSessionService,
@@ -39,6 +40,7 @@ const reasoningLevelByModel = new Map<string, string>();
 const sending = ref(false);
 const cancelling = ref(false);
 const liveAssistantText = ref("");
+const liveContentBlocks = shallowRef<readonly AgentMessageContentBlock[]>([]);
 const liveToolCalls = shallowRef<readonly AgentToolCallSnapshot[]>([]);
 const liveContextTokens = ref<number>();
 const runningSessionId = ref<string>();
@@ -54,6 +56,7 @@ const activeConversationId = computed(() => props.workspace.activeConversationId
 watch(activeConversationId, (id) => {
   if (id !== runningSessionId.value) {
     liveAssistantText.value = "";
+    liveContentBlocks.value = [];
     liveToolCalls.value = [];
     liveContextTokens.value = undefined;
   }
@@ -204,6 +207,7 @@ async function sendMessage(text: string): Promise<void> {
     liveContextTokens.value = undefined;
     runningInvocationId.value = undefined;
     liveAssistantText.value = "";
+    liveContentBlocks.value = [];
     liveToolCalls.value = [];
     void nextTick(() => composerComponent.value?.focus());
   }
@@ -215,6 +219,7 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
     const invocation = await props.invocations.getInvocation(invocationId);
     if (activeConversationId.value === sessionId) {
       liveAssistantText.value = invocation.text;
+      liveContentBlocks.value = invocation.contentBlocks;
       liveToolCalls.value = invocation.toolCalls;
       if (invocation.contextTokens !== undefined) {
         liveContextTokens.value = invocation.contextTokens;
@@ -268,6 +273,7 @@ function delay(milliseconds: number): Promise<void> {
       :messages="session?.messages ?? []"
       :tool-calls="session?.toolCalls ?? []"
       :live-assistant-text="liveAssistantText"
+      :live-content-blocks="liveContentBlocks"
       :live-tool-calls="liveToolCalls"
       :running-invocation-id="runningInvocationId"
       :streaming="sending && runningSessionId === activeConversationId"

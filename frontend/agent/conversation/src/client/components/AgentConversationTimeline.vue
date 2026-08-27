@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   interleaveAgentInvocationContent,
+  type AgentMessageContentBlock,
   type AgentMessageSnapshot,
   type AgentToolCallSnapshot,
 } from "@seashard/contracts";
@@ -13,6 +14,7 @@ const props = defineProps<{
   messages: readonly AgentMessageSnapshot[];
   toolCalls: readonly AgentToolCallSnapshot[];
   liveAssistantText: string;
+  liveContentBlocks: readonly AgentMessageContentBlock[];
   liveToolCalls: readonly AgentToolCallSnapshot[];
   runningInvocationId?: string;
   streaming: boolean;
@@ -24,6 +26,12 @@ type ConversationEntry =
       readonly key: string;
       readonly role: AgentMessageSnapshot["role"];
       readonly content: string;
+    }
+  | {
+      readonly kind: "reasoning";
+      readonly key: string;
+      readonly content: string;
+      readonly redacted?: boolean;
     }
   | {
       readonly kind: "tool";
@@ -39,16 +47,17 @@ const visibleToolCalls = computed<readonly AgentToolCallSnapshot[]>(() => {
 });
 const conversationEntries = computed<readonly ConversationEntry[]>(() => {
   const entries: ConversationEntry[] = [];
-  const assistantTextByInvocation = new Map<string, string>();
+  const assistantByInvocation = new Map<string, AgentMessageSnapshot[]>();
   const callsByInvocation = new Map<string, AgentToolCallSnapshot[]>();
+  const callsById = new Map<string, AgentToolCallSnapshot>();
   for (const message of props.messages) {
     if (message.role !== "assistant") continue;
-    assistantTextByInvocation.set(
-      message.invocationId,
-      `${assistantTextByInvocation.get(message.invocationId) ?? ""}${message.content}`,
-    );
+    const messages = assistantByInvocation.get(message.invocationId) ?? [];
+    messages.push(message);
+    assistantByInvocation.set(message.invocationId, messages);
   }
   for (const call of visibleToolCalls.value) {
+    callsById.set(call.id, call);
     const calls = callsByInvocation.get(call.invocationId) ?? [];
     calls.push(call);
     callsByInvocation.set(call.invocationId, calls);
@@ -64,41 +73,124 @@ const conversationEntries = computed<readonly ConversationEntry[]>(() => {
       content: message.content,
     });
     representedInvocations.add(message.invocationId);
-    appendAssistantEntries(
+    if (message.invocationId === props.runningInvocationId) {
+      appendRichContent(
+        entries,
+        `live:${message.invocationId}`,
+        props.liveContentBlocks.length > 0
+          ? props.liveContentBlocks
+          : props.liveAssistantText
+            ? [{ type: "text", text: props.liveAssistantText }]
+            : [],
+        callsById,
+      );
+      continue;
+    }
+    appendStoredInvocation(
       entries,
       message.invocationId,
-      message.invocationId === props.runningInvocationId
-        ? props.liveAssistantText
-        : (assistantTextByInvocation.get(message.invocationId) ?? ""),
+      assistantByInvocation.get(message.invocationId) ?? [],
       callsByInvocation.get(message.invocationId) ?? [],
+      callsById,
     );
   }
 
   // 损坏 Journal 中的孤立活动仍可局部展示，不能拖垮其余完整会话。
   for (const invocationId of new Set([
-    ...assistantTextByInvocation.keys(),
+    ...assistantByInvocation.keys(),
     ...callsByInvocation.keys(),
   ])) {
     if (representedInvocations.has(invocationId)) continue;
-    appendAssistantEntries(
+    appendStoredInvocation(
       entries,
       invocationId,
-      invocationId === props.runningInvocationId
-        ? props.liveAssistantText
-        : (assistantTextByInvocation.get(invocationId) ?? ""),
+      assistantByInvocation.get(invocationId) ?? [],
       callsByInvocation.get(invocationId) ?? [],
+      callsById,
     );
   }
   return entries;
 });
 const showLiveThinking = computed(() => {
   if (!props.streaming) return false;
-  const parts = interleaveAgentInvocationContent(props.liveAssistantText, props.liveToolCalls);
-  return parts.length === 0 || parts.at(-1)?.kind === "tool";
+  if (props.liveContentBlocks.length === 0) return !props.liveAssistantText;
+  const activeBlock = props.liveContentBlocks.at(-1);
+  return activeBlock?.type === "reasoning";
 });
 
-/** 单次 Invocation 的文字片段和工具卡共用同一偏移恢复规则，流式与历史记录不会分叉。 */
-function appendAssistantEntries(
+/**
+ * 推理行已经由时间线统一加粗，模型生成的 Markdown 强调符只会成为可见噪音。
+ * 仅展开成对的星号语法，保留算式或普通文本中的独立星号。
+ */
+function formatReasoningText(content: string): string {
+  return content
+    .replace(/\*\*\*([^*\n]+)\*\*\*/g, "$1")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1");
+}
+
+/** 新记录按内容块精确还原；迁移后的第一版记录继续使用原文本偏移。 */
+function appendStoredInvocation(
+  entries: ConversationEntry[],
+  invocationId: string,
+  messages: readonly AgentMessageSnapshot[],
+  calls: readonly AgentToolCallSnapshot[],
+  callsById: ReadonlyMap<string, AgentToolCallSnapshot>,
+): void {
+  const rich = messages.some(
+    (message) =>
+      message.provider ||
+      message.usage ||
+      message.contentBlocks.some((block) => block.type !== "text"),
+  );
+  if (!rich) {
+    appendLegacyAssistantEntries(
+      entries,
+      invocationId,
+      messages.map(({ content }) => content).join(""),
+      calls,
+    );
+    return;
+  }
+  for (const message of messages) {
+    appendRichContent(entries, `message:${message.id}`, message.contentBlocks, callsById);
+  }
+}
+
+function appendRichContent(
+  entries: ConversationEntry[],
+  keyPrefix: string,
+  blocks: readonly AgentMessageContentBlock[],
+  callsById: ReadonlyMap<string, AgentToolCallSnapshot>,
+): void {
+  blocks.forEach((block, index) => {
+    if (block.type === "text") {
+      if (!block.text) return;
+      entries.push({
+        kind: "message",
+        key: `${keyPrefix}:text:${index}`,
+        role: "assistant",
+        content: block.text,
+      });
+      return;
+    }
+    if (block.type === "reasoning") {
+      if (!block.text && !block.redacted) return;
+      entries.push({
+        kind: "reasoning",
+        key: `${keyPrefix}:reasoning:${index}`,
+        content: block.text,
+        ...(block.redacted === undefined ? {} : { redacted: block.redacted }),
+      });
+      return;
+    }
+    const call = callsById.get(block.toolCallId);
+    if (call) entries.push({ kind: "tool", key: `tool:${call.id}`, call });
+  });
+}
+
+/** 第一版 Invocation 的文字片段和工具卡继续共用旧偏移恢复规则。 */
+function appendLegacyAssistantEntries(
   entries: ConversationEntry[],
   invocationId: string,
   text: string,
@@ -139,10 +231,24 @@ function appendAssistantEntries(
             {{ entry.content }}
           </div>
           <div v-else class="agent-assistant-message">
-            <Cmz_Markdown :content="entry.content ?? ''" variant="plain" />
+            <Cmz_Markdown :content="entry.content" variant="plain" />
           </div>
         </article>
-        <article v-else-if="entry.call" class="agent-message is-assistant is-tool-call">
+
+        <article
+          v-else-if="entry.kind === 'reasoning'"
+          class="agent-message is-assistant is-reasoning"
+        >
+          <div class="agent-reasoning-block">
+            {{
+              entry.redacted && !entry.content
+                ? "供应商已隐藏这段推理内容"
+                : formatReasoningText(entry.content)
+            }}
+          </div>
+        </article>
+
+        <article v-else-if="entry.kind === 'tool'" class="agent-message is-assistant is-tool-call">
           <div class="agent-message-avatar" aria-hidden="true">
             <div class="agent-brand-mark"></div>
           </div>
@@ -150,14 +256,10 @@ function appendAssistantEntries(
         </article>
       </template>
 
-      <article v-if="showLiveThinking" class="agent-message is-assistant is-live">
-        <div class="agent-message-avatar" aria-hidden="true">
-          <div class="agent-brand-mark"></div>
-        </div>
-        <div class="agent-assistant-message">
-          <div class="agent-thinking" aria-label="AI 正在回复">
-            <span></span><span></span><span></span>
-          </div>
+      <article v-if="showLiveThinking" class="agent-message is-assistant is-thinking">
+        <div class="agent-thinking" aria-label="AI 正在思考">
+          <strong>Thinking</strong>
+          <span></span><span></span><span></span>
         </div>
       </article>
     </div>

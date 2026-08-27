@@ -413,13 +413,15 @@ export function defineAgentResource<
 export interface AgentProviderCatalogModel {
   readonly id: string;
   readonly displayName?: string;
+  /** 供应商模型目录中的稳定能力元数据；Core Host 负责投影为公开 Contract。 */
+  readonly settings?: JsonObject;
   readonly providerOptions?: JsonObject;
 }
 
 /**
- * Provider Type 只描述配置与 AI SDK Provider 工厂。
+ * Core Host 内建组件专用的 Provider Type 描述。Plugin Host 会拒绝第三方注册。
  *
- * Provider 实例保持为泛型对象，避免把 AI SDK 的版本化类型带入 SeaShard
+ * Provider 实例保持为泛型对象，避免把底层模型驱动的版本化类型带入 SeaShard
  * Contract；实际注册表会在 Core Host 内校验其 Provider 结构。
  */
 export interface AiProviderType<
@@ -442,7 +444,7 @@ export interface AiProviderType<
   }): Promise<readonly AgentProviderCatalogModel[]>;
 }
 
-/** 保留具体设置与 Provider 的类型推导；生命周期仍由 PluginContext 接管。 */
+/** Core Host 内建组件用此函数保留具体设置与 Provider 的类型推导。 */
 export function defineAiProviderType<TSettings extends JsonObject, TProvider extends object>(
   definition: AiProviderType<TSettings, TProvider>,
 ): AiProviderType<TSettings, TProvider> {
@@ -460,6 +462,7 @@ export interface PluginContext {
   contribute(kind: string, value: JsonValue): string;
   agentTool(definition: AgentToolDefinition, execute: AgentToolHandler): string;
   agentResources(resources: AgentResourceMap): void;
+  /** Core Host 内建组件专用；第三方 Plugin Host 调用会被拒绝。 */
   aiProviderType<TSettings extends JsonObject, TProvider extends object>(
     definition: AiProviderType<TSettings, TProvider>,
   ): string;

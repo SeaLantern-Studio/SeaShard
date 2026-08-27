@@ -22,9 +22,9 @@
     "verify:service-catalog": "node scripts/generate-service-catalog.mjs --check"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.3",
     "@types/node": "26.2.0",
     "@vitejs/plugin-vue": "6.0.8",
-    "ai": "7.0.77",
     "cmzya-modern-ui": "0.7.1",
     "cordis": "4.0.0-rc.8",
     "electron": "43.4.0",

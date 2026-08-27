@@ -45,6 +45,9 @@
   user-select: text;
   -webkit-user-select: text;
 }
+.agent-message.is-tool-call {
+  margin-bottom: 14px;
+}
 
 .agent-message.is-user {
   justify-content: flex-end;
@@ -138,11 +141,41 @@
   transform: translateY(-50%);
 }
 
+.agent-message.is-reasoning {
+  margin-bottom: 22px;
+  padding-left: 44px;
+}
+
+.agent-reasoning-block {
+  width: min(200%, 1240px);
+  min-width: 0;
+  color: var(--sl-text-tertiary);
+  font-size: 1.625rem;
+  font-weight: 620;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* 先以两倍字号绘制，再缩回 13px 的视觉尺寸，缓解小号加粗文字的像素阶梯。 */
+  zoom: 0.5;
+}
+
+.agent-message.is-thinking {
+  margin-bottom: 22px;
+  padding-left: 44px;
+}
+
 .agent-thinking {
   display: flex;
   height: 30px;
   align-items: center;
   gap: 5px;
+}
+.agent-thinking strong {
+  margin-right: 3px;
+  color: var(--sl-text-tertiary);
+  font-size: 1.625rem;
+  font-weight: 620;
+  zoom: 0.5;
 }
 
 .agent-thinking span {
@@ -153,11 +186,11 @@
   background: var(--sl-text-tertiary);
 }
 
-.agent-thinking span:nth-child(2) {
+.agent-thinking span:nth-of-type(2) {
   animation-delay: 120ms;
 }
 
-.agent-thinking span:nth-child(3) {
+.agent-thinking span:nth-of-type(3) {
   animation-delay: 240ms;
 }
 

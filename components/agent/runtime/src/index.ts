@@ -308,6 +308,13 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./model-config";
+export type {
+  AgentCredentialSource,
+  AgentProviderOptions,
+  AgentProviderTypeSnapshot,
+  AgentProviderTypeSource,
+  ResolvedAgentModel,
+} from "./model-config/types";
 export * from "./provider-types";
 export * from "./credential-store";
 export * from "./help-resource";
@@ -315,3 +322,4 @@ export * from "./local-resource";
 export * from "./output-collector";
 export * from "./runtime";
 export * from "./session-journal";
+export type { LoadedAgentSession } from "./session-journal/records";

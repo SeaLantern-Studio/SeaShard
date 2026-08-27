@@ -82,7 +82,7 @@ SeaShard 插件安装到应用本身，可以同时服务多个服务器实例�
 - 在独立 Node.js 子进程中运行的 Host Entry；
 - 在 Desktop Renderer 中注册页面或侧栏的 Client Entry；
 - 面向其他组件和插件的类型化 Service Contract；
-- 事件、托管存储、Agent Tool、Agent Resource 和模型供应商类型。
+- 事件、托管存储、Agent Tool 和 Agent Resource。
 
 公开开发包包括：
 

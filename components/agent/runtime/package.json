@@ -7,13 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "4.0.41",
-    "@ai-sdk/google": "4.0.50",
-    "@ai-sdk/openai": "4.0.46",
-    "@ai-sdk/openai-compatible": "3.0.35",
+    "@earendil-works/pi-ai": "0.84.3",
     "@seashard/contracts": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
-    "ai": "7.0.77",
     "yaml": "2.9.0"
   }
 }

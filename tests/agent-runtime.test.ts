@@ -27,8 +27,19 @@ import {
   AgentToolRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
 import type { JsonValue } from "../packages/plugin-sdk/src/index.ts";
-import { simulateReadableStream } from "ai";
-import { MockLanguageModelV4 } from "ai/test";
+import {
+  createAssistantMessageEventStream,
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxText,
+  fauxThinking,
+  fauxToolCall,
+  type AssistantMessage,
+  type Context,
+  type Models,
+  type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 
 async function waitForModels(
   catalog: AgentModelCatalog,
@@ -71,6 +82,106 @@ function createProviderTypes(): AgentProviderTypeRegistry {
   registerProviderTypes(registry);
   return registry;
 }
+function createScriptedModelSource(
+  modelId: string,
+  responses: readonly AssistantMessage[],
+  name = "Test Model",
+): {
+  readonly modelSource: AgentModelSource;
+  readonly calls: Array<{ context: Context; options?: SimpleStreamOptions }>;
+} {
+  const faux = fauxProvider({
+    api: "test-api",
+    provider: "test",
+    models: [{ id: modelId, name, reasoning: true, contextWindow: 128_000 }],
+  });
+  const calls: Array<{ context: Context; options?: SimpleStreamOptions }> = [];
+  faux.setResponses(
+    responses.map((response) => (context, options) => {
+      calls.push({
+        context: JSON.parse(JSON.stringify(context)) as Context,
+        ...(options ? { options: JSON.parse(JSON.stringify(options)) as SimpleStreamOptions } : {}),
+      });
+      return response;
+    }),
+  );
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const configuredModel = { connectionId: "test", modelId, name };
+  return {
+    calls,
+    modelSource: {
+      initialize: async () => {},
+      list: async () => [configuredModel],
+      resolve: async () => ({
+        selection: { connectionId: configuredModel.connectionId, modelId },
+        models,
+        model: faux.getModel(),
+      }),
+    },
+  };
+}
+
+await test("pi-ai 内建供应商目录完整注册并保留自定义兼容入口", () => {
+  const definitions = createProviderTypes().snapshot().definitions;
+  assert.deepEqual(
+    definitions.map(({ id }) => id),
+    [
+      "amazon-bedrock",
+      "ant-ling",
+      "anthropic",
+      "azure-openai-responses",
+      "baseten",
+      "cerebras",
+      "cloudflare-ai-gateway",
+      "cloudflare-workers-ai",
+      "deepseek",
+      "fireworks",
+      "github-copilot",
+      "google",
+      "google-vertex",
+      "groq",
+      "huggingface",
+      "kimi-coding",
+      "minimax",
+      "minimax-cn",
+      "mistral",
+      "moonshotai",
+      "moonshotai-cn",
+      "nvidia",
+      "openai",
+      "openai-codex",
+      "openai-compatible",
+      "opencode",
+      "opencode-go",
+      "openrouter",
+      "qwen-token-plan",
+      "qwen-token-plan-cn",
+      "qwen-token-plan-individual",
+      "radius",
+      "together",
+      "vercel-ai-gateway",
+      "xai",
+      "xiaomi",
+      "xiaomi-token-plan-ams",
+      "xiaomi-token-plan-cn",
+      "xiaomi-token-plan-sgp",
+      "zai",
+      "zai-coding-cn",
+    ],
+  );
+  for (const definition of definitions) {
+    assert.equal(typeof definition.create, "function");
+    if (definition.id !== "openai-compatible" && definition.id !== "radius") {
+      assert.ok((definition.catalog?.length ?? 0) > 0, `${definition.id} 应提供模型目录`);
+    }
+  }
+  assert.equal(
+    typeof definitions.find(({ id }) => id === "openai-compatible")?.discoverModels,
+    "function",
+  );
+  assert.equal(typeof definitions.find(({ id }) => id === "radius")?.discoverModels, "function");
+});
 
 await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-models-"));
@@ -84,6 +195,7 @@ await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置",
     providerTypes: createProviderTypes(),
     environment: {},
   });
+  context.after(() => catalog.dispose());
   assert.deepEqual(defaultAgentModelReasoningLevels, [
     "low",
     "medium",
@@ -114,21 +226,26 @@ await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置",
   );
   await waitForModels(catalog, ["local/qwen3-coder"]);
 
-  assert.deepEqual(await catalog.list(), [
-    {
-      connectionId: "local",
-      modelId: "qwen3-coder",
-      name: "Qwen 3 Coder",
-    },
-  ]);
+  const listedModels = await catalog.list();
+  assert.deepEqual(
+    listedModels.map(({ settings: _settings, ...model }) => model),
+    [
+      {
+        connectionId: "local",
+        modelId: "qwen3-coder",
+        name: "Qwen 3 Coder",
+      },
+    ],
+  );
+  assert.equal(listedModels[0]?.settings?.api, "openai-completions");
+  assert.equal(listedModels[0]?.settings?.maximumContextTokens, 128_000);
   const resolved = await catalog.resolve({ connectionId: "local", modelId: "qwen3-coder" });
   assert.deepEqual(resolved.selection, {
     connectionId: "local",
     modelId: "qwen3-coder",
-    reasoningLevel: "high",
+    reasoningLevel: "low",
   });
   assert.equal(dirname(catalog.configPath), join(userDataRoot, "agent"));
-  await catalog.dispose();
 });
 await test("旧格式 models.yml 不阻断 Agent 启动并可显式重置", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-invalid-models-"));
@@ -214,9 +331,10 @@ await test("models.yml 热更新保留最后有效快照并识别 rename 保存"
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  assert.deepEqual(await catalog.list(), [
-    { connectionId: "local", modelId: "model-a", name: "model-a" },
-  ]);
+  assert.deepEqual(
+    (await catalog.list()).map(({ settings: _settings, ...model }) => model),
+    [{ connectionId: "local", modelId: "model-a", name: "model-a" }],
+  );
   assert.equal((await catalog.getConfiguration()).revision, acceptedRevision);
   assert.ok(reported.length > 0);
 
@@ -282,10 +400,9 @@ await test("模型连接修改保留未触及 YAML 节点并拒绝旧 revision",
     ],
   });
   assert.notEqual(after.revision, before.revision);
-  assert.deepEqual(after.models[0]?.settings, {
-    maximumContextTokens: 256_000,
-    reasoningLevels: ["brief", "deep", "beyond"],
-  });
+  assert.equal(after.models[0]?.settings?.maximumContextTokens, 256_000);
+  assert.deepEqual(after.models[0]?.settings?.reasoningLevels, ["brief", "deep", "beyond"]);
+  assert.equal(after.models[0]?.settings?.api, "openai-completions");
   const resolved = await catalog.resolve({
     connectionId: "local",
     modelId: "model-a",
@@ -296,9 +413,7 @@ await test("模型连接修改保留未触及 YAML 节点并拒绝旧 revision",
     modelId: "model-a",
     reasoningLevel: "beyond",
   });
-  assert.deepEqual(resolved.providerOptions, {
-    local: { reasoningEffort: "beyond" },
-  });
+  assert.equal(resolved.reasoning, "medium");
   await assert.rejects(
     catalog.resolve({
       connectionId: "local",
@@ -477,9 +592,10 @@ await test("凭据 Vault 只落盘密文并为模型发现提供临时授权", a
   });
   assert.equal(withCredential.connections[0]?.credentialConfigured, true);
   assert.equal(withCredential.connections[0]?.available, true);
-  assert.deepEqual(withCredential.models, [
-    { connectionId: "local", modelId: "model-a", name: "model-a" },
-  ]);
+  assert.deepEqual(
+    withCredential.models.map(({ settings: _settings, ...model }) => model),
+    [{ connectionId: "local", modelId: "model-a", name: "model-a" }],
+  );
   const credentialSource = await readFile(vault.filePath, "utf8");
   assert.doesNotMatch(credentialSource, /secret-value/u);
   assert.match(credentialSource, /ZW5jcnlwdGVkOnNlY3JldC12YWx1ZQ==/u);
@@ -503,6 +619,116 @@ await test("凭据 Vault 只落盘密文并为模型发现提供临时授权", a
   assert.equal(withoutCredential.connections[0]?.credentialConfigured, false);
   assert.equal(withoutCredential.connections[0]?.available, false);
   assert.deepEqual(withoutCredential.models, []);
+});
+
+await test("同供应商多连接隔离端点、凭据与 Models 容器", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-connection-isolation-"));
+  const requests: Array<{ readonly url?: string; readonly authorization?: string }> = [];
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // 必须读完请求体，OpenAI SDK 才能稳定复用或关闭当前连接。
+    }
+    requests.push({
+      url: request.url,
+      authorization:
+        typeof request.headers.authorization === "string"
+          ? request.headers.authorization
+          : undefined,
+    });
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    for (const event of openAiResponseEvents(2)) {
+      response.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+    response.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {
+      OFFICIAL_OPENAI_KEY: "official-secret",
+      PROXY_OPENAI_KEY: "proxy-secret",
+    },
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  await writeFile(
+    catalog.configPath,
+    [
+      "providers:",
+      "  official:",
+      "    providerType: openai",
+      "    credentialId: OFFICIAL_OPENAI_KEY",
+      "    settings:",
+      `      baseURL: http://127.0.0.1:${address.port}/official/v1`,
+      "    models:",
+      "      - id: gpt-5.6-sol",
+      "  proxy:",
+      "    providerType: openai",
+      "    credentialId: PROXY_OPENAI_KEY",
+      "    settings:",
+      `      baseURL: http://127.0.0.1:${address.port}/proxy/v1`,
+      "    models:",
+      "      - id: gpt-5.6-sol",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await waitForModels(catalog, ["official/gpt-5.6-sol", "proxy/gpt-5.6-sol"]);
+
+  const official = await catalog.resolve({
+    connectionId: "official",
+    modelId: "gpt-5.6-sol",
+  });
+  const proxy = await catalog.resolve({ connectionId: "proxy", modelId: "gpt-5.6-sol" });
+  assert.notEqual(official.models, proxy.models);
+  assert.match(official.model.baseUrl, /\/official\/v1$/u);
+  assert.match(proxy.model.baseUrl, /\/proxy\/v1$/u);
+
+  for (const [index, resolved] of [official, proxy].entries()) {
+    const stream = resolved.models.streamSimple(
+      resolved.model,
+      {
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: `连接 ${index + 1}` }],
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      { sessionId: `connection-${index + 1}` },
+    );
+    let message: AssistantMessage | undefined;
+    for await (const event of stream) {
+      if (event.type === "done") message = event.message;
+    }
+    assert.equal(message?.content[0]?.type, "text");
+    assert.equal(
+      message?.content[0]?.type === "text" ? message.content[0].text : "",
+      "当前有 1 个服务器。",
+    );
+  }
+  assert.deepEqual(requests, [
+    { url: "/official/v1/responses", authorization: "Bearer official-secret" },
+    { url: "/proxy/v1/responses", authorization: "Bearer proxy-secret" },
+  ]);
 });
 
 await test("Agent Session Journal 保留新对话标题并投影最近使用的模型", async (context) => {
@@ -542,6 +768,77 @@ await test("Agent Session Journal 保留新对话标题并投影最近使用的�
   await journal.rename(created.header.id, "服务端规划");
   assert.equal((await journal.snapshot(created.header.id)).title, "服务端规划");
 });
+await test("Agent Session Journal 原子升级第一版消息记录", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-session-v1-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const sessionsRoot = join(userDataRoot, "agent", "sessions");
+  await mkdir(sessionsRoot, { recursive: true });
+  const timestamp = "2026-08-23T10:00:00.000Z";
+  const storageKey = "v1-session";
+  const titleSlot = Buffer.alloc(256, 0x20);
+  Buffer.from(
+    JSON.stringify({ type: "title", v: 1, title: "第一版对话", updatedAt: timestamp }),
+    "utf8",
+  ).copy(titleSlot);
+  titleSlot[255] = 0x0a;
+  const records = [
+    {
+      type: "session",
+      version: 1,
+      id: "session-v1",
+      timestamp,
+      title: "第一版对话",
+      model: { connectionId: "openai", modelId: "gpt-v1" },
+    },
+    {
+      type: "message",
+      id: "message-v1",
+      invocationId: "invocation-v1",
+      role: "assistant",
+      content: "旧消息继续可读",
+      timestamp,
+    },
+    {
+      type: "invocation",
+      id: "invocation-v1",
+      state: "completed",
+      model: { connectionId: "openai", modelId: "gpt-v1" },
+      text: "旧消息继续可读",
+      contextTokens: 42,
+      timestamp,
+    },
+  ];
+  const journalPath = join(sessionsRoot, `${storageKey}.jsonl`);
+  await writeFile(
+    journalPath,
+    Buffer.concat([
+      titleSlot,
+      Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8"),
+    ]),
+  );
+
+  const journal = new AgentSessionJournal(userDataRoot);
+  await journal.initialize();
+  await journal.initialize();
+  const migrated = await readFile(journalPath);
+  assert.equal(migrated.subarray(0, 256).equals(titleSlot), true);
+  const migratedRecords = migrated
+    .subarray(256)
+    .toString("utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(migratedRecords[0]?.version, 2);
+  assert.deepEqual(migratedRecords[1]?.contentBlocks, [{ type: "text", text: "旧消息继续可读" }]);
+  const snapshot = await journal.snapshot("session-v1");
+  assert.equal(snapshot.title, "第一版对话");
+  assert.equal(snapshot.contextTokens, 42);
+  assert.deepEqual(snapshot.messages[0]?.contentBlocks, [{ type: "text", text: "旧消息继续可读" }]);
+});
+
 await test("Agent Session Journal 复制完整历史并重新分配记录身份", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-session-copy-"));
   context.after(async () => {
@@ -553,11 +850,46 @@ await test("Agent Session Journal 复制完整历史并重新分配记录身份"
   await journal.initialize();
   const source = await journal.create({ connectionId: "openai", modelId: "gpt-copy" });
   await journal.rename(source.header.id, "分支起点");
+  const richBlocks = [
+    { type: "reasoning" as const, text: "先检查分支资料" },
+    { type: "text" as const, text: "assistant answer" },
+    { type: "tool-call" as const, toolCallId: "tool-call-source" },
+  ];
+  const provider = {
+    api: "openai-responses",
+    provider: "openai",
+    requestedModel: "gpt-copy",
+    responseModel: "gpt-copy-2026-08-01",
+    responseId: "response-copy",
+    stopReason: "toolUse",
+    rawStopReason: "completed",
+    diagnostics: [{ route: "official" }],
+  };
+  const usage = {
+    input: 120,
+    output: 40,
+    cacheRead: 20,
+    cacheWrite: 5,
+    cacheWrite1h: 2,
+    reasoning: 12,
+    totalTokens: 185,
+    cost: {
+      input: 0.001,
+      output: 0.002,
+      cacheRead: 0.0001,
+      cacheWrite: 0.0002,
+      total: 0.0033,
+    },
+  };
   await journal.appendInvocation(source.header.id, {
     id: "invocation-source",
     state: "completed",
     model: { connectionId: "openai", modelId: "gpt-copy" },
     text: "assistant answer",
+    contentBlocks: richBlocks,
+    provider,
+    usage,
+    contextTokens: 185,
   });
   await journal.appendMessage({
     sessionId: source.header.id,
@@ -570,6 +902,28 @@ await test("Agent Session Journal 复制完整历史并重新分配记录身份"
     invocationId: "invocation-source",
     role: "assistant",
     content: "assistant answer",
+    contentBlocks: richBlocks,
+    provider,
+    usage,
+    providerContent: [
+      {
+        type: "thinking",
+        thinking: "先检查分支资料",
+        thinkingSignature: "private-thinking-signature",
+      },
+      {
+        type: "text",
+        text: "assistant answer",
+        textSignature: "private-text-signature",
+      },
+      {
+        type: "toolCall",
+        id: "tool-call-source",
+        name: "read",
+        arguments: { path: "local://notes/branch.txt", input: {} },
+        thoughtSignature: "private-tool-signature",
+      },
+    ],
   });
   await journal.appendToolCall(source.header.id, {
     id: "tool-call-source",
@@ -628,6 +982,32 @@ await test("Agent Session Journal 复制完整历史并重新分配记录身份"
   assert.equal(copiedLoaded.toolCalls.length, 1);
   assert.notEqual(copiedLoaded.toolCalls[0]?.id, sourceLoaded.toolCalls[0]?.id);
   assert.equal(copiedLoaded.toolCalls[0]?.invocationId, copiedLoaded.invocations[0]?.id);
+  const copiedAssistant = copiedLoaded.messages[1];
+  assert.deepEqual(copiedAssistant?.provider, provider);
+  assert.deepEqual(copiedAssistant?.usage, usage);
+  assert.equal(
+    copiedAssistant?.contentBlocks.find((block) => block.type === "tool-call")?.toolCallId,
+    copiedLoaded.toolCalls[0]?.id,
+  );
+  assert.equal(
+    copiedAssistant?.providerContent?.find((block) => block.type === "toolCall")?.id,
+    copiedLoaded.toolCalls[0]?.id,
+  );
+  assert.equal(
+    copiedAssistant?.providerContent?.find((block) => block.type === "thinking")?.thinkingSignature,
+    "private-thinking-signature",
+  );
+  assert.equal(
+    copiedLoaded.invocations[0]?.contentBlocks?.find((block) => block.type === "tool-call")
+      ?.toolCallId,
+    copiedLoaded.toolCalls[0]?.id,
+  );
+  const publicSnapshotSource = JSON.stringify(await journal.snapshot(source.header.id));
+  assert.doesNotMatch(
+    publicSnapshotSource,
+    /providerContent|private-(thinking|text|tool)-signature/u,
+  );
+  assert.match(publicSnapshotSource, /"reasoning":12/u);
   assert.deepEqual(
     {
       toolName: copiedLoaded.toolCalls[0]?.toolName,
@@ -765,85 +1145,31 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: 1, text: 1, reasoning: undefined },
-  };
-  const model = new MockLanguageModelV4({
-    doStream: [
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: "tool-call",
-              toolCallId: "local-read-1",
-              toolName: "read",
-              input: '{"path":"local://","input":{}}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "会话目录为空。" },
-            { type: "text-end", id: "answer" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: "tool-call",
-              toolCallId: "local-read-2",
-              toolName: "read",
-              input:
-                '{"path":"local://111.txt","input":{"ranges":[{"start":1,"length":10},{"start":500,"length":11},{"start":700,"length":1}]}}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer-2" },
-            { type: "text-delta", id: "answer-2", delta: "已读取多个范围。" },
-            { type: "text-end", id: "answer-2" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-    ],
-  });
-  const modelSource: AgentModelSource = {
-    initialize: async () => {},
-    list: async () => [],
-    resolve: async () => ({
-      selection: { connectionId: "test", modelId: "local-presentation" },
-      languageModel: model,
-    }),
-  };
+  const { modelSource } = createScriptedModelSource("local-presentation", [
+    fauxAssistantMessage(
+      fauxToolCall("read", { path: "local://", input: {} }, { id: "local-read-1" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("会话目录为空。"),
+    fauxAssistantMessage(
+      fauxToolCall(
+        "read",
+        {
+          path: "local://111.txt",
+          input: {
+            ranges: [
+              { start: 1, length: 10 },
+              { start: 500, length: 11 },
+              { start: 700, length: 1 },
+            ],
+          },
+        },
+        { id: "local-read-2" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("已读取多个范围。"),
+  ]);
   const runtime = new AgentRuntime({
     userDataRoot,
     modelCatalog: modelSource,
@@ -858,7 +1184,7 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
     mode: "agent",
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
-  assert.equal(invocation.contextTokens, 2);
+  assert.ok(invocation.contextTokens > 0);
   assert.deepEqual(invocation.toolCalls[0]?.presentation, {
     title: "读取local://",
     resultPayload: [{ value: "0", unit: "个结果" }],
@@ -886,7 +1212,7 @@ await test("Agent local:// 读取持久化前端卡片 payload", async (context)
   );
   const persistedSession = await runtime.getSession(reference.sessionId);
   assert.equal(persistedSession.toolCalls.length, 2);
-  assert.equal(persistedSession.contextTokens, 2);
+  assert.equal(persistedSession.contextTokens, fileInvocation.contextTokens);
 });
 
 await test("Agent help:// 从冻结 Registry 快照生成工具与资源说明", async (context) => {
@@ -1159,58 +1485,21 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const usage = {
-    inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: 2, text: 2, reasoning: undefined },
-  };
-  const model = new MockLanguageModelV4({
-    doStream: [
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: "tool-call",
-              toolCallId: "resource-read-1",
-              toolName: "read",
-              input: '{"path":"server://instances","input":{"offset":2,"limit":1}}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "读取到了第二个服务器。" },
-            { type: "text-end", id: "answer" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
+  const { modelSource, calls } = createScriptedModelSource(
+    "resource-model",
+    [
+      fauxAssistantMessage(
+        fauxToolCall(
+          "read",
+          { path: "server://instances", input: { offset: 2, limit: 1 } },
+          { id: "resource-read-1" },
+        ),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("读取到了第二个服务器。"),
     ],
-  });
-  const configuredModel = {
-    connectionId: "test",
-    modelId: "resource-model",
-    name: "Resource Model",
-  };
-  const modelSource: AgentModelSource = {
-    initialize: async () => {},
-    list: async () => [configuredModel],
-    resolve: async () => ({
-      selection: { connectionId: configuredModel.connectionId, modelId: configuredModel.modelId },
-      languageModel: model,
-    }),
-  };
+    "Resource Model",
+  );
   const resources = new AgentResourceRegistry();
   resources.register(
     "test.server-manager",
@@ -1274,12 +1563,12 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
   assert.equal(invocation.text, "读取到了第二个服务器。");
-  assert.equal(model.doStreamCalls.length, 2);
+  assert.equal(calls.length, 2);
   assert.deepEqual(
-    model.doStreamCalls[0]?.tools?.map(({ name }) => name),
+    calls[0]?.context.tools?.map(({ name }) => name),
     ["read"],
   );
-  const readToolMetadata = JSON.stringify(model.doStreamCalls[0]?.tools);
+  const readToolMetadata = JSON.stringify(calls[0]?.context.tools);
   assert.match(readToolMetadata, /server:\/\/instances/u);
   assert.match(readToolMetadata, /读取服务器实例列表/u);
   assert.match(readToolMetadata, /不要猜测或使用列表外/u);
@@ -1317,53 +1606,17 @@ await test("Agent 资源展示投影失败不会中断读取", async (context) =
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: 1, text: 1, reasoning: undefined },
-  };
-  const model = new MockLanguageModelV4({
-    doStream: [
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: "tool-call",
-              toolCallId: "presenter-failure-1",
-              toolName: "read",
-              input: '{"path":"test://presenter-failure","input":{}}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "读取完成。" },
-            { type: "text-end", id: "answer" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-    ],
-  });
-  const modelSource: AgentModelSource = {
-    initialize: async () => {},
-    list: async () => [],
-    resolve: async () => ({
-      selection: { connectionId: "test", modelId: "presenter-failure-model" },
-      languageModel: model,
-    }),
-  };
+  const { modelSource } = createScriptedModelSource("presenter-failure-model", [
+    fauxAssistantMessage(
+      fauxToolCall(
+        "read",
+        { path: "test://presenter-failure", input: {} },
+        { id: "presenter-failure-1" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("读取完成。"),
+  ]);
   const resources = new AgentResourceRegistry();
   resources.register(
     "test.presenter-failure",
@@ -1420,81 +1673,24 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const usage = {
-    inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: 2, text: 2, reasoning: undefined },
-  };
-  const model = new MockLanguageModelV4({
-    doStream: [
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "first-analysis" },
-            { type: "text-delta", id: "first-analysis", delta: "先检查。" },
-            { type: "text-end", id: "first-analysis" },
-            {
-              type: "tool-call",
-              toolCallId: "echo-1",
-              toolName: "test_echo",
-              input: '{"value":"probe"}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "second-analysis" },
-            { type: "text-delta", id: "second-analysis", delta: "继续检查。" },
-            { type: "text-end", id: "second-analysis" },
-            {
-              type: "tool-call",
-              toolCallId: "echo-2",
-              toolName: "test_echo",
-              input: '{"value":"next"}',
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "回显完成。" },
-            { type: "text-end", id: "answer" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
+  const { modelSource, calls } = createScriptedModelSource(
+    "tool-model",
+    [
+      fauxAssistantMessage(
+        [
+          fauxThinking("规划第一步"),
+          fauxText("先检查。"),
+          fauxToolCall("test_echo", { value: "probe" }, { id: "echo-1" }),
+          fauxText("继续检查。"),
+          fauxToolCall("test_echo", { value: "next" }, { id: "echo-2" }),
+          fauxText("检查完成。"),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("回显完成。"),
     ],
-  });
-  const configuredModel = {
-    connectionId: "test",
-    modelId: "tool-model",
-    name: "Tool Model",
-  };
-  const modelSource: AgentModelSource = {
-    initialize: async () => {},
-    list: async () => [configuredModel],
-    resolve: async () => ({
-      selection: { connectionId: configuredModel.connectionId, modelId: configuredModel.modelId },
-      languageModel: model,
-    }),
-  };
+    "Tool Model",
+  );
   const executions: JsonValue[] = [];
   const toolRegistry = new AgentToolRegistry();
   const runtime = new AgentRuntime({
@@ -1533,11 +1729,11 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
   });
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
-  assert.equal(invocation.text, "先检查。继续检查。回显完成。");
+  assert.equal(invocation.text, "先检查。继续检查。检查完成。回显完成。");
   assert.deepEqual(executions, [{ value: "probe" }, { value: "next" }]);
-  assert.equal(model.doStreamCalls.length, 3);
+  assert.equal(calls.length, 2);
   assert.deepEqual(
-    model.doStreamCalls[0]?.tools?.map(({ name }) => name),
+    calls[0]?.context.tools?.map(({ name }) => name),
     ["read", "test_echo"],
   );
   assert.deepEqual(invocation.toolCalls, [
@@ -1577,7 +1773,7 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
       { kind: "tool", id: "echo-1" },
       { kind: "text", content: "继续检查。" },
       { kind: "tool", id: "echo-2" },
-      { kind: "text", content: "回显完成。" },
+      { kind: "text", content: "检查完成。回显完成。" },
     ],
   );
 
@@ -1587,9 +1783,284 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
     session.messages.map(({ role, content }) => ({ role, content })),
     [
       { role: "user", content: "连续回显两次。" },
-      { role: "assistant", content: "先检查。继续检查。回显完成。" },
+      { role: "assistant", content: "先检查。继续检查。检查完成。" },
+      { role: "assistant", content: "回显完成。" },
     ],
   );
+  assert.deepEqual(session.messages[1]?.contentBlocks, [
+    { type: "reasoning", text: "规划第一步" },
+    { type: "text", text: "先检查。" },
+    { type: "tool-call", toolCallId: "echo-1" },
+    { type: "text", text: "继续检查。" },
+    { type: "tool-call", toolCallId: "echo-2" },
+    { type: "text", text: "检查完成。" },
+  ]);
+  assert.equal(session.messages[1]?.provider?.provider, "test");
+  assert.ok((session.messages[1]?.usage?.totalTokens ?? 0) > 0);
+});
+
+await test("取消多工具批次后不再分派剩余工具", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-cancel-tool-batch-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource } = createScriptedModelSource("cancel-tool-model", [
+    fauxAssistantMessage(
+      [
+        fauxToolCall("test_cancel", { order: "first" }, { id: "cancel-tool-1" }),
+        fauxToolCall("test_cancel", { order: "second" }, { id: "cancel-tool-2" }),
+      ],
+      { stopReason: "toolUse" },
+    ),
+  ]);
+  let notifyFirstToolStarted!: () => void;
+  const firstToolStarted = new Promise<void>((resolve) => {
+    notifyFirstToolStarted = resolve;
+  });
+  const executions: JsonValue[] = [];
+  const tools = new AgentToolRegistry();
+  tools.register(
+    "test.cancel-tool-batch",
+    { type: "global", id: "global" },
+    {
+      namespace: "test",
+      name: "cancel",
+      title: "取消批次",
+      description: "验证取消后不会继续执行同一批次中的后续工具。",
+      inputSchema: {
+        type: "object",
+        properties: { order: { type: "string" } },
+        required: ["order"],
+        additionalProperties: false,
+      },
+    },
+    async (input, { signal }) => {
+      executions.push(input);
+      if (executions.length === 1) {
+        notifyFirstToolStarted();
+        await new Promise<void>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      return input;
+    },
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: tools,
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "依次调用两个工具。" },
+    mode: "agent",
+  });
+  await firstToolStarted;
+  await runtime.cancelInvocation(reference.invocationId);
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.state, "cancelled");
+  assert.deepEqual(executions, [{ order: "first" }]);
+  assert.equal(invocation.toolCalls.length, 1);
+  assert.equal(invocation.toolCalls[0]?.id, "cancel-tool-1");
+  assert.equal(invocation.toolCalls[0]?.state, "cancelled");
+});
+
+await test("失败响应不覆盖最近成功的上下文占用", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-context-fallback-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource } = createScriptedModelSource("context-fallback-model", [
+    fauxAssistantMessage("成功响应。"),
+    fauxAssistantMessage([], {
+      stopReason: "error",
+      errorMessage: "fixture provider failure",
+    }),
+  ]);
+  const reported: unknown[] = [];
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+    reportError: (error) => reported.push(error),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const firstReference = await runtime.startSession({
+    initialMessage: { text: "建立成功的上下文统计。" },
+    mode: "chat",
+  });
+  const firstInvocation = await waitForInvocation(runtime, firstReference.invocationId);
+  assert.equal(firstInvocation.state, "completed");
+  assert.ok((firstInvocation.contextTokens ?? 0) > 0);
+
+  const failedReference = await runtime.sendMessage({
+    sessionId: firstReference.sessionId,
+    message: { text: "触发供应商失败。" },
+    mode: "chat",
+  });
+  const failedInvocation = await waitForInvocation(runtime, failedReference.invocationId);
+  assert.equal(failedInvocation.state, "failed");
+  assert.equal(failedInvocation.contextTokens, undefined);
+  assert.equal(
+    (await runtime.getSession(firstReference.sessionId)).contextTokens,
+    firstInvocation.contextTokens,
+  );
+  assert.equal(reported.length, 1);
+});
+
+await test("异常的成功响应 Token 不会破坏 Session Journal", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-invalid-context-usage-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const invalidTotals = [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    -1,
+    0.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ];
+  const faux = fauxProvider({
+    api: "test-api",
+    provider: "test",
+    models: [
+      {
+        id: "invalid-context-model",
+        name: "Invalid Context Model",
+        contextWindow: 128_000,
+      },
+    ],
+  });
+  const model = faux.getModel();
+  let responseIndex = 0;
+  const models = {
+    streamSimple() {
+      const totalTokens = invalidTotals[responseIndex++];
+      assert.notEqual(totalTokens, undefined);
+      const base = fauxAssistantMessage("响应内容保持可读。");
+      const message: AssistantMessage = {
+        ...base,
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        usage: { ...base.usage, totalTokens },
+      };
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        stream.push({ type: "done", reason: "stop", message });
+        stream.end(message);
+      });
+      return stream;
+    },
+  } as unknown as Models;
+  const modelSource: AgentModelSource = {
+    initialize: async () => {},
+    list: async () => [
+      {
+        connectionId: "test",
+        modelId: model.id,
+        name: model.name,
+      },
+    ],
+    resolve: async () => ({
+      selection: { connectionId: "test", modelId: model.id },
+      models,
+      model,
+    }),
+  };
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  for (const totalTokens of invalidTotals) {
+    const reference = await runtime.startSession({
+      initialMessage: { text: `验证异常 Token：${String(totalTokens)}` },
+      mode: "chat",
+    });
+    const invocation = await waitForInvocation(runtime, reference.invocationId);
+    assert.equal(invocation.state, "completed");
+    assert.equal(invocation.contextTokens, undefined);
+    const session = await runtime.getSession(reference.sessionId);
+    assert.equal(session.contextTokens, undefined);
+    assert.equal(session.messages.at(-1)?.content, "响应内容保持可读。");
+  }
+});
+
+await test("pi-ai 工具循环继续使用 SeaShard 严格输入校验", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-strict-tool-input-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource, calls } = createScriptedModelSource("strict-tool-model", [
+    fauxAssistantMessage(
+      fauxToolCall("test_echo", { value: "probe", unexpected: true }, { id: "strict-tool-call" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("已识别无效工具参数。"),
+  ]);
+  let executions = 0;
+  const tools = new AgentToolRegistry();
+  tools.register(
+    "test.strict-tool",
+    { type: "global", id: "global" },
+    {
+      namespace: "test",
+      name: "echo",
+      title: "严格回显",
+      description: "验证工具参数保持 SeaShard 严格校验。",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+    },
+    async (input) => {
+      executions += 1;
+      return input;
+    },
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: tools,
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+  const reference = await runtime.startSession({
+    initialMessage: { text: "调用严格工具。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.state, "completed");
+  assert.equal(invocation.text, "已识别无效工具参数。");
+  assert.equal(executions, 0);
+  assert.equal(invocation.toolCalls[0]?.state, "failed");
+  assert.match(invocation.toolCalls[0]?.error ?? "", /未知字段|additional/u);
+  assert.equal(calls.length, 2);
+  const followupContext = JSON.stringify(calls[1]?.context);
+  assert.match(followupContext, /strict-tool-call/u);
+  assert.match(followupContext, /未知字段|additional/u);
 });
 
 await test("Agent 工具长输出以前缀和英文 local 指令进入模型上下文", async (context) => {
@@ -1599,53 +2070,12 @@ await test("Agent 工具长输出以前缀和英文 local 指令进入模型上�
     await rm(userDataRoot, { recursive: true, force: true });
   });
 
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-    outputTokens: { total: 1, text: 1, reasoning: undefined },
-  };
-  const model = new MockLanguageModelV4({
-    doStream: [
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: "tool-call",
-              toolCallId: "large-1",
-              toolName: "test_large",
-              input: "{}",
-            },
-            {
-              type: "finish",
-              finishReason: { unified: "tool-calls", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-      {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "text-start", id: "answer" },
-            { type: "text-delta", id: "answer", delta: "长输出已保存。" },
-            { type: "text-end", id: "answer" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: undefined },
-              usage,
-            },
-          ],
-        }),
-      },
-    ],
-  });
-  const modelSource: AgentModelSource = {
-    initialize: async () => {},
-    list: async () => [],
-    resolve: async () => ({
-      selection: { connectionId: "test", modelId: "bounded-output" },
-      languageModel: model,
+  const { modelSource, calls } = createScriptedModelSource("bounded-output", [
+    fauxAssistantMessage(fauxToolCall("test_large", {}, { id: "large-1" }), {
+      stopReason: "toolUse",
     }),
-  };
+    fauxAssistantMessage("长输出已保存。"),
+  ]);
   const largeOutput = Array.from(
     { length: 240 },
     (_, index) => `${index + 1}: ${"z".repeat(500)}`,
@@ -1694,7 +2124,7 @@ await test("Agent 工具长输出以前缀和英文 local 指令进入模型上�
     ),
     largeOutput,
   );
-  assert.match(JSON.stringify(model.doStreamCalls[1]), /local:\/\/tool-output\/call-large-1\.txt/u);
+  assert.match(JSON.stringify(calls[1]?.context), /local:\/\/tool-output\/call-large-1\.txt/u);
 });
 
 await test("OpenAI Responses 工具结果会触发第二次上游请求", async (context) => {
@@ -1826,6 +2256,53 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
   const invocation = await waitForInvocation(runtime, reference.invocationId);
   assert.equal(invocation.state, "completed");
   assert.equal(invocation.text, "当前有 1 个服务器。");
+  assert.deepEqual(
+    {
+      api: invocation.provider?.api,
+      provider: invocation.provider?.provider,
+      requestedModel: invocation.provider?.requestedModel,
+      responseModel: invocation.provider?.responseModel,
+      responseId: invocation.provider?.responseId,
+      stopReason: invocation.provider?.stopReason,
+      rawStopReason: invocation.provider?.rawStopReason,
+    },
+    {
+      api: "openai-responses",
+      provider: "openai",
+      requestedModel: "gpt-5.6-sol",
+      responseModel: undefined,
+      responseId: "response-2",
+      stopReason: "stop",
+      rawStopReason: "completed",
+    },
+  );
+  assert.deepEqual(
+    {
+      input: invocation.usage?.input,
+      output: invocation.usage?.output,
+      cacheRead: invocation.usage?.cacheRead,
+      cacheWrite: invocation.usage?.cacheWrite,
+      totalTokens: invocation.usage?.totalTokens,
+    },
+    { input: 2, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 4 },
+  );
+  const persisted = await runtime.getSession(reference.sessionId);
+  assert.deepEqual(
+    persisted.messages.map(({ role, content }) => ({ role, content })),
+    [
+      { role: "user", content: "我有哪些服务器？" },
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "当前有 1 个服务器。" },
+    ],
+  );
+  assert.equal(persisted.messages[1]?.provider?.responseId, "response-1");
+  assert.doesNotMatch(JSON.stringify(persisted), /encrypted-reasoning-context/u);
+  const internal = await runtime.journal.get(reference.sessionId);
+  assert.match(
+    internal.messages[1]?.providerContent?.find((block) => block.type === "thinking")
+      ?.thinkingSignature ?? "",
+    /encrypted-reasoning-context/u,
+  );
   assert.equal(requests.length, 2);
   assert.deepEqual(
     requests.map(({ store }) => store),
@@ -1853,6 +2330,7 @@ await test("OpenAI Responses 工具结果会触发第二次上游请求", async 
       id: "reasoning-1",
       encrypted_content: "encrypted-reasoning-context",
       summary: [],
+      status: "completed",
     },
     {
       type: "function_call",
@@ -1877,15 +2355,18 @@ function openAiResponseEvents(requestNumber: number): readonly Record<string, un
   const completed = {
     type: "response.completed",
     response: {
+      ...response,
+      status: "completed",
+      output: [],
       incomplete_details: null,
       usage: {
         input_tokens: 1,
         input_tokens_details: null,
         output_tokens: 1,
         output_tokens_details: null,
+        total_tokens: 2,
       },
       reasoning: null,
-      service_tier: null,
     },
   };
   if (requestNumber === 1) {
@@ -1936,7 +2417,13 @@ function openAiResponseEvents(requestNumber: number): readonly Record<string, un
     {
       type: "response.output_item.done",
       output_index: 0,
-      item: { type: "message", id: "message-1", phase: "final_answer" },
+      item: {
+        type: "message",
+        id: "message-1",
+        phase: "final_answer",
+        status: "completed",
+        content: [{ type: "output_text", text: "当前有 1 个服务器。", annotations: [] }],
+      },
     },
     completed,
   ];

@@ -11,7 +11,7 @@ Host Entry 在独立 Node.js 子进程中执行，可以：
 - 调用 SeaShard 公开 Service Contract；
 - 向其他组件提供 JSON Service；
 - 使用按 Runtime 隔离的托管存储；
-- 注册 Agent Tool、Agent Resource 和 AI Provider Type；
+- 注册 Agent Tool 和 Agent Resource；
 - 订阅和发送插件事件；
 - 注册具有完整生命周期清理语义的副作用。
 
@@ -474,7 +474,6 @@ export function apply(context: PluginContext, _config: JsonValue) {
 - `context.contribute()`；
 - `context.agentTool()`；
 - `context.agentResources()`；
-- `context.aiProviderType()`；
 - `context.on()`。
 
 reload、升级、停用、启动失败和应用退出都可能触发清理。清理函数必须幂等，并等待异步资源真正关闭。
@@ -1116,18 +1115,11 @@ acme://greetings/Steve
 
 `presentRequest`、`presentResult` 和 `presentation` 只生成客户端工具卡片，不会进入模型上下文。资源的 `description`、`inputSchema`、`examples` 和 `help` 才负责向 Agent 解释如何使用能力。
 
-### 10.3 AI Provider Type
+### 10.3 模型供应商边界
 
-实现新的模型供应商时使用 `context.aiProviderType()`。定义包含：
+模型供应商由 Core Host 内建组件统一注册，第三方插件不能注册或替换 Provider Type。Plugin Host 会拒绝第三方调用 `context.aiProviderType()`。
 
-- 小写 Provider Type ID；
-- 显示名称；
-- 配置 JSON Schema；
-- 可选静态模型目录；
-- 根据连接设置和凭据创建 AI SDK Provider 的工厂；
-- 可选动态模型发现函数。
-
-Host 会先使用 `settingsSchema` 校验设置，再调用 `create()` 或 `discoverModels()`。凭据正文只在创建或发现调用期间传入，不应进入日志、错误、Resource、Tool 输出或持久化设置。
+内建供应商驱动使用 `@earendil-works/pi-ai`，负责模型目录、协议适配、认证和流式响应。第三方插件需要扩展 Agent 能力时，应注册 Agent Tool 或 Agent Resource。
 
 ## 11. 事件与 Contribution
 

@@ -686,7 +686,8 @@ await test("Agent tool registry rejects duplicates and invalidates Fiber snapsho
   const [snapshot] = registry.snapshot();
   assert.equal(snapshot?.name, "test_echo");
   assert.equal(registry.countRuntime("test-handler"), 1);
-  assert.deepEqual(await snapshot?.execute({ value: 1 }, {}), { value: 1 });
+  assert.deepEqual(await snapshot?.execute({}, {}), {});
+  await assert.rejects(snapshot!.execute({ value: 1 }, {}), /value 是未知字段/);
   assert.throws(
     () => registry.register("duplicate-handler", scope, definition, async () => null),
     /test_echo.*test-handler/,
