@@ -1566,7 +1566,7 @@ await test("Agent 通用 read 工具保留领域分页并持久化展示投影",
   assert.equal(calls.length, 2);
   assert.deepEqual(
     calls[0]?.context.tools?.map(({ name }) => name),
-    ["ask", "read"],
+    ["ask", "todo", "read"],
   );
   const readToolMetadata = JSON.stringify(calls[0]?.context.tools);
   assert.match(readToolMetadata, /server:\/\/instances/u);
@@ -1734,7 +1734,7 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
   assert.equal(calls.length, 2);
   assert.deepEqual(
     calls[0]?.context.tools?.map(({ name }) => name),
-    ["ask", "read", "test_echo"],
+    ["ask", "todo", "read", "test_echo"],
   );
   assert.deepEqual(invocation.toolCalls, [
     {
@@ -1898,6 +1898,112 @@ await test("Agent Ask 支持预设选项与固定自定义回答", async (contex
     answer: "灰度环境",
     source: "custom",
   });
+});
+
+await test("Agent TODO 原子替换任务清单并投影当前进度", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-todo-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource } = createScriptedModelSource("todo-model", [
+    fauxAssistantMessage(
+      fauxToolCall(
+        "todo",
+        {
+          items: [
+            { content: "梳理契约", status: "in_progress" },
+            { content: "实现界面", status: "pending" },
+            { content: "运行验证", status: "pending" },
+          ],
+        },
+        { id: "todo-initial" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage(
+      fauxToolCall(
+        "todo",
+        {
+          items: [
+            { content: "梳理契约", status: "completed" },
+            { content: "实现界面", status: "in_progress" },
+            { content: "运行验证", status: "pending" },
+          ],
+        },
+        { id: "todo-progress" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("任务继续执行。"),
+    fauxAssistantMessage(
+      fauxToolCall(
+        "todo",
+        {
+          items: [
+            { content: "重复当前任务", status: "in_progress" },
+            { content: "第二个当前任务", status: "in_progress" },
+          ],
+        },
+        { id: "todo-invalid" },
+      ),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("无效清单已拒绝。"),
+  ]);
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "按计划执行任务。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.deepEqual(invocation.todo?.items, [
+    { content: "梳理契约", status: "completed" },
+    { content: "实现界面", status: "in_progress" },
+    { content: "运行验证", status: "pending" },
+  ]);
+  assert.ok(invocation.todo?.updatedAt);
+  assert.deepEqual(
+    invocation.toolCalls.map(({ presentation, output }) => ({
+      title: presentation.title,
+      output,
+    })),
+    [
+      {
+        title: "更新 TODO",
+        output: { completed: 0, total: 3, current: "梳理契约" },
+      },
+      {
+        title: "更新 TODO",
+        output: { completed: 1, total: 3, current: "实现界面" },
+      },
+    ],
+  );
+  const completedSession = await runtime.getSession(reference.sessionId);
+  assert.deepEqual(completedSession.todo?.items, invocation.todo?.items);
+  assert.ok(completedSession.todo?.updatedAt);
+
+  const reloadedJournal = new AgentSessionJournal(userDataRoot);
+  await reloadedJournal.initialize();
+  const reloadedSession = await reloadedJournal.snapshot(reference.sessionId);
+  assert.deepEqual(reloadedSession.todo, completedSession.todo);
+
+  const invalidReference = await runtime.startSession({
+    initialMessage: { text: "提交无效清单。" },
+    mode: "agent",
+  });
+  const invalidInvocation = await waitForInvocation(runtime, invalidReference.invocationId);
+  assert.equal(invalidInvocation.todo, undefined);
+  assert.equal(invalidInvocation.toolCalls[0]?.state, "failed");
+  assert.match(invalidInvocation.toolCalls[0]?.error ?? "", /同时只能有一个 in_progress 任务/u);
 });
 
 await test("Agent 三档权限按工具确认级别裁决执行", async (context) => {

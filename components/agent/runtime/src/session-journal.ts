@@ -24,6 +24,7 @@ import {
   tryParseToolCall,
 } from "./session-journal/codec";
 import { uuidV7 } from "./session-journal/identifiers";
+import { projectLatestAgentTodo } from "./runtime/interactions";
 import { migrateVersionOneSessions } from "./session-journal/migration";
 import {
   sessionVersion,
@@ -153,10 +154,12 @@ export class AgentSessionJournal {
   async snapshot(sessionId: string): Promise<AgentSessionSnapshot> {
     const session = await this.get(sessionId);
     const contextTokens = findLatestDragonHTDevContextTokens(session.invocations);
+    const todo = projectLatestAgentTodo(session.toolCalls);
     return {
       ...projectSummary(session),
       messages: session.messages.map(projectMessageRecord),
       toolCalls: session.toolCalls,
+      ...(todo === undefined ? {} : { todo }),
       ...(contextTokens === undefined ? {} : { contextTokens }),
     };
   }

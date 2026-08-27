@@ -8,6 +8,7 @@ import {
   type AgentPermissionMode,
   type AgentConversationMode,
   type AgentModelSelection,
+  type AgentTodoSnapshot,
 } from "@seashard/contracts";
 import {
   ArrowUp,
@@ -25,6 +26,7 @@ import {
 } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
 import AgentInteractionPanel from "./AgentInteractionPanel.vue";
+import AgentTodoPanel from "./AgentTodoPanel.vue";
 import "./AgentMessageComposer.css";
 
 const props = defineProps<{
@@ -37,6 +39,7 @@ const props = defineProps<{
   interaction?: AgentPendingInteraction;
   respondingToInteraction: boolean;
   runningInvocationId?: string;
+  todo?: AgentTodoSnapshot;
   contextTokensUsed: number;
 }>();
 
@@ -298,6 +301,7 @@ defineExpose({ clear, focus });
 <template>
   <div class="agent-composer-wrap">
     <div class="agent-composer-stack">
+      <AgentTodoPanel v-if="todo" :todo="todo" />
       <AgentInteractionPanel
         v-if="interaction"
         :interaction="interaction"

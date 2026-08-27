@@ -13,6 +13,7 @@ import {
   type AgentSessionService,
   type AgentSessionSnapshot,
   type AgentToolCallSnapshot,
+  type AgentTodoSnapshot,
 } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
 import { Cmz_Toast, useToast } from "cmzya-modern-ui";
@@ -51,6 +52,7 @@ const liveContextTokens = ref<number>();
 const runningSessionId = ref<string>();
 const runningInvocationId = ref<string>();
 const liveInteraction = shallowRef<AgentPendingInteraction>();
+const liveTodo = shallowRef<AgentTodoSnapshot>();
 let conversationLoad = 0;
 let invocationPoll = 0;
 let modelConfigurationLoad = 0;
@@ -65,6 +67,7 @@ watch(activeConversationId, (id) => {
     liveContentBlocks.value = [];
     liveToolCalls.value = [];
     liveInteraction.value = undefined;
+    liveTodo.value = undefined;
     liveContextTokens.value = undefined;
   }
   void loadActiveConversation();
@@ -126,12 +129,14 @@ async function loadActiveConversation(): Promise<void> {
   const id = activeConversationId.value;
   if (!id || props.workspace.isDraft(id)) {
     session.value = undefined;
+    liveTodo.value = undefined;
     return;
   }
   try {
     const snapshot = await props.sessions.getSession(id);
     if (load !== conversationLoad) return;
     session.value = snapshot;
+    liveTodo.value = snapshot.todo;
     // Session 可能先于初始模型目录返回；先保留其模型身份，待目录到达后再校验可用性。
     selectedModel.value = { ...snapshot.model };
     if (modelCatalogInitialized) selectAvailableModel(snapshot.model);
@@ -232,6 +237,7 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
       liveContentBlocks.value = invocation.contentBlocks;
       liveToolCalls.value = invocation.toolCalls;
       liveInteraction.value = invocation.interaction;
+      if (invocation.todo) liveTodo.value = invocation.todo;
       if (invocation.contextTokens !== undefined) {
         liveContextTokens.value = invocation.contextTokens;
       }
@@ -322,6 +328,7 @@ function delay(milliseconds: number): Promise<void> {
       :cancelling="cancelling"
       :interaction="liveInteraction"
       :responding-to-interaction="respondingToInteraction"
+      :todo="liveTodo"
       :running-invocation-id="runningInvocationId"
       :context-tokens-used="liveContextTokens ?? session?.contextTokens ?? 0"
       @attachment="showAttachmentPlaceholder"

@@ -11,6 +11,7 @@ import type {
   AgentPendingInteraction,
   AgentPermissionMode,
 } from "./interaction";
+import type { AgentTodoSnapshot } from "./todo";
 
 /** Agent Session 的创建、读取与续写 Contract。 */
 export const agentSessionContract =
@@ -176,6 +177,8 @@ export interface AgentSessionSummary {
 export interface AgentSessionSnapshot extends AgentSessionSummary {
   readonly messages: readonly AgentMessageSnapshot[];
   readonly toolCalls: readonly AgentToolCallSnapshot[];
+  /** Session 最近一次成功 TODO 更新；供响应结束后继续展示任务进度。 */
+  readonly todo?: AgentTodoSnapshot;
   /** 最近一次成功取得供应商用量的 Invocation 所占上下文 Token。 */
   readonly contextTokens?: number;
 }
@@ -200,6 +203,8 @@ export interface AgentInvocationSnapshot extends AgentInvocationSummary {
   readonly toolCalls: readonly AgentToolCallSnapshot[];
   /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */
   readonly interaction?: AgentPendingInteraction;
+  /** 当前 Invocation 最近一次由 todo 工具写入的完整任务清单。 */
+  readonly todo?: AgentTodoSnapshot;
 }
 
 /** 创建、读取和管理可持久化的 Agent 会话。 */

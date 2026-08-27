@@ -109,6 +109,7 @@ export function cloneInvocation(snapshot: AgentInvocationSnapshot): AgentInvocat
     ...(snapshot.provider ? { provider: structuredClone(snapshot.provider) } : {}),
     ...(snapshot.usage ? { usage: structuredClone(snapshot.usage) } : {}),
     ...(snapshot.interaction ? { interaction: structuredClone(snapshot.interaction) } : {}),
+    ...(snapshot.todo ? { todo: structuredClone(snapshot.todo) } : {}),
     toolCalls: snapshot.toolCalls.map((call) => ({
       ...call,
       presentation: {

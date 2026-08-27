@@ -54,7 +54,13 @@ import type { LoadedAgentSession } from "./session-journal/records";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
 import { bindAgentHelpResource } from "./help-resource";
 import { AgentOutputCollector } from "./output-collector";
-import { askToolName, parseAskToolInput, requiresToolConfirmation } from "./runtime/interactions";
+import {
+  askToolName,
+  parseAskToolInput,
+  parseTodoToolInput,
+  requiresToolConfirmation,
+  todoToolName,
+} from "./runtime/interactions";
 import {
   addTokenUsage,
   assistantText,
@@ -670,9 +676,11 @@ export class AgentRuntime {
       const output =
         call.name === askToolName
           ? await this.executeAskTool(invocation, call.id, input)
-          : call.name === "read"
-            ? await this.executeResourceRead(invocation, call.id, input)
-            : await this.executeRegisteredTool(invocation, call, input);
+          : call.name === todoToolName
+            ? this.executeTodoTool(invocation, input)
+            : call.name === "read"
+              ? await this.executeResourceRead(invocation, call.id, input)
+              : await this.executeRegisteredTool(invocation, call, input);
       await this.finishToolCall(invocation, call.id, "completed", output);
       return createPiToolResult(call, output, false);
     } catch (error) {
@@ -726,6 +734,25 @@ export class AgentRuntime {
       return { answer: response.value, source: "custom" };
     }
     throw new Error("Agent Ask 收到了不匹配的交互响应");
+  }
+
+  private executeTodoTool(invocation: RunningInvocation, input: JsonValue): JsonValue {
+    const items = parseTodoToolInput(input);
+    const todo = {
+      items: structuredClone(items),
+      updatedAt: new Date().toISOString(),
+    };
+    invocation.snapshot = { ...invocation.snapshot, todo };
+    this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+    const completed = items.filter(({ status }) => status === "completed").length;
+    const current =
+      items.find(({ status }) => status === "in_progress") ??
+      items.find(({ status }) => status === "pending");
+    return {
+      completed,
+      total: items.length,
+      current: current?.content ?? null,
+    };
   }
 
   private async confirmRegisteredTool(
@@ -869,10 +896,12 @@ export class AgentRuntime {
           title:
             call.toolName === askToolName
               ? "向用户提问"
-              : call.toolName === "read"
-                ? "读取资源"
-                : (invocation.toolDefinitions.get(call.toolName)?.definition.title ??
-                  call.toolName),
+              : call.toolName === todoToolName
+                ? "更新 TODO"
+                : call.toolName === "read"
+                  ? "读取资源"
+                  : (invocation.toolDefinitions.get(call.toolName)?.definition.title ??
+                    call.toolName),
         } satisfies AgentActivityPresentation),
       state: "running",
       input: call.input,
