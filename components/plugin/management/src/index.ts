@@ -1,6 +1,7 @@
 import { pluginManagementContract } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { PluginKernel } from "@seashard/plugin-system";
+import { registerPluginManagementAgentIntegration } from "./agent-integration";
 
 export const pluginManagementManifest: PluginManifest = {
   id: "seashard.plugin-management",
@@ -26,6 +27,12 @@ export function createPluginManagementModule(kernel: PluginKernel): PluginModule
   return {
     provides: [pluginManagementContract],
     apply(ctx) {
+      registerPluginManagementAgentIntegration(ctx, {
+        list: () => kernel.listThirdPartyPlugins(),
+        setEnabled: (pluginId, enabled) => kernel.setThirdPartyPluginEnabled(pluginId, enabled),
+        uninstall: (pluginId) => kernel.uninstallThirdPartyPlugin(pluginId),
+      });
+
       ctx.provide(pluginManagementContract, {
         list: async () => (await kernel.listThirdPartyPlugins()) as unknown as JsonValue,
         setEnabled: async (pluginId, enabled) =>
@@ -40,3 +47,5 @@ export function createPluginManagementModule(kernel: PluginKernel): PluginModule
     },
   };
 }
+
+export * from "./agent-integration";

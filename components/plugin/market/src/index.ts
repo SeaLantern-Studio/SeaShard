@@ -6,6 +6,7 @@ import {
 } from "@seashard/contracts";
 import type { PluginKernel } from "@seashard/plugin-system";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
+import { registerPluginMarketAgentIntegration } from "./agent-integration";
 import { PluginMarketInstaller } from "./installer";
 import { PluginRegistryCatalog, type PluginRegistryCatalogOptions } from "./registry-catalog";
 
@@ -42,6 +43,12 @@ export function createPluginMarketModule(options: PluginMarketModuleOptions): Pl
         options.kernel,
         options.fetchProvider ? { fetchProvider: options.fetchProvider } : {},
       );
+      registerPluginMarketAgentIntegration(ctx, {
+        search: (request) => catalog.search(request),
+        listInstalled: () => installer.list(),
+        install: (request) => installer.install(request),
+      });
+
       ctx.provide(pluginMarketContract, {
         search: async (request) =>
           asJsonValue(await catalog.search(request as unknown as PluginMarketSearchRequest)),
@@ -61,3 +68,4 @@ function asJsonValue(value: unknown): JsonValue {
 
 export * from "./registry-catalog";
 export * from "./installer";
+export * from "./agent-integration";
