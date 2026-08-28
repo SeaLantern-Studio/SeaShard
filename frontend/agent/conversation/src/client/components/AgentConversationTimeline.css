@@ -27,10 +27,15 @@
   flex: 0 0 auto;
   border-radius: var(--sl-radius-md);
 
-  background-image: var(--sl-software-logo);
+  background-image: url(../assets/agent-avatar-cropped.png);
   background-position: center;
   background-repeat: no-repeat;
   background-size: 32px 32px;
+}
+.agent-conversation-empty .agent-brand-mark {
+  width: 48px;
+  height: 48px;
+  background-size: 48px 48px;
 }
 
 .agent-message-list {
@@ -52,6 +57,16 @@
 
 .agent-message.is-user {
   justify-content: flex-end;
+}
+.agent-message.is-assistant {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 14px;
+}
+
+.agent-message.is-assistant > :not(.agent-message-avatar) {
+  grid-column: 2;
+  min-width: 0;
 }
 
 .agent-message-avatar {
@@ -143,9 +158,14 @@
   transform: translateY(-50%);
 }
 
+.agent-message.is-reasoning,
+.agent-message.is-tool-call,
+.agent-message.is-thinking {
+  align-items: center;
+}
+
 .agent-message.is-reasoning {
   margin-bottom: 22px;
-  padding-left: 44px;
 }
 
 .agent-reasoning-block {
@@ -163,7 +183,6 @@
 
 .agent-message.is-thinking {
   margin-bottom: 22px;
-  padding-left: 44px;
 }
 
 .agent-thinking {

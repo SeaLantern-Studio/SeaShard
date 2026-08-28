@@ -24,20 +24,40 @@ type ConversationEntry =
   | {
       readonly kind: "message";
       readonly key: string;
+      readonly invocationId: string;
       readonly role: AgentMessageSnapshot["role"];
       readonly content: string;
+      readonly showAvatar?: boolean;
     }
   | {
       readonly kind: "reasoning";
       readonly key: string;
+      readonly invocationId: string;
       readonly content: string;
+      readonly showAvatar: boolean;
       readonly redacted?: boolean;
     }
   | {
       readonly kind: "tool";
       readonly key: string;
+      readonly invocationId: string;
       readonly call: AgentToolCallSnapshot;
+      readonly showAvatar: boolean;
     };
+
+interface AssistantAvatarPlacement {
+  pending: boolean;
+}
+
+function takeAssistantAvatar(placement: AssistantAvatarPlacement): boolean {
+  if (!placement.pending) return false;
+  placement.pending = false;
+  return true;
+}
+
+function isAssistantEntry(entry: ConversationEntry): boolean {
+  return entry.kind !== "message" || entry.role === "assistant";
+}
 
 const visibleToolCalls = computed<readonly AgentToolCallSnapshot[]>(() => {
   const calls = new Map<string, AgentToolCallSnapshot>();
@@ -68,6 +88,7 @@ const conversationEntries = computed<readonly ConversationEntry[]>(() => {
     if (message.role !== "user") continue;
     entries.push({
       kind: "message",
+      invocationId: message.invocationId,
       key: `message:${message.id}`,
       role: "user",
       content: message.content,
@@ -76,6 +97,7 @@ const conversationEntries = computed<readonly ConversationEntry[]>(() => {
     if (message.invocationId === props.runningInvocationId) {
       appendRichContent(
         entries,
+        message.invocationId,
         `live:${message.invocationId}`,
         props.liveContentBlocks.length > 0
           ? props.liveContentBlocks
@@ -83,6 +105,7 @@ const conversationEntries = computed<readonly ConversationEntry[]>(() => {
             ? [{ type: "text", text: props.liveAssistantText }]
             : [],
         callsById,
+        { pending: true },
       );
       continue;
     }
@@ -116,6 +139,13 @@ const showLiveThinking = computed(() => {
   if (props.liveContentBlocks.length === 0) return !props.liveAssistantText;
   const activeBlock = props.liveContentBlocks.at(-1);
   return activeBlock?.type === "reasoning";
+});
+const showLiveThinkingAvatar = computed(() => {
+  const invocationId = props.runningInvocationId;
+  if (!showLiveThinking.value || !invocationId) return false;
+  return !conversationEntries.value.some(
+    (entry) => entry.invocationId === invocationId && isAssistantEntry(entry),
+  );
 });
 
 /**
@@ -152,16 +182,26 @@ function appendStoredInvocation(
     );
     return;
   }
+  const avatarPlacement: AssistantAvatarPlacement = { pending: true };
   for (const message of messages) {
-    appendRichContent(entries, `message:${message.id}`, message.contentBlocks, callsById);
+    appendRichContent(
+      entries,
+      invocationId,
+      `message:${message.id}`,
+      message.contentBlocks,
+      callsById,
+      avatarPlacement,
+    );
   }
 }
 
 function appendRichContent(
   entries: ConversationEntry[],
+  invocationId: string,
   keyPrefix: string,
   blocks: readonly AgentMessageContentBlock[],
   callsById: ReadonlyMap<string, AgentToolCallSnapshot>,
+  avatarPlacement: AssistantAvatarPlacement,
 ): void {
   blocks.forEach((block, index) => {
     if (block.type === "text") {
@@ -169,8 +209,10 @@ function appendRichContent(
       entries.push({
         kind: "message",
         key: `${keyPrefix}:text:${index}`,
+        invocationId,
         role: "assistant",
         content: block.text,
+        showAvatar: takeAssistantAvatar(avatarPlacement),
       });
       return;
     }
@@ -179,13 +221,23 @@ function appendRichContent(
       entries.push({
         kind: "reasoning",
         key: `${keyPrefix}:reasoning:${index}`,
+        invocationId,
         content: block.text,
+        showAvatar: takeAssistantAvatar(avatarPlacement),
         ...(block.redacted === undefined ? {} : { redacted: block.redacted }),
       });
       return;
     }
     const call = callsById.get(block.toolCallId);
-    if (call) entries.push({ kind: "tool", key: `tool:${call.id}`, call });
+    if (call) {
+      entries.push({
+        kind: "tool",
+        key: `tool:${call.id}`,
+        invocationId,
+        call,
+        showAvatar: takeAssistantAvatar(avatarPlacement),
+      });
+    }
   });
 }
 
@@ -196,16 +248,25 @@ function appendLegacyAssistantEntries(
   text: string,
   calls: readonly AgentToolCallSnapshot[],
 ): void {
+  const avatarPlacement: AssistantAvatarPlacement = { pending: true };
   for (const part of interleaveAgentInvocationContent(text, calls)) {
     if (part.kind === "tool") {
-      entries.push({ kind: "tool", key: `tool:${part.call.id}`, call: part.call });
+      entries.push({
+        kind: "tool",
+        key: `tool:${part.call.id}`,
+        invocationId,
+        call: part.call,
+        showAvatar: takeAssistantAvatar(avatarPlacement),
+      });
       continue;
     }
     entries.push({
       kind: "message",
       key: `assistant:${invocationId}:${part.start}:${part.end}`,
+      invocationId,
       role: "assistant",
       content: part.content,
+      showAvatar: takeAssistantAvatar(avatarPlacement),
     });
   }
 }
@@ -224,7 +285,11 @@ function appendLegacyAssistantEntries(
     <div v-else class="agent-message-list" aria-live="polite">
       <template v-for="entry in conversationEntries" :key="entry.key">
         <article v-if="entry.kind === 'message'" class="agent-message" :class="`is-${entry.role}`">
-          <div v-if="entry.role === 'assistant'" class="agent-message-avatar" aria-hidden="true">
+          <div
+            v-if="entry.role === 'assistant' && entry.showAvatar"
+            class="agent-message-avatar"
+            aria-hidden="true"
+          >
             <div class="agent-brand-mark"></div>
           </div>
           <div v-if="entry.role === 'user'" class="agent-user-message">
@@ -239,6 +304,9 @@ function appendLegacyAssistantEntries(
           v-else-if="entry.kind === 'reasoning'"
           class="agent-message is-assistant is-reasoning"
         >
+          <div v-if="entry.showAvatar" class="agent-message-avatar" aria-hidden="true">
+            <div class="agent-brand-mark"></div>
+          </div>
           <div class="agent-reasoning-block">
             {{
               entry.redacted && !entry.content
@@ -249,7 +317,7 @@ function appendLegacyAssistantEntries(
         </article>
 
         <article v-else-if="entry.kind === 'tool'" class="agent-message is-assistant is-tool-call">
-          <div class="agent-message-avatar" aria-hidden="true">
+          <div v-if="entry.showAvatar" class="agent-message-avatar" aria-hidden="true">
             <div class="agent-brand-mark"></div>
           </div>
           <AgentToolCallCard :call="entry.call" />
@@ -257,6 +325,9 @@ function appendLegacyAssistantEntries(
       </template>
 
       <article v-if="showLiveThinking" class="agent-message is-assistant is-thinking">
+        <div v-if="showLiveThinkingAvatar" class="agent-message-avatar" aria-hidden="true">
+          <div class="agent-brand-mark"></div>
+        </div>
         <div class="agent-thinking" aria-label="AI 正在思考">
           <strong>Thinking</strong>
           <span></span><span></span><span></span>

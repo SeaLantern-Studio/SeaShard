@@ -1015,6 +1015,46 @@ await test("Agent 工作区立即应用运行快照携带的 Session 标题", ()
     agentWorkspace.persistedSessions.value = previousSessions;
   }
 });
+await test("Agent 工作区在首次发送前不向侧栏加入空白对话", async () => {
+  const previousSessions = agentWorkspace.persistedSessions.value;
+  const previousActiveConversationId = agentWorkspace.activeConversationId.value;
+  try {
+    const existing = {
+      id: "existing-session",
+      title: "已有对话",
+      model: { connectionId: "test", modelId: "workspace-model" },
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    agentWorkspace.persistedSessions.value = [existing];
+
+    const draftId = agentWorkspace.createDraft();
+    assert.equal(agentWorkspace.isDraft(draftId), true);
+    assert.equal(agentWorkspace.activeConversationId.value, draftId);
+    assert.deepEqual(
+      agentWorkspace.conversations.value.map(({ id }) => id),
+      ["existing-session"],
+    );
+
+    agentWorkspace.persistedSessions.value = [
+      {
+        ...existing,
+        id: "materialized-session",
+        title: "新对话",
+      },
+      existing,
+    ];
+    await agentWorkspace.materializeDraft(draftId, "materialized-session");
+    assert.equal(agentWorkspace.activeConversationId.value, "materialized-session");
+    assert.deepEqual(
+      agentWorkspace.conversations.value.map(({ id }) => id),
+      ["materialized-session", "existing-session"],
+    );
+  } finally {
+    agentWorkspace.persistedSessions.value = previousSessions;
+    agentWorkspace.activeConversationId.value = previousActiveConversationId;
+  }
+});
 
 await test("关闭自动总结时只执行主模型调用并保留新对话标题", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-auto-title-off-"));

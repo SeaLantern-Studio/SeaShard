@@ -4,7 +4,6 @@ import { computed, ref, shallowRef } from "vue";
 export interface AgentConversationListItem {
   readonly id: string;
   readonly title: string;
-  readonly draft: boolean;
   readonly updatedAt: string;
 }
 
@@ -15,21 +14,18 @@ type AgentWorkspaceService = Pick<
 
 /**
  * Agent 对话页与同一 Client Entry 发布的侧栏共享最小状态。
- * Host Session 仍是事实来源；尚未发送首条消息的新对话仅作为 Renderer 草稿存在。
+ * Host Session 是列表的唯一事实来源；首次发送前只用临时 ID 表示空白编辑状态。
  */
 class AgentWorkspaceState {
   readonly activeConversationId = ref<string>();
   readonly persistedSessions = shallowRef<readonly AgentSessionSummary[]>([]);
-  readonly drafts = shallowRef<readonly AgentConversationListItem[]>([]);
-  readonly conversations = computed<readonly AgentConversationListItem[]>(() => [
-    ...this.drafts.value,
-    ...this.persistedSessions.value.map((session) => ({
+  readonly conversations = computed<readonly AgentConversationListItem[]>(() =>
+    this.persistedSessions.value.map((session) => ({
       id: session.id,
       title: session.title,
-      draft: false,
       updatedAt: session.updatedAt,
     })),
-  ]);
+  );
 
   private service?: AgentWorkspaceService;
   private binding = 0;
@@ -61,17 +57,9 @@ class AgentWorkspaceState {
     );
   }
 
-  createDraft(title = "新对话"): string {
+  /** 新建动作只切换到临时空白状态，首条消息发送后才由 Host 创建正式 Session。 */
+  createDraft(): string {
     const id = `draft:${crypto.randomUUID()}`;
-    this.drafts.value = [
-      {
-        id,
-        title,
-        draft: true,
-        updatedAt: new Date().toISOString(),
-      },
-      ...this.drafts.value,
-    ];
     this.activeConversationId.value = id;
     return id;
   }
@@ -82,7 +70,6 @@ class AgentWorkspaceState {
   async copyConversation(conversationId: string): Promise<string> {
     const conversation = this.conversations.value.find(({ id }) => id === conversationId);
     if (!conversation) throw new Error(`Agent 对话不存在：${conversationId}`);
-    if (conversation.draft) return this.createDraft(conversation.title);
 
     const service = this.service;
     if (!service) throw new Error("Agent 对话服务尚未就绪");
@@ -96,15 +83,10 @@ class AgentWorkspaceState {
     const conversation = this.conversations.value.find(({ id }) => id === conversationId);
     if (!conversation) throw new Error(`Agent 对话不存在：${conversationId}`);
     const wasActive = this.activeConversationId.value === conversationId;
-
-    if (conversation.draft) {
-      this.drafts.value = this.drafts.value.filter(({ id }) => id !== conversationId);
-    } else {
-      const service = this.service;
-      if (!service) throw new Error("Agent 对话服务尚未就绪");
-      await service.deleteSession(conversationId);
-      await this.refresh();
-    }
+    const service = this.service;
+    if (!service) throw new Error("Agent 对话服务尚未就绪");
+    await service.deleteSession(conversationId);
+    await this.refresh();
 
     if (wasActive) this.activeConversationId.value = this.conversations.value[0]?.id;
   }
@@ -114,10 +96,10 @@ class AgentWorkspaceState {
   }
 
   async materializeDraft(draftId: string | undefined, sessionId: string): Promise<void> {
-    if (draftId) {
-      this.drafts.value = this.drafts.value.filter((draft) => draft.id !== draftId);
+    // 用户等待 startSession 时可能已经切换页面；完成请求不能把界面强行拉回旧草稿。
+    if (this.activeConversationId.value === draftId) {
+      this.activeConversationId.value = sessionId;
     }
-    this.activeConversationId.value = sessionId;
     await this.refresh();
   }
 }
