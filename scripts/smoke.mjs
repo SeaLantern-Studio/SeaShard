@@ -106,7 +106,7 @@ function verifyPersistedState(databasePath) {
     const bindings = database.prepare("SELECT COUNT(*) AS count FROM plugin_bindings").get();
     const packageCount = Number(packages.count);
     const bindingCount = Number(bindings.count);
-    if (packageCount !== 35 || bindingCount !== 35) {
+    if (packageCount !== 36 || bindingCount !== 36) {
       throw new Error(
         `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}`,
       );

@@ -3,6 +3,7 @@ import {
   agentModelConfigurationContract,
   agentInvocationContract,
   agentSessionContract,
+  agentSettingsContract,
   type AgentConversationMode,
   type AgentInteractionResponseInput,
   type AgentPermissionMode,
@@ -11,11 +12,13 @@ import {
   type AgentModelConnectionMutation,
   type AgentModelSelection,
   type AgentSessionService,
+  type AgentSettingsService,
   type AgentUserMessage,
 } from "@seashard/contracts";
 import type { JsonObject, JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import { AgentRuntime, type AgentRuntimeOptions } from "./runtime";
 import { registerBuiltInAgentProviderTypes } from "./provider-types";
+import { AgentSettingsStore } from "./settings";
 
 export const agentRuntimeManifest: PluginManifest = {
   id: "seashard.agent-runtime",
@@ -38,10 +41,16 @@ export const agentRuntimeManifest: PluginManifest = {
 
 export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginModule {
   return {
-    provides: [agentSessionContract, agentInvocationContract, agentModelConfigurationContract],
+    provides: [
+      agentSessionContract,
+      agentInvocationContract,
+      agentModelConfigurationContract,
+      agentSettingsContract,
+    ],
     async apply(context) {
       registerBuiltInAgentProviderTypes(context);
-      const runtime = new AgentRuntime(options);
+      const settings = new AgentSettingsStore(context.storage);
+      const runtime = new AgentRuntime({ ...options, settingsSource: settings });
       await runtime.initialize();
       context.provide(agentSessionContract, {
         listModels: async () => asJsonValue(await runtime.listModels()),
@@ -108,6 +117,18 @@ export function createAgentRuntimeModule(options: AgentRuntimeOptions): PluginMo
         },
       } satisfies Record<
         keyof AgentModelConfigurationService,
+        (...arguments_: unknown[]) => Promise<JsonValue>
+      >);
+      context.provide(agentSettingsContract, {
+        get: async () => asJsonValue(await settings.get()),
+        setAutomaticConversationSummary: async (enabled) =>
+          asJsonValue(
+            await settings.setAutomaticConversationSummary(
+              requireBoolean(enabled, "automaticConversationSummary"),
+            ),
+          ),
+      } satisfies Record<
+        keyof AgentSettingsService,
         (...arguments_: unknown[]) => Promise<JsonValue>
       >);
       const disposeModelChanges = runtime.onModelConfigurationChanged((snapshot) => {
@@ -335,6 +356,11 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new TypeError(`${label} must be a boolean`);
+  return value;
+}
+
 function requireJsonValue(
   value: unknown,
   label: string,
@@ -386,4 +412,6 @@ export * from "./local-resource";
 export * from "./output-collector";
 export * from "./runtime";
 export * from "./session-journal";
+export * from "./settings";
+export * from "./runtime/title-summary";
 export type { LoadedAgentSession } from "./session-journal/records";

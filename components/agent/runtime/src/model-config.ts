@@ -481,11 +481,19 @@ export class AgentModelCatalog {
       projectedConnections.push(projectConnection(connection, Boolean(credential), true));
       for (const configured of configuredModels) {
         const piModel = resolveAgentPiModel(piConnection, configured.id, configured.settings);
+        // 公共模型投影必须沿用用户配置顺序；pi-ai 的内部槽位只负责协议映射，
+        // 若反向投影会把 ultra 等供应商值移动到列表首位。
+        const projectedSettings = {
+          ...projectAgentPiModelSettings(piModel),
+          ...(configured.settings
+            ? { reasoningLevels: [...configured.settings.reasoningLevels] }
+            : {}),
+        };
         models.push({
           connectionId: connection.id,
           modelId: configured.id,
           name: configured.displayName ?? piModel.name,
-          settings: projectAgentPiModelSettings(piModel),
+          settings: projectedSettings,
           providerType: connection.providerType,
           connection: piConnection,
           piModel,

@@ -803,7 +803,7 @@ function errorMessage(error: unknown): string {
                     :disabled="saving || discovering"
                     :min="1"
                     :max="agentModelMaximumContextTokensLimit"
-                    :step="1000"
+                    :step="1"
                     aria-label="最大上下文 Token"
                     @update:model-value="updateModelRow(row, 'maximumContextTokens', $event)"
                   />

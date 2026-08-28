@@ -232,6 +232,9 @@ async function pollInvocation(invocationId: string, sessionId: string): Promise<
   const poll = ++invocationPoll;
   while (poll === invocationPoll) {
     const invocation = await props.invocations.getInvocation(invocationId);
+    if (invocation.sessionTitle) {
+      props.workspace.applySessionTitle(sessionId, invocation.sessionTitle);
+    }
     if (activeConversationId.value === sessionId) {
       liveAssistantText.value = invocation.text;
       liveContentBlocks.value = invocation.contentBlocks;

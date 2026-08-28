@@ -49,6 +49,18 @@ class AgentWorkspaceState {
     this.persistedSessions.value = await service.listSessions();
   }
 
+  /**
+   * Invocation 轮询携带自动标题时只更新对应列表项，避免等待整轮模型与工具执行结束。
+   * Host Journal 已先完成落盘，因此这里仅负责 Renderer 的即时投影。
+   */
+  applySessionTitle(sessionId: string, title: string): void {
+    const current = this.persistedSessions.value.find((session) => session.id === sessionId);
+    if (!current || current.title === title) return;
+    this.persistedSessions.value = this.persistedSessions.value.map((session) =>
+      session.id === sessionId ? { ...session, title } : session,
+    );
+  }
+
   createDraft(title = "新对话"): string {
     const id = `draft:${crypto.randomUUID()}`;
     this.drafts.value = [

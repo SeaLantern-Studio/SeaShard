@@ -1,0 +1,60 @@
+.agent-general-settings-page {
+  width: min(100%, 980px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 2px 0 var(--sl-space-2xl);
+}
+
+.agent-general-settings-header {
+  padding: 10px 0 26px;
+}
+
+.agent-general-settings-header h1,
+.agent-general-settings-copy h2,
+.agent-general-settings-copy p {
+  margin: 0;
+}
+
+.agent-general-settings-header h1 {
+  color: var(--sl-text-primary);
+  font-size: 1.75rem;
+  font-weight: 680;
+  letter-spacing: -0.04em;
+}
+
+.agent-general-settings-loading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+}
+
+.agent-general-settings-list {
+  border-top: 1px solid var(--sl-border-light);
+}
+
+.agent-general-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sl-space-xl);
+  min-height: 82px;
+  padding: 18px 4px;
+  border-bottom: 1px solid var(--sl-border-light);
+}
+
+.agent-general-settings-copy {
+  min-width: 0;
+}
+
+.agent-general-settings-copy h2 {
+  color: var(--sl-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 630;
+}
+
+.agent-general-settings-copy p {
+  margin-top: 5px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}

@@ -201,6 +201,8 @@ export interface AgentInvocationSnapshot extends AgentInvocationSummary {
   readonly provider?: AgentProviderResponseDetails;
   readonly usage?: AgentTokenUsage;
   readonly toolCalls: readonly AgentToolCallSnapshot[];
+  /** 本次 Invocation 已生成的新 Session 标题，供运行中的客户端立即同步侧栏。 */
+  readonly sessionTitle?: string;
   /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */
   readonly interaction?: AgentPendingInteraction;
   /** 当前 Invocation 最近一次由 todo 工具写入的完整任务清单。 */

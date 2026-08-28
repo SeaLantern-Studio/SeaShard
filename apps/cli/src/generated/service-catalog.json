@@ -105,7 +105,7 @@
         {
           "name": "AgentInvocationSnapshot",
           "description": "",
-          "declaration": "export interface AgentInvocationSnapshot extends AgentInvocationSummary {\n  readonly text: string;\n  readonly contentBlocks: readonly AgentMessageContentBlock[];\n  readonly provider?: AgentProviderResponseDetails;\n  readonly usage?: AgentTokenUsage;\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n  /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */\n  readonly interaction?: AgentPendingInteraction;\n  /** 当前 Invocation 最近一次由 todo 工具写入的完整任务清单。 */\n  readonly todo?: AgentTodoSnapshot;\n}",
+          "declaration": "export interface AgentInvocationSnapshot extends AgentInvocationSummary {\n  readonly text: string;\n  readonly contentBlocks: readonly AgentMessageContentBlock[];\n  readonly provider?: AgentProviderResponseDetails;\n  readonly usage?: AgentTokenUsage;\n  readonly toolCalls: readonly AgentToolCallSnapshot[];\n  /** 本次 Invocation 已生成的新 Session 标题，供运行中的客户端立即同步侧栏。 */\n  readonly sessionTitle?: string;\n  /** 等待 Ask 回答或命令确认时，只在运行期公开的交互请求。 */\n  readonly interaction?: AgentPendingInteraction;\n  /** 当前 Invocation 最近一次由 todo 工具写入的完整任务清单。 */\n  readonly todo?: AgentTodoSnapshot;\n}",
           "source": "packages/contracts/src/agent/session.ts:198"
         },
         {
@@ -716,6 +716,50 @@
           "description": "",
           "declaration": "export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };",
           "source": "packages/plugin-sdk/src/index.ts:5"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.agent-settings",
+      "owner": "seashard.agent-runtime",
+      "description": "Renderer 只获得 Agent 行为设置读写能力，不接触插件存储。",
+      "source": "packages/contracts/src/agent/settings.ts:5",
+      "methods": [
+        {
+          "name": "get",
+          "signature": "get(): Promise<AgentSettingsSnapshot>",
+          "description": "读取当前 Agent 全局设置。",
+          "parameters": [],
+          "returns": {
+            "type": "Promise<AgentSettingsSnapshot>",
+            "description": "当前自动化行为设置。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setAutomaticConversationSummary",
+          "signature": "setAutomaticConversationSummary(enabled: boolean): Promise<AgentSettingsSnapshot>",
+          "description": "开启或关闭自动对话标题总结。",
+          "parameters": [
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "description": "是否在首轮与后续周期边界生成对话标题。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<AgentSettingsSnapshot>",
+            "description": "更新后的 Agent 设置快照。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "AgentSettingsSnapshot",
+          "description": "可跨 Host/Client 边界传输的 Agent 设置快照。",
+          "declaration": "/** 可跨 Host/Client 边界传输的 Agent 设置快照。 */\nexport interface AgentSettingsSnapshot {\n  readonly automaticConversationSummary: boolean;\n}",
+          "source": "packages/contracts/src/agent/settings.ts:8"
         }
       ]
     },

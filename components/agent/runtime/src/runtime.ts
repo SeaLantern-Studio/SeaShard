@@ -21,6 +21,7 @@ import type {
   AgentToolCallSnapshot,
   AgentUserMessage,
 } from "@seashard/contracts";
+import { defaultAgentModelReasoningLevels } from "@seashard/contracts";
 import { defaultAgentResourcePresentationTitle } from "@seashard/plugin-sdk";
 import type {
   AgentActivityPresentationField,
@@ -54,6 +55,7 @@ import type { LoadedAgentSession } from "./session-journal/records";
 import { AgentSessionLocalStore, bindAgentLocalResource } from "./local-resource";
 import { bindAgentHelpResource } from "./help-resource";
 import { AgentOutputCollector } from "./output-collector";
+import type { AgentSettingsSource } from "./settings";
 import {
   askToolName,
   parseAskToolInput,
@@ -78,6 +80,12 @@ import {
   parseResourceReadInput,
   safelyPresentAgentResource,
 } from "./runtime/tools";
+import {
+  createConversationTitlePrompt,
+  normalizeConversationTitle,
+  shouldRefreshConversationTitle,
+  type ConversationTitleSummarySource,
+} from "./runtime/title-summary";
 import {
   cloneInvocation,
   createAbortError,
@@ -165,6 +173,10 @@ interface RunningInteraction {
   respond(response: AgentInteractionResponse): void;
 }
 
+interface ConversationTitleSummaryPlan {
+  readonly source: ConversationTitleSummarySource;
+  readonly model: ResolvedAgentModel;
+}
 interface RunningInvocation {
   snapshot: AgentInvocationSnapshot;
   readonly mode: AgentConversationMode;
@@ -176,6 +188,8 @@ interface RunningInvocation {
   readonly outputCollector: AgentOutputCollector;
   readonly hasTools: boolean;
   readonly tools: readonly Tool[];
+  readonly userText: string;
+  readonly titleSummary?: ConversationTitleSummaryPlan;
   interaction?: RunningInteraction;
 }
 
@@ -188,6 +202,7 @@ export interface AgentRuntimeOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly modelConfigWatchDebounceMs?: number;
   readonly openModelConfigurationFile?: (path: string) => Promise<void>;
+  readonly settingsSource?: AgentSettingsSource;
   readonly toolSource: AgentRuntimeToolSource;
   readonly resourceSource: AgentRuntimeResourceSource;
   readonly reportError?: (error: unknown) => void;
@@ -202,6 +217,7 @@ export class AgentRuntime {
   private readonly reportError: (error: unknown) => void;
   private readonly toolSource: AgentRuntimeToolSource;
   private readonly resourceSource: AgentRuntimeResourceSource;
+  private readonly settingsSource?: AgentSettingsSource;
   private readonly running = new Map<string, RunningInvocation>();
   private readonly tasks = new Map<string, Promise<void>>();
   private readonly invocations = new Map<string, AgentInvocationSnapshot>();
@@ -237,6 +253,7 @@ export class AgentRuntime {
       options.reportError ?? ((error) => console.error("Agent Runtime failed", error));
     this.toolSource = options.toolSource;
     this.resourceSource = options.resourceSource;
+    this.settingsSource = options.settingsSource;
   }
 
   async initialize(): Promise<void> {
@@ -453,6 +470,10 @@ export class AgentRuntime {
     const localResources = bindAgentLocalResource(this.resourceSource.snapshot(), localStore);
     const resources = bindAgentHelpResource(localResources, [...toolDefinitions.values()]);
     const outputCollector = new AgentOutputCollector(localStore);
+    const titleSummary = await this.prepareConversationTitleSummary(
+      session,
+      resolvedModel.selection,
+    );
 
     const invocationId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -492,6 +513,8 @@ export class AgentRuntime {
       outputCollector,
       hasTools: tools.length > 0,
       tools,
+      userText: text,
+      ...(titleSummary ? { titleSummary } : {}),
     };
     this.running.set(invocationId, running);
     this.invocations.set(invocationId, snapshot);
@@ -505,10 +528,109 @@ export class AgentRuntime {
     return { sessionId: session.header.id, invocationId };
   }
 
+  /**
+   * 标题刷新计划在主调用启动前确定。轮次只由已持久化的用户消息推导，
+   * 因此应用重启后仍会落在同一组 3–5 轮边界上，无需另建游标状态。
+   */
+  private async prepareConversationTitleSummary(
+    session: LoadedAgentSession,
+    selection: AgentModelSelection,
+  ): Promise<ConversationTitleSummaryPlan | undefined> {
+    if (!this.settingsSource) return undefined;
+    try {
+      const settings = await this.settingsSource.get();
+      if (!settings.automaticConversationSummary) return undefined;
+      const turnNumber = session.messages.filter((message) => message.role === "user").length + 1;
+      const source =
+        turnNumber === 1
+          ? "user-question"
+          : shouldRefreshConversationTitle(session.header.id, turnNumber)
+            ? "assistant-answer"
+            : undefined;
+      if (!source) return undefined;
+
+      const configured = (await this.models.list()).find(
+        (model) =>
+          model.connectionId === selection.connectionId && model.modelId === selection.modelId,
+      );
+      const lowestReasoningLevel =
+        configured?.settings?.reasoningLevels[0] ?? defaultAgentModelReasoningLevels[0];
+      const model = await this.models.resolve({
+        connectionId: selection.connectionId,
+        modelId: selection.modelId,
+        reasoningLevel: lowestReasoningLevel,
+      });
+      return { source, model };
+    } catch (error) {
+      // 自动标题属于伴随能力；设置损坏或模型配置变化都不能阻断用户的主对话。
+      this.reportError(error);
+      return undefined;
+    }
+  }
+
+  /**
+   * 总结调用只接收本轮指定来源，不复用对话上下文、工具和资源。
+   * 首轮任务会与主调用并行；标题落盘后同步写入运行快照，让客户端轮询立即取得结果。
+   */
+  private async tryUpdateConversationTitle(
+    invocation: RunningInvocation,
+    plan: ConversationTitleSummaryPlan,
+    content: string,
+  ): Promise<void> {
+    if (content.trim().length === 0) return;
+    try {
+      const context: Context = {
+        messages: [
+          {
+            role: "user",
+            content: createConversationTitlePrompt(plan.source, content),
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const options = {
+        ...(plan.model.requestOptions as ModelsSimpleStreamOptions | undefined),
+        signal: invocation.controller.signal,
+        sessionId: `${invocation.snapshot.sessionId}:title-summary`,
+        ...(plan.model.reasoning ? { reasoning: plan.model.reasoning } : {}),
+      } satisfies ModelsSimpleStreamOptions;
+      const stream = plan.model.models.streamSimple(plan.model.model, context, options);
+      let finalMessage: AssistantMessage | undefined;
+      for await (const event of stream) {
+        if (event.type === "done") {
+          finalMessage = event.message;
+        } else if (event.type === "error") {
+          finalMessage = event.error;
+        }
+      }
+      if (!finalMessage) throw new Error("标题总结模型流在返回最终消息前结束");
+      if (finalMessage.stopReason === "aborted") return;
+      if (finalMessage.stopReason === "error") {
+        throw new Error(finalMessage.errorMessage ?? "标题总结失败");
+      }
+      const title = normalizeConversationTitle(
+        assistantText(projectAssistantContent(finalMessage.content)),
+      );
+      if (title) {
+        await this.journal.rename(invocation.snapshot.sessionId, title);
+        invocation.snapshot = { ...invocation.snapshot, sessionTitle: title };
+        this.invocations.set(invocation.snapshot.id, invocation.snapshot);
+      }
+    } catch (error) {
+      if (!invocation.controller.signal.aborted && !isAbortError(error)) {
+        this.reportError(error);
+      }
+    }
+  }
+
   private async runInvocation(invocation: RunningInvocation): Promise<void> {
     let usage: AgentTokenUsage | undefined;
     let provider: AgentProviderResponseDetails | undefined;
     let contextTokens: number | undefined;
+    const initialTitleTask =
+      invocation.titleSummary?.source === "user-question"
+        ? this.tryUpdateConversationTitle(invocation, invocation.titleSummary, invocation.userText)
+        : Promise.resolve();
     try {
       const session = await this.journal.get(invocation.snapshot.sessionId);
       const agentMode = invocation.mode === "agent" && invocation.hasTools;
@@ -578,6 +700,10 @@ export class AgentRuntime {
       }
 
       const text = assistantText(completedBlocks);
+      if (invocation.titleSummary?.source === "assistant-answer") {
+        await this.tryUpdateConversationTitle(invocation, invocation.titleSummary, text);
+      }
+      await initialTitleTask;
       await this.finishInvocation(
         invocation,
         "completed",
@@ -589,6 +715,7 @@ export class AgentRuntime {
         contextTokens,
       );
     } catch (error) {
+      await initialTitleTask;
       const cancelled = invocation.controller.signal.aborted || isAbortError(error);
       const message = cancelled ? "调用已取消" : errorMessage(error);
       await this.finishOpenToolCalls(invocation, cancelled ? "cancelled" : "failed", message);

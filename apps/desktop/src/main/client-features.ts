@@ -1,5 +1,6 @@
 import { aboutUiManifest } from "@seashard/about-ui";
 import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
+import { agentSettingsUiManifest } from "@seashard/agent-settings-ui";
 import { agentSettingsProviderUiManifest } from "@seashard/agent-settings-provider-ui";
 import { pluginManagementUiRuntimeId, pluginMarketUiRuntimeId } from "@seashard/contracts";
 import { pluginMarketUiManifest } from "@seashard/plugin-market-ui";
@@ -32,6 +33,21 @@ export async function registerClientFeatures(kernel: PluginKernel): Promise<void
       {
         id: "core.agent-conversation.ui",
         entryId: "agent-conversation.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
+  // Agent 常规设置独立发布，只消费 Runtime 提供的设置 Contract。
+  await kernel.registerBuiltIn({
+    manifest: agentSettingsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: "core.agent-settings.ui",
+        entryId: "agent-settings.client",
         scopeType: "global",
         scopeId: "global",
         enabled: true,

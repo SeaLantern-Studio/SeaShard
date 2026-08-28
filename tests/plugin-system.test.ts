@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
 import {
+  agentSettingsContract,
   pluginManagementContract,
   pluginManagementUiRuntimeId,
 } from "../packages/contracts/src/index.ts";
+import { agentSettingsUiManifest } from "../frontend/agent/settings/src/index.ts";
 import { pluginSettingsUiManifest } from "../frontend/settings/plugin/src/index.ts";
 import type { ServiceResultValidationError } from "../packages/plugin-sdk/src/index.ts";
 import type {
@@ -397,6 +399,43 @@ await test("plugin settings Client may call every declared management method", a
     pluginId: "example.plugin",
     uninstalled: true,
   });
+});
+
+await test("agent settings Client declares every remote settings method", () => {
+  const manifestEntry = agentSettingsUiManifest.entries[0]!;
+  const entry: ResolvedEntry = {
+    package: {
+      manifest: agentSettingsUiManifest,
+      digest: "c".repeat(64),
+      rootPath: "builtin://seashard.agent-settings-ui",
+      source: "builtin",
+      trust: "builtin",
+      installedAt: "2026-08-27T00:00:00.000Z",
+    },
+    entry: manifestEntry,
+    binding: {
+      id: "core.agent-settings.ui",
+      pluginId: agentSettingsUiManifest.id,
+      entryId: manifestEntry.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: null,
+    },
+    runtimeId: "core.agent-settings.ui",
+    host: "client",
+  };
+
+  for (const method of ["get", "setAutomaticConversationSummary"]) {
+    assert.deepEqual(
+      authorizeEntryServiceCall(entry, {
+        contract: agentSettingsContract,
+        method,
+        args: [],
+      }),
+      { contract: agentSettingsContract, method, args: [] },
+    );
+  }
 });
 
 await test("built-in inventory removes retired packages and bindings before reconciliation", async () => {

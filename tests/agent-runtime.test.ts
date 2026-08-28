@@ -10,12 +10,15 @@ import {
   AgentOutputCollector,
   AgentRuntime,
   AgentSessionJournal,
+  AgentSettingsStore,
   AgentSessionLocalStore,
   bindAgentHelpResource,
   registerBuiltInAgentProviderTypes,
+  shouldRefreshConversationTitle,
   bindAgentLocalResource,
   type AgentModelSource,
 } from "../components/agent/runtime/src/index.ts";
+import { agentWorkspace } from "../frontend/agent/shared/src/index.ts";
 import {
   defaultAgentModelReasoningLevels,
   interleaveAgentInvocationContent,
@@ -26,7 +29,11 @@ import {
   AgentResourceRegistry,
   AgentToolRegistry,
 } from "../packages/plugin-system/src/runtime-registries.ts";
-import type { JsonValue } from "../packages/plugin-sdk/src/index.ts";
+import type {
+  JsonValue,
+  PluginStorage,
+  PluginStoredDocument,
+} from "../packages/plugin-sdk/src/index.ts";
 import {
   createAssistantMessageEventStream,
   createModels,
@@ -82,13 +89,50 @@ function createProviderTypes(): AgentProviderTypeRegistry {
   registerProviderTypes(registry);
   return registry;
 }
+
+class MemoryPluginStorage implements PluginStorage {
+  private readonly documents = new Map<string, PluginStoredDocument>();
+
+  async get(key: string): Promise<PluginStoredDocument | undefined> {
+    return this.documents.get(key);
+  }
+
+  async put(key: string, value: JsonValue): Promise<PluginStoredDocument> {
+    const previous = this.documents.get(key);
+    const document: PluginStoredDocument = {
+      value,
+      revision: (previous?.revision ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    this.documents.set(key, document);
+    return document;
+  }
+
+  async delete(key: string): Promise<boolean> {
+    return this.documents.delete(key);
+  }
+}
+
+type ScriptedModelResponse =
+  | AssistantMessage
+  | ((
+      context: Context,
+      options?: SimpleStreamOptions,
+    ) => AssistantMessage | Promise<AssistantMessage>);
+
 function createScriptedModelSource(
   modelId: string,
-  responses: readonly AssistantMessage[],
+  responses: readonly ScriptedModelResponse[],
   name = "Test Model",
+  reasoningLevels: readonly string[] = defaultAgentModelReasoningLevels,
 ): {
   readonly modelSource: AgentModelSource;
   readonly calls: Array<{ context: Context; options?: SimpleStreamOptions }>;
+  readonly resolutions: Array<{
+    readonly connectionId: string;
+    readonly modelId: string;
+    readonly reasoningLevel?: string;
+  }>;
 } {
   const faux = fauxProvider({
     api: "test-api",
@@ -96,30 +140,63 @@ function createScriptedModelSource(
     models: [{ id: modelId, name, reasoning: true, contextWindow: 128_000 }],
   });
   const calls: Array<{ context: Context; options?: SimpleStreamOptions }> = [];
+  const resolutions: Array<{
+    readonly connectionId: string;
+    readonly modelId: string;
+    readonly reasoningLevel?: string;
+  }> = [];
   faux.setResponses(
     responses.map((response) => (context, options) => {
       calls.push({
         context: JSON.parse(JSON.stringify(context)) as Context,
         ...(options ? { options: JSON.parse(JSON.stringify(options)) as SimpleStreamOptions } : {}),
       });
-      return response;
+      return typeof response === "function" ? response(context, options) : response;
     }),
   );
   const models = createModels();
   models.setProvider(faux.provider);
-  const configuredModel = { connectionId: "test", modelId, name };
+  const configuredModel = {
+    connectionId: "test",
+    modelId,
+    name,
+    settings: {
+      maximumContextTokens: 128_000,
+      reasoningLevels,
+    },
+  };
   return {
     calls,
+    resolutions,
     modelSource: {
       initialize: async () => {},
       list: async () => [configuredModel],
-      resolve: async () => ({
-        selection: { connectionId: configuredModel.connectionId, modelId },
-        models,
-        model: faux.getModel(),
-      }),
+      resolve: async (selection) => {
+        const resolvedSelection = selection ?? {
+          connectionId: configuredModel.connectionId,
+          modelId,
+        };
+        resolutions.push({ ...resolvedSelection });
+        return {
+          selection: { ...resolvedSelection },
+          models,
+          model: faux.getModel(),
+        };
+      },
     },
   };
+}
+
+function firstModelMessageText(context: Context): string {
+  const content = context.messages[0]?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block): block is Extract<(typeof content)[number], { type: "text" }> => {
+      return block.type === "text";
+    })
+    .map((block) => block.text)
+    .join("");
 }
 
 await test("pi-ai 内建供应商目录完整注册并保留自定义兼容入口", () => {
@@ -246,6 +323,44 @@ await test("Agent 模型目录创建 models.yml 并读取 Provider Type 配置",
     reasoningLevel: "low",
   });
   assert.equal(dirname(catalog.configPath), join(userDataRoot, "agent"));
+});
+await test("Runtime 模型投影保留配置中的推理档位顺序", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-model-order-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const catalog = new AgentModelCatalog({
+    userDataRoot,
+    providerTypes: createProviderTypes(),
+    environment: {},
+  });
+  await catalog.initialize();
+  context.after(() => catalog.dispose());
+  const reasoningLevels = ["low", "medium", "high", "xhigh", "max", "ultra"];
+  await writeFile(
+    catalog.configPath,
+    [
+      "providers:",
+      "  ordered:",
+      "    providerType: openai",
+      "    settings: {}",
+      "    models:",
+      "      - id: gpt-5.6-luna",
+      "        settings:",
+      "          maximumContextTokens: 272000",
+      `          reasoningLevels: [${reasoningLevels.join(", ")}]`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await waitForModels(catalog, ["ordered/gpt-5.6-luna"]);
+
+  assert.deepEqual((await catalog.list())[0]?.settings?.reasoningLevels, reasoningLevels);
+  assert.deepEqual(
+    (await catalog.getConfiguration()).connections[0]?.models?.[0]?.settings?.reasoningLevels,
+    reasoningLevels,
+  );
 });
 await test("旧格式 models.yml 不阻断 Agent 启动并可显式重置", async (context) => {
   const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-invalid-models-"));
@@ -727,8 +842,207 @@ await test("同供应商多连接隔离端点、凭据与 Models 容器", async 
   }
   assert.deepEqual(requests, [
     { url: "/official/v1/responses", authorization: "Bearer official-secret" },
+
     { url: "/proxy/v1/responses", authorization: "Bearer proxy-secret" },
   ]);
+});
+await test("Agent 设置默认开启自动总结并持久化关闭状态", async () => {
+  const storage = new MemoryPluginStorage();
+  const first = new AgentSettingsStore(storage);
+  assert.deepEqual(await first.get(), { automaticConversationSummary: true });
+  assert.deepEqual(await first.setAutomaticConversationSummary(false), {
+    automaticConversationSummary: false,
+  });
+  const reloaded = new AgentSettingsStore(storage);
+  assert.deepEqual(await reloaded.get(), { automaticConversationSummary: false });
+});
+
+await test("自动标题首轮并行总结用户问题并按 3–5 轮 AI 回答刷新", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-auto-title-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  let answerNumber = 0;
+  const responder: ScriptedModelResponse = (modelContext) => {
+    const prompt = firstModelMessageText(modelContext);
+    if (prompt.includes("【用户问题开始】")) {
+      return fauxAssistantMessage("# 「首轮规划标题。」");
+    }
+    if (prompt.includes("【AI 回答开始】")) {
+      return fauxAssistantMessage("**阶段实现标题！**");
+    }
+    answerNumber += 1;
+    return fauxAssistantMessage(`第${answerNumber}轮 AI 回答`);
+  };
+  const { modelSource, calls, resolutions } = createScriptedModelSource(
+    "title-model",
+    Array.from({ length: 16 }, () => responder),
+    "Title Model",
+    ["low", "medium", "high", "xhigh", "max", "ultra"],
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    settingsSource: {
+      get: async () => ({ automaticConversationSummary: true }),
+    },
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+
+  const firstQuestion = "如何规划一个新的 Minecraft 服务端？";
+  const firstReference = await runtime.startSession({
+    initialMessage: { text: firstQuestion },
+    mode: "chat",
+    model: { connectionId: "test", modelId: "title-model", reasoningLevel: "high" },
+  });
+  await waitForInvocation(runtime, firstReference.invocationId);
+  assert.equal((await runtime.getSession(firstReference.sessionId)).title, "首轮规划标题");
+  assert.deepEqual(resolutions.slice(0, 2), [
+    { connectionId: "test", modelId: "title-model", reasoningLevel: "high" },
+    { connectionId: "test", modelId: "title-model", reasoningLevel: "low" },
+  ]);
+
+  let refreshTurn = 2;
+  while (!shouldRefreshConversationTitle(firstReference.sessionId, refreshTurn)) {
+    refreshTurn += 1;
+  }
+  assert.ok(refreshTurn >= 4 && refreshTurn <= 6);
+  for (let turn = 2; turn <= refreshTurn; turn += 1) {
+    const reference = await runtime.sendMessage({
+      sessionId: firstReference.sessionId,
+      message: { text: `第${turn}轮用户问题` },
+      mode: "chat",
+    });
+    await waitForInvocation(runtime, reference.invocationId);
+  }
+  assert.equal((await runtime.getSession(firstReference.sessionId)).title, "阶段实现标题");
+
+  const summaryPrompts = calls
+    .map(({ context: modelContext }) => firstModelMessageText(modelContext))
+    .filter((prompt) => prompt.includes("你是对话标题生成器"));
+  assert.equal(summaryPrompts.length, 2);
+  assert.match(summaryPrompts[0] ?? "", new RegExp(firstQuestion, "u"));
+  assert.doesNotMatch(summaryPrompts[0] ?? "", /第1轮 AI 回答/u);
+  assert.match(summaryPrompts[1] ?? "", new RegExp(`第${refreshTurn}轮 AI 回答`, "u"));
+  assert.doesNotMatch(summaryPrompts[1] ?? "", new RegExp(`第${refreshTurn}轮用户问题`, "u"));
+
+  const refreshTurns = Array.from({ length: 30 }, (_, index) => index + 2).filter((turn) =>
+    shouldRefreshConversationTitle(firstReference.sessionId, turn),
+  );
+  const intervals = refreshTurns.map((turn, index) =>
+    index === 0 ? turn - 1 : turn - (refreshTurns[index - 1] ?? turn),
+  );
+  assert.ok(intervals.length >= 5);
+  assert.equal(
+    intervals.every((interval) => interval >= 3 && interval <= 5),
+    true,
+  );
+});
+
+await test("首轮标题在主 Invocation 仍运行时进入轮询快照", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-live-title-"));
+  let releaseMain!: () => void;
+  const mainGate = new Promise<void>((resolve) => {
+    releaseMain = resolve;
+  });
+  const responder: ScriptedModelResponse = async (modelContext) => {
+    const prompt = firstModelMessageText(modelContext);
+    if (prompt.includes("【用户问题开始】")) {
+      return fauxAssistantMessage("运行中标题");
+    }
+    await mainGate;
+    return fauxAssistantMessage("主回答完成");
+  };
+  const { modelSource } = createScriptedModelSource(
+    "live-title-model",
+    [responder, responder],
+    "Live Title Model",
+    ["low", "high"],
+  );
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    settingsSource: {
+      get: async () => ({ automaticConversationSummary: true }),
+    },
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(async () => {
+    releaseMain();
+    await runtime.dispose();
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "生成一个需要较长时间回答的问题。" },
+    mode: "chat",
+    model: { connectionId: "test", modelId: "live-title-model", reasoningLevel: "high" },
+  });
+  const running = await waitForInvocationSessionTitle(runtime, reference.invocationId);
+  assert.equal(running.state, "running");
+  assert.equal(running.sessionTitle, "运行中标题");
+  assert.equal((await runtime.getSession(reference.sessionId)).title, "运行中标题");
+
+  releaseMain();
+  const completed = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(completed.state, "completed");
+  assert.equal(completed.sessionTitle, "运行中标题");
+});
+
+await test("Agent 工作区立即应用运行快照携带的 Session 标题", () => {
+  const previousSessions = agentWorkspace.persistedSessions.value;
+  try {
+    agentWorkspace.persistedSessions.value = [
+      {
+        id: "live-title-session",
+        title: "新对话",
+        model: { connectionId: "test", modelId: "live-title-model" },
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+      },
+    ];
+    agentWorkspace.applySessionTitle("live-title-session", "运行中标题");
+    assert.equal(agentWorkspace.conversations.value[0]?.title, "运行中标题");
+  } finally {
+    agentWorkspace.persistedSessions.value = previousSessions;
+  }
+});
+
+await test("关闭自动总结时只执行主模型调用并保留新对话标题", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-auto-title-off-"));
+  context.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+  const { modelSource, calls } = createScriptedModelSource("title-off-model", [
+    fauxAssistantMessage("主回答"),
+  ]);
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    settingsSource: {
+      get: async () => ({ automaticConversationSummary: false }),
+    },
+    toolSource: new AgentToolRegistry(),
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+  const reference = await runtime.startSession({
+    initialMessage: { text: "不需要自动标题。" },
+    mode: "chat",
+  });
+  await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(calls.length, 1);
+  assert.equal((await runtime.getSession(reference.sessionId)).title, "新对话");
 });
 
 await test("Agent Session Journal 保留新对话标题并投影最近使用的模型", async (context) => {
@@ -2824,6 +3138,21 @@ async function waitForInvocationInteraction(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Agent Invocation did not request interaction");
+}
+async function waitForInvocationSessionTitle(
+  runtime: AgentRuntime,
+  invocationId: string,
+): Promise<Awaited<ReturnType<AgentRuntime["getInvocation"]>>> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const invocation = await runtime.getInvocation(invocationId);
+    if (invocation.sessionTitle) return invocation;
+    if (invocation.state !== "running") {
+      throw new Error("Agent Invocation finished before publishing its Session title");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Agent Invocation did not publish its Session title");
 }
 
 async function waitForInvocation(

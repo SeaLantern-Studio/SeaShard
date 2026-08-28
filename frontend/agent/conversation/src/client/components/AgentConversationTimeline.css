@@ -22,14 +22,15 @@
 }
 
 .agent-brand-mark {
-  width: 42px;
-  height: 42px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   border-radius: var(--sl-radius-md);
+
   background-image: var(--sl-software-logo);
   background-position: center;
   background-repeat: no-repeat;
-  background-size: contain;
+  background-size: 32px 32px;
 }
 
 .agent-message-list {
@@ -54,16 +55,17 @@
 }
 
 .agent-message-avatar {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   margin-top: 2px;
 }
 
 .agent-message-avatar .agent-brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--sl-radius-sm);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sl-radius-md);
+  background-size: 32px 32px;
 }
 
 .agent-user-message {
