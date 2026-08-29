@@ -190,14 +190,19 @@ export class ServerRuntimeManager {
   /**
    * 在同一实例的启动互斥区间内执行停机操作。
    * 已排队的启动会等待操作完成；已经先取得互斥权的启动则会令操作在写文件前失败。
+   * action 由内部调用方提供具体中文动作，让 Agent 收到与本次工具一致的停机提示。
    */
-  async runWhileStopped<T>(value: unknown, operation: () => Promise<T>): Promise<T> {
+  async runWhileStopped<T>(
+    value: unknown,
+    action: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     this.ensureActive();
     const instanceId = expectInstanceId(value);
     return this.runInstanceOperation(instanceId, async () => {
       this.ensureActive();
       if (isActiveState(this.get(instanceId).state)) {
-        throw new Error("服务器正在运行，无法修改世界数据包。请先停止服务器后重试。");
+        throw new Error(`服务器正在运行，无法${action}。请先停止服务器后重试。`);
       }
       return operation();
     });

@@ -15,6 +15,7 @@ import { serverInstanceDataCapsule, SQLiteServerInstanceRegistry } from "./regis
 import { registerServerInstanceAgentResources } from "./agent-resources";
 import { registerServerInstalledModAgentIntegration } from "./agent-mods";
 import { registerServerDatapackAgentResources } from "./agent-datapacks";
+import { registerServerWorldAgentResources } from "./agent-worlds";
 import type { ServerInstanceClientProjection } from "./types";
 import type { ServerInstanceRuntimeGate } from "./manager";
 
@@ -70,6 +71,11 @@ export function createServerInstanceManagerModule(
         setModDisabled: (instanceId, relativePath, disabled) =>
           manager.setModDisabled(instanceId, relativePath, disabled),
         deleteMod: (instanceId, relativePath) => manager.deleteMod(instanceId, relativePath),
+      });
+      registerServerWorldAgentResources(ctx, {
+        listInstances: () => manager.list(),
+        listWorldStorage: (instanceId) => manager.listWorldStorage(instanceId),
+        listWorldBackups: (instanceId, worldId) => manager.listWorldBackups(instanceId, worldId),
       });
       registerServerDatapackAgentResources(ctx, {
         listInstances: () => manager.list(),
@@ -181,6 +187,7 @@ function asJsonValue(value: unknown): JsonValue {
 export * from "./agent-resources";
 export * from "./agent-mods";
 export * from "./agent-datapacks";
+export * from "./agent-worlds";
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";

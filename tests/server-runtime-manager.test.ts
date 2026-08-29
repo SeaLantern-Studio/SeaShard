@@ -51,7 +51,7 @@ await test("stopped file operations exclude server startup until the transaction
     },
   });
 
-  const mutation = manager.runWhileStopped(vanillaInstance.id, async () => {
+  const mutation = manager.runWhileStopped(vanillaInstance.id, "执行测试操作", async () => {
     markOperationStarted();
     await operationGate;
     return "updated";
@@ -167,6 +167,15 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   );
   assert.equal(files.get(eulaPath), "# Minecraft EULA\neula=true\n");
   assert.equal(files.get(propertiesPath), "server-port=25566\n");
+
+  let stoppedMutationCalls = 0;
+  await assert.rejects(
+    manager.runWhileStopped(vanillaInstance.id, "创建世界备份", async () => {
+      stoppedMutationCalls += 1;
+    }),
+    /服务器正在运行，无法创建世界备份。请先停止服务器后重试。/u,
+  );
+  assert.equal(stoppedMutationCalls, 0);
 
   child.stdout.write("[Server thread/INFO]: Done\r\nsecond");
   child.stdout.write(" line\n");

@@ -11,6 +11,7 @@ import {
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import {
   registerServerDatapackAgentTools,
+  registerServerWorldAgentTools,
   type ServerInstanceManagerService,
   type ServerInstanceRuntimeGate,
 } from "@seashard/server-instance-manager";
@@ -89,12 +90,25 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): 
       registerServerDatapackAgentTools(ctx, {
         listWorldDatapacks: (instanceId, worldId) =>
           instances.listWorldDatapacks(instanceId, worldId),
-        runWhileServerStopped: (instanceId, operation) =>
-          manager.runWhileStopped(instanceId, operation),
+        runWhileServerStopped: (instanceId, action, operation) =>
+          manager.runWhileStopped(instanceId, action, operation),
         setWorldDatapackDisabled: (instanceId, worldId, fileName, disabled) =>
           instances.setWorldDatapackDisabled(instanceId, worldId, fileName, disabled),
         deleteWorldDatapack: (instanceId, worldId, fileName) =>
           instances.deleteWorldDatapack(instanceId, worldId, fileName),
+      });
+      registerServerWorldAgentTools(ctx, {
+        listWorldStorage: (instanceId) => instances.listWorldStorage(instanceId),
+        listWorldBackups: (instanceId, worldId) => instances.listWorldBackups(instanceId, worldId),
+        runWhileServerStopped: (instanceId, action, operation) =>
+          manager.runWhileStopped(instanceId, action, operation),
+        switchWorld: (instanceId, worldId) => instances.switchWorld(instanceId, worldId),
+        createWorldBackup: (instanceId, worldId) =>
+          instances.createWorldBackup(instanceId, worldId),
+        restoreWorldBackup: (instanceId, worldId, fileName) =>
+          instances.restoreWorldBackup(instanceId, worldId, fileName),
+        deleteWorldBackup: (instanceId, worldId, fileName) =>
+          instances.deleteWorldBackup(instanceId, worldId, fileName),
       });
 
       ctx.provide(serverRuntimeContract, {

@@ -232,6 +232,7 @@ function defaultInstalledOptions(
           name: "测试服务器名称非常非常长",
           rootPath: "C:/private/server-1",
           coreJarPath: "C:/private/server-1/server.jar",
+          modLoader: null,
           storageMode: "managed",
           source: "downloaded",
           createdAt: "2026-08-20T10:00:00.000Z",
@@ -245,7 +246,11 @@ function defaultInstalledOptions(
     async listWorldDatapacks() {
       return datapacks;
     },
-    async runWhileServerStopped<T>(_instanceId: string, operation: () => Promise<T>): Promise<T> {
+    async runWhileServerStopped<T>(
+      _instanceId: string,
+      _action: string,
+      operation: () => Promise<T>,
+    ): Promise<T> {
       return operation();
     },
     async setWorldDatapackDisabled(_instanceId, _worldId, fileName, disabled) {
@@ -289,14 +294,13 @@ function defaultCatalogOptions(
   };
 }
 
-await test("datapack Agent integration registers world, catalog, and confirmed tools", () => {
+await test("datapack Agent integration registers catalog, installed resource, and confirmed tools", () => {
   const harness = createDatapackAgentHarness(defaultInstalledOptions(), defaultCatalogOptions());
   assert.deepEqual(
     harness.resources.snapshot().definitions.map((definition) => definition.pattern),
     [
       "server://instances/{instanceId}/worlds/{worldId}/datapacks",
       "server://datapacks/catalog/{source}/{projectId}",
-      "server://instances/{instanceId}/worlds",
       "server://datapacks/catalog",
     ],
   );
@@ -311,23 +315,8 @@ await test("datapack Agent integration registers world, catalog, and confirmed t
   harness.dispose();
 });
 
-await test("world and installed datapack resources publish actionable IDs without image data", async () => {
+await test("installed datapack resource publishes actionable IDs without image data", async () => {
   const harness = createDatapackAgentHarness(defaultInstalledOptions(), defaultCatalogOptions());
-  const preparedWorlds = harness.resources
-    .snapshot()
-    .prepare(`server://instances/${instanceId}/worlds`, {});
-  assert.deepEqual(await preparedWorlds.presentRequest(), [
-    { label: "服务器", value: "测试服务器名称非常非…" },
-  ]);
-  const worlds = await preparedWorlds.read();
-  const worldContent = requireJsonObject(worlds.content, "worlds");
-  assert.equal(worldContent.mode, "split");
-  assert.equal(
-    requireJsonObject(requireJsonArray(worldContent.dimensions, "dimensions")[0], "dimension")
-      .worldId,
-    worldId,
-  );
-  assert.doesNotMatch(JSON.stringify(worldContent), /iconDataUrl|private-world-icon/u);
 
   const prepared = harness.resources
     .snapshot()
@@ -388,15 +377,16 @@ await test("world and installed datapack resources publish actionable IDs withou
 });
 
 await test("datapack tools preserve file names, enforce stopped state, and return receipts", async () => {
-  const stateChecks: string[] = [];
+  const stateChecks: Array<{ instanceId: string; action: string }> = [];
   const setCalls: JsonObject[] = [];
   const deleteCalls: JsonObject[] = [];
   const installed = defaultInstalledOptions({
     async runWhileServerStopped<T>(
       targetInstanceId: string,
+      action: string,
       operation: () => Promise<T>,
     ): Promise<T> {
-      stateChecks.push(targetInstanceId);
+      stateChecks.push({ instanceId: targetInstanceId, action });
       return operation();
     },
     async setWorldDatapackDisabled(targetInstanceId, targetWorldId, fileName, disabled) {
@@ -432,7 +422,10 @@ await test("datapack tools preserve file names, enforce stopped state, and retur
   assert.equal(requireJsonObject(deleted.before, "before").fileName, installedDatapack.fileName);
   assert.equal(deleted.after, null);
   assert.deepEqual(deleteCalls, [{ instanceId, worldId, fileName: installedDatapack.fileName }]);
-  assert.deepEqual(stateChecks, [instanceId, instanceId]);
+  assert.deepEqual(stateChecks, [
+    { instanceId, action: "禁用世界数据包" },
+    { instanceId, action: "删除世界数据包" },
+  ]);
   harness.dispose();
 
   const activeHarness = createDatapackAgentHarness(

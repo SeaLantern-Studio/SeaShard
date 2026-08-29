@@ -2,7 +2,6 @@ import type {
   ServerInstanceSnapshot,
   ServerResourceSourceMetadata,
   ServerWorldDatapackSnapshot,
-  ServerWorldSave,
   ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import {
@@ -17,6 +16,7 @@ import {
   type JsonValue,
   type PluginContext,
 } from "@seashard/plugin-sdk";
+import { findInstanceForPresentation, findWorldNameForPresentation } from "./agent-worlds";
 
 const defaultPage = 1;
 const defaultPageSize = 20;
@@ -25,7 +25,6 @@ const maximumPageSize = 50;
 const maximumQueryLength = 200;
 const maximumWorldIdLength = 512;
 const maximumFileNameLength = 512;
-const maximumWorldNameLength = 200;
 const maximumPresentationTextCharacters = 10;
 const presentationTextSegmenter = new Intl.Segmenter("zh-CN", { granularity: "grapheme" });
 const maximumDescriptionLength = 1_000;
@@ -63,7 +62,11 @@ export interface ServerDatapackAgentToolOptions extends Pick<
   ServerDatapackAgentResourceOptions,
   "listWorldDatapacks"
 > {
-  runWhileServerStopped<T>(instanceId: string, operation: () => Promise<T>): Promise<T>;
+  runWhileServerStopped<T>(
+    instanceId: string,
+    action: string,
+    operation: () => Promise<T>,
+  ): Promise<T>;
   setWorldDatapackDisabled(
     instanceId: string,
     worldId: string,
@@ -113,11 +116,6 @@ const fileNameProperty: JsonObject = {
     "server://instances/{instanceId}/worlds/{worldId}/datapacks 返回的文件名；不能提交路径或自行猜测名称。",
 };
 
-const emptyInputSchema: JsonObject = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
 const installedDatapacksInputSchema: JsonObject = {
   type: "object",
   properties: {
@@ -175,15 +173,14 @@ const deleteDatapackInputSchema: JsonObject = {
 };
 
 /**
- * 世界和已安装数据包都由实例管理器扫描；资源只发布可操作身份和安全元数据。
- * split 存储下数据包属于逻辑世界组，因此 dimensions 中额外发布可直接提交的 worldId。
+ * 已安装数据包由实例管理器扫描；资源只发布可操作身份和安全元数据。
+ * 世界清单由 agent-worlds 独立注册，数据包适配器只消费其稳定 worldId。
  */
 export function registerServerDatapackAgentResources(
   context: Pick<PluginContext, "agentResources">,
   options: ServerDatapackAgentResourceOptions,
 ): void {
   context.agentResources({
-    "server://instances/{instanceId}/worlds": createServerWorldsResource(options),
     "server://instances/{instanceId}/worlds/{worldId}/datapacks":
       createServerInstalledDatapacksResource(options),
   });
@@ -251,26 +248,6 @@ export function registerServerDatapackAgentIntegration(
   registerServerDatapackAgentTools(context, options);
 }
 
-export function createServerWorldsResource(
-  options: Pick<ServerDatapackAgentResourceOptions, "listInstances" | "listWorldStorage">,
-): AgentResource {
-  return defineAgentResource({
-    description:
-      "读取指定服务器实例可发现的世界存储布局和可操作世界 ID；unified 模式使用 saves.id，split 模式使用 dimensions.worldId。结果不包含宿主绝对路径或图标 Base64。",
-    inputSchema: emptyInputSchema,
-    outputDescription:
-      "返回存储模式、当前世界、世界存档和分维度分组；每个字段均为实例管理器的安全投影。",
-    examples: [{}],
-    help: "安装或管理数据包前先读取此资源；split 模式必须使用 dimensions 中的 worldId。",
-    presentation: { title: "读取服务器世界" },
-    implementation: {
-      read: (request, execution) => readServerWorlds(options, request, execution),
-      presentRequest: (request) => presentWorldsRequest(options, request),
-      presentResult: presentWorldsResult,
-    },
-  });
-}
-
 export function createServerInstalledDatapacksResource(
   options: ServerDatapackAgentResourceOptions,
 ): AgentResource {
@@ -291,22 +268,6 @@ export function createServerInstalledDatapacksResource(
       presentResult: presentInstalledDatapacksResult,
     },
   });
-}
-
-async function readServerWorlds(
-  options: Pick<ServerDatapackAgentResourceOptions, "listWorldStorage">,
-  request: AgentResourceReadRequest,
-  execution: AgentResourceExecutionContext,
-): Promise<AgentResourceReadResult> {
-  execution.signal?.throwIfAborted();
-  expectEmptyInput(request.input, "服务器世界资源");
-  const instanceId = expectInstanceId(request.pathParams.instanceId);
-  const storage = await waitForInvocation(options.listWorldStorage(instanceId), execution.signal);
-  execution.signal?.throwIfAborted();
-  return {
-    mimeType: "application/json",
-    content: projectWorldStorageForAgent(storage),
-  };
 }
 
 async function readServerInstalledDatapacks(
@@ -349,30 +310,6 @@ async function readServerInstalledDatapacks(
   };
 }
 
-async function presentWorldsRequest(
-  options: Pick<ServerDatapackAgentResourceOptions, "listInstances">,
-  request: AgentResourceReadRequest,
-): Promise<readonly AgentActivityPresentationField[]> {
-  expectEmptyInput(request.input, "服务器世界资源");
-  const instance = await findInstanceForPresentation(
-    options,
-    expectInstanceId(request.pathParams.instanceId),
-  );
-  return [{ label: "服务器", value: truncatePresentationText(instance.name) }];
-}
-
-function presentWorldsResult(
-  _request: AgentResourceReadRequest,
-  result: AgentResourceReadResult,
-): readonly AgentActivityPresentationField[] {
-  const output = expectObjectOutput(result.content, "服务器世界资源结果");
-  if (!Array.isArray(output.saves) || !Array.isArray(output.dimensions)) {
-    throw new TypeError("服务器世界资源结果缺少 saves 或 dimensions");
-  }
-  const count = output.mode === "split" ? output.dimensions.length : output.saves.length;
-  return [{ value: String(count), unit: "个世界" }];
-}
-
 async function presentInstalledDatapacksRequest(
   options: Pick<ServerDatapackAgentResourceOptions, "listInstances" | "listWorldStorage">,
   request: AgentResourceReadRequest,
@@ -396,27 +333,6 @@ async function presentInstalledDatapacksRequest(
   ];
 }
 
-async function findInstanceForPresentation(
-  options: Pick<ServerDatapackAgentResourceOptions, "listInstances">,
-  instanceId: string,
-): Promise<ServerInstanceSnapshot> {
-  const instance = (await options.listInstances()).find(({ id }) => id === instanceId);
-  if (!instance) throw new Error(`找不到服务器实例：${instanceId}`);
-  return instance;
-}
-
-function findWorldNameForPresentation(
-  storage: ServerWorldStorageSnapshot,
-  worldId: string,
-): string {
-  const world =
-    storage.mode === "unified"
-      ? storage.saves.find(({ id }) => id === worldId)
-      : storage.dimensions.find(({ id }) => id === worldId);
-  if (!world) throw new Error(`服务器实例 ${storage.instanceId} 中不存在世界：${worldId}`);
-  return world.name;
-}
-
 function presentInstalledDatapacksResult(
   _request: AgentResourceReadRequest,
   result: AgentResourceReadResult,
@@ -436,15 +352,19 @@ async function setServerDatapackDisabled(
   const before = await findInstalledDatapack(options, input, execution.signal);
   // 回调取得 Runtime 的实例互斥权后再次检查 Invocation，取消排队中的调用不会延迟执行写事务。
   const after = await waitForInvocation(
-    options.runWhileServerStopped(input.instanceId, async () => {
-      execution.signal?.throwIfAborted();
-      return options.setWorldDatapackDisabled(
-        input.instanceId,
-        input.worldId,
-        input.fileName,
-        input.disabled!,
-      );
-    }),
+    options.runWhileServerStopped(
+      input.instanceId,
+      input.disabled ? "禁用世界数据包" : "启用世界数据包",
+      async () => {
+        execution.signal?.throwIfAborted();
+        return options.setWorldDatapackDisabled(
+          input.instanceId,
+          input.worldId,
+          input.fileName,
+          input.disabled!,
+        );
+      },
+    ),
     execution.signal,
   );
   execution.signal?.throwIfAborted();
@@ -463,7 +383,7 @@ async function deleteServerDatapack(
   const input = parseDatapackTargetInput(value, "server_delete-datapack", false);
   const before = await findInstalledDatapack(options, input, execution.signal);
   await waitForInvocation(
-    options.runWhileServerStopped(input.instanceId, async () => {
+    options.runWhileServerStopped(input.instanceId, "删除世界数据包", async () => {
       execution.signal?.throwIfAborted();
       return options.deleteWorldDatapack(input.instanceId, input.worldId, input.fileName);
     }),
@@ -489,36 +409,6 @@ async function findInstalledDatapack(
     );
   }
   return datapack;
-}
-
-/** 世界投影保留逻辑 ID、维度关系和当前状态，隐藏宿主路径与内嵌图标。 */
-export function projectWorldStorageForAgent(storage: ServerWorldStorageSnapshot): JsonObject {
-  return {
-    instanceId: storage.instanceId,
-    mode: storage.mode,
-    ...(storage.currentId ? { currentId: storage.currentId } : {}),
-    saves: storage.saves.map((save) => projectWorldSaveForAgent(save)),
-    dimensions: storage.dimensions.map((group) => ({
-      worldId: truncateText(group.id, maximumWorldIdLength),
-      name: truncateText(group.name, maximumWorldNameLength),
-      current: group.current,
-      saves: group.saves.map((save) => projectWorldSaveForAgent(save)),
-    })),
-  };
-}
-
-function projectWorldSaveForAgent(save: ServerWorldSave): JsonObject {
-  const resourceSource = projectKnownResourceSource(save.resourceSource);
-  return {
-    id: truncateText(save.id, maximumWorldIdLength),
-    groupId: truncateText(save.groupId, maximumWorldIdLength),
-    name: truncateText(save.name, maximumWorldNameLength),
-    dimension: save.dimension,
-    current: save.current,
-    ...(save.createdAt ? { createdAt: save.createdAt } : {}),
-    ...(save.updatedAt ? { updatedAt: save.updatedAt } : {}),
-    ...(resourceSource ? { resourceSource } : {}),
-  };
 }
 
 /** 数据包投影保留原生启用状态和可操作文件名，隐藏绝对路径、内嵌图标与远程图标。 */
@@ -593,10 +483,6 @@ function parseDatapackTargetInput(
     fileName: expectDatapackFileName(input.fileName),
     ...(withDisabled ? { disabled: expectBoolean(input.disabled, "disabled") } : {}),
   };
-}
-
-function expectEmptyInput(value: JsonValue, label: string): void {
-  expectObject(value, label, {});
 }
 
 function expectObject(
