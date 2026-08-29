@@ -20,6 +20,7 @@ await test("server runtime registers isolated Agent resources and correlated too
     { readonly definition: AgentToolDefinition; readonly execute: AgentToolHandler }
   >();
   const commands: string[] = [];
+  const waitTimeouts: number[] = [];
   const consoleLines = [
     createConsoleLine(49, "system", "first retained line"),
     createConsoleLine(50, "input", "> help"),
@@ -57,6 +58,31 @@ await test("server runtime registers isolated Agent resources and correlated too
       commands.push(command);
       return { accepted: true, commandLogSequence: 55 };
     },
+    waitUntilReady: async (_instanceId, waitOptions) => {
+      waitTimeouts.push(waitOptions.timeoutMs);
+      return {
+        snapshot: {
+          instanceId: vanillaInstance.id,
+          state: "running",
+          startedAt: "2026-08-24T17:09:00.000Z",
+        },
+        readyLogSequence: 56,
+        readyAt: "2026-08-24T17:09:08.000Z",
+        readyMarker: '[Server thread/INFO]: Done (8.000s)! For help, type "help"',
+      };
+    },
+    waitUntilStopped: async (_instanceId, waitOptions) => {
+      waitTimeouts.push(waitOptions.timeoutMs);
+      return {
+        snapshot: {
+          instanceId: vanillaInstance.id,
+          state: "stopped",
+          startedAt: "2026-08-24T17:09:00.000Z",
+          stoppedAt: "2026-08-24T17:10:00.000Z",
+          exitCode: 0,
+        },
+      };
+    },
   };
   const context: Pick<PluginContext, "agentResources" | "agentTool"> = {
     agentResources(registered) {
@@ -79,6 +105,8 @@ await test("server runtime registers isolated Agent resources and correlated too
     "server_send-command",
     "server_start",
     "server_stop",
+    "server_wait-ready",
+    "server_wait-stopped",
   ]);
 
   const runtimeResource = resources["server://instances/{instanceId}/runtime"]!;
@@ -181,6 +209,37 @@ await test("server runtime registers isolated Agent resources and correlated too
       stopCommandLogSequence: 54,
     },
   );
+  assert.equal(tools.get("server_wait-ready")?.definition.confirmationLevel, 0);
+  assert.equal(tools.get("server_wait-stopped")?.definition.confirmationLevel, 0);
+  assert.equal(
+    await executeTool(tools, "server_wait-ready", {
+      instanceId: vanillaInstance.id,
+      timeoutSeconds: 7,
+    }),
+    [
+      "Server name: 1.21.1-vanilla",
+      "Instance ID: instance-vanilla",
+      "Ready: yes",
+      "State: running",
+      "Ready at: 2026-08-24T17:09:08.000Z",
+      "Ready log sequence: 56",
+      'Readiness marker: [Server thread/INFO]: Done (8.000s)! For help, type "help"',
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    await executeTool(tools, "server_wait-stopped", {
+      instanceId: vanillaInstance.id,
+      json: true,
+    }),
+    {
+      instanceId: vanillaInstance.id,
+      name: vanillaInstance.name,
+      state: "stopped",
+      startedAt: "2026-08-24T17:09:00.000Z",
+      stoppedAt: "2026-08-24T17:10:00.000Z",
+      exitCode: 0,
+    },
+  );
   assert.equal(
     await executeTool(tools, "server_send-command", {
       instanceId: vanillaInstance.id,
@@ -194,6 +253,7 @@ await test("server runtime registers isolated Agent resources and correlated too
     ].join("\n"),
   );
   assert.deepEqual(commands, ["list"]);
+  assert.deepEqual(waitTimeouts, [7_000, 300_000]);
 });
 
 function createConsoleLine(

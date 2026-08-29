@@ -86,6 +86,10 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): 
         start: (instanceId) => manager.startWithReceipt(instanceId),
         stop: (instanceId) => manager.stopWithReceipt(instanceId),
         sendCommand: (instanceId, command) => manager.sendCommandWithReceipt(instanceId, command),
+        waitUntilReady: (instanceId, waitOptions) =>
+          manager.waitUntilReady(instanceId, waitOptions),
+        waitUntilStopped: (instanceId, waitOptions) =>
+          manager.waitUntilStopped(instanceId, waitOptions),
       });
       registerServerDatapackAgentTools(ctx, {
         listWorldDatapacks: (instanceId, worldId) =>

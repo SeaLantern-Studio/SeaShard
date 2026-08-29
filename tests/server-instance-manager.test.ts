@@ -462,6 +462,24 @@ await test("managed downloads persist unique instances and split portable manife
       assert.equal(serverInformation.minecraft.version, request.gameVersion);
       assert.equal("name" in serverInformation, false);
     }
+    const renamed = await manager.rename("instance-1", " Survival ");
+    assert.equal(renamed.name, "Survival");
+    await assert.rejects(
+      manager.rename("instance-2", "ｓｕｒｖｉｖａｌ"),
+      /服务器实例名称已被占用/u,
+    );
+    assert.equal((await manager.list()).find(({ id }) => id === "instance-1")?.name, "Survival");
+    const renamedManifest = JSON.parse(
+      await readFile(
+        join(
+          renamed.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.equal(renamedManifest.name, "Survival");
     const managedInstance = instances.find(({ id }) => id === "instance-1")!;
     const firstWorldInstance = await manager.ensureWorldStorageDirectory(managedInstance.id);
     const secondWorldInstance = await manager.ensureWorldStorageDirectory(managedInstance.id);

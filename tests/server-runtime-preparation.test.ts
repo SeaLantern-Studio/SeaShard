@@ -287,12 +287,16 @@ await test("SpongeForge installs standard Forge, copies the Universal mod, and r
   assert.equal(files.get(resolve(rootPath, "server.properties")), "server-port=25566\n");
 
   await manager.stop(instance.id);
+  const firstStop = manager.waitUntilStopped(instance.id, { timeoutMs: 1_000 });
   children[1]!.finish(0, null);
+  await firstStop;
   await manager.start(instance.id);
   assert.equal(spawnCalls.length, 3);
   assert.deepEqual(spawnCalls[2]!.arguments_, plan.arguments);
   await manager.stop(instance.id);
+  const secondStop = manager.waitUntilStopped(instance.id, { timeoutMs: 1_000 });
   children[2]!.finish(0, null);
+  await secondStop;
   await manager.dispose();
 });
 

@@ -1,5 +1,10 @@
-import type { ServerInstanceSnapshot } from "../packages/contracts/src/index.ts";
+import {
+  serverRuntimeSupportedTypes,
+  type ServerInstanceSnapshot,
+  type ServerRuntimeSupportedType,
+} from "../packages/contracts/src/index.ts";
 import { ServerRuntimeManager } from "../components/server/runtime/src/manager.ts";
+import { matchesServerReadinessMarker } from "../components/server/runtime/src/readiness.ts";
 import type { SpawnServerProcess } from "../components/server/runtime/src/process.ts";
 import { formatRuntimeDuration } from "../frontend/server/shared/src/runtime-duration.ts";
 import assert from "node:assert/strict";
@@ -21,6 +26,46 @@ await test("runtime duration formatting keeps stable Chinese units", () => {
   assert.equal(formatRuntimeDuration(61_000), "1 分 1 秒");
   assert.equal(formatRuntimeDuration(3_661_000), "1 小时 1 分");
   assert.equal(formatRuntimeDuration(90_000_000), "1 天 1 小时");
+});
+
+await test("runtime readiness markers cover every supported core protocol", () => {
+  const listeningTypes = new Set<ServerRuntimeSupportedType>([
+    "bungeecord",
+    "lightfall",
+    "travertine",
+  ]);
+  for (const serverType of serverRuntimeSupportedTypes) {
+    if (listeningTypes.has(serverType)) {
+      assert.equal(matchesServerReadinessMarker(serverType, "Listening on /0.0.0.0:25577"), true);
+      assert.equal(
+        matchesServerReadinessMarker(serverType, 'Done (1.000s)! For help, type "help"'),
+        false,
+      );
+      continue;
+    }
+    assert.equal(
+      matchesServerReadinessMarker(serverType, 'Done (1.000s)! For help, type "help"'),
+      true,
+    );
+  }
+  assert.equal(
+    matchesServerReadinessMarker("banner", '加载完成 (10.574s)！如需帮助，请键入 "help" 或 "?"'),
+    true,
+  );
+  assert.equal(
+    matchesServerReadinessMarker(
+      "nukkitx",
+      "23:41:21 [main] [INFO] Done (4.018s)! For help, type help",
+    ),
+    true,
+  );
+  for (const serverType of listeningTypes) {
+    assert.equal(matchesServerReadinessMarker(serverType, "Listening on /127.0.0.1:25577"), true);
+    assert.equal(
+      matchesServerReadinessMarker(serverType, "Listening on /localhost/127.0.0.1:25577"),
+      true,
+    );
+  }
 });
 
 await test("stopped file operations exclude server startup until the transaction settles", async () => {
@@ -80,7 +125,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
       [eulaPath, "# Minecraft EULA\neula=false\neula=false\n"],
     ]),
   );
-  const child = new FakeServerProcess();
+  let child = new FakeServerProcess();
   const spawnCalls: Array<{
     command: string;
     arguments_: readonly string[];
@@ -177,7 +222,8 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   );
   assert.equal(stoppedMutationCalls, 0);
 
-  child.stdout.write("[Server thread/INFO]: Done\r\nsecond");
+  const readyWait = manager.waitUntilReady(vanillaInstance.id, { timeoutMs: 1_000 });
+  child.stdout.write('[Server thread/INFO]: Done (6.793s)! For help, type "help"\r\nsecond');
   child.stdout.write(" line\n");
   child.stdout.write(Buffer.from("c3fcc1eeb2bbb4e6d4da0a", "hex"));
   child.stdout.write("\u001b]0;Nukkit MOT\u0007");
@@ -185,6 +231,17 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   child.stdout.write("Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8\n");
   child.stderr.write("0% [        ]\r50% [====    ]\r100% [========]\n");
   child.stderr.write("warning from java\n");
+  assert.deepEqual(await readyWait, {
+    snapshot: {
+      instanceId: vanillaInstance.id,
+      state: "running",
+      pid: 4_242,
+      startedAt: "2026-08-17T13:00:00.000Z",
+    },
+    readyLogSequence: 3,
+    readyAt: "2026-08-17T13:00:00.000Z",
+    readyMarker: '[Server thread/INFO]: Done (6.793s)! For help, type "help"',
+  });
   const commandReceipt = await manager.sendCommandWithReceipt(vanillaInstance.id, "list");
   assert.equal((child.stdin as PassThrough).read()?.toString(), "list\n");
   assert.equal(
@@ -199,7 +256,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
       .filter((line) => ["stdout", "stderr", "input"].includes(line.stream))
       .map((line) => `${line.stream}:${line.text}`),
     [
-      "stdout:[Server thread/INFO]: Done",
+      'stdout:[Server thread/INFO]: Done (6.793s)! For help, type "help"',
       "stdout:second line",
       "stdout:命令不存在",
       "stdout:22:38:12 [main] [INFO] Ready",
@@ -220,12 +277,21 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   );
   assert.equal((child.stdin as PassThrough).read()?.toString(), "stop\n");
   assert.equal((await manager.stop(vanillaInstance.id)).state, "stopping");
+  const stoppedWait = manager.waitUntilStopped(vanillaInstance.id, { timeoutMs: 1_000 });
   child.emitExit(0, null);
   child.stdout.write("saved tail without newline");
   assert.equal(manager.get(vanillaInstance.id).state, "stopping");
   now = new Date("2026-08-17T13:02:03.000Z");
   child.emitClose(0, null);
   await new Promise<void>((resolveWait) => setImmediate(resolveWait));
+  assert.deepEqual((await stoppedWait).snapshot, {
+    instanceId: vanillaInstance.id,
+    state: "stopped",
+    pid: 4_242,
+    startedAt: "2026-08-17T13:00:00.000Z",
+    stoppedAt: "2026-08-17T13:02:03.000Z",
+    exitCode: 0,
+  });
   assert.deepEqual(manager.get(vanillaInstance.id), {
     instanceId: vanillaInstance.id,
     state: "stopped",
@@ -249,6 +315,44 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   );
   assert.equal(
     emittedLines.includes("system:[SeaShard] Vanilla 服务器进程已启动（Java 21.0.7）。"),
+    true,
+  );
+
+  // 第二次运行仍保留上一轮日志；等待器只能接受当前 ActiveSession 新产生的就绪标志。
+  child = new FakeServerProcess();
+  now = new Date("2026-08-17T13:03:00.000Z");
+  await manager.start(vanillaInstance.id);
+  const cancelled = new AbortController();
+  const staleMarkerWait = manager.waitUntilReady(vanillaInstance.id, {
+    timeoutMs: 1_000,
+    signal: cancelled.signal,
+  });
+  cancelled.abort(new Error("restart readiness wait cancelled"));
+  await assert.rejects(staleMarkerWait, /restart readiness wait cancelled/u);
+
+  const restartedReadyWait = manager.waitUntilReady(vanillaInstance.id, { timeoutMs: 1_000 });
+  child.stdout.write('[Server thread/INFO]: Done (1.000s)! For help, type "help"\n');
+  assert.equal((await restartedReadyWait).readyMarker.includes("Done (1.000s)!"), true);
+
+  await manager.stop(vanillaInstance.id);
+  const restartedStoppedWait = manager.waitUntilStopped(vanillaInstance.id, {
+    timeoutMs: 1_000,
+  });
+  now = new Date("2026-08-17T13:04:00.000Z");
+  child.finish(0, null);
+  assert.equal((await restartedStoppedWait).snapshot.state, "stopped");
+
+  // close 时仍要把无换行尾部写入控制台，但 stopping 会话不能再被这段 Done 标记为可用。
+  child = new FakeServerProcess();
+  now = new Date("2026-08-17T13:05:00.000Z");
+  await manager.start(vanillaInstance.id);
+  const closingReadyWait = manager.waitUntilReady(vanillaInstance.id, { timeoutMs: 1_000 });
+  const closingMarker = '[Server thread/INFO]: Done (0.500s)! For help, type "help"';
+  child.stdout.write(closingMarker);
+  child.finish(0, null);
+  await assert.rejects(closingReadyWait, /exited before becoming ready/u);
+  assert.equal(
+    manager.getLogs(vanillaInstance.id).some(({ text }) => text === closingMarker),
     true,
   );
   await manager.dispose();

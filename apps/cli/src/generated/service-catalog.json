@@ -1596,7 +1596,7 @@
       "contract": "seashard.server-instance-manager",
       "owner": "seashard.server-instance-manager",
       "description": "实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。",
-      "source": "components/server/instance-manager/src/types.ts:246",
+      "source": "components/server/instance-manager/src/types.ts:254",
       "methods": [
         {
           "name": "createManaged",
@@ -1634,6 +1634,28 @@
           "returns": {
             "type": "Promise<readonly ServerInstanceClientProjection[]>",
             "description": "可以跨 Client 边界发布的实例投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "rename",
+          "signature": "rename(instanceId: string, name: string): Promise<ServerInstanceClientProjection>",
+          "description": "修改 SeaShard 实例显示名称；目录、核心文件与世界目录均保持原位。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "description": "去除首尾空白后的唯一显示名称。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceClientProjection>",
+            "description": "更新后的实例投影。"
           },
           "throws": []
         },

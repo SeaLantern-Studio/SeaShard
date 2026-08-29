@@ -57,6 +57,14 @@ export interface ServerInstanceManagerService {
    */
   listForClient(): Promise<readonly ServerInstanceClientProjection[]>;
   /**
+   * 修改 SeaShard 实例显示名称；目录、核心文件与世界目录均保持原位。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param name 去除首尾空白后的唯一显示名称。
+   * @returns 更新后的实例投影。
+   */
+  rename(instanceId: string, name: string): Promise<ServerInstanceClientProjection>;
+  /**
    * 持久化启动参数，并返回可直接交给 Client 的最新实例投影。
    *
    * @param instanceId 已登记实例 ID。

@@ -1,17 +1,13 @@
-import {
-  serverJvmArgumentsMaximumLength,
-  serverPortLimits,
-  type JavaInstallationSnapshot,
-  type ServerConsoleLine,
-  type ServerConsoleStream,
-  type ServerInstanceStartupSettings,
-  type ServerLaunchCommandPreview,
-  type ServerInstanceSnapshot,
-  type ServerRuntimeSnapshot,
-  type ServerSettingsSnapshot,
+import type {
+  JavaInstallationSnapshot,
+  ServerConsoleLine,
+  ServerConsoleStream,
+  ServerLaunchCommandPreview,
+  ServerInstanceSnapshot,
+  ServerRuntimeSnapshot,
+  ServerSettingsSnapshot,
 } from "@seashard/contracts";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { ProcessLineDecoder } from "./console-decoder";
 import { defaultServerRuntimeFileSystem, type ServerRuntimeFileSystem } from "./filesystem";
 import {
   createJavaEnvironment,
@@ -24,11 +20,29 @@ import {
   type FetchPreparationArtifact,
   ServerPreparationRunner,
 } from "./preparation-runner";
+import {
+  captureSessionReadiness,
+  createActiveSession,
+  type ActiveSession,
+} from "./manager/session";
+import {
+  waitForRuntimeEvent,
+  type ServerRuntimeReadyReceipt,
+  type ServerRuntimeStoppedReceipt,
+  type ServerRuntimeWaitOptions,
+} from "./manager/wait";
+import {
+  expectAfterSequence,
+  expectCommand,
+  expectInstanceId,
+  expectServerInstanceStartupSettings,
+  formatServerLaunchCommand,
+  resolveServerRuntimeSettings,
+} from "./manager/validation";
 import { buildServerLaunchPlan, selectJavaInstallation } from "./profiles";
 import { prepareRuntimeFiles } from "./runtime-files";
 
 const maximumConsoleLines = 5_000;
-const maximumCommandLength = 32_768;
 const defaultStopGracePeriodMs = 15_000;
 
 export interface ServerRuntimeManagerOptions {
@@ -68,39 +82,16 @@ export interface ServerRuntimeCommandReceipt {
   readonly commandLogSequence: number;
 }
 
+export type {
+  ServerRuntimeReadyReceipt,
+  ServerRuntimeStoppedReceipt,
+  ServerRuntimeWaitOptions,
+} from "./manager/wait";
+export { formatServerLaunchCommand, resolveServerRuntimeSettings } from "./manager/validation";
+
 interface ConsoleLogState {
   nextSequence: number;
   lines: ServerConsoleLine[];
-}
-
-interface ActiveSession {
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly stdout: ProcessLineDecoder;
-  readonly stderr: ProcessLineDecoder;
-  readonly closed: Promise<void>;
-  readonly resolveClosed: () => void;
-  readonly stopCommand: string;
-  snapshot: ServerRuntimeSnapshot;
-  forceStopTimer?: ReturnType<typeof setTimeout>;
-  stdinFailure?: Error;
-  stopCommandLogSequence?: number;
-}
-
-/** 单个实例保存的是完整设置组；存在时整体映射到运行组件现有的全局设置结构。 */
-export function resolveServerRuntimeSettings(
-  instance: ServerInstanceSnapshot,
-  defaults: ServerSettingsSnapshot,
-  override: ServerInstanceStartupSettings | undefined = instance.startupSettings,
-): ServerSettingsSnapshot {
-  if (!override) return defaults;
-  return {
-    ...defaults,
-    defaultMinimumMemoryMiB: override.minimumMemoryMiB,
-    defaultMaximumMemoryMiB: override.maximumMemoryMiB,
-    defaultServerPort: override.serverPort,
-    autoAcceptEula: override.autoAcceptEula,
-    defaultJvmArguments: override.jvmArguments,
-  };
 }
 
 /**
@@ -188,6 +179,79 @@ export class ServerRuntimeManager {
   }
 
   /**
+   * 等待当前进程输出其核心协议对应的启动完成标志。
+   * 匹配状态保存在 ActiveSession 中，因此不会把上一次运行残留的 Done 日志误认为本次已就绪。
+   */
+  async waitUntilReady(
+    value: unknown,
+    options: ServerRuntimeWaitOptions,
+  ): Promise<ServerRuntimeReadyReceipt> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(value);
+    const session = this.sessions.get(instanceId);
+    if (!session || session.snapshot.state !== "running") {
+      throw new Error(`server instance ${instanceId} is not running`);
+    }
+
+    let readyLine = session.readyLine;
+    if (!readyLine) {
+      const outcome = await waitForRuntimeEvent(
+        Promise.race([
+          session.ready.then((line) => ({ kind: "ready", line }) as const),
+          session.closed.then(() => ({ kind: "closed" }) as const),
+        ]),
+        options,
+        `等待服务器 ${instanceId} 启动完成`,
+      );
+      readyLine = outcome.kind === "ready" ? outcome.line : session.readyLine;
+      if (!readyLine) {
+        const snapshot = this.get(instanceId);
+        throw new Error(
+          `server instance ${instanceId} exited before becoming ready (state: ${snapshot.state})`,
+        );
+      }
+    }
+
+    const snapshot = this.get(instanceId);
+    if (this.sessions.get(instanceId) !== session || snapshot.state !== "running") {
+      throw new Error(
+        `server instance ${instanceId} stopped before the ready receipt was completed`,
+      );
+    }
+    return {
+      snapshot,
+      readyLogSequence: readyLine.sequence,
+      readyAt: readyLine.timestamp,
+      readyMarker: readyLine.text,
+    };
+  }
+
+  /**
+   * 等待安全停止请求完成进程退出和实例生命周期释放。
+   * 已结算的 stopped/failed 状态直接返回，便于 Agent 对重复等待保持幂等。
+   */
+  async waitUntilStopped(
+    value: unknown,
+    options: ServerRuntimeWaitOptions,
+  ): Promise<ServerRuntimeStoppedReceipt> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(value);
+    const current = this.get(instanceId);
+    if (isTerminalState(current.state)) return { snapshot: current };
+
+    const session = this.sessions.get(instanceId);
+    if (!session || current.state !== "stopping") {
+      throw new Error(`server instance ${instanceId} has not been requested to stop`);
+    }
+    await waitForRuntimeEvent(session.closed, options, `等待服务器 ${instanceId} 完全停止`);
+    const snapshot = this.get(instanceId);
+    if (!isTerminalState(snapshot.state)) {
+      throw new Error(`server instance ${instanceId} returned an incomplete stopped state`);
+    }
+    return { snapshot };
+  }
+
+  /**
    * 在同一实例的启动互斥区间内执行停机操作。
    * 已排队的启动会等待操作完成；已经先取得互斥权的启动则会令操作在写文件前失败。
    * action 由内部调用方提供具体中文动作，让 Agent 收到与本次工具一致的停机提示。
@@ -245,7 +309,20 @@ export class ServerRuntimeManager {
         env: environment,
         windowsHide: true,
       });
-      const session = this.createSession(instanceId, child, startingSnapshot, plan.stopCommand);
+      const session = createActiveSession(
+        child,
+        startingSnapshot,
+        plan.serverType,
+        plan.stopCommand,
+        {
+          onLine: (stream, text) => this.appendLine(instanceId, stream, text),
+          onStdinError: (error) => this.handleStdinError(instanceId, child!, error),
+          onProcessError: (error) => this.handleProcessError(instanceId, child!, error),
+          onClose: (code, signal) => {
+            void this.handleClose(instanceId, child!, code, signal);
+          },
+        },
+      );
       this.sessions.set(instanceId, session);
       await waitForSpawn(child);
       if (this.sessions.get(instanceId) !== session) {
@@ -434,38 +511,6 @@ export class ServerRuntimeManager {
     }
   }
 
-  private createSession(
-    instanceId: string,
-    child: ChildProcessWithoutNullStreams,
-    snapshot: ServerRuntimeSnapshot,
-    stopCommand: string,
-  ): ActiveSession {
-    const stdout = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stdout", line));
-    const stderr = new ProcessLineDecoder((line) => this.appendLine(instanceId, "stderr", line));
-    let resolveClosed = (): void => {};
-    const closed = new Promise<void>((resolveSession) => {
-      resolveClosed = resolveSession;
-    });
-    const session: ActiveSession = {
-      child,
-      stdout,
-      stderr,
-      closed,
-      resolveClosed,
-      stopCommand,
-      snapshot,
-    };
-    child.stdout.on("data", (chunk: Buffer | string) => stdout.write(chunk));
-    child.stderr.on("data", (chunk: Buffer | string) => stderr.write(chunk));
-    child.stdin.on("error", (error: Error) => this.handleStdinError(instanceId, child, error));
-    child.on("error", (error) => this.handleProcessError(instanceId, child, error));
-    // close 在 stdout/stderr 已关闭后触发，能够保证最后一块无换行输出也被解码。
-    child.once("close", (code, signal) => {
-      void this.handleClose(instanceId, child, code, signal);
-    });
-    return session;
-  }
-
   private async handleClose(
     instanceId: string,
     child: ChildProcessWithoutNullStreams,
@@ -633,6 +678,8 @@ export class ServerRuntimeManager {
       state.lines.splice(0, state.lines.length - maximumConsoleLines);
     }
     this.logs.set(instanceId, state);
+    const session = this.sessions.get(instanceId);
+    if (session) captureSessionReadiness(session, stream, line);
     try {
       this.options.onConsoleLine?.({ ...line });
     } catch (error) {
@@ -674,90 +721,8 @@ function isActiveState(state: ServerRuntimeSnapshot["state"]): boolean {
   return state === "starting" || state === "running" || state === "stopping";
 }
 
-/** spawn 不经过 Shell；这里按当前平台生成便于用户阅读和复制的等价命令。 */
-export function formatServerLaunchCommand(
-  executable: string,
-  arguments_: readonly string[],
-  platform: NodeJS.Platform = process.platform,
-): string {
-  return [executable, ...arguments_]
-    .map((argument) => quoteCommandArgument(argument, platform))
-    .join(" ");
-}
-
-function quoteCommandArgument(argument: string, platform: NodeJS.Platform): string {
-  if (argument && !/[\s"']/u.test(argument)) return argument;
-  if (platform === "win32") return `"${argument.replaceAll('"', '\\"')}"`;
-  return `'${argument.replaceAll("'", "'\\''")}'`;
-}
-
-function expectServerInstanceStartupSettings(value: unknown): ServerInstanceStartupSettings {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("server runtime startup settings must be an object");
-  }
-  const settings = value as Record<string, unknown>;
-  const minimumMemoryMiB = expectPositiveInteger(settings.minimumMemoryMiB, "minimum memory");
-  const maximumMemoryMiB = expectPositiveInteger(settings.maximumMemoryMiB, "maximum memory");
-  const serverPort = expectPositiveInteger(settings.serverPort, "server port");
-  if (minimumMemoryMiB > maximumMemoryMiB) {
-    throw new TypeError("server runtime minimum memory must not exceed maximum memory");
-  }
-  if (serverPort < serverPortLimits.minimum || serverPort > serverPortLimits.maximum) {
-    throw new TypeError("server runtime port is outside the allowed range");
-  }
-  if (typeof settings.autoAcceptEula !== "boolean") {
-    throw new TypeError("server runtime auto accept EULA must be a boolean");
-  }
-  if (
-    typeof settings.jvmArguments !== "string" ||
-    settings.jvmArguments.length > serverJvmArgumentsMaximumLength ||
-    settings.jvmArguments.includes("\0")
-  ) {
-    throw new TypeError("server runtime JVM arguments are invalid");
-  }
-  return {
-    minimumMemoryMiB,
-    maximumMemoryMiB,
-    serverPort,
-    autoAcceptEula: settings.autoAcceptEula,
-    jvmArguments: settings.jvmArguments,
-  };
-}
-
-function expectPositiveInteger(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    throw new TypeError(`server runtime ${label} must be a positive safe integer`);
-  }
-  return value as number;
-}
-
-function expectInstanceId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(value)) {
-    throw new TypeError("server runtime instance id must be a plain identifier");
-  }
-  return value;
-}
-
-function expectAfterSequence(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new TypeError("server console sequence must be a non-negative safe integer");
-  }
-  return value as number;
-}
-
-function expectCommand(value: unknown): string {
-  if (typeof value !== "string") throw new TypeError("server command must be a string");
-  const command = value.trim();
-  if (
-    !command ||
-    command.length > maximumCommandLength ||
-    command.includes("\0") ||
-    command.includes("\r") ||
-    command.includes("\n")
-  ) {
-    throw new TypeError("server command must be one non-empty line");
-  }
-  return command;
+function isTerminalState(state: ServerRuntimeSnapshot["state"]): boolean {
+  return state === "stopped" || state === "failed";
 }
 
 function toError(error: unknown): Error {

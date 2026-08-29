@@ -2,7 +2,9 @@ import {
   serverCoreIconScheme,
   serverInstanceIconHost,
   serverInstanceManagerContract,
+  serverSettingsContract,
   type ServerInstanceSnapshot,
+  type ServerSettingsClientService,
 } from "@seashard/contracts";
 import type { DatabaseService } from "@seashard/database";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
@@ -16,6 +18,7 @@ import { registerServerInstanceAgentResources } from "./agent-resources";
 import { registerServerInstalledModAgentIntegration } from "./agent-mods";
 import { registerServerDatapackAgentResources } from "./agent-datapacks";
 import { registerServerWorldAgentResources } from "./agent-worlds";
+import { registerServerInstanceAgentTools } from "./agent-management";
 import type { ServerInstanceClientProjection } from "./types";
 import type { ServerInstanceRuntimeGate } from "./manager";
 
@@ -37,7 +40,7 @@ export const serverInstanceManagerManifest: PluginManifest = {
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
-      permissions: [serverCoreSourceContract],
+      permissions: [serverCoreSourceContract, serverSettingsContract],
     },
   ],
   compatibility: {
@@ -50,12 +53,13 @@ export function createServerInstanceManagerModule(
   options: ServerInstanceManagerModuleOptions,
 ): PluginModule {
   return {
-    inject: [serverCoreSourceContract],
+    inject: [serverCoreSourceContract, serverSettingsContract],
     provides: [serverInstanceManagerContract],
     async apply(ctx) {
       const repository = await options.database.registerCapsule(serverInstanceDataCapsule);
       const registry = new SQLiteServerInstanceRegistry(repository);
       const coreSource = ctx.service<ServerCoreSourceService>(serverCoreSourceContract);
+      const settings = ctx.service<ServerSettingsClientService>(serverSettingsContract);
       const manager = new ServerInstanceManager({
         managedRoot: options.managedRoot,
         registry,
@@ -83,11 +87,23 @@ export function createServerInstanceManagerModule(
         listWorldDatapacks: (instanceId, worldId) =>
           manager.listWorldDatapacks(instanceId, worldId),
       });
+      registerServerInstanceAgentTools(ctx, {
+        listInstances: () => manager.list(),
+        getDefaultDownloadConnections: async () =>
+          (await settings.get()).defaultDownloadConnections,
+        createManaged: (request) => manager.createManaged(request),
+        waitForManagedTask: (taskId) => manager.waitForManagedTask(taskId),
+        snapshotManagedTask: (taskId) => coreSource.snapshot(taskId),
+        rename: (instanceId, name) => manager.rename(instanceId, name),
+        delete: (instanceId) => manager.delete(instanceId),
+      });
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
         list: async () => asJsonValue(await manager.list()),
         listForClient: async () =>
           asJsonValue((await manager.list()).map(projectServerInstanceForClient)),
+        rename: async (instanceId, name) =>
+          asJsonValue(projectServerInstanceForClient(await manager.rename(instanceId, name))),
         contentCounts: async (instanceId) => asJsonValue(await manager.contentCounts(instanceId)),
         listMods: async (instanceId) => asJsonValue(await manager.listMods(instanceId)),
         setModDisabled: async (instanceId, relativePath, disabled) => {
@@ -188,6 +204,7 @@ export * from "./agent-resources";
 export * from "./agent-mods";
 export * from "./agent-datapacks";
 export * from "./agent-worlds";
+export * from "./agent-management";
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";

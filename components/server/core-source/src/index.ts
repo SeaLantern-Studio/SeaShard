@@ -6,6 +6,7 @@ import { serverCoreSourceCatalogDataCapsule, SQLiteCnbCatalogCache } from "./cat
 import { ServerCoreSourceCoordinator } from "./coordinator";
 import { ServerCoreIconCache } from "./icon-cache";
 import { serverCoreSourceContract } from "./types";
+import { registerServerCoreCatalogAgentResources } from "./agent-integration";
 
 export type ServerCoreSourceModuleOptions = Omit<CnbServerCoreCatalogOptions, "cache"> & {
   readonly database: DatabaseService;
@@ -48,6 +49,11 @@ export function createServerCoreSourceModule(options: ServerCoreSourceModuleOpti
         icons: await catalog.listIcons(),
       });
       const coordinator = new ServerCoreSourceCoordinator(catalog, downloads);
+      registerServerCoreCatalogAgentResources(ctx, {
+        listTypes: async () => iconCache.listTypes(),
+        listVersions: (serverType) => catalog.listVersions(serverType),
+        listArtifacts: (serverType, gameVersion) => catalog.listArtifacts(serverType, gameVersion),
+      });
       // 核心源只选择 CNB 类型和版本，通用网络、进度、取消及临时文件由公共下载组件负责。
       ctx.provide(serverCoreSourceContract, {
         listTypes: async () => asJsonValue(iconCache.listTypes()),
@@ -87,6 +93,7 @@ function asJsonValue(value: unknown): JsonValue {
   return value as JsonValue;
 }
 
+export * from "./agent-integration";
 export * from "./catalog-cache";
 export * from "./cnb-catalog";
 export * from "./coordinator";

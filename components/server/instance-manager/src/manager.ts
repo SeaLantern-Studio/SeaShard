@@ -57,6 +57,7 @@ interface PendingManagedInstance {
   readonly createdAt: string;
 }
 const maximumDirectoryAllocationAttempts = 8;
+const maximumInstanceNameLength = 200;
 /**
  * 在服务器生命周期与停机写操作之间提供实例级互斥。
  * Gate 不读取 Runtime 快照：reserve 与写操作在同一队列内决定先后，避免检查后启动的竞态。
@@ -162,6 +163,46 @@ export class ServerInstanceManager {
     }
     return this.readIndexedInstances();
   }
+  /**
+   * 只修改 SeaShard 私有显示名称；实例目录、核心文件和正在运行的进程身份保持不变。
+   * 实例操作队列先与删除事务确定顺序，再占用全局名称键，避免并发创建或重命名产生重复名称。
+   */
+  async rename(instanceValue: unknown, nameValue: unknown): Promise<ServerInstanceSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const name = expectInstanceDisplayName(nameValue);
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance: before } = await this.findIndexedInstance(instanceId);
+      if (before.name === name) return before;
+
+      const previousKey = instanceNameKey(before.name);
+      const nextKey = instanceNameKey(name);
+      const reservesNewKey = previousKey !== nextKey;
+      if (reservesNewKey) {
+        const instances = await this.readIndexedInstances();
+        if (
+          this.reservedNameKeys.has(nextKey) ||
+          instances.some(
+            (instance) => instance.id !== instanceId && instanceNameKey(instance.name) === nextKey,
+          )
+        ) {
+          throw new Error(`服务器实例名称已被占用：${name}`);
+        }
+        this.reservedNameKeys.add(nextKey);
+      }
+
+      try {
+        return await this.updatePrivateManifest(instanceId, (instance) => ({
+          ...instance,
+          name,
+          updatedAt: this.options.now?.() ?? new Date().toISOString(),
+        }));
+      } finally {
+        if (reservesNewKey) this.reservedNameKeys.delete(nextKey);
+      }
+    });
+  }
+
   /** 实例启动设置整体持久化；未设置的旧实例仍继续继承全局默认值。 */
   async setStartupSettings(
     instanceValue: unknown,
@@ -968,6 +1009,17 @@ function expectConnections(value: unknown): number {
     );
   }
   return value as number;
+}
+
+function expectInstanceDisplayName(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError("服务器实例名称必须是字符串");
+  }
+  const name = value.trim();
+  if (!name || name.length > maximumInstanceNameLength || /[\u0000-\u001F\u007F]/u.test(name)) {
+    throw new TypeError(`服务器实例名称必须为 1～${maximumInstanceNameLength} 个可见字符`);
+  }
+  return name;
 }
 
 const maximumInstanceIconBytes = 512 * 1024;

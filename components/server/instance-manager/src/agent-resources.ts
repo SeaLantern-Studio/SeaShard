@@ -184,7 +184,7 @@ function displayModLoader(value: string): string {
 }
 
 /** 资源内容只保留回答问题需要的字段，绝不把宿主绝对路径交给模型。 */
-function projectServerForAgent(instance: ServerInstanceSnapshot): JsonObject {
+export function projectServerForAgent(instance: ServerInstanceSnapshot): JsonObject {
   const projected: JsonObject = {
     id: instance.id,
     name: instance.name,
