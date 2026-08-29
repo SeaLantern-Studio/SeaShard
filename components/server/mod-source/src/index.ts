@@ -8,6 +8,7 @@ import {
 import { downloadContract, type DownloadService } from "@seashard/download";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
+import { registerServerModCatalogAgentIntegration } from "./agent-integration";
 import {
   CurseForgeServerModCatalog,
   type CurseForgeServerModCatalogOptions,
@@ -55,6 +56,13 @@ export function createServerModSourceModule(options: ServerModSourceModuleOption
       const downloads = ctx.service<DownloadService>(downloadContract);
       const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
       const coordinator = new ServerModDownloadCoordinator(catalog, downloads, instances);
+      registerServerModCatalogAgentIntegration(ctx, {
+        search: (request) => catalog.search(request),
+        getProjectDetails: (source, projectId) =>
+          catalog.getProjectDetails("mod", source, projectId),
+        installToInstance: (request) => coordinator.installToInstance(request),
+        listInstalledMods: (instanceId) => instances.listMods(instanceId),
+      });
       ctx.provide(serverModSourceContract, {
         getFilters: async (resourceType, source) =>
           asJsonValue(
@@ -90,6 +98,7 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./modrinth-catalog";
+export * from "./agent-integration";
 export * from "./catalog-types";
 export * from "./curseforge-catalog";
 export * from "./source-catalog";

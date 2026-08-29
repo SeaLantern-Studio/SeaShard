@@ -401,6 +401,7 @@ await test("Modrinth project details expose the full body and primary version fi
           {
             id: "version-neoforge-1",
             project_id: "server-mod-1",
+            version_number: "1.21.1-1.0.0",
             game_versions: ["1.21.1"],
             loaders: ["neoforge"],
             downloads: 4_321,
@@ -440,6 +441,7 @@ await test("Modrinth project details expose the full body and primary version fi
     versions: [
       {
         id: "version-neoforge-1",
+        version: "1.21.1-1.0.0",
         gameVersions: ["1.21.1"],
         loaders: ["neoforge"],
         fileName: "server-tools-neoforge-1.21.1.jar",
@@ -1202,6 +1204,7 @@ await test("CurseForge world 422034 keeps real details when its file list is tra
   const embeddedFile = {
     id: 8_480_262,
     modId: 422_034,
+    displayName: "Voidblock 26.2",
     fileName: "Voidblock.zip",
     fileLength: 12_345,
     downloadCount: 321,
@@ -1250,6 +1253,7 @@ await test("CurseForge world 422034 keeps real details when its file list is tra
   assert.deepEqual(details.versions, [
     {
       id: "8480262",
+      version: "Voidblock 26.2",
       gameVersions: ["26.2"],
       loaders: [],
       fileName: "Voidblock.zip",
@@ -1271,6 +1275,7 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
   const file = {
     id: 456,
     modId: 123,
+    displayName: "Server Tools 1.21.1",
     fileName,
     fileLength: 2_048,
     downloadCount: 987,
@@ -1359,6 +1364,7 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
   const details = await catalog.getProjectDetails("mod", "123");
   assert.deepEqual(details.versions[0], {
     id: "456",
+    version: "Server Tools 1.21.1",
     gameVersions: ["1.21.1"],
     loaders: ["fabric"],
     fileName,
@@ -1373,6 +1379,7 @@ await test("CurseForge MCIM catalog searches, reads details, and normalizes mirr
     projectId: "123",
     iconUrl: "https://media.forgecdn.net/mod/icon.png",
     versionId: "456",
+    version: "Server Tools 1.21.1",
     fileName,
     url: `https://mod.mcimirror.top/files/7091/801/${fileName}`,
     sha1,

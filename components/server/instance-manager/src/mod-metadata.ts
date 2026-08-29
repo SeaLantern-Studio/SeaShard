@@ -34,9 +34,14 @@ interface ParsedModMetadata {
 }
 
 /** 读取常见加载器清单；JAR 损坏或元数据异常时保留文件本身但返回空元数据。 */
-export async function readModMetadata(entryPath: string): Promise<ModMetadata> {
+export async function readModMetadata(
+  entryPath: string,
+  signal?: AbortSignal,
+): Promise<ModMetadata> {
   try {
-    const archive = await readFile(entryPath);
+    signal?.throwIfAborted();
+    const archive = await readFile(entryPath, { signal });
+    signal?.throwIfAborted();
     if (archive.byteLength > maximumModArchiveBytes) return {};
 
     let entryCount = 0;
@@ -47,10 +52,12 @@ export async function readModMetadata(entryPath: string): Promise<ModMetadata> {
         return metadataFileNames.has(file.name);
       },
     });
+    signal?.throwIfAborted();
     if (entryCount > maximumModArchiveEntries) return {};
 
     const parsed = parseMetadataEntries(metadataEntries);
     const iconDataUrl = readIcon(archive, iconPaths(parsed));
+    signal?.throwIfAborted();
     return {
       ...(parsed?.name ? { name: parsed.name } : {}),
       ...(parsed?.version ? { version: parsed.version } : {}),
@@ -58,6 +65,7 @@ export async function readModMetadata(entryPath: string): Promise<ModMetadata> {
       ...(iconDataUrl ? { iconDataUrl } : {}),
     };
   } catch {
+    signal?.throwIfAborted();
     return {};
   }
 }

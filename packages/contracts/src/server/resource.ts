@@ -101,6 +101,8 @@ export interface ServerModSearchResult {
 /** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */
 export interface ServerModVersion {
   id: string;
+  /** 来源显示给用户的版本号或版本名称；安装时仍使用稳定的 id。 */
+  version?: string;
   gameVersions: readonly string[];
   loaders: readonly string[];
   fileName: string;

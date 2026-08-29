@@ -13,6 +13,7 @@ import {
 import { ServerInstanceManager } from "./manager";
 import { serverInstanceDataCapsule, SQLiteServerInstanceRegistry } from "./registry";
 import { registerServerInstanceAgentResources } from "./agent-resources";
+import { registerServerInstalledModAgentIntegration } from "./agent-mods";
 import type { ServerInstanceClientProjection } from "./types";
 
 export interface ServerInstanceManagerModuleOptions {
@@ -59,6 +60,12 @@ export function createServerInstanceManagerModule(
       });
       registerServerInstanceAgentResources(ctx, {
         listInstances: () => manager.list(),
+      });
+      registerServerInstalledModAgentIntegration(ctx, {
+        listMods: (instanceId, signal) => manager.listMods(instanceId, signal),
+        setModDisabled: (instanceId, relativePath, disabled) =>
+          manager.setModDisabled(instanceId, relativePath, disabled),
+        deleteMod: (instanceId, relativePath) => manager.deleteMod(instanceId, relativePath),
       });
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
@@ -162,6 +169,7 @@ function asJsonValue(value: unknown): JsonValue {
 }
 
 export * from "./agent-resources";
+export * from "./agent-mods";
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";

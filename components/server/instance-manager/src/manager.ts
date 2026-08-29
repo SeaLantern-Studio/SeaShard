@@ -366,13 +366,17 @@ export class ServerInstanceManager {
       plugins,
     };
   }
-  /** 列出实例标准 Mod 目录中的已安装 MOD；同一实例的文件操作共享串行队列。 */
-  async listMods(value: unknown) {
+  /**
+   * 列出实例标准 Mod 目录中的已安装 MOD；同一实例的文件操作共享串行队列。
+   * Agent 读取可传入 Invocation 信号，扫描会在文件边界及时停止。
+   */
+  async listMods(value: unknown, signal?: AbortSignal) {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(value, "instance id");
     return this.runInstanceOperation(instanceId, async () => {
+      signal?.throwIfAborted();
       const { instance } = await this.findIndexedInstance(instanceId);
-      return listInstalledMods(instance);
+      return listInstalledMods(instance, signal);
     });
   }
 

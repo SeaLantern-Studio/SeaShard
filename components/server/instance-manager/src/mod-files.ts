@@ -19,9 +19,12 @@ export interface DeletedInstalledMod {
 /** 扫描实例标准 Mod 目录；禁用文件保留在列表中，供管理页面直接恢复。 */
 export async function listInstalledMods(
   instance: ServerInstanceSnapshot,
+  signal?: AbortSignal,
 ): Promise<readonly ServerInstalledModSnapshot[]> {
   const result: ServerInstalledModSnapshot[] = [];
+  signal?.throwIfAborted();
   for (const directory of modDirectories(instance)) {
+    signal?.throwIfAborted();
     let entries: Dirent[];
     try {
       entries = await readdir(directory, { withFileTypes: true });
@@ -29,11 +32,13 @@ export async function listInstalledMods(
       if (isMissingPathError(error)) continue;
       throw error;
     }
+    signal?.throwIfAborted();
     for (const entry of entries.sort((left, right) =>
       left.name.localeCompare(right.name, "zh-CN"),
     )) {
+      signal?.throwIfAborted();
       if (!isInstalledModEntry(entry)) continue;
-      result.push(await readInstalledMod(instance, directory, entry));
+      result.push(await readInstalledMod(instance, directory, entry, signal));
       if (result.length >= maximumInstalledModCount) return sortInstalledMods(result);
     }
   }
@@ -128,14 +133,18 @@ async function readInstalledMod(
   instance: ServerInstanceSnapshot,
   directory: string,
   entry: Dirent,
+  signal?: AbortSignal,
 ): Promise<ServerInstalledModSnapshot> {
+  signal?.throwIfAborted();
   const absolutePath = join(directory, entry.name);
   const relativePath = relative(instance.rootPath, absolutePath).replaceAll("\\", "/");
-  const metadata = await readModMetadata(absolutePath);
+  const metadata = await readModMetadata(absolutePath, signal);
+  signal?.throwIfAborted();
   const source =
     instance.resourceSources?.mods?.[relativePath] ??
     instance.resourceSources?.mods?.[enabledRelativePath(relativePath)];
   const details = await stat(absolutePath);
+  signal?.throwIfAborted();
   const fallbackName = entry.name.replace(/\.jar(?:\.disabled)?$/iu, "");
   return {
     instanceId: instance.id,

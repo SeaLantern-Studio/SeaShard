@@ -2206,31 +2206,31 @@
           "name": "ServerResourceSource",
           "description": "",
           "declaration": "export type ServerResourceSource = string;",
-          "source": "packages/contracts/src/server/resource.ts:121"
+          "source": "packages/contracts/src/server/resource.ts:123"
         },
         {
           "name": "ServerResourceSourceIndex",
           "description": "实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。",
           "declaration": "/** 实例 seashard.json 中按对应资源存储根目录的相对路径保存资源来源索引。 */\nexport interface ServerResourceSourceIndex {\n  mods?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  datapacks?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n  worlds?: Readonly<Record<string, ServerResourceSourceMetadata>>;\n}",
-          "source": "packages/contracts/src/server/resource.ts:133"
+          "source": "packages/contracts/src/server/resource.ts:135"
         },
         {
           "name": "ServerResourceSourceMetadata",
           "description": "已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。",
           "declaration": "/** 已安装资源的来源标识；未知来源只保留展示信息，不自动生成来源跳转。 */\nexport interface ServerResourceSourceMetadata {\n  source: ServerResourceSource;\n  id: string;\n  /** 来源发布版本的显示标签，例如 Modrinth 的 version_number。 */\n  version?: string;\n  iconUrl?: string;\n}",
-          "source": "packages/contracts/src/server/resource.ts:124"
+          "source": "packages/contracts/src/server/resource.ts:126"
         },
         {
           "name": "ServerResourceSourceRecord",
           "description": "Host 写入资源来源索引时使用的单条记录。",
           "declaration": "/** Host 写入资源来源索引时使用的单条记录。 */\nexport interface ServerResourceSourceRecord extends ServerResourceSourceMetadata {\n  resourceType: ServerResourceSourceType;\n  relativePath: string;\n}",
-          "source": "packages/contracts/src/server/resource.ts:140"
+          "source": "packages/contracts/src/server/resource.ts:142"
         },
         {
           "name": "ServerResourceSourceType",
           "description": "",
           "declaration": "export type ServerResourceSourceType = \"mod\" | \"datapack\" | \"world\";",
-          "source": "packages/contracts/src/server/resource.ts:120"
+          "source": "packages/contracts/src/server/resource.ts:122"
         },
         {
           "name": "ServerWorldBackupSnapshot",
@@ -2400,7 +2400,7 @@
           "name": "ServerModDownloadResult",
           "description": "多来源资源完成校验并发布后的稳定结果。",
           "declaration": "/** 多来源资源完成校验并发布后的稳定结果。 */\nexport interface ServerModDownloadResult {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n  fileName: string;\n  destination: \"instance\" | \"directory\";\n  instanceId?: string;\n  downloadedBytes: number;\n}",
-          "source": "packages/contracts/src/server/resource.ts:164"
+          "source": "packages/contracts/src/server/resource.ts:166"
         },
         {
           "name": "ServerModEnvironment",
@@ -2424,7 +2424,7 @@
           "name": "ServerModInstallRequest",
           "description": "Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。",
           "declaration": "/** Renderer 只提交来源、资源类型、项目身份和已登记实例 ID；数据包还要提交已选择的存档 ID。 */\nexport interface ServerModInstallRequest {\n  source: ServerModSource;\n  resourceType: \"mod\" | \"datapack\" | \"world\";\n  projectId: string;\n  versionId: string;\n  instanceId: string;\n  /** 仅数据包安装使用；Host 会再次确认它属于该实例且确实存在。 */\n  worldId?: string;\n}",
-          "source": "packages/contracts/src/server/resource.ts:146"
+          "source": "packages/contracts/src/server/resource.ts:148"
         },
         {
           "name": "ServerModProject",
@@ -2436,7 +2436,7 @@
           "name": "ServerModProjectDetails",
           "description": "多来源项目长简介及其全部公开版本。",
           "declaration": "/** 多来源项目长简介及其全部公开版本。 */\nexport interface ServerModProjectDetails {\n  resourceType: ServerModrinthResourceType;\n  source: ServerModSource;\n  projectId: string;\n  project: ServerModProject;\n  body: string;\n  versions: readonly ServerModVersion[];\n}",
-          "source": "packages/contracts/src/server/resource.ts:112"
+          "source": "packages/contracts/src/server/resource.ts:114"
         },
         {
           "name": "ServerModrinthResourceType",
@@ -2448,7 +2448,7 @@
           "name": "ServerModSaveAsRequest",
           "description": "“另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。",
           "declaration": "/** “另存为”同样只提交来源、资源类型和项目身份，目标目录由 Desktop 系统对话框选择。 */\nexport interface ServerModSaveAsRequest {\n  source: ServerModSource;\n  resourceType: ServerModDownloadableResourceType;\n  projectId: string;\n  versionId: string;\n}",
-          "source": "packages/contracts/src/server/resource.ts:157"
+          "source": "packages/contracts/src/server/resource.ts:159"
         },
         {
           "name": "ServerModSearchIndex",
@@ -2483,7 +2483,7 @@
         {
           "name": "ServerModVersion",
           "description": "详情页中的单个可下载版本；Host 只投影列表展示所需字段。",
-          "declaration": "/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */\nexport interface ServerModVersion {\n  id: string;\n  gameVersions: readonly string[];\n  loaders: readonly string[];\n  fileName: string;\n  downloads: number;\n  datePublished: string;\n}",
+          "declaration": "/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */\nexport interface ServerModVersion {\n  id: string;\n  /** 来源显示给用户的版本号或版本名称；安装时仍使用稳定的 id。 */\n  version?: string;\n  gameVersions: readonly string[];\n  loaders: readonly string[];\n  fileName: string;\n  downloads: number;\n  datePublished: string;\n}",
           "source": "packages/contracts/src/server/resource.ts:102"
         }
       ]

@@ -370,8 +370,13 @@ function parseVersion(
   const file = parseFile(value, `CurseForge project file ${index}`);
   if (String(file.modId) !== projectId)
     throw new Error("CurseForge file belongs to another project");
+  const version = parseOptionalVersionLabel(
+    file.displayName ?? file.versionName,
+    "CurseForge project file version label",
+  );
   return {
     id: String(file.id),
+    ...(version ? { version } : {}),
     gameVersions: parseGameVersions(file.gameVersions),
     loaders: parseLoaders(file.gameVersions, file.sortableGameVersions),
     fileName: expectResourceFileName(file.fileName, resourceType),

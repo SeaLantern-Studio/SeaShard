@@ -676,8 +676,13 @@ function parseProjectVersion(value: unknown, index: number, projectId: string): 
     };
   });
   const primaryFile = parsedFiles.find(({ primary }) => primary) ?? parsedFiles[0]!;
+  const version = parseOptionalVersionLabel(
+    record.version_number ?? record.name,
+    `Modrinth project version ${index} label`,
+  );
   return {
     id: expectBoundedString(record.id, `Modrinth project version ${index} ID`, 64),
+    ...(version ? { version } : {}),
     gameVersions: parseStringArray(
       record.game_versions,
       `Modrinth project version ${index} game versions`,
