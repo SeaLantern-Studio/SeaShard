@@ -1757,7 +1757,7 @@
         {
           "name": "setModDisabled",
           "signature": "setModDisabled(instanceId: string, relativePath: string, disabled: boolean): Promise<ServerInstalledModSnapshot>",
-          "description": "通过 .disabled 后缀切换 MOD 文件状态。",
+          "description": "通过 .disabled 后缀切换 MOD 文件状态；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1784,7 +1784,7 @@
         {
           "name": "deleteMod",
           "signature": "deleteMod(instanceId: string, relativePath: string): Promise<void>",
-          "description": "删除实例标准 Mod 目录中的单个 MOD。",
+          "description": "删除实例标准 Mod 目录中的单个 MOD；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1806,7 +1806,7 @@
         {
           "name": "switchWorld",
           "signature": "switchWorld(instanceId: string, worldId: string): Promise<ServerWorldStorageSnapshot>",
-          "description": "切换 server.properties 中的 level-name，并返回最新存档投影。",
+          "description": "切换 server.properties 中的 level-name，并返回最新存档投影；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1867,7 +1867,7 @@
         {
           "name": "setWorldDatapackDisabled",
           "signature": "setWorldDatapackDisabled(instanceId: string, worldId: string, fileName: string, disabled: boolean): Promise<ServerWorldDatapackSnapshot>",
-          "description": "通过安全后缀切换指定世界数据包状态。",
+          "description": "修改世界 level.dat 中 Minecraft 原生的数据包启用与禁用列表；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1899,7 +1899,7 @@
         {
           "name": "deleteWorldDatapack",
           "signature": "deleteWorldDatapack(instanceId: string, worldId: string, fileName: string): Promise<void>",
-          "description": "删除指定世界数据包。",
+          "description": "删除指定世界数据包；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1948,7 +1948,7 @@
         {
           "name": "createWorldBackup",
           "signature": "createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>",
-          "description": "创建指定逻辑世界的 ZIP 备份；调用方负责保证服务端已停机。",
+          "description": "创建指定逻辑世界的 ZIP 备份；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1970,7 +1970,7 @@
         {
           "name": "restoreWorldBackup",
           "signature": "restoreWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<ServerWorldStorageSnapshot>",
-          "description": "恢复指定备份；调用方负责保证服务端已停机。",
+          "description": "恢复指定备份；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -1997,7 +1997,7 @@
         {
           "name": "deleteWorldBackup",
           "signature": "deleteWorldBackup(instanceId: string, worldId: string, fileName: string): Promise<void>",
-          "description": "删除指定备份文件，不允许操作备份根目录之外的路径。",
+          "description": "删除指定备份文件；运行中会直接失败，且不允许操作备份根目录之外的路径。",
           "parameters": [
             {
               "name": "instanceId",
@@ -2073,7 +2073,7 @@
         {
           "name": "delete",
           "signature": "delete(instanceId: string): Promise<void>",
-          "description": "删除托管目录和 SQLite 中对应的 manifest 路径记录。",
+          "description": "删除托管目录和 SQLite 中对应的 manifest 路径记录；运行中会直接失败。",
           "parameters": [
             {
               "name": "instanceId",
@@ -2158,7 +2158,7 @@
           "name": "ServerInstalledModSnapshot",
           "description": "一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。",
           "declaration": "/** 一个已安装 MOD 的稳定投影；relativePath 是实例根目录下的 POSIX 相对路径。 */\nexport interface ServerInstalledModSnapshot {\n  instanceId: string;\n  relativePath: string;\n  fileName: string;\n  name: string;\n  version?: string;\n  /** 从 MOD 清单读取的简短介绍。 */\n  description?: string;\n  /** MOD JAR 内部图标的数据地址。 */\n  iconDataUrl?: string;\n  /** 文件首次落盘时间；手动复制的 MOD 使用文件系统创建时间。 */\n  addedAt: string;\n  disabled: boolean;\n  resourceSource?: ServerResourceSourceMetadata;\n}",
-          "source": "packages/contracts/src/server/instance.ts:95"
+          "source": "packages/contracts/src/server/instance.ts:99"
         },
         {
           "name": "ServerInstanceClientProjection",
@@ -2170,7 +2170,7 @@
           "name": "ServerInstanceContentCounts",
           "description": "Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。",
           "declaration": "/** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */\nexport interface ServerInstanceContentCounts {\n  mods: number;\n  plugins: number;\n}",
-          "source": "packages/contracts/src/server/instance.ts:167"
+          "source": "packages/contracts/src/server/instance.ts:173"
         },
         {
           "name": "ServerInstanceSnapshot",
@@ -2236,7 +2236,7 @@
           "name": "ServerWorldBackupSnapshot",
           "description": "一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。",
           "declaration": "/** 一个世界备份的稳定投影；路径仅返回文件名，不暴露宿主绝对路径。 */\nexport interface ServerWorldBackupSnapshot {\n  instanceId: string;\n  worldId: string;\n  worldDirectoryName: string;\n  fileName: string;\n  createdAt: string;\n  sizeBytes: number;\n}",
-          "source": "packages/contracts/src/server/instance.ts:70"
+          "source": "packages/contracts/src/server/instance.ts:74"
         },
         {
           "name": "ServerWorldDatapackKind",
@@ -2248,7 +2248,7 @@
           "name": "ServerWorldDatapackSnapshot",
           "description": "一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。",
           "declaration": "/** 一个世界数据包的稳定投影；路径仅返回世界数据包目录中的文件名。 */\nexport interface ServerWorldDatapackSnapshot {\n  instanceId: string;\n  worldId: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  fileName: string;\n  kind: ServerWorldDatapackKind;\n  disabled: boolean;\n  /** 从 pack.mcmeta 读取的简短介绍。 */\n  description?: string;\n  /** 数据包内部 pack.png 的数据地址。 */\n  iconDataUrl?: string;\n  updatedAt: string;\n}",
-          "source": "packages/contracts/src/server/instance.ts:80"
+          "source": "packages/contracts/src/server/instance.ts:84"
         },
         {
           "name": "ServerWorldDimension",
@@ -2259,14 +2259,14 @@
         {
           "name": "ServerWorldDimensionGroup",
           "description": "",
-          "declaration": "export interface ServerWorldDimensionGroup {\n  id: string;\n  name: string;\n  current: boolean;\n  saves: readonly ServerWorldSave[];\n}",
-          "source": "packages/contracts/src/server/instance.ts:111"
+          "declaration": "export interface ServerWorldDimensionGroup {\n  /** 可直接提交给世界、数据包和备份能力的末级逻辑世界 ID。 */\n  id: string;\n  name: string;\n  current: boolean;\n  saves: readonly ServerWorldSave[];\n}",
+          "source": "packages/contracts/src/server/instance.ts:115"
         },
         {
           "name": "ServerWorldSave",
-          "description": "一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。",
-          "declaration": "/** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */\nexport interface ServerWorldSave {\n  id: string;\n  groupId: string;\n  name: string;\n  dimension: ServerWorldDimension;\n  current: boolean;\n  createdAt?: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  updatedAt?: string;\n  iconDataUrl?: string;\n}",
-          "source": "packages/contracts/src/server/instance.ts:57"
+          "description": "一个可切换的世界目录。\nid 只发布实际世界目录的末级名称；下载世界的外层 Host 容器永远不进入公开身份。",
+          "declaration": "/**\n * 一个可切换的世界目录。\n * id 只发布实际世界目录的末级名称；下载世界的外层 Host 容器永远不进入公开身份。\n */\nexport interface ServerWorldSave {\n  id: string;\n  /** split 模式下同一组的多个维度共享末级逻辑世界 ID。 */\n  groupId: string;\n  name: string;\n  dimension: ServerWorldDimension;\n  current: boolean;\n  createdAt?: string;\n  resourceSource?: ServerResourceSourceMetadata;\n  updatedAt?: string;\n  iconDataUrl?: string;\n}",
+          "source": "packages/contracts/src/server/instance.ts:60"
         },
         {
           "name": "ServerWorldStorageMode",
@@ -2276,9 +2276,9 @@
         },
         {
           "name": "ServerWorldStorageSnapshot",
-          "description": "Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。",
-          "declaration": "/** Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。 */\nexport interface ServerWorldStorageSnapshot {\n  instanceId: string;\n  mode: ServerWorldStorageMode;\n  currentId?: string;\n  saves: readonly ServerWorldSave[];\n  dimensions: readonly ServerWorldDimensionGroup[];\n}",
-          "source": "packages/contracts/src/server/instance.ts:119"
+          "description": "Host 扫描实例目录后发布的存档稳定投影，不暴露绝对路径或外层存储容器。",
+          "declaration": "/** Host 扫描实例目录后发布的存档稳定投影，不暴露绝对路径或外层存储容器。 */\nexport interface ServerWorldStorageSnapshot {\n  instanceId: string;\n  mode: ServerWorldStorageMode;\n  /** 当前世界的末级逻辑 ID；server.properties 可在 Host 内继续保存完整相对路径。 */\n  currentId?: string;\n  saves: readonly ServerWorldSave[];\n  dimensions: readonly ServerWorldDimensionGroup[];\n}",
+          "source": "packages/contracts/src/server/instance.ts:124"
         }
       ]
     },

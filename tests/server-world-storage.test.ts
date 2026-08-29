@@ -304,6 +304,7 @@ await test("Quilt world downloads use the server working directory and matching 
       },
     });
     assert.equal(snapshot.mode, "unified");
+    assert.equal(snapshot.saves[0]?.id, "worlds-d4e5f6");
     assert.deepEqual(snapshot.saves[0]?.resourceSource, {
       source: "curseforge",
       id: "quilt-world-project",

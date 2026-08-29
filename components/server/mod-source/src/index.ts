@@ -8,7 +8,10 @@ import {
 import { downloadContract, type DownloadService } from "@seashard/download";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
 import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
-import { registerServerModCatalogAgentIntegration } from "./agent-integration";
+import {
+  registerServerDatapackCatalogAgentIntegration,
+  registerServerModCatalogAgentIntegration,
+} from "./agent-integration";
 import {
   CurseForgeServerModCatalog,
   type CurseForgeServerModCatalogOptions,
@@ -62,6 +65,14 @@ export function createServerModSourceModule(options: ServerModSourceModuleOption
           catalog.getProjectDetails("mod", source, projectId),
         installToInstance: (request) => coordinator.installToInstance(request),
         listInstalledMods: (instanceId) => instances.listMods(instanceId),
+      });
+      registerServerDatapackCatalogAgentIntegration(ctx, {
+        search: (request) => catalog.search(request),
+        getProjectDetails: (source, projectId) =>
+          catalog.getProjectDetails("datapack", source, projectId),
+        installToInstance: (request) => coordinator.installToInstance(request),
+        listInstalledDatapacks: (instanceId, worldId) =>
+          instances.listWorldDatapacks(instanceId, worldId),
       });
       ctx.provide(serverModSourceContract, {
         getFilters: async (resourceType, source) =>

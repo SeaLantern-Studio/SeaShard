@@ -47,27 +47,34 @@ await test("world storage lists native and downloaded worlds with level metadata
       },
     });
     assert.equal(snapshot.mode, "unified");
-    assert.equal(snapshot.currentId, "worlds-outer/worlds-inner");
+    assert.equal(snapshot.currentId, "worlds-inner");
     assert.deepEqual(
       snapshot.saves.map(({ id, name, current }) => ({ id, name, current })),
       [
-        { id: "worlds-outer/worlds-inner", name: "Downloaded World", current: true },
+        { id: "worlds-inner", name: "Downloaded World", current: true },
         { id: "world", name: "Native World", current: false },
       ],
     );
     assert.match(
-      snapshot.saves.find(({ id }) => id === "worlds-outer/worlds-inner")?.iconDataUrl ?? "",
+      snapshot.saves.find(({ id }) => id === "worlds-inner")?.iconDataUrl ?? "",
       /^data:image\/png;base64,/u,
     );
-    assert.deepEqual(
-      snapshot.saves.find(({ id }) => id === "worlds-outer/worlds-inner")?.resourceSource,
-      {
-        source: "modrinth",
-        id: "world-project",
-        iconUrl: "https://cdn.modrinth.com/data/world-project/icon.webp",
-      },
-    );
+    assert.deepEqual(snapshot.saves.find(({ id }) => id === "worlds-inner")?.resourceSource, {
+      source: "modrinth",
+      id: "world-project",
+      iconUrl: "https://cdn.modrinth.com/data/world-project/icon.webp",
+    });
 
+    const switchedDownloaded = await switchWorldStorage(instance(root, "fabric"), "worlds-inner");
+    assert.equal(switchedDownloaded.currentId, "worlds-inner");
+    assert.match(
+      await readFile(join(root, "server.properties"), "utf8"),
+      /level-name=worlds-outer\/worlds-inner/u,
+    );
+    await assert.rejects(
+      switchWorldStorage(instance(root, "fabric"), "worlds-outer/worlds-inner"),
+      /末级名称|不能包含路径/u,
+    );
     const switched = await switchWorldStorage(instance(root, "fabric"), "world");
     assert.equal(switched.currentId, "world");
     assert.match(await readFile(join(root, "server.properties"), "utf8"), /level-name=world/u);
@@ -291,7 +298,7 @@ await test("Quilt world datapacks use the server working directory for source ke
           },
         },
       },
-      "worlds-a1b2c3/worlds-d4e5f6",
+      "worlds-d4e5f6",
     );
     assert.deepEqual(
       datapacks.map(({ fileName }) => fileName),

@@ -53,9 +53,13 @@ export type ServerWorldStorageMode = "unified" | "split";
 export type ServerWorldDimension = "overworld" | "nether" | "end";
 export type ServerWorldDatapackKind = "archive" | "directory";
 
-/** 一个可切换的世界目录；split 模式下同一组的多个维度共享 groupId。 */
+/**
+ * 一个可切换的世界目录。
+ * id 只发布实际世界目录的末级名称；下载世界的外层 Host 容器永远不进入公开身份。
+ */
 export interface ServerWorldSave {
   id: string;
+  /** split 模式下同一组的多个维度共享末级逻辑世界 ID。 */
   groupId: string;
   name: string;
   dimension: ServerWorldDimension;
@@ -109,16 +113,18 @@ export interface ServerInstalledModSnapshot {
 }
 
 export interface ServerWorldDimensionGroup {
+  /** 可直接提交给世界、数据包和备份能力的末级逻辑世界 ID。 */
   id: string;
   name: string;
   current: boolean;
   saves: readonly ServerWorldSave[];
 }
 
-/** Host 扫描实例目录后发布的存档稳定投影，不向 Renderer 暴露绝对路径。 */
+/** Host 扫描实例目录后发布的存档稳定投影，不暴露绝对路径或外层存储容器。 */
 export interface ServerWorldStorageSnapshot {
   instanceId: string;
   mode: ServerWorldStorageMode;
+  /** 当前世界的末级逻辑 ID；server.properties 可在 Host 内继续保存完整相对路径。 */
   currentId?: string;
   saves: readonly ServerWorldSave[];
   dimensions: readonly ServerWorldDimensionGroup[];

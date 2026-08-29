@@ -104,7 +104,7 @@ export interface ServerInstanceManagerService {
    */
   listMods(instanceId: string): Promise<readonly ServerInstalledModSnapshot[]>;
   /**
-   * 通过 .disabled 后缀切换 MOD 文件状态。
+   * 通过 .disabled 后缀切换 MOD 文件状态；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param relativePath listMods 返回的实例内相对路径。
@@ -117,14 +117,14 @@ export interface ServerInstanceManagerService {
     disabled: boolean,
   ): Promise<ServerInstalledModSnapshot>;
   /**
-   * 删除实例标准 Mod 目录中的单个 MOD。
+   * 删除实例标准 Mod 目录中的单个 MOD；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param relativePath listMods 返回的实例内相对路径。
    */
   deleteMod(instanceId: string, relativePath: string): Promise<void>;
   /**
-   * 切换 server.properties 中的 level-name，并返回最新存档投影。
+   * 切换 server.properties 中的 level-name，并返回最新存档投影；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -150,7 +150,7 @@ export interface ServerInstanceManagerService {
     worldId: string,
   ): Promise<readonly ServerWorldDatapackSnapshot[]>;
   /**
-   * 通过安全后缀切换指定世界数据包状态。
+   * 修改世界 level.dat 中 Minecraft 原生的数据包启用与禁用列表；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -165,7 +165,7 @@ export interface ServerInstanceManagerService {
     disabled: boolean,
   ): Promise<ServerWorldDatapackSnapshot>;
   /**
-   * 删除指定世界数据包。
+   * 删除指定世界数据包；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -184,7 +184,7 @@ export interface ServerInstanceManagerService {
     worldId: string,
   ): Promise<readonly ServerWorldBackupSnapshot[]>;
   /**
-   * 创建指定逻辑世界的 ZIP 备份；调用方负责保证服务端已停机。
+   * 创建指定逻辑世界的 ZIP 备份；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -192,7 +192,7 @@ export interface ServerInstanceManagerService {
    */
   createWorldBackup(instanceId: string, worldId: string): Promise<ServerWorldBackupSnapshot>;
   /**
-   * 恢复指定备份；调用方负责保证服务端已停机。
+   * 恢复指定备份；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -205,7 +205,7 @@ export interface ServerInstanceManagerService {
     fileName: string,
   ): Promise<ServerWorldStorageSnapshot>;
   /**
-   * 删除指定备份文件，不允许操作备份根目录之外的路径。
+   * 删除指定备份文件；运行中会直接失败，且不允许操作备份根目录之外的路径。
    *
    * @param instanceId 已登记实例 ID。
    * @param worldId listWorldStorage 返回的逻辑世界 ID。
@@ -228,7 +228,7 @@ export interface ServerInstanceManagerService {
    */
   recordRuntime(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>;
   /**
-   * 删除托管目录和 SQLite 中对应的 manifest 路径记录。
+   * 删除托管目录和 SQLite 中对应的 manifest 路径记录；运行中会直接失败。
    *
    * @param instanceId 已登记实例 ID。
    */

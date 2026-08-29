@@ -57,11 +57,62 @@ interface PendingManagedInstance {
   readonly createdAt: string;
 }
 const maximumDirectoryAllocationAttempts = 8;
+/**
+ * 在服务器生命周期与停机写操作之间提供实例级互斥。
+ * Gate 不读取 Runtime 快照：reserve 与写操作在同一队列内决定先后，避免检查后启动的竞态。
+ */
+export class ServerInstanceRuntimeGate {
+  private readonly activeInstances = new Set<string>();
+  private readonly operations = new Map<string, Promise<void>>();
+
+  /** 启动侧等待先到达的停机写操作完成，再原子登记活动生命周期。 */
+  async reserve(instanceId: string): Promise<void> {
+    await this.run(instanceId, async () => {
+      if (this.activeInstances.has(instanceId)) {
+        throw new Error(`server instance ${instanceId} runtime is already active`);
+      }
+      this.activeInstances.add(instanceId);
+    });
+  }
+
+  /** 进程完全退出后释放生命周期；重复释放保持幂等，兼容启动失败与 close 同时结算。 */
+  async release(instanceId: string): Promise<void> {
+    await this.run(instanceId, async () => {
+      this.activeInstances.delete(instanceId);
+    });
+  }
+
+  /** 写入侧只在停机状态取得队列，并持有到整个文件事务完成。 */
+  runWhileStopped<T>(instanceId: string, action: string, operation: () => Promise<T>): Promise<T> {
+    return this.run(instanceId, async () => {
+      if (this.activeInstances.has(instanceId)) {
+        throw new Error(`服务器正在运行，无法${action}。请先关停服务器后重试。`);
+      }
+      return operation();
+    });
+  }
+
+  private run<T>(instanceId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.operations.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(operation);
+    const settled = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.operations.set(instanceId, settled);
+    return task.finally(() => {
+      if (this.operations.get(instanceId) === settled) {
+        this.operations.delete(instanceId);
+      }
+    });
+  }
+}
 
 export interface ServerInstanceManagerOptions {
   readonly managedRoot: string;
   readonly registry: SQLiteServerInstanceRegistry;
   readonly coreSource: ServerCoreSourceService;
+  readonly runtimeGate?: ServerInstanceRuntimeGate;
   readonly createId?: () => string;
   readonly now?: () => string;
   readonly reportError?: (error: unknown) => void;
@@ -70,12 +121,12 @@ export interface ServerInstanceManagerOptions {
 /** 协调托管目录、核心下载、双 JSON 描述文件和 SQLite 路径索引的提交顺序。 */
 export class ServerInstanceManager {
   private readonly managedRoot: string;
+  private readonly runtimeGate: ServerInstanceRuntimeGate;
   private readonly reservedNameKeys = new Set<string>();
   private readonly pending = new Map<string, PendingManagedInstance>();
   private readonly finalizers = new Map<string, Promise<void>>();
   private readonly deletions = new Map<string, Promise<void>>();
   private readonly instanceOperations = new Map<string, Promise<void>>();
-  private readonly worldSwitches = new Map<string, Promise<ServerWorldStorageSnapshot>>();
   private readonly metadataUpdates = new Map<string, Promise<ServerInstanceSnapshot>>();
   private disposed = false;
   private iconBackfillTask: Promise<void> | undefined;
@@ -85,6 +136,7 @@ export class ServerInstanceManager {
       throw new TypeError("server instance managed root must be absolute");
     }
     this.managedRoot = resolve(options.managedRoot);
+    this.runtimeGate = options.runtimeGate ?? new ServerInstanceRuntimeGate();
   }
 
   async list(): Promise<readonly ServerInstanceSnapshot[]> {
@@ -268,7 +320,7 @@ export class ServerInstanceManager {
     });
   }
 
-  /** 删除仅限由 SeaShard 管理且仍位于 managedRoot 直属目录中的实例。 */
+  /** 删除仅限由 SeaShard 管理且仍位于 managedRoot 直属目录中的实例；运行中会直接失败。 */
   async delete(value: unknown): Promise<void> {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(value, "instance id");
@@ -279,7 +331,7 @@ export class ServerInstanceManager {
       throw new Error(`server instance ${instanceId} is already being deleted`);
     }
 
-    const task = this.runInstanceOperation(instanceId, () =>
+    const task = this.runStoppedInstanceOperation(instanceId, "删除服务器实例", () =>
       this.deleteManagedInstance(instanceId),
     );
     this.deletions.set(instanceId, task);
@@ -380,11 +432,11 @@ export class ServerInstanceManager {
     });
   }
 
-  /** 通过重命名 .disabled 后缀切换 MOD 状态，并同步来源索引路径。 */
+  /** 通过重命名 .disabled 后缀切换 MOD 状态，并同步来源索引路径；运行中会直接失败。 */
   async setModDisabled(instanceValue: unknown, relativePathValue: unknown, disabled: boolean) {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    return this.runInstanceOperation(instanceId, async () => {
+    return this.runStoppedInstanceOperation(instanceId, "切换 MOD 状态", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       const result = await setInstalledModDisabled(instance, relativePathValue, disabled);
       await this.updatePrivateManifest(instanceId, (current) => {
@@ -414,11 +466,11 @@ export class ServerInstanceManager {
     });
   }
 
-  /** 删除 MOD 文件，并清理启用态与禁用态可能对应的来源索引。 */
+  /** 删除 MOD 文件，并清理启用态与禁用态可能对应的来源索引；运行中会直接失败。 */
   async deleteMod(instanceValue: unknown, relativePathValue: unknown): Promise<void> {
     if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    await this.runInstanceOperation(instanceId, async () => {
+    await this.runStoppedInstanceOperation(instanceId, "删除 MOD", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       const deleted = await deleteInstalledMod(instance, relativePathValue);
       await this.updatePrivateManifest(instanceId, (current) => {
@@ -457,16 +509,18 @@ export class ServerInstanceManager {
     });
   }
 
-  /** 修改世界 level.dat 中的数据包原生启用列表；调用方负责保证服务端已停机。 */
+  /**
+   * 修改世界 level.dat 中的数据包原生启用列表。
+   * 运行状态检查和文件事务共享实例队列，调用方无法在检查与写入之间插入服务器启动。
+   */
   async setWorldDatapackDisabled(
     instanceValue: unknown,
     worldIdValue: unknown,
     fileNameValue: unknown,
     disabled: boolean,
   ): Promise<ServerWorldDatapackSnapshot> {
-    if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    return this.runInstanceOperation(instanceId, async () => {
+    return this.runStoppedInstanceOperation(instanceId, "修改世界数据包", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       return setWorldDatapackDisabled(instance, worldIdValue, fileNameValue, disabled);
     });
@@ -478,9 +532,8 @@ export class ServerInstanceManager {
     worldIdValue: unknown,
     fileNameValue: unknown,
   ): Promise<void> {
-    if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    await this.runInstanceOperation(instanceId, async () => {
+    await this.runStoppedInstanceOperation(instanceId, "删除世界数据包", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       const deleted = await deleteWorldDatapack(instance, worldIdValue, fileNameValue);
       await this.updatePrivateManifest(instanceId, (current) => {
@@ -503,17 +556,10 @@ export class ServerInstanceManager {
   /** 串行修改当前实例的 level-name，避免两个切换请求互相覆盖。 */
   async switchWorld(value: unknown, worldId: unknown): Promise<ServerWorldStorageSnapshot> {
     const instanceId = expectDirectoryName(value, "instance id");
-    const previous = this.worldSwitches.get(instanceId);
-    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
+    return this.runStoppedInstanceOperation(instanceId, "切换世界", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       return switchWorldStorage(instance, worldId);
     });
-    this.worldSwitches.set(instanceId, task);
-    try {
-      return await task;
-    } finally {
-      if (this.worldSwitches.get(instanceId) === task) this.worldSwitches.delete(instanceId);
-    }
   }
   /** 串行访问同一实例的备份目录，避免读取、创建、恢复和删除互相竞态。 */
   async listWorldBackups(
@@ -533,9 +579,8 @@ export class ServerInstanceManager {
     instanceValue: unknown,
     worldIdValue: unknown,
   ): Promise<ServerWorldBackupSnapshot> {
-    if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    return this.runInstanceOperation(instanceId, async () => {
+    return this.runStoppedInstanceOperation(instanceId, "创建世界备份", async () => {
       const instance = await this.ensureBackupDirectory(instanceId);
       return createWorldBackup(
         instance,
@@ -551,9 +596,8 @@ export class ServerInstanceManager {
     worldIdValue: unknown,
     fileNameValue: unknown,
   ): Promise<ServerWorldStorageSnapshot> {
-    if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    return this.runInstanceOperation(instanceId, async () => {
+    return this.runStoppedInstanceOperation(instanceId, "恢复世界备份", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       await restoreWorldBackup(instance, worldIdValue, fileNameValue);
       return listWorldStorage(instance);
@@ -566,9 +610,8 @@ export class ServerInstanceManager {
     worldIdValue: unknown,
     fileNameValue: unknown,
   ): Promise<void> {
-    if (this.disposed) throw new Error("server instance manager is stopped");
     const instanceId = expectDirectoryName(instanceValue, "instance id");
-    await this.runInstanceOperation(instanceId, async () => {
+    await this.runStoppedInstanceOperation(instanceId, "删除世界备份", async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       await deleteWorldBackup(instance, worldIdValue, fileNameValue);
     });
@@ -620,6 +663,27 @@ export class ServerInstanceManager {
         this.metadataUpdates.delete(instanceId);
       }
     }
+  }
+
+  /**
+   * 所有要求停机的实例写操作统一经过 Gate，再进入实例文件队列。
+   * Gate 同时覆盖世界、MOD 与实例删除，保证任何调用入口都不能绕过 Runtime 生命周期。
+   * 第二次生命周期检查阻止已排队调用在组件销毁后补执行文件事务。
+   */
+  private runStoppedInstanceOperation<T>(
+    instanceId: string,
+    action: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    this.ensureActive();
+    return this.runtimeGate.runWhileStopped(instanceId, action, () => {
+      this.ensureActive();
+      return this.runInstanceOperation(instanceId, operation);
+    });
+  }
+
+  private ensureActive(): void {
+    if (this.disposed) throw new Error("server instance manager is stopped");
   }
 
   /** 同一实例的破坏性目录操作与备份共享串行队列。 */

@@ -37,6 +37,7 @@ import {
   expectServerModSearchRequest,
   expectServerModSource,
   expectServerStartupDefaultsUpdate,
+  expectServerWorldId,
   expectString,
 } from "./validation";
 
@@ -412,18 +413,13 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         });
         config.runtime.handle(
           desktopChannels.serverInstancesSetModDisabled,
-          async (event, instanceId, relativePath, disabled) => {
+          (event, instanceId, relativePath, disabled) => {
             ownedWindow(event.sender.id);
             if (typeof disabled !== "boolean") {
               throw new TypeError("server mod disabled must be a boolean");
             }
-            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
-            const runtime = await config.readServerRuntime(safeInstanceId);
-            if (isActiveServerState(runtime.state)) {
-              throw new Error("需要关停服务器之后才能操作 MOD。");
-            }
             return config.setServerModDisabled(
-              safeInstanceId,
+              expectNonEmptyString(instanceId, "server instance id"),
               expectNonEmptyString(relativePath, "server mod relative path"),
               disabled,
             );
@@ -431,15 +427,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         );
         config.runtime.handle(
           desktopChannels.serverInstancesDeleteMod,
-          async (event, instanceId, relativePath) => {
+          (event, instanceId, relativePath) => {
             ownedWindow(event.sender.id);
-            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
-            const runtime = await config.readServerRuntime(safeInstanceId);
-            if (isActiveServerState(runtime.state)) {
-              throw new Error("需要关停服务器之后才能操作 MOD。");
-            }
             return config.deleteServerMod(
-              safeInstanceId,
+              expectNonEmptyString(instanceId, "server instance id"),
               expectNonEmptyString(relativePath, "server mod relative path"),
             );
           },
@@ -456,7 +447,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.listServerWorldDatapacks(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
             );
           },
         );
@@ -469,7 +460,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             }
             return config.setServerWorldDatapackDisabled(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
               expectNonEmptyString(fileName, "server datapack file name"),
               disabled,
             );
@@ -481,7 +472,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.deleteServerWorldDatapack(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
               expectNonEmptyString(fileName, "server datapack file name"),
             );
           },
@@ -492,7 +483,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.listServerWorldBackups(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
             );
           },
         );
@@ -502,7 +493,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.createServerWorldBackup(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
             );
           },
         );
@@ -512,7 +503,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.restoreServerWorldBackup(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
               expectNonEmptyString(fileName, "server world backup file name"),
             );
           },
@@ -523,23 +514,18 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             ownedWindow(event.sender.id);
             return config.deleteServerWorldBackup(
               expectNonEmptyString(instanceId, "server instance id"),
-              expectNonEmptyString(worldId, "server world id"),
+              expectServerWorldId(worldId),
               expectNonEmptyString(fileName, "server world backup file name"),
             );
           },
         );
         config.runtime.handle(
           desktopChannels.serverInstancesSwitchWorld,
-          async (event, instanceId, worldId) => {
+          (event, instanceId, worldId) => {
             ownedWindow(event.sender.id);
-            const safeInstanceId = expectNonEmptyString(instanceId, "server instance id");
-            const runtime = await config.readServerRuntime(safeInstanceId);
-            if (isActiveServerState(runtime.state)) {
-              throw new Error("需要关停服务器之后才能切换存档。");
-            }
             return config.switchServerWorld(
-              safeInstanceId,
-              expectNonEmptyString(worldId, "server world id"),
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectServerWorldId(worldId),
             );
           },
         );
@@ -581,14 +567,6 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           }
           deletingServerInstances.add(instanceId);
           try {
-            const runtime = await config.readServerRuntime(instanceId);
-            if (
-              runtime.state === "starting" ||
-              runtime.state === "running" ||
-              runtime.state === "stopping"
-            ) {
-              throw new Error("请先停止服务器，再删除实例");
-            }
             await config.deleteServerInstance(instanceId);
           } finally {
             deletingServerInstances.delete(instanceId);
@@ -918,10 +896,4 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
       }, "desktop shell lifecycle");
     },
   };
-}
-
-function isActiveServerState(
-  state: "stopped" | "starting" | "running" | "stopping" | "failed",
-): boolean {
-  return state === "starting" || state === "running" || state === "stopping";
 }

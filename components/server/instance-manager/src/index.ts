@@ -14,11 +14,14 @@ import { ServerInstanceManager } from "./manager";
 import { serverInstanceDataCapsule, SQLiteServerInstanceRegistry } from "./registry";
 import { registerServerInstanceAgentResources } from "./agent-resources";
 import { registerServerInstalledModAgentIntegration } from "./agent-mods";
+import { registerServerDatapackAgentResources } from "./agent-datapacks";
 import type { ServerInstanceClientProjection } from "./types";
+import type { ServerInstanceRuntimeGate } from "./manager";
 
 export interface ServerInstanceManagerModuleOptions {
   readonly database: DatabaseService;
   readonly managedRoot: string;
+  readonly runtimeGate: ServerInstanceRuntimeGate;
   readonly reportError?: (error: unknown) => void;
 }
 
@@ -56,6 +59,7 @@ export function createServerInstanceManagerModule(
         managedRoot: options.managedRoot,
         registry,
         coreSource,
+        runtimeGate: options.runtimeGate,
         ...(options.reportError ? { reportError: options.reportError } : {}),
       });
       registerServerInstanceAgentResources(ctx, {
@@ -66,6 +70,12 @@ export function createServerInstanceManagerModule(
         setModDisabled: (instanceId, relativePath, disabled) =>
           manager.setModDisabled(instanceId, relativePath, disabled),
         deleteMod: (instanceId, relativePath) => manager.deleteMod(instanceId, relativePath),
+      });
+      registerServerDatapackAgentResources(ctx, {
+        listInstances: () => manager.list(),
+        listWorldStorage: (instanceId) => manager.listWorldStorage(instanceId),
+        listWorldDatapacks: (instanceId, worldId) =>
+          manager.listWorldDatapacks(instanceId, worldId),
       });
       ctx.provide(serverInstanceManagerContract, {
         createManaged: async (request) => asJsonValue(await manager.createManaged(request)),
@@ -170,6 +180,7 @@ function asJsonValue(value: unknown): JsonValue {
 
 export * from "./agent-resources";
 export * from "./agent-mods";
+export * from "./agent-datapacks";
 export * from "./manager";
 export * from "./directory-naming";
 export * from "./world-backup";

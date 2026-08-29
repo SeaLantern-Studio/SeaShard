@@ -246,6 +246,7 @@ const serverModResourceTypes = new Set<ServerModrinthResourceType>([
 ]);
 const serverModFilterPattern = /^[a-z0-9][a-z0-9+._-]{0,63}$/u;
 const serverModProjectIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+const maximumServerWorldIdLength = 512;
 
 /** 收窄 Renderer 的搜索参数，分页和 Facet 都只能落在公开 Contract 的固定边界内。 */
 export function expectServerModSearchRequest(value: unknown): ServerModSearchRequest {
@@ -419,15 +420,18 @@ function expectServerModIdentity(value: unknown, label: string, maximumLength = 
   }
   return identity;
 }
-function expectServerWorldId(value: unknown): string {
+export function expectServerWorldId(value: unknown): string {
   const worldId = expectString(value, "server world ID");
   if (
-    worldId.length > 1_024 ||
+    !worldId ||
+    worldId.length > maximumServerWorldIdLength ||
+    worldId === "." ||
+    worldId === ".." ||
+    worldId.includes("/") ||
     worldId.includes("\\") ||
-    worldId.startsWith("/") ||
-    worldId.split("/").some((part) => !part || part === "." || part === "..")
+    worldId.includes("\0")
   ) {
-    throw new TypeError("server world ID is invalid");
+    throw new TypeError("server world ID must be a leaf directory name");
   }
   return worldId;
 }

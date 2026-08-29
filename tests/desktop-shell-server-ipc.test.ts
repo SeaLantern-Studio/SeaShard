@@ -335,25 +335,6 @@ await test("desktop shell routes settings, downloads, instances, and configurati
     /must be a boolean/u,
   );
   await runtime.invoke(desktopChannels.serverRuntimeStart, 1, "instance-paper");
-  await assert.rejects(
-    runtime.invoke(
-      desktopChannels.serverInstancesSetModDisabled,
-      1,
-      "instance-paper",
-      "mods/example.jar",
-      true,
-    ),
-    /关停服务器之后才能操作 MOD/u,
-  );
-  await assert.rejects(
-    runtime.invoke(
-      desktopChannels.serverInstancesDeleteMod,
-      1,
-      "instance-paper",
-      "mods/example.jar",
-    ),
-    /关停服务器之后才能操作 MOD/u,
-  );
   await runtime.invoke(desktopChannels.serverRuntimeStop, 1, "instance-paper");
   assert.deepEqual(
     await runtime.invoke(
@@ -382,6 +363,35 @@ await test("desktop shell routes settings, downloads, instances, and configurati
       "pack.zip",
     ),
     undefined,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesWorldDatapacks,
+      1,
+      "instance-paper",
+      "outer/inner",
+    ),
+    /leaf directory name/u,
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverInstancesWorldBackups,
+      1,
+      "instance-paper",
+      "w".repeat(513),
+    ),
+    /leaf directory name/u,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.serverModInstallToInstance, 1, {
+      source: "modrinth",
+      resourceType: "datapack",
+      projectId: "datapack-project",
+      versionId: "datapack-version",
+      instanceId: "instance-paper",
+      worldId: "outer/inner",
+    }),
+    /leaf directory name/u,
   );
   await assert.rejects(
     runtime.invoke(

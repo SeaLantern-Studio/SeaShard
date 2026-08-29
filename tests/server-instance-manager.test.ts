@@ -15,6 +15,7 @@ import type {
 } from "../components/server/core-source/src/index.ts";
 import {
   ServerInstanceManager,
+  ServerInstanceRuntimeGate,
   SQLiteServerInstanceRegistry,
   registerServerInstanceAgentResources,
   projectServerInstanceForClient,
@@ -35,6 +36,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 const databaseWorkerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
 const artifactHash = "a".repeat(64);
@@ -385,10 +387,12 @@ await test("managed downloads persist unique instances and split portable manife
     let repository = await broker.registerCapsule(serverInstanceDataCapsule);
     let registry = new SQLiteServerInstanceRegistry(repository);
     let idNumber = 0;
+    const runtimeGate = new ServerInstanceRuntimeGate();
     const manager = new ServerInstanceManager({
       managedRoot,
       registry,
       coreSource: new FakeServerCoreSource("completed", coreIconPath),
+      runtimeGate,
       createId: () => `instance-${++idNumber}`,
       now: () => "2026-08-17T00:00:00.000Z",
     });
@@ -489,6 +493,75 @@ await test("managed downloads persist unique instances and split portable manife
       persistedWorldManifest.worldStorageDirectoryName,
       firstWorldInstance.worldStorageDirectoryName,
     );
+    const guardedWorldId = "guarded-world";
+    const guardedWorldDirectory = join(managedInstance.rootPath, guardedWorldId);
+    const guardedDatapackDirectory = join(guardedWorldDirectory, "datapacks");
+    await mkdir(guardedDatapackDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(
+        join(guardedWorldDirectory, "level.dat"),
+        gzipSync(createDatapackLevelDat("Guarded World")),
+      ),
+      writeFile(
+        join(guardedDatapackDirectory, "guarded.zip"),
+        zipSync({
+          "pack.mcmeta": strToU8(
+            JSON.stringify({ pack: { pack_format: 48, description: "运行锁测试" } }),
+          ),
+        }),
+      ),
+    ]);
+    // 左侧写操作先登记实例队列；并发启动预留必须等到 level.dat 事务完整提交。
+    const [disabledDatapack] = await Promise.all([
+      manager.setWorldDatapackDisabled(managedInstance.id, guardedWorldId, "guarded.zip", true),
+      runtimeGate.reserve(managedInstance.id),
+    ]);
+    assert.equal(disabledDatapack.disabled, true);
+    await Promise.all([
+      assert.rejects(
+        manager.setModDisabled(managedInstance.id, "mods/missing.jar", true),
+        /服务器正在运行，无法切换 MOD 状态/u,
+      ),
+      assert.rejects(
+        manager.deleteMod(managedInstance.id, "mods/missing.jar"),
+        /服务器正在运行，无法删除 MOD/u,
+      ),
+      assert.rejects(manager.delete(managedInstance.id), /服务器正在运行，无法删除服务器实例/u),
+    ]);
+    await assert.rejects(
+      manager.setWorldDatapackDisabled(managedInstance.id, guardedWorldId, "guarded.zip", false),
+      /服务器正在运行，无法修改世界数据包/u,
+    );
+    await Promise.all([
+      assert.rejects(
+        manager.deleteWorldDatapack(managedInstance.id, guardedWorldId, "guarded.zip"),
+        /服务器正在运行，无法删除世界数据包/u,
+      ),
+      assert.rejects(
+        manager.switchWorld(managedInstance.id, guardedWorldId),
+        /服务器正在运行，无法切换世界/u,
+      ),
+      assert.rejects(
+        manager.createWorldBackup(managedInstance.id, guardedWorldId),
+        /服务器正在运行，无法创建世界备份/u,
+      ),
+      assert.rejects(
+        manager.restoreWorldBackup(managedInstance.id, guardedWorldId, "missing.zip"),
+        /服务器正在运行，无法恢复世界备份/u,
+      ),
+      assert.rejects(
+        manager.deleteWorldBackup(managedInstance.id, guardedWorldId, "missing.zip"),
+        /服务器正在运行，无法删除世界备份/u,
+      ),
+    ]);
+    await runtimeGate.release(managedInstance.id);
+    const enabledDatapack = await manager.setWorldDatapackDisabled(
+      managedInstance.id,
+      guardedWorldId,
+      "guarded.zip",
+      false,
+    );
+    assert.equal(enabledDatapack.disabled, false);
 
     const countedInstance = instances[0]!;
     await Promise.all([
@@ -693,7 +766,37 @@ await test("managed downloads persist unique instances and split portable manife
       ),
     );
 
+    let markGateOperationStarted!: () => void;
+    let releaseGateOperation!: () => void;
+    const gateOperationStarted = new Promise<void>((resolveStarted) => {
+      markGateOperationStarted = resolveStarted;
+    });
+    const gateOperationRelease = new Promise<void>((resolveRelease) => {
+      releaseGateOperation = resolveRelease;
+    });
+    const heldGateOperation = runtimeGate.runWhileStopped(
+      managedInstance.id,
+      "执行测试操作",
+      async () => {
+        markGateOperationStarted();
+        await gateOperationRelease;
+      },
+    );
+    await gateOperationStarted;
+    const queuedMutation = manager.setWorldDatapackDisabled(
+      managedInstance.id,
+      guardedWorldId,
+      "guarded.zip",
+      true,
+    );
+    const queuedMutationRejection = assert.rejects(
+      queuedMutation,
+      /server instance manager is stopped/u,
+    );
     await manager.dispose();
+    releaseGateOperation();
+    await heldGateOperation;
+    await queuedMutationRejection;
     await broker.close();
     broker = await SQLiteDatabaseBroker.create({
       databasePath,
@@ -952,3 +1055,42 @@ await test("failed managed downloads leave neither a registry row nor an instanc
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
+
+function createDatapackLevelDat(levelName: string): Uint8Array {
+  const bytes: number[] = [10, 0, 0];
+  pushNamedNbtCompound(bytes, "Data");
+  pushNamedNbtString(bytes, "LevelName", levelName);
+  pushNamedNbtCompound(bytes, "DataPacks");
+  pushNamedNbtStringList(bytes, "Enabled", ["vanilla"]);
+  pushNamedNbtStringList(bytes, "Disabled", []);
+  bytes.push(0, 0, 0);
+  return Uint8Array.from(bytes);
+}
+
+function pushNamedNbtCompound(bytes: number[], name: string): void {
+  bytes.push(10);
+  pushNbtString(bytes, name);
+}
+
+function pushNamedNbtString(bytes: number[], name: string, value: string): void {
+  bytes.push(8);
+  pushNbtString(bytes, name);
+  pushNbtString(bytes, value);
+}
+
+function pushNamedNbtStringList(bytes: number[], name: string, values: readonly string[]): void {
+  bytes.push(9);
+  pushNbtString(bytes, name);
+  bytes.push(8);
+  pushNbtInt32(bytes, values.length);
+  for (const value of values) pushNbtString(bytes, value);
+}
+
+function pushNbtString(bytes: number[], value: string): void {
+  const encoded = new TextEncoder().encode(value);
+  bytes.push((encoded.byteLength >> 8) & 0xff, encoded.byteLength & 0xff, ...encoded);
+}
+
+function pushNbtInt32(bytes: number[], value: number): void {
+  bytes.push((value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff);
+}

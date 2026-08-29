@@ -3,13 +3,18 @@ import {
   createServerModCatalogResource,
   createServerModProjectResource,
 } from "./agent-integration/catalog";
+import {
+  createServerDatapackCatalogResource,
+  createServerDatapackProjectResource,
+} from "./agent-integration/datapack-catalog";
+import { registerServerDatapackInstallAgentTool } from "./agent-integration/datapack-install";
 import { registerServerModInstallAgentTool } from "./agent-integration/install";
-import type { ServerModCatalogAgentRegistrationOptions } from "./agent-integration/shared";
+import type {
+  ServerDatapackCatalogAgentRegistrationOptions,
+  ServerModCatalogAgentRegistrationOptions,
+} from "./agent-integration/shared";
 
-/**
- * Mod Source 组件同时拥有 Mod、数据包、世界与整合包的多来源目录。
- * 入口只负责编排当前 Mod 能力；各资源类型继续放进 agent-integration 子目录独立维护。
- */
+/** 当前入口编排 Mod 资源；多来源目录的通用分页和安全投影位于独立共享适配器。 */
 export function registerServerModCatalogAgentIntegration(
   context: Pick<PluginContext, "agentResources" | "agentTool">,
   options: ServerModCatalogAgentRegistrationOptions,
@@ -21,6 +26,21 @@ export function registerServerModCatalogAgentIntegration(
   registerServerModInstallAgentTool(context, options);
 }
 
+/** 数据包目录与安装保持独立 URI 和工具身份，底层继续复用 Mod Source 目录与下载事务。 */
+export function registerServerDatapackCatalogAgentIntegration(
+  context: Pick<PluginContext, "agentResources" | "agentTool">,
+  options: ServerDatapackCatalogAgentRegistrationOptions,
+): void {
+  context.agentResources({
+    "server://datapacks/catalog": createServerDatapackCatalogResource(options),
+    "server://datapacks/catalog/{source}/{projectId}": createServerDatapackProjectResource(options),
+  });
+  registerServerDatapackInstallAgentTool(context, options);
+}
+
 export * from "./agent-integration/catalog";
+export * from "./agent-integration/datapack-catalog";
+export * from "./agent-integration/datapack-install";
 export * from "./agent-integration/install";
+export * from "./agent-integration/resource-catalog";
 export * from "./agent-integration/shared";

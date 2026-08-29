@@ -59,11 +59,6 @@ await test("desktop shell routes Java and server runtime IPC", async () => {
     pid: 4_242,
     startedAt: "2026-08-17T12:00:02.000Z",
   });
-  await assert.rejects(
-    runtime.invoke(desktopChannels.serverInstancesDelete, 1, "instance-paper"),
-    /请先停止服务器/,
-  );
-  assert.deepEqual(harness.deletedServerInstances, []);
   assert.equal(
     await runtime.invoke(desktopChannels.serverRuntimeSendCommand, 1, "instance-paper", "list"),
     undefined,

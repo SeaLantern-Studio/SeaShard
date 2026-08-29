@@ -94,17 +94,6 @@ export async function registerDesktopShellBridge(
     if (!visibleTasks.some((task) => task.id === taskId)) return false;
     return downloads.cancel(taskId);
   };
-  /** 备份属于磁盘破坏性操作，桥接层统一复核服务端必须已停机。 */
-  const ensureServerStoppedForWorldMutation = async (instanceId: string): Promise<void> => {
-    const snapshot = await serverRuntime.get(instanceId);
-    if (
-      snapshot.state === "starting" ||
-      snapshot.state === "running" ||
-      snapshot.state === "stopping"
-    ) {
-      throw new Error("需要关停服务器之后才能操作存档备份。");
-    }
-  };
   // BrowserWindow、Sender 授权和 IPC Handler 属于同一个 Desktop Shell 生命周期。
   await kernel.registerBuiltIn({
     manifest: desktopShellManifest,
@@ -208,31 +197,16 @@ export async function registerDesktopShellBridge(
               await serverInstances.listWorldBackups(instanceId, worldId),
             listServerWorldDatapacks: async (instanceId, worldId) =>
               await serverInstances.listWorldDatapacks(instanceId, worldId),
-            setServerWorldDatapackDisabled: async (instanceId, worldId, fileName, disabled) => {
-              await ensureServerStoppedForWorldMutation(instanceId);
-              return serverInstances.setWorldDatapackDisabled(
-                instanceId,
-                worldId,
-                fileName,
-                disabled,
-              );
-            },
-            deleteServerWorldDatapack: async (instanceId, worldId, fileName) => {
-              await ensureServerStoppedForWorldMutation(instanceId);
-              await serverInstances.deleteWorldDatapack(instanceId, worldId, fileName);
-            },
-            createServerWorldBackup: async (instanceId, worldId) => {
-              await ensureServerStoppedForWorldMutation(instanceId);
-              return await serverInstances.createWorldBackup(instanceId, worldId);
-            },
-            restoreServerWorldBackup: async (instanceId, worldId, fileName) => {
-              await ensureServerStoppedForWorldMutation(instanceId);
-              return await serverInstances.restoreWorldBackup(instanceId, worldId, fileName);
-            },
-            deleteServerWorldBackup: async (instanceId, worldId, fileName) => {
-              await ensureServerStoppedForWorldMutation(instanceId);
-              await serverInstances.deleteWorldBackup(instanceId, worldId, fileName);
-            },
+            setServerWorldDatapackDisabled: (instanceId, worldId, fileName, disabled) =>
+              serverInstances.setWorldDatapackDisabled(instanceId, worldId, fileName, disabled),
+            deleteServerWorldDatapack: (instanceId, worldId, fileName) =>
+              serverInstances.deleteWorldDatapack(instanceId, worldId, fileName),
+            createServerWorldBackup: (instanceId, worldId) =>
+              serverInstances.createWorldBackup(instanceId, worldId),
+            restoreServerWorldBackup: (instanceId, worldId, fileName) =>
+              serverInstances.restoreWorldBackup(instanceId, worldId, fileName),
+            deleteServerWorldBackup: (instanceId, worldId, fileName) =>
+              serverInstances.deleteWorldBackup(instanceId, worldId, fileName),
             switchServerWorld: async (instanceId, worldId) =>
               await serverInstances.switchWorld(instanceId, worldId),
             writeServerInstanceStartupSettings: (instanceId, settings) =>

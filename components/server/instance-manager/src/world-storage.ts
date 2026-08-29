@@ -15,6 +15,7 @@ const maximumWorldScanDepth = 4;
 const maximumWorldCount = 1_000;
 const maximumLevelDatBytes = 64 * 1024 * 1024;
 const maximumIconBytes = 512 * 1024;
+const maximumWorldIdLength = 512;
 const skippedWorldDirectories = new Set([
   ".seashard",
   "config",
@@ -28,7 +29,10 @@ const skippedWorldDirectories = new Set([
 ]);
 
 interface DiscoveredWorld {
+  /** 对外公开的世界 ID，只使用实际世界目录的末级名称。 */
   readonly id: string;
+  /** 相对世界存储根的真实路径，只在 Host 内用于定位目录和来源索引。 */
+  readonly relativePath: string;
   readonly absolutePath: string;
 }
 
@@ -37,24 +41,31 @@ interface WorldMetadata {
   readonly iconDataUrl?: string;
 }
 
-/** 扫描实例目录并把原生世界、下载世界和多维度目录归一成 Renderer 投影。 */
+/**
+ * 扫描实例目录并把原生世界、下载世界和多维度目录归一成 Renderer 投影。
+ * 下载世界的外层容器属于 Host 存储结构；公开 ID 始终是实际世界目录的末级名称。
+ */
 export async function listWorldStorage(
   instance: ServerInstanceSnapshot,
 ): Promise<ServerWorldStorageSnapshot> {
   const rootPath = await resolveWorldStorageRoot(instance);
-  const currentId = await readLevelNameFromProperties(rootPath);
+  const configuredWorldPath = await readLevelNameFromProperties(rootPath);
   const unified = supportsUnifiedWorldStorage(instance.serverType);
   const worlds = await discoverWorlds(rootPath, unified);
+  const currentId = configuredWorldPath
+    ? (worlds.find(({ relativePath }) => relativePath === configuredWorldPath)?.id ??
+      basename(configuredWorldPath))
+    : undefined;
 
   if (unified) {
     const saves = await Promise.all(
       worlds.map(async (world) =>
         createSave(
           world,
-          currentId === world.id,
+          configuredWorldPath === world.relativePath,
           world.id,
           "overworld",
-          instance.resourceSources?.worlds?.[world.id],
+          instance.resourceSources?.worlds?.[world.relativePath],
         ),
       ),
     );
@@ -82,7 +93,7 @@ export async function listWorldStorage(
         groupWorlds.map(async (world) =>
           createSave(
             world,
-            currentId === groupId,
+            configuredWorldPath === groupId,
             groupId,
             splitWorldDimension(world.id, groupId),
             instance.resourceSources?.worlds?.[groupId],
@@ -93,8 +104,8 @@ export async function listWorldStorage(
       const overworld = saves.find(({ dimension }) => dimension === "overworld");
       return {
         id: groupId,
-        name: overworld?.name ?? saves[0]?.name ?? basename(groupId),
-        current: currentId === groupId,
+        name: overworld?.name ?? saves[0]?.name ?? groupId,
+        current: configuredWorldPath === groupId,
         saves,
       } satisfies ServerWorldDimensionGroup;
     }),
@@ -111,6 +122,7 @@ export async function listWorldStorage(
 export interface WorldStorageDirectory {
   readonly id: string;
   readonly groupId: string;
+  readonly relativePath: string;
   readonly absolutePath: string;
   readonly storageRoot: string;
 }
@@ -156,23 +168,23 @@ export async function resolveWorldDatapackDirectory(
   };
 }
 
-/** 只允许切换扫描结果中的目录，并通过 server.properties 的 level-name 完成切换。 */
+/**
+ * 公开调用只接收末级世界 ID；写回 server.properties 时恢复 Host 扫描得到的真实相对路径。
+ * 这样模型和 Renderer 不需要了解下载世界的外层容器，同时 Minecraft 仍能定位嵌套目录。
+ */
 export async function switchWorldStorage(
   instance: ServerInstanceSnapshot,
   requestedId: unknown,
 ): Promise<ServerWorldStorageSnapshot> {
   const worldId = expectWorldId(requestedId);
-  const snapshot = await listWorldStorage(instance);
-  const selectable =
-    snapshot.mode === "unified"
-      ? snapshot.saves.some((save) => save.id === worldId)
-      : snapshot.dimensions.some((group) => group.id === worldId);
-  if (!selectable) throw new Error("目标存档不存在或不属于当前服务器实例。");
+  const sources = await resolveWorldStorageDirectories(instance, worldId);
+  const overworld = sources.find(({ id, groupId }) => id === groupId) ?? sources[0];
+  if (!overworld) throw new Error("目标存档不存在或不属于当前服务器实例。");
 
   const rootPath = await resolveWorldStorageRoot(instance);
   const propertiesPath = resolve(rootPath, "server.properties");
   const source = await readFile(propertiesPath, "utf8");
-  await writeFile(propertiesPath, upsertLevelName(source, worldId), "utf8");
+  await writeFile(propertiesPath, upsertLevelName(source, overworld.relativePath), "utf8");
   return listWorldStorage(instance);
 }
 
@@ -191,6 +203,7 @@ export async function resolveWorldStorageContainer(
 
 async function discoverWorlds(rootPath: string, recursive: boolean): Promise<DiscoveredWorld[]> {
   const worlds: DiscoveredWorld[] = [];
+  const publicIds = new Set<string>();
   const visit = async (
     directory: string,
     relativeDirectory: string,
@@ -216,7 +229,15 @@ async function discoverWorlds(rootPath: string, recursive: boolean): Promise<Dis
       const childPath = join(directory, entry.name);
       const childRelative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
       if (await hasLevelDat(childPath)) {
-        worlds.push({ id: childRelative.replaceAll("\\", "/"), absolutePath: childPath });
+        if (publicIds.has(entry.name)) {
+          throw new Error(`发现重名世界目录，无法生成唯一世界 ID：${entry.name}`);
+        }
+        publicIds.add(entry.name);
+        worlds.push({
+          id: entry.name,
+          relativePath: childRelative.replaceAll("\\", "/"),
+          absolutePath: childPath,
+        });
         continue;
       }
       if (recursive) await visit(childPath, childRelative, depth + 1);
@@ -452,7 +473,7 @@ async function readLevelNameFromProperties(rootPath: string): Promise<string | u
   return undefined;
 }
 
-function upsertLevelName(source: string, worldId: string): string {
+function upsertLevelName(source: string, worldPath: string): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/u);
   const index = lines.findIndex((line) => {
@@ -462,10 +483,10 @@ function upsertLevelName(source: string, worldId: string): string {
     return separator >= 0 && trimmed.slice(0, separator).trim() === "level-name";
   });
   if (index >= 0) {
-    lines[index] = `level-name=${worldId}`;
+    lines[index] = `level-name=${worldPath}`;
   } else {
     if (lines.length > 0 && lines.at(-1) !== "") lines.push("");
-    lines.push(`level-name=${worldId}`);
+    lines.push(`level-name=${worldPath}`);
   }
   return lines.join(newline);
 }
@@ -474,12 +495,14 @@ function expectWorldId(value: unknown): string {
   if (
     typeof value !== "string" ||
     !value ||
+    value.length > maximumWorldIdLength ||
+    value === "." ||
+    value === ".." ||
+    value.includes("/") ||
     value.includes("\\") ||
-    value.includes("\0") ||
-    value.startsWith("/") ||
-    value.split("/").some((part) => !part || part === "." || part === "..")
+    value.includes("\0")
   ) {
-    throw new TypeError("存档目录标识无效");
+    throw new TypeError("世界 ID 必须是实际世界目录的末级名称，不能包含路径");
   }
   return value;
 }

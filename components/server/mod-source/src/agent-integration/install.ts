@@ -15,6 +15,7 @@ import {
   maximumIdentityLength,
   maximumVersionLength,
   readOptionalText,
+  resolveInstallVersionId,
   truncateText,
   waitForInvocation,
   type ServerModCatalogAgentRegistrationOptions,
@@ -165,28 +166,6 @@ async function installServerMod(
       downloadedBytes: download.downloadedBytes,
     },
   };
-}
-
-/** 可读版本号只在同一项目中唯一时解析；歧义场景强制模型回到稳定版本 ID。 */
-async function resolveInstallVersionId(
-  options: ServerModCatalogAgentRegistrationOptions,
-  input: InstallModInput,
-  signal: AbortSignal | undefined,
-): Promise<string> {
-  if (input.versionId) return input.versionId;
-  const details = await waitForInvocation(
-    options.getProjectDetails(input.source, input.projectId),
-    signal,
-  );
-  signal?.throwIfAborted();
-  const matches = details.versions.filter((candidate) => candidate.version === input.version);
-  if (matches.length === 0) {
-    throw new Error(`项目 ${input.projectId} 中不存在可读版本：${input.version}`);
-  }
-  if (matches.length > 1) {
-    throw new Error(`项目 ${input.projectId} 中有多个同名版本，请改用详情资源返回的 versionId`);
-  }
-  return matches[0]!.id;
 }
 
 function projectProjectModReceipt(

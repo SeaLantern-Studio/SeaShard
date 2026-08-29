@@ -36,6 +36,10 @@ export interface ServerRuntimeManagerOptions {
   scanJavaInstallations(): Promise<readonly JavaInstallationSnapshot[]>;
   recordInstanceStartedAt?(instanceId: string, startedAt: string): Promise<void>;
   recordInstanceRuntime?(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>;
+  /** 在实例文件队列内登记服务器生命周期，令底层世界写操作能够原子判断运行状态。 */
+  reserveInstanceRuntime?(instanceId: string): Promise<void>;
+  /** 进程完全退出后释放实例生命周期登记。 */
+  releaseInstanceRuntime?(instanceId: string): Promise<void>;
   readSettings(): Promise<ServerSettingsSnapshot>;
   onConsoleLine?(line: ServerConsoleLine): void;
   reportError?(error: unknown): void;
@@ -108,6 +112,7 @@ export class ServerRuntimeManager {
   private readonly sessions = new Map<string, ActiveSession>();
   private readonly snapshots = new Map<string, ServerRuntimeSnapshot>();
   private readonly logs = new Map<string, ConsoleLogState>();
+  private readonly instanceOperations = new Map<string, Promise<void>>();
   private readonly fileSystem: ServerRuntimeFileSystem;
   private readonly spawnProcess: SpawnServerProcess;
   private readonly preparationRunner: ServerPreparationRunner;
@@ -179,17 +184,42 @@ export class ServerRuntimeManager {
   async startWithReceipt(value: unknown): Promise<ServerRuntimeStartReceipt> {
     this.ensureActive();
     const instanceId = expectInstanceId(value);
+    return this.runInstanceOperation(instanceId, () => this.startInstanceWithReceipt(instanceId));
+  }
+
+  /**
+   * 在同一实例的启动互斥区间内执行停机操作。
+   * 已排队的启动会等待操作完成；已经先取得互斥权的启动则会令操作在写文件前失败。
+   */
+  async runWhileStopped<T>(value: unknown, operation: () => Promise<T>): Promise<T> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(value);
+    return this.runInstanceOperation(instanceId, async () => {
+      this.ensureActive();
+      if (isActiveState(this.get(instanceId).state)) {
+        throw new Error("服务器正在运行，无法修改世界数据包。请先停止服务器后重试。");
+      }
+      return operation();
+    });
+  }
+
+  private async startInstanceWithReceipt(instanceId: string): Promise<ServerRuntimeStartReceipt> {
+    this.ensureActive();
     const current = this.snapshots.get(instanceId);
     if (current && isActiveState(current.state)) {
       throw new Error(`server instance ${instanceId} is already ${current.state}`);
     }
-
-    const startingSnapshot: ServerRuntimeSnapshot = { instanceId, state: "starting" };
-    this.snapshots.set(instanceId, startingSnapshot);
-    this.appendLine(instanceId, "system", "[SeaShard] 正在解析服务器核心启动策略…");
-
+    let runtimeReserved = false;
     let child: ChildProcessWithoutNullStreams | undefined;
     try {
+      // 生命周期预留与 Instance Manager 的世界写入共享队列；先到达的一方完整执行。
+      await this.options.reserveInstanceRuntime?.(instanceId);
+      runtimeReserved = true;
+
+      const startingSnapshot: ServerRuntimeSnapshot = { instanceId, state: "starting" };
+      this.snapshots.set(instanceId, startingSnapshot);
+      this.appendLine(instanceId, "system", "[SeaShard] 正在解析服务器核心启动策略…");
+
       const [instance, settings, installations] = await Promise.all([
         this.findInstance(instanceId),
         this.options.readSettings(),
@@ -252,6 +282,7 @@ export class ServerRuntimeManager {
         child.kill();
         await session.closed;
       }
+      if (runtimeReserved) await this.releaseInstanceRuntime(instanceId);
       const message = errorMessage(error);
       const failedSnapshot: ServerRuntimeSnapshot = {
         instanceId,
@@ -311,9 +342,12 @@ export class ServerRuntimeManager {
   dispose(): Promise<void> {
     if (this.disposeTask) return this.disposeTask;
     this.disposed = true;
-    this.disposeTask = Promise.all([this.disposeSessions(), this.preparationRunner.dispose()]).then(
-      () => undefined,
-    );
+    const pendingOperations = [...this.instanceOperations.values()];
+    this.disposeTask = Promise.all([
+      this.disposeSessions(),
+      this.preparationRunner.dispose(),
+      ...pendingOperations,
+    ]).then(() => undefined);
     return this.disposeTask;
   }
 
@@ -422,33 +456,26 @@ export class ServerRuntimeManager {
     child.on("error", (error) => this.handleProcessError(instanceId, child, error));
     // close 在 stdout/stderr 已关闭后触发，能够保证最后一块无换行输出也被解码。
     child.once("close", (code, signal) => {
-      this.handleClose(instanceId, child, code, signal);
+      void this.handleClose(instanceId, child, code, signal);
     });
     return session;
   }
 
-  private handleClose(
+  private async handleClose(
     instanceId: string,
     child: ChildProcessWithoutNullStreams,
     code: number | null,
     signal: NodeJS.Signals | null,
-  ): void {
+  ): Promise<void> {
     const session = this.sessions.get(instanceId);
     if (!session || session.child !== child) return;
     const closingSnapshot = session.snapshot;
     const expectedStop = closingSnapshot.state === "stopping" && !session.stdinFailure;
     if (closingSnapshot.state !== "stopping") {
-      // close 后继续保留 session，令组件卸载等待累计时长真正落盘。
+      // close 后继续保留 session，令组件卸载等待累计时长和生命周期标记真正结算。
       session.snapshot = { ...closingSnapshot, state: "stopping" };
       this.snapshots.set(instanceId, session.snapshot);
     }
-
-    const releaseSession = (): void => {
-      if (this.sessions.get(instanceId) === session) {
-        this.sessions.delete(instanceId);
-      }
-      session.resolveClosed();
-    };
 
     try {
       session.stdout.end();
@@ -475,40 +502,42 @@ export class ServerRuntimeManager {
         ...(code === null ? {} : { exitCode: code }),
         ...(state === "failed" ? { error: message } : {}),
       };
-      const finalize = (): void => {
-        try {
-          this.snapshots.set(instanceId, snapshot);
-          this.appendLine(
-            instanceId,
-            state === "failed" ? "stderr" : "system",
-            `[SeaShard] ${message}`,
-          );
-        } finally {
-          releaseSession();
-        }
-      };
 
-      if (!closingSnapshot.startedAt || !this.options.recordInstanceRuntime) {
-        finalize();
-        return;
-      }
-      const reportAndFinalize = (error: unknown): void => {
+      if (closingSnapshot.startedAt && this.options.recordInstanceRuntime) {
         try {
+          await this.options.recordInstanceRuntime(
+            instanceId,
+            closingSnapshot.startedAt,
+            stoppedAt,
+          );
+        } catch (error) {
           this.options.reportError?.(error);
-        } finally {
-          finalize();
         }
-      };
-      try {
-        void this.options
-          .recordInstanceRuntime(instanceId, closingSnapshot.startedAt, stoppedAt)
-          .then(finalize, reportAndFinalize)
-          .catch((error) => this.options.reportError?.(error));
-      } catch (error) {
-        reportAndFinalize(error);
       }
+
+      // 先释放底层生命周期标记，再发布 stopped；读取到 stopped 的调用方随后一定可以取得写锁。
+      await this.releaseInstanceRuntime(instanceId);
+      this.snapshots.set(instanceId, snapshot);
+      this.appendLine(
+        instanceId,
+        state === "failed" ? "stderr" : "system",
+        `[SeaShard] ${message}`,
+      );
     } catch (error) {
-      releaseSession();
+      await this.releaseInstanceRuntime(instanceId);
+      this.options.reportError?.(error);
+    } finally {
+      if (this.sessions.get(instanceId) === session) {
+        this.sessions.delete(instanceId);
+      }
+      session.resolveClosed();
+    }
+  }
+  /** 生命周期释放失败时保持原始进程结算结果，并把底层同步故障交给统一诊断入口。 */
+  private async releaseInstanceRuntime(instanceId: string): Promise<void> {
+    try {
+      await this.options.releaseInstanceRuntime?.(instanceId);
+    } catch (error) {
       this.options.reportError?.(error);
     }
   }
@@ -605,6 +634,22 @@ export class ServerRuntimeManager {
       this.options.reportError?.(error);
     }
     return line;
+  }
+
+  /** 启动和停机文件事务共享同一实例队列，队列失败不会阻塞后续操作。 */
+  private runInstanceOperation<T>(instanceId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.instanceOperations.get(instanceId);
+    const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(operation);
+    const settled = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.instanceOperations.set(instanceId, settled);
+    return task.finally(() => {
+      if (this.instanceOperations.get(instanceId) === settled) {
+        this.instanceOperations.delete(instanceId);
+      }
+    });
   }
 
   private ensureActive(): void {

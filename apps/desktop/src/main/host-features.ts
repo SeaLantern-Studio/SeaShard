@@ -42,6 +42,7 @@ import {
 } from "@seashard/server-configuration";
 import {
   createServerInstanceManagerModule,
+  ServerInstanceRuntimeGate,
   serverInstanceManagerManifest,
 } from "@seashard/server-instance-manager";
 import { createServerRuntimeModule, serverRuntimeManifest } from "@seashard/server-runtime";
@@ -75,6 +76,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
     isStopping,
     publishServerConsoleLine,
   } = options;
+  const serverInstanceRuntimeGate = new ServerInstanceRuntimeGate();
   // 插件启停影响整个 Runtime 图，只允许固定的内置设置 Entry 调用管理 Contract。
   kernel.restrictServiceCalls(
     pluginManagementContract,
@@ -257,6 +259,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
           createServerInstanceManagerModule({
             database: root.database,
             managedRoot: join(dataRoot, "servers"),
+            runtimeGate: serverInstanceRuntimeGate,
             reportError: (error) =>
               console.error("Managed server instance finalization failed", error),
           }),
@@ -346,6 +349,7 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       "server-runtime.host": {
         load: async () =>
           createServerRuntimeModule({
+            runtimeGate: serverInstanceRuntimeGate,
             onConsoleLine: publishServerConsoleLine,
             reportError: (error) => console.error("Server runtime failed", error),
           }),

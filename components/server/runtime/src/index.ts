@@ -9,11 +9,16 @@ import {
   type ServerSettingsClientService,
 } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule } from "@seashard/plugin-sdk";
-import type { ServerInstanceManagerService } from "@seashard/server-instance-manager";
+import {
+  registerServerDatapackAgentTools,
+  type ServerInstanceManagerService,
+  type ServerInstanceRuntimeGate,
+} from "@seashard/server-instance-manager";
 import { ServerRuntimeManager, type ServerRuntimeManagerOptions } from "./manager";
 import { registerServerRuntimeAgentIntegration } from "./agent-integration";
 
 export interface ServerRuntimeModuleOptions {
+  readonly runtimeGate: ServerInstanceRuntimeGate;
   onConsoleLine?(line: ServerConsoleLine): void;
   reportError?(error: unknown): void;
   managerOptions?: Pick<
@@ -46,7 +51,7 @@ export const serverRuntimeManifest: PluginManifest = {
 };
 
 /** 创建多核心服务器运行组件；实例、Java 与启动默认值均来自显式 Contract。 */
-export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = {}): PluginModule {
+export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): PluginModule {
   return {
     inject: [serverInstanceManagerContract, javaRuntimeManagerContract, serverSettingsContract],
     provides: [serverRuntimeContract],
@@ -60,6 +65,8 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
           instances.recordStartedAt(instanceId, startedAt),
         recordInstanceRuntime: (instanceId, startedAt, stoppedAt) =>
           instances.recordRuntime(instanceId, startedAt, stoppedAt),
+        reserveInstanceRuntime: (instanceId) => options.runtimeGate.reserve(instanceId),
+        releaseInstanceRuntime: (instanceId) => options.runtimeGate.release(instanceId),
         scanJavaInstallations: () => javaRuntime.scan(),
         readSettings: () => settings.get(),
         ...(options.onConsoleLine
@@ -78,6 +85,16 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions = 
         start: (instanceId) => manager.startWithReceipt(instanceId),
         stop: (instanceId) => manager.stopWithReceipt(instanceId),
         sendCommand: (instanceId, command) => manager.sendCommandWithReceipt(instanceId, command),
+      });
+      registerServerDatapackAgentTools(ctx, {
+        listWorldDatapacks: (instanceId, worldId) =>
+          instances.listWorldDatapacks(instanceId, worldId),
+        runWhileServerStopped: (instanceId, operation) =>
+          manager.runWhileStopped(instanceId, operation),
+        setWorldDatapackDisabled: (instanceId, worldId, fileName, disabled) =>
+          instances.setWorldDatapackDisabled(instanceId, worldId, fileName, disabled),
+        deleteWorldDatapack: (instanceId, worldId, fileName) =>
+          instances.deleteWorldDatapack(instanceId, worldId, fileName),
       });
 
       ctx.provide(serverRuntimeContract, {

@@ -23,6 +23,54 @@ await test("runtime duration formatting keeps stable Chinese units", () => {
   assert.equal(formatRuntimeDuration(90_000_000), "1 天 1 小时");
 });
 
+await test("stopped file operations exclude server startup until the transaction settles", async () => {
+  let listInstanceCalls = 0;
+  let markOperationStarted!: () => void;
+  let releaseOperation!: () => void;
+  const operationStarted = new Promise<void>((resolveStarted) => {
+    markOperationStarted = resolveStarted;
+  });
+  const operationGate = new Promise<void>((resolveOperation) => {
+    releaseOperation = resolveOperation;
+  });
+  const runtimeReservations = new Set<string>();
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => {
+      listInstanceCalls += 1;
+      return [vanillaInstance];
+    },
+    scanJavaInstallations: async () => {
+      throw new Error("startup entered after stopped operation");
+    },
+    readSettings: async () => settings,
+    reserveInstanceRuntime: async (instanceId) => {
+      runtimeReservations.add(instanceId);
+    },
+    releaseInstanceRuntime: async (instanceId) => {
+      runtimeReservations.delete(instanceId);
+    },
+  });
+
+  const mutation = manager.runWhileStopped(vanillaInstance.id, async () => {
+    markOperationStarted();
+    await operationGate;
+    return "updated";
+  });
+  await operationStarted;
+
+  const startup = manager.startWithReceipt(vanillaInstance.id);
+  await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  assert.equal(listInstanceCalls, 0);
+  assert.equal(manager.get(vanillaInstance.id).state, "stopped");
+
+  releaseOperation();
+  assert.equal(await mutation, "updated");
+  await assert.rejects(startup, /startup entered after stopped operation/u);
+  assert.equal(listInstanceCalls, 1);
+  assert.deepEqual([...runtimeReservations], []);
+  await manager.dispose();
+});
+
 await test("vanilla runtime starts a direct JAR process and streams bidirectional console IO", async () => {
   const eulaPath = resolve(vanillaInstance.rootPath, "eula.txt");
   const propertiesPath = resolve(vanillaInstance.rootPath, "server.properties");
@@ -47,12 +95,20 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   const recordedStartTimes: Array<{ instanceId: string; startedAt: string }> = [];
   const recordedRuntimes: Array<{ instanceId: string; startedAt: string; stoppedAt: string }> = [];
   let now = new Date("2026-08-17T13:00:00.000Z");
+  const runtimeReservations = new Set<string>();
   const manager = new ServerRuntimeManager({
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java17, java21],
     readSettings: async () => settings,
     recordInstanceStartedAt: async (instanceId, startedAt) => {
       recordedStartTimes.push({ instanceId, startedAt });
+    },
+    reserveInstanceRuntime: async (instanceId) => {
+      assert.equal(runtimeReservations.has(instanceId), false);
+      runtimeReservations.add(instanceId);
+    },
+    releaseInstanceRuntime: async (instanceId) => {
+      runtimeReservations.delete(instanceId);
     },
     recordInstanceRuntime: async (instanceId, startedAt, stoppedAt) => {
       recordedRuntimes.push({ instanceId, startedAt, stoppedAt });
@@ -71,6 +127,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     pid: 4_242,
     startedAt: "2026-08-17T13:00:00.000Z",
   });
+  assert.deepEqual([...runtimeReservations], [vanillaInstance.id]);
   assert.equal(
     manager
       .getLogs(vanillaInstance.id)
@@ -175,6 +232,7 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
       stoppedAt: "2026-08-17T13:02:03.000Z",
     },
   ]);
+  assert.deepEqual([...runtimeReservations], []);
   const finalLogs = manager.getLogs(vanillaInstance.id);
   assert.equal(
     finalLogs.some((line) => line.text === "saved tail without newline"),

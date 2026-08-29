@@ -158,14 +158,18 @@
   transform: translateY(-50%);
 }
 
-.agent-message.is-reasoning,
 .agent-message.is-tool-call,
 .agent-message.is-thinking {
   align-items: center;
 }
 
 .agent-message.is-reasoning {
+  align-items: start;
   margin-bottom: 22px;
+}
+
+.agent-message.is-reasoning .agent-message-avatar {
+  margin-top: 0;
 }
 
 .agent-reasoning-block {
