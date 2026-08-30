@@ -9,7 +9,7 @@ export const serverInstanceManagerContract = "seashard.server-instance-manager";
 export type ServerInstanceStorageMode = "managed" | "external";
 export type ServerInstanceSource = "downloaded" | "imported";
 
-/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */
+/** 单个服务器实例持久化的完整启动参数；首次启动固化后不再跟随通用默认值。 */
 export interface ServerInstanceStartupSettings {
   minimumMemoryMiB: number;
   maximumMemoryMiB: number;
@@ -43,7 +43,7 @@ export interface ServerInstanceSnapshot {
   lastStartedAt?: string;
   /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */
   totalRuntimeMs?: number;
-  /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */
+  /** 缺省表示尚未首次启动固化；存在后始终使用实例自己的完整设置组。 */
   startupSettings?: ServerInstanceStartupSettings;
   /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */
   resourceSources?: ServerResourceSourceIndex;

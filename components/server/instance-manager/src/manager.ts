@@ -203,7 +203,29 @@ export class ServerInstanceManager {
     });
   }
 
-  /** 实例启动设置整体持久化；未设置的旧实例仍继续继承全局默认值。 */
+  /**
+   * 首次启动通过私有清单更新队列固化通用默认值。
+   * 与用户主动保存发生并发时，队列中先写入的实例设置会被后续 ensure 原样保留。
+   */
+  async ensureStartupSettings(
+    instanceValue: unknown,
+    settingsValue: unknown,
+  ): Promise<ServerInstanceSnapshot> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    const startupSettings = parseServerInstanceStartupSettings(settingsValue);
+    return this.updatePrivateManifest(instanceId, (instance) =>
+      instance.startupSettings
+        ? instance
+        : {
+            ...instance,
+            startupSettings,
+            updatedAt: this.options.now?.() ?? new Date().toISOString(),
+          },
+    );
+  }
+
+  /** 用户主动保存实例启动设置时整体覆盖已固化值。 */
   async setStartupSettings(
     instanceValue: unknown,
     settingsValue: unknown,
@@ -693,6 +715,7 @@ export class ServerInstanceManager {
     const task = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(async () => {
       const { instance } = await this.findIndexedInstance(instanceId);
       const updated = update(instance);
+      if (updated === instance) return instance;
       await writePortableSeaShardInstanceManifest(updated);
       return updated;
     });

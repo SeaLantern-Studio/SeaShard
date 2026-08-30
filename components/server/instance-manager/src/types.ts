@@ -65,6 +65,17 @@ export interface ServerInstanceManagerService {
    */
   rename(instanceId: string, name: string): Promise<ServerInstanceClientProjection>;
   /**
+   * 首次启动前原子固化通用默认值；实例已经拥有启动设置时原样返回，绝不覆盖。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param settings 首次启动准备采用的完整默认值。
+   * @returns 含最终实例启动设置的完整实例快照。
+   */
+  ensureStartupSettings(
+    instanceId: string,
+    settings: ServerInstanceStartupSettings,
+  ): Promise<ServerInstanceSnapshot>;
+  /**
    * 持久化启动参数，并返回可直接交给 Client 的最新实例投影。
    *
    * @param instanceId 已登记实例 ID。

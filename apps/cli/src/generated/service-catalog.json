@@ -1596,7 +1596,7 @@
       "contract": "seashard.server-instance-manager",
       "owner": "seashard.server-instance-manager",
       "description": "实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。",
-      "source": "components/server/instance-manager/src/types.ts:254",
+      "source": "components/server/instance-manager/src/types.ts:265",
       "methods": [
         {
           "name": "createManaged",
@@ -1656,6 +1656,28 @@
           "returns": {
             "type": "Promise<ServerInstanceClientProjection>",
             "description": "更新后的实例投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "ensureStartupSettings",
+          "signature": "ensureStartupSettings(instanceId: string, settings: ServerInstanceStartupSettings): Promise<ServerInstanceSnapshot>",
+          "description": "首次启动前原子固化通用默认值；实例已经拥有启动设置时原样返回，绝不覆盖。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "settings",
+              "type": "ServerInstanceStartupSettings",
+              "description": "首次启动准备采用的完整默认值。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstanceSnapshot>",
+            "description": "含最终实例启动设置的完整实例快照。"
           },
           "throws": []
         },
@@ -2197,7 +2219,7 @@
         {
           "name": "ServerInstanceSnapshot",
           "description": "服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。",
-          "declaration": "/** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */\nexport interface ServerInstanceSnapshot {\n  id: string;\n  name: string;\n  rootPath: string;\n  coreJarPath: string;\n  iconPath?: string;\n  /** 世界下载外层目录的完整名称；例如 worlds-abc123。 */\n  worldStorageDirectoryName?: string;\n  /** 世界备份外层目录的完整名称；例如 backups-def456。 */\n  backupDirectoryName?: string;\n  storageMode: ServerInstanceStorageMode;\n  source: ServerInstanceSource;\n  /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */\n  modLoader: ServerModLoader | null;\n  serverType?: string;\n  gameVersion?: string;\n  coreArtifactFileName?: string;\n  artifactSha256?: string;\n  createdAt: string;\n  updatedAt: string;\n  iconUrl?: string;\n  lastStartedAt?: string;\n  /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */\n  totalRuntimeMs?: number;\n  /** 保存后整体覆盖全局启动默认值；缺省表示继续继承全局设置。 */\n  startupSettings?: ServerInstanceStartupSettings;\n  /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */\n  resourceSources?: ServerResourceSourceIndex;\n}",
+          "declaration": "/** 服务器事实与 SeaShard 私有 JSON 合并后的稳定 Client 投影。 */\nexport interface ServerInstanceSnapshot {\n  id: string;\n  name: string;\n  rootPath: string;\n  coreJarPath: string;\n  iconPath?: string;\n  /** 世界下载外层目录的完整名称；例如 worlds-abc123。 */\n  worldStorageDirectoryName?: string;\n  /** 世界备份外层目录的完整名称；例如 backups-def456。 */\n  backupDirectoryName?: string;\n  storageMode: ServerInstanceStorageMode;\n  source: ServerInstanceSource;\n  /** 核心对应的标准 Mod 加载器；纯插件端、代理端和原版核心为 null。 */\n  modLoader: ServerModLoader | null;\n  serverType?: string;\n  gameVersion?: string;\n  coreArtifactFileName?: string;\n  artifactSha256?: string;\n  createdAt: string;\n  updatedAt: string;\n  iconUrl?: string;\n  lastStartedAt?: string;\n  /** 已完成运行会话的累计时长；当前会话由 Client 根据 startedAt 实时叠加。 */\n  totalRuntimeMs?: number;\n  /** 缺省表示尚未首次启动固化；存在后始终使用实例自己的完整设置组。 */\n  startupSettings?: ServerInstanceStartupSettings;\n  /** 本地资源到来源展示信息的可选索引；不参与资源归属和版本判断。 */\n  resourceSources?: ServerResourceSourceIndex;\n}",
           "source": "packages/contracts/src/server/instance.ts:22"
         },
         {
@@ -2208,8 +2230,8 @@
         },
         {
           "name": "ServerInstanceStartupSettings",
-          "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
-          "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
+          "description": "单个服务器实例持久化的完整启动参数；首次启动固化后不再跟随通用默认值。",
+          "declaration": "/** 单个服务器实例持久化的完整启动参数；首次启动固化后不再跟随通用默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
           "source": "packages/contracts/src/server/instance.ts:13"
         },
         {
@@ -2649,8 +2671,8 @@
         },
         {
           "name": "ServerInstanceStartupSettings",
-          "description": "单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。",
-          "declaration": "/** 单个服务器实例持久化的完整启动参数；存在时整体覆盖全局启动默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
+          "description": "单个服务器实例持久化的完整启动参数；首次启动固化后不再跟随通用默认值。",
+          "declaration": "/** 单个服务器实例持久化的完整启动参数；首次启动固化后不再跟随通用默认值。 */\nexport interface ServerInstanceStartupSettings {\n  minimumMemoryMiB: number;\n  maximumMemoryMiB: number;\n  serverPort: number;\n  autoAcceptEula: boolean;\n  jvmArguments: string;\n}",
           "source": "packages/contracts/src/server/instance.ts:13"
         },
         {
@@ -2686,7 +2708,7 @@
           "parameters": [],
           "returns": {
             "type": "Promise<ServerSettingsSnapshot>",
-            "description": "下载目录、并发数和新实例启动默认值。"
+            "description": "下载目录、并发数和等待实例首次启动固化的默认值。"
           },
           "throws": []
         },
@@ -2727,7 +2749,7 @@
         {
           "name": "setStartupDefaults",
           "signature": "setStartupDefaults(update: ServerStartupDefaultsUpdate): Promise<ServerSettingsSnapshot>",
-          "description": "一次性更新相互依赖的新实例启动默认值。",
+          "description": "更新尚未固化启动设置的服务器将在首次启动时采用的完整默认值。",
           "parameters": [
             {
               "name": "update",

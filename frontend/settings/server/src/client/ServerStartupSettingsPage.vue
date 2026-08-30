@@ -156,15 +156,13 @@ function errorMessage(error: unknown): string {
 
 <template>
   <div class="settings-view animate-stagger-in">
-    <Cmz_Card title="启动设置" subtitle="设置新服务器和未单独配置实例继承的全局默认启动参数">
-      <p class="inheritance-note">
-        单个服务器后续可以覆盖这些值；Java 运行环境统一在“游戏设置 · Java”中管理。
-      </p>
-
+    <Cmz_Card title="启动设置">
       <div class="settings-entry">
         <div class="settings-entry-info">
           <label class="settings-entry-title" for="default-maximum-memory">默认最大内存</label>
-          <span class="settings-entry-desc">Java 进程可使用的最大堆内存，单位 MiB</span>
+          <span class="settings-entry-desc">
+            尚未固化设置的服务器首次启动时保存的最大堆内存，单位 MiB
+          </span>
         </div>
         <div class="number-control">
           <Cmz_Input
@@ -184,7 +182,9 @@ function errorMessage(error: unknown): string {
       <div class="settings-entry">
         <div class="settings-entry-info">
           <label class="settings-entry-title" for="default-minimum-memory">默认最小内存</label>
-          <span class="settings-entry-desc">Java 进程启动时申请的初始堆内存，单位 MiB</span>
+          <span class="settings-entry-desc">
+            尚未固化设置的服务器首次启动时保存的初始堆内存，单位 MiB
+          </span>
         </div>
         <div class="number-control">
           <Cmz_Input
@@ -204,7 +204,7 @@ function errorMessage(error: unknown): string {
       <div class="settings-entry">
         <div class="settings-entry-info">
           <label class="settings-entry-title" for="default-server-port">默认服务器端口</label>
-          <span class="settings-entry-desc">创建服务器时使用的默认监听端口</span>
+          <span class="settings-entry-desc">尚未固化设置的服务器首次启动时保存的监听端口</span>
         </div>
         <div class="number-control">
           <Cmz_Input
@@ -225,7 +225,7 @@ function errorMessage(error: unknown): string {
         <div class="settings-entry-info">
           <span class="settings-entry-title">自动同意 EULA</span>
           <span class="settings-entry-desc">
-            启动前自动写入 eula=true；开启即表示你同意 Mojang 的最终用户许可协议
+            首次启动固化设置时写入 eula=true；开启即表示你同意 Mojang 的最终用户许可协议
           </span>
         </div>
         <Cmz_Switch
@@ -238,7 +238,7 @@ function errorMessage(error: unknown): string {
 
       <div class="jvm-entry">
         <label class="settings-entry-title" for="default-jvm-arguments">默认 JVM 参数</label>
-        <span class="settings-entry-desc">追加到 Java 启动命令的全局参数；留空则不追加</span>
+        <span class="settings-entry-desc">首次启动时固化到实例的 JVM 参数；留空则不追加</span>
         <textarea
           id="default-jvm-arguments"
           class="jvm-textarea"
@@ -277,17 +277,6 @@ function errorMessage(error: unknown): string {
   gap: var(--sl-space-lg);
   margin: 0 auto;
   padding-bottom: var(--sl-space-2xl);
-}
-
-.inheritance-note {
-  margin: 0 0 var(--sl-space-sm);
-  padding: var(--sl-space-sm) var(--sl-space-md);
-  border: 1px solid var(--sl-border-light);
-  border-radius: var(--sl-radius-md);
-  background: var(--sl-bg-secondary);
-  color: var(--sl-text-secondary);
-  font-size: 0.8125rem;
-  line-height: 1.5;
 }
 
 .settings-entry {

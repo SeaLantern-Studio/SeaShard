@@ -1,6 +1,7 @@
 import type {
   JavaInstallationSnapshot,
   ServerInstanceSnapshot,
+  ServerInstanceStartupSettings,
   ServerSettingsSnapshot,
 } from "../packages/contracts/src/index.ts";
 import type { ServerRuntimeFileSystem } from "../components/server/runtime/src/filesystem.ts";
@@ -105,6 +106,16 @@ export const settings = {
   autoAcceptEula: true,
   defaultJvmArguments: '-XX:+UseG1GC "-Dmotd=Hello World"',
 } satisfies ServerSettingsSnapshot;
+
+/** Runtime 单元测试使用的最小 Instance Manager ensure 语义。 */
+export async function materializeTestStartupSettings(
+  instance: ServerInstanceSnapshot,
+  instanceId: string,
+  startupSettings: ServerInstanceStartupSettings,
+): Promise<ServerInstanceSnapshot> {
+  if (instance.id !== instanceId) throw new Error(`missing test server instance ${instanceId}`);
+  return instance.startupSettings ? instance : { ...instance, startupSettings };
+}
 
 export function createMemoryFileSystem(
   initialFiles: ReadonlyMap<string, string | Uint8Array>,

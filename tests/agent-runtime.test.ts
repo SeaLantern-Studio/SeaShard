@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, rename, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -2151,6 +2160,82 @@ await test("Agent 模式按文本偏移持久化多次工具活动", async (cont
   ]);
   assert.equal(session.messages[1]?.provider?.provider, "test");
   assert.ok((session.messages[1]?.usage?.totalTokens ?? 0) > 0);
+});
+
+await test("第二十五轮等待工具结算后仍请求最终回复", async (context) => {
+  const userDataRoot = await mkdtemp(join(tmpdir(), "seashard-agent-final-tool-round-"));
+  context.after(() => rm(userDataRoot, { recursive: true, force: true }));
+
+  const toolSteps = Array.from({ length: 25 }, (_, index) =>
+    fauxAssistantMessage(
+      fauxToolCall("test_wait", { round: index + 1 }, { id: `wait-${index + 1}` }),
+      { stopReason: "toolUse" },
+    ),
+  );
+  const { modelSource, calls } = createScriptedModelSource("final-tool-round-model", [
+    ...toolSteps,
+    (modelContext) => {
+      assert.equal(modelContext.tools, undefined);
+      assert.equal(modelContext.messages.at(-1)?.role, "toolResult");
+      return fauxAssistantMessage("服务器已完全停止，继续输出最终结果。");
+    },
+  ]);
+  const completedRounds: number[] = [];
+  const toolRegistry = new AgentToolRegistry();
+  const runtime = new AgentRuntime({
+    userDataRoot,
+    modelCatalog: modelSource,
+    toolSource: toolRegistry,
+    resourceSource: new AgentResourceRegistry(),
+  });
+  await runtime.initialize();
+  context.after(() => runtime.dispose());
+  toolRegistry.register(
+    "test.wait",
+    { type: "global", id: "global" },
+    {
+      namespace: "test",
+      name: "wait",
+      title: "等待测试事件",
+      description: "等待一项测试事件结算。",
+      inputSchema: {
+        type: "object",
+        properties: { round: { type: "integer", minimum: 1 } },
+        required: ["round"],
+        additionalProperties: false,
+      },
+    },
+    async (input) => {
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        throw new TypeError("wait test input must be an object");
+      }
+      const round = input.round;
+      if (typeof round !== "number" || !Number.isSafeInteger(round)) {
+        throw new TypeError("wait test round must be an integer");
+      }
+      completedRounds.push(round);
+      return { round, state: "completed" };
+    },
+  );
+
+  const reference = await runtime.startSession({
+    initialMessage: { text: "完成多步操作，等待服务器停止后继续回答。" },
+    mode: "agent",
+  });
+  const invocation = await waitForInvocation(runtime, reference.invocationId);
+  assert.equal(invocation.state, "completed");
+  assert.equal(invocation.text, "服务器已完全停止，继续输出最终结果。");
+  assert.deepEqual(
+    completedRounds,
+    Array.from({ length: 25 }, (_, index) => index + 1),
+  );
+  assert.equal(invocation.toolCalls.length, 25);
+  assert.equal(
+    invocation.toolCalls.every(({ state }) => state === "completed"),
+    true,
+  );
+  assert.equal(calls.length, 26);
+  assert.equal(calls.at(-1)?.context.tools, undefined);
 });
 
 await test("Agent Ask 支持预设选项与固定自定义回答", async (context) => {

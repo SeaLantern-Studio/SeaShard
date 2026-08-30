@@ -25,6 +25,19 @@ export function resolveServerRuntimeSettings(
   };
 }
 
+/** 将首次启动读取到的通用默认值转换为实例私有清单使用的稳定字段名。 */
+export function createServerInstanceStartupSettings(
+  defaults: ServerSettingsSnapshot,
+): ServerInstanceStartupSettings {
+  return {
+    minimumMemoryMiB: defaults.defaultMinimumMemoryMiB,
+    maximumMemoryMiB: defaults.defaultMaximumMemoryMiB,
+    serverPort: defaults.defaultServerPort,
+    autoAcceptEula: defaults.autoAcceptEula,
+    jvmArguments: defaults.defaultJvmArguments,
+  };
+}
+
 /** spawn 不经过 Shell；这里按当前平台生成便于用户阅读和复制的等价命令。 */
 export function formatServerLaunchCommand(
   executable: string,

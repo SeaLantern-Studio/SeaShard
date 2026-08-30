@@ -71,6 +71,8 @@ async function activateSettings(
   const context = {
     storage,
     provide: (contract: string, provider: ServiceProvider) => providers.set(contract, provider),
+    agentResources: () => undefined,
+    agentTool: () => "test.server-settings",
   } as unknown as PluginContext;
   await createServerSettingsModule({
     defaultResourceDownloadDirectory,

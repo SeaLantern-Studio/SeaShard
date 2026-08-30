@@ -92,7 +92,7 @@ async function load(): Promise<void> {
   }
 }
 
-/** 未保存过专属值的实例以当前全局默认值填充表单，保存后才形成完整覆盖。 */
+/** 尚未首次启动固化的实例以当前通用默认值预览；保存或首次启动后形成完整实例设置。 */
 function applySelectedInstance(): void {
   const instance = selectedInstance.value;
   const defaults = globalSettings.value;

@@ -4,7 +4,7 @@ import { defineServiceContract } from "@seashard/plugin-sdk";
 export const serverSettingsContract = defineServiceContract<ServerSettingsClientService>(
   "seashard.server-settings",
 );
-/** 新服务器继承的全局启动默认值；具体实例后续可以单独覆盖。 */
+/** 尚未固化启动设置的服务器在首次启动时复制并保存的通用默认值。 */
 export const serverStartupDefaults = {
   minimumMemoryMiB: 512,
   maximumMemoryMiB: 2_048,
@@ -40,7 +40,7 @@ export interface ServerSettingsClientService {
   /**
    * 读取当前服务器全局设置。
    *
-   * @returns 下载目录、并发数和新实例启动默认值。
+   * @returns 下载目录、并发数和等待实例首次启动固化的默认值。
    */
   get(): Promise<ServerSettingsSnapshot>;
   /**
@@ -58,7 +58,7 @@ export interface ServerSettingsClientService {
    */
   setDefaultDownloadConnections(connections: number): Promise<ServerSettingsSnapshot>;
   /**
-   * 一次性更新相互依赖的新实例启动默认值。
+   * 更新尚未固化启动设置的服务器将在首次启动时采用的完整默认值。
    *
    * @param update 内存、端口、EULA 和 JVM 参数默认值。
    * @returns 更新后的设置快照。

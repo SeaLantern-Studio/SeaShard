@@ -146,6 +146,8 @@ export function createServerInstanceManagerModule(
         },
         switchWorld: async (instanceId, worldId) =>
           asJsonValue(await manager.switchWorld(instanceId, worldId)),
+        ensureStartupSettings: async (instanceId, startupSettings) =>
+          asJsonValue(await manager.ensureStartupSettings(instanceId, startupSettings)),
         setStartupSettings: async (instanceId, settings) =>
           asJsonValue(
             projectServerInstanceForClient(await manager.setStartupSettings(instanceId, settings)),

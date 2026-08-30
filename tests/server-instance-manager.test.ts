@@ -613,6 +613,35 @@ await test("managed downloads persist unique instances and split portable manife
       plugins: 1,
     });
     await assert.rejects(manager.contentCounts("missing-instance"), /was not found/u);
+    const firstStartupDefaults: ServerInstanceStartupSettings = {
+      minimumMemoryMiB: 1_024,
+      maximumMemoryMiB: 2_048,
+      serverPort: 25_566,
+      autoAcceptEula: true,
+      jvmArguments: "",
+    };
+    const materializedInstance = await manager.ensureStartupSettings(
+      countedInstance.id,
+      firstStartupDefaults,
+    );
+    assert.deepEqual(materializedInstance.startupSettings, firstStartupDefaults);
+    const preservedInstance = await manager.ensureStartupSettings(
+      countedInstance.id,
+      instanceStartupSettings,
+    );
+    assert.deepEqual(preservedInstance.startupSettings, firstStartupDefaults);
+    const materializedManifest = JSON.parse(
+      await readFile(
+        join(
+          countedInstance.rootPath,
+          portableInstanceMetadataDirectoryName,
+          portableSeaShardInstanceFileName,
+        ),
+        "utf8",
+      ),
+    ) as PortableSeaShardInstanceManifest;
+    assert.deepEqual(materializedManifest.startupSettings, firstStartupDefaults);
+
     const updatedInstance = await manager.setStartupSettings(
       countedInstance.id,
       instanceStartupSettings,

@@ -138,6 +138,9 @@ function instanceService(
     switchWorld: async () => {
       throw new Error("not implemented in fixture");
     },
+    ensureStartupSettings: async () => {
+      throw new Error("not implemented in fixture");
+    },
     setStartupSettings: async () => {
       throw new Error("not implemented in fixture");
     },

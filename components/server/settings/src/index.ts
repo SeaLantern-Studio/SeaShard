@@ -8,6 +8,11 @@ import {
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
 import type { JsonValue, PluginManifest, PluginModule, PluginStorage } from "@seashard/plugin-sdk";
+import {
+  registerServerSettingsAgentIntegration,
+  type ServerSettingsAgentMutationReceipt,
+  type ServerSettingsAgentStartupDefaultsPatch,
+} from "./agent-integration";
 
 const settingsStorageKey = "settings";
 
@@ -59,16 +64,24 @@ export function createServerSettingsModule(options: ServerSettingsModuleOptions)
       let snapshotTask = loadSnapshot(ctx.storage, defaults);
       let writeQueue: Promise<void> = Promise.resolve();
 
-      /** 所有字段共用同一写队列，避免目录和线程数的并发保存互相覆盖。 */
+      const readSnapshot = async (): Promise<ServerSettingsSnapshot> => {
+        await writeQueue;
+        return snapshotTask;
+      };
+
+      /**
+       * 所有调用方共用同一写队列，Agent 修改回执因此能在真正提交设置时捕获一致的前后快照。
+       * 写入失败时保留旧 snapshotTask，后续设置操作仍可继续排队。
+       */
       const updateSnapshot = (
         update: (current: ServerSettingsSnapshot) => ServerSettingsSnapshot,
-      ): Promise<JsonValue> => {
+      ): Promise<ServerSettingsAgentMutationReceipt> => {
         const task = writeQueue.then(async () => {
           const current = await snapshotTask;
           const next = update(current);
           await ctx.storage.put(settingsStorageKey, asJsonValue(next));
           snapshotTask = Promise.resolve(next);
-          return asJsonValue(next);
+          return { before: current, after: next };
         });
         writeQueue = task.then(
           () => undefined,
@@ -77,32 +90,68 @@ export function createServerSettingsModule(options: ServerSettingsModuleOptions)
         return task;
       };
 
+      const setResourceDownloadDirectory = (
+        value: unknown,
+      ): Promise<ServerSettingsAgentMutationReceipt> => {
+        const directory = expectString(value, "resourceDownloadDirectory");
+        return updateSnapshot((current) => ({
+          ...current,
+          resourceDownloadDirectory: directory,
+        }));
+      };
+
+      const setDefaultDownloadConnections = (
+        value: unknown,
+      ): Promise<ServerSettingsAgentMutationReceipt> => {
+        const connections = expectConnections(value, "defaultDownloadConnections");
+        return updateSnapshot((current) => ({
+          ...current,
+          defaultDownloadConnections: connections,
+        }));
+      };
+
+      const setStartupDefaults = (value: unknown): Promise<ServerSettingsAgentMutationReceipt> => {
+        const startupDefaults = expectStartupDefaults(value);
+        return updateSnapshot((current) => ({
+          ...current,
+          ...startupDefaults,
+        }));
+      };
+
+      /**
+       * Agent 提交的是部分修改；合并和跨字段校验都在设置写队列内完成，
+       * 避免与 Renderer 并发保存时用旧快照覆盖未修改字段。
+       */
+      const updateStartupDefaults = (
+        patch: ServerSettingsAgentStartupDefaultsPatch,
+      ): Promise<ServerSettingsAgentMutationReceipt> =>
+        updateSnapshot((current) => ({
+          ...current,
+          ...expectStartupDefaults({
+            defaultMinimumMemoryMiB:
+              patch.defaultMinimumMemoryMiB ?? current.defaultMinimumMemoryMiB,
+            defaultMaximumMemoryMiB:
+              patch.defaultMaximumMemoryMiB ?? current.defaultMaximumMemoryMiB,
+            defaultServerPort: patch.defaultServerPort ?? current.defaultServerPort,
+            autoAcceptEula: patch.autoAcceptEula ?? current.autoAcceptEula,
+            defaultJvmArguments: patch.defaultJvmArguments ?? current.defaultJvmArguments,
+          }),
+        }));
+
+      registerServerSettingsAgentIntegration(ctx, {
+        get: readSnapshot,
+        setDefaultDownloadConnections,
+        updateStartupDefaults,
+      });
+
       ctx.provide(serverSettingsContract, {
-        get: async () => {
-          await writeQueue;
-          return asJsonValue(await snapshotTask);
-        },
-        setResourceDownloadDirectory: (value) => {
-          const directory = expectString(value, "resourceDownloadDirectory");
-          return updateSnapshot((current) => ({
-            ...current,
-            resourceDownloadDirectory: directory,
-          }));
-        },
-        setDefaultDownloadConnections: (value) => {
-          const connections = expectConnections(value, "defaultDownloadConnections");
-          return updateSnapshot((current) => ({
-            ...current,
-            defaultDownloadConnections: connections,
-          }));
-        },
-        setStartupDefaults: (value) => {
-          const startupDefaults = expectStartupDefaults(value);
-          return updateSnapshot((current) => ({
-            ...current,
-            ...startupDefaults,
-          }));
-        },
+        get: async () => asJsonValue(await readSnapshot()),
+        setResourceDownloadDirectory: (value) =>
+          setResourceDownloadDirectory(value).then(({ after }) => asJsonValue(after)),
+        setDefaultDownloadConnections: (value) =>
+          setDefaultDownloadConnections(value).then(({ after }) => asJsonValue(after)),
+        setStartupDefaults: (value) =>
+          setStartupDefaults(value).then(({ after }) => asJsonValue(after)),
       });
     },
   };
@@ -247,3 +296,5 @@ function isConnections(value: unknown): value is number {
 function asJsonValue(value: ServerSettingsSnapshot): JsonValue {
   return value as unknown as JsonValue;
 }
+
+export * from "./agent-integration";

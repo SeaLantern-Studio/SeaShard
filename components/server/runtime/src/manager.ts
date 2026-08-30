@@ -2,6 +2,7 @@ import type {
   JavaInstallationSnapshot,
   ServerConsoleLine,
   ServerConsoleStream,
+  ServerInstanceStartupSettings,
   ServerLaunchCommandPreview,
   ServerInstanceSnapshot,
   ServerRuntimeSnapshot,
@@ -32,6 +33,7 @@ import {
   type ServerRuntimeWaitOptions,
 } from "./manager/wait";
 import {
+  createServerInstanceStartupSettings,
   expectAfterSequence,
   expectCommand,
   expectInstanceId,
@@ -48,6 +50,11 @@ const defaultStopGracePeriodMs = 15_000;
 export interface ServerRuntimeManagerOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
   scanJavaInstallations(): Promise<readonly JavaInstallationSnapshot[]>;
+  /** 首次启动前固化通用默认值；已经固化或由用户保存的实例设置不得覆盖。 */
+  ensureInstanceStartupSettings(
+    instanceId: string,
+    settings: ServerInstanceStartupSettings,
+  ): Promise<ServerInstanceSnapshot>;
   recordInstanceStartedAt?(instanceId: string, startedAt: string): Promise<void>;
   recordInstanceRuntime?(instanceId: string, startedAt: string, stoppedAt: string): Promise<void>;
   /** 在实例文件队列内登记服务器生命周期，令底层世界写操作能够原子判断运行状态。 */
@@ -289,18 +296,35 @@ export class ServerRuntimeManager {
       this.snapshots.set(instanceId, startingSnapshot);
       this.appendLine(instanceId, "system", "[SeaShard] 正在解析服务器核心启动策略…");
 
-      const [instance, settings, installations] = await Promise.all([
+      const [discoveredInstance, settings, installations] = await Promise.all([
         this.findInstance(instanceId),
         this.options.readSettings(),
         this.options.scanJavaInstallations(),
       ]);
-      const effectiveSettings = resolveServerRuntimeSettings(instance, settings);
-      // 异步扫描期间组件可能开始卸载；此后不得再写实例文件或创建新进程。
+      let instance = discoveredInstance;
+      let effectiveSettings = resolveServerRuntimeSettings(instance, settings);
+      let plan = buildServerLaunchPlan(instance, effectiveSettings);
+      let java = selectJavaInstallation(installations, plan.java);
+
+      // 扫描和核心准备期间组件可能开始卸载；准备完成后才允许固化设置或创建新进程。
       this.ensureActive();
-      const plan = buildServerLaunchPlan(instance, effectiveSettings);
-      const java = selectJavaInstallation(installations, plan.java);
       await this.preparationRunner.prepare(instanceId, java, plan);
       this.ensureActive();
+      if (!instance.startupSettings) {
+        // 这是进程启动前的首次应用边界；固化成功后，通用设置变化不再影响该实例。
+        instance = await this.options.ensureInstanceStartupSettings(
+          instanceId,
+          createServerInstanceStartupSettings(settings),
+        );
+        this.ensureActive();
+        if (instance.id !== instanceId || !instance.startupSettings) {
+          throw new Error(`server instance ${instanceId} did not persist startup settings`);
+        }
+        // ensure 可能保留并发先写入的用户设置，因此必须按最终实例快照重新生成启动计划。
+        effectiveSettings = resolveServerRuntimeSettings(instance, settings);
+        plan = buildServerLaunchPlan(instance, effectiveSettings);
+        java = selectJavaInstallation(installations, plan.java);
+      }
       await prepareRuntimeFiles(this.fileSystem, plan, effectiveSettings);
       const environment = createJavaEnvironment(java);
 

@@ -14,6 +14,7 @@ import {
   java21,
   java25,
   settings,
+  materializeTestStartupSettings,
   vanillaInstance,
 } from "./server-runtime-fixtures.ts";
 
@@ -44,6 +45,8 @@ await test("Quilt installer runs once and hands off to the generated launcher di
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: (command, arguments_, options) => {
       const child = new FakeServerProcess();
@@ -103,6 +106,8 @@ await test("NeoForge installs with Java 25 and stores heap settings in user_jvm_
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java21, java25],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: (command, arguments_, options) => {
       const child = new FakeServerProcess();
@@ -248,6 +253,8 @@ await test("SpongeForge installs standard Forge, copies the Universal mod, and r
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java21, java25],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     fetchPreparationArtifact: async () => {
       fetchCount += 1;
@@ -325,6 +332,8 @@ await test("SpongeForge rejects a Forge installer download with the wrong SHA-25
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java25],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     fetchPreparationArtifact: async (url) =>
       url.endsWith(".sha256")
@@ -368,6 +377,8 @@ await test("Youer completes its embedded bootstrap before the managed Java 21 la
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java25, java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: (command, arguments_) => {
       const child = new FakeServerProcess();
@@ -420,6 +431,8 @@ await test("Mohist completes its EULA-gated bootstrap before the managed heap la
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java17, java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: (_command, arguments_) => {
       const child = new FakeServerProcess();
@@ -467,6 +480,8 @@ await test("installer exit code zero is rejected when required runtime files are
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: () => {
       queueMicrotask(() => installer.emit("spawn"));

@@ -99,7 +99,7 @@ import {
   validateUserMessage,
 } from "./runtime/validation";
 
-const maximumAgentSteps = 6;
+const maximumAgentToolSteps = 25;
 
 export interface AgentModelSource {
   initialize(): Promise<void>;
@@ -642,8 +642,12 @@ export class AgentRuntime {
       // 文本偏移独立累计，避免流式快照已经包含当前步骤的尾部文本时把工具排到末尾。
       let completedAssistantTextLength = 0;
 
-      for (let step = 0; step < maximumAgentSteps; step += 1) {
-        const message = await this.streamModelStep(invocation, context, completedBlocks);
+      // 二十五轮都允许执行工具；最后一轮仍有工具时，再发起一次无工具的收尾请求。
+      // 这既限制真实副作用轮数，也保证最后一个长等待结果一定会交还模型生成最终答复。
+      for (let step = 0; step <= maximumAgentToolSteps; step += 1) {
+        const mayUseTools = agentMode && step < maximumAgentToolSteps;
+        const stepContext: Context = mayUseTools ? context : { messages: context.messages };
+        const message = await this.streamModelStep(invocation, stepContext, completedBlocks);
         const toolCalls: Array<{
           readonly call: ToolCall;
           readonly assistantTextOffset: number;
@@ -691,6 +695,9 @@ export class AgentRuntime {
           contextTokens = confirmedContextTokens;
         }
         if (!agentMode || toolCalls.length === 0) break;
+        if (!mayUseTools) {
+          throw new Error("模型在最终答复阶段返回了无法执行的工具调用");
+        }
         for (const { call, assistantTextOffset } of toolCalls) {
           if (invocation.controller.signal.aborted) throw createAbortError("调用已取消");
           context.messages.push(await this.executeToolCall(invocation, call, assistantTextOffset));

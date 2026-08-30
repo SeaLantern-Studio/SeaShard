@@ -18,6 +18,7 @@ import {
   java17,
   java21,
   settings,
+  materializeTestStartupSettings,
   vanillaInstance,
 } from "./server-runtime-fixtures.ts";
 
@@ -88,6 +89,8 @@ await test("stopped file operations exclude server startup until the transaction
       throw new Error("startup entered after stopped operation");
     },
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
     reserveInstanceRuntime: async (instanceId) => {
       runtimeReservations.add(instanceId);
     },
@@ -145,6 +148,8 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java17, java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
     recordInstanceStartedAt: async (instanceId, startedAt) => {
       recordedStartTimes.push({ instanceId, startedAt });
     },
@@ -358,6 +363,81 @@ await test("vanilla runtime starts a direct JAR process and streams bidirectiona
   await manager.dispose();
 });
 
+await test("runtime materializes global defaults once before an instance first starts", async () => {
+  let instance: ServerInstanceSnapshot = {
+    ...vanillaInstance,
+    id: "instance-first-start-defaults",
+    rootPath: "C:/SeaShard/servers/instance-first-start-defaults",
+    coreJarPath: "C:/SeaShard/servers/instance-first-start-defaults/server.jar",
+  };
+  let defaults = settings;
+  const { fileSystem, files } = createMemoryFileSystem(new Map([[instance.coreJarPath, "jar"]]));
+  const children: FakeServerProcess[] = [];
+  const launchArguments: Array<readonly string[]> = [];
+  const materializedSettings: Array<NonNullable<ServerInstanceSnapshot["startupSettings"]>> = [];
+  const manager = new ServerRuntimeManager({
+    listInstances: async () => [instance],
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => defaults,
+    ensureInstanceStartupSettings: async (instanceId, startupSettings) => {
+      assert.equal(instanceId, instance.id);
+      materializedSettings.push(startupSettings);
+      if (!instance.startupSettings) instance = { ...instance, startupSettings };
+      return instance;
+    },
+    fileSystem,
+    spawnProcess: (_command, arguments_) => {
+      launchArguments.push(arguments_);
+      const child = new FakeServerProcess();
+      children.push(child);
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+
+  await manager.start(instance.id);
+  assert.deepEqual(materializedSettings, [
+    {
+      minimumMemoryMiB: 1_024,
+      maximumMemoryMiB: 2_048,
+      serverPort: 25_566,
+      autoAcceptEula: true,
+      jvmArguments: '-XX:+UseG1GC "-Dmotd=Hello World"',
+    },
+  ]);
+  assert.deepEqual(launchArguments[0], [
+    "-XX:+UseG1GC",
+    "-Dmotd=Hello World",
+    "-Xms1024M",
+    "-Xmx2048M",
+    "-jar",
+    "server.jar",
+    "nogui",
+  ]);
+  await manager.stop(instance.id);
+  const firstStopped = manager.waitUntilStopped(instance.id, { timeoutMs: 1_000 });
+  children[0]!.finish(0, null);
+  await firstStopped;
+
+  defaults = {
+    ...settings,
+    defaultMinimumMemoryMiB: 2_048,
+    defaultMaximumMemoryMiB: 4_096,
+    defaultServerPort: 25_590,
+    defaultJvmArguments: "-XX:+UseZGC",
+  };
+  await manager.start(instance.id);
+  assert.equal(materializedSettings.length, 1);
+  assert.deepEqual(launchArguments[1], launchArguments[0]);
+  assert.equal(files.get(resolve(instance.rootPath, "server.properties")), "server-port=25566\n");
+
+  await manager.stop(instance.id);
+  const secondStopped = manager.waitUntilStopped(instance.id, { timeoutMs: 1_000 });
+  children[1]!.finish(0, null);
+  await secondStopped;
+  await manager.dispose();
+});
+
 await test("instance startup settings override global launch values and update an existing port", async () => {
   const instance: ServerInstanceSnapshot = {
     ...vanillaInstance,
@@ -387,6 +467,8 @@ await test("instance startup settings override global launch values and update a
     listInstances: async () => [instance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(instance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: (_command, launchArguments) => {
       arguments_ = launchArguments;
@@ -439,6 +521,8 @@ await test("runtime disposal sends stop, force-terminates on timeout, and waits 
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: () => {
       queueMicrotask(() => child.emit("spawn"));
@@ -477,6 +561,8 @@ await test("disposal during asynchronous preparation prevents a late process spa
     listInstances: () => instancesReady,
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: () => {
       spawnCount += 1;
@@ -518,6 +604,8 @@ await test("asynchronous stdin failures are handled without escaping as unhandle
     listInstances: async () => [vanillaInstance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: () => {
       queueMicrotask(() => child.emit("spawn"));
@@ -558,6 +646,8 @@ await test("runtime rejects undeclared core types without inspecting files", asy
     listInstances: async () => [unknownInstance],
     scanJavaInstallations: async () => [java21],
     readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(unknownInstance, instanceId, startupSettings),
     fileSystem,
     spawnProcess: () => {
       spawnCount += 1;
@@ -597,6 +687,8 @@ await test("Banner submits interactive EULA only when automatic acceptance is en
       listInstances: async () => [instance],
       scanJavaInstallations: async () => [java17, java21],
       readSettings: async () => ({ ...settings, autoAcceptEula }),
+      ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+        materializeTestStartupSettings(instance, instanceId, startupSettings),
       fileSystem,
       spawnProcess: () => {
         queueMicrotask(() => child.emit("spawn"));
@@ -652,6 +744,8 @@ await test("Velocity uses end while Nukkit skips EULA but receives server.proper
       listInstances: async () => [instance],
       scanJavaInstallations: async () => [java17, java21],
       readSettings: async () => settings,
+      ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+        materializeTestStartupSettings(instance, instanceId, startupSettings),
       fileSystem,
       spawnProcess: () => {
         queueMicrotask(() => child.emit("spawn"));
