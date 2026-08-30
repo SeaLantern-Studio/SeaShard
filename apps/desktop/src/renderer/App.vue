@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { useClientUiRuntime } from "@seashard/ui-runtime";
+import { computed, KeepAlive, nextTick, reactive, ref, watch, type Component } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
 import logoSvg from "./assets/logo.svg";
-import UiEntryBoundary from "./UiEntryBoundary.vue";
 import PageExtensionRoot from "./PageExtensionRoot.vue";
-import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
+import UiEntryBoundary from "./UiEntryBoundary.vue";
+import {
+  createWorkspaceRouteHistory,
+  rememberWorkspaceRoute,
+  resolveWorkspaceRoute,
+  workspaceForPath,
+  type SettingsMode,
+  type WorkspaceMode,
+} from "./workspace-layout";
 
 const route = useRoute();
 const router = useRouter();
+const clientUiRuntime = useClientUiRuntime();
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
 );
@@ -24,29 +33,66 @@ const settingsMode = computed<SettingsMode | undefined>(() => {
 const downloadMode = computed(
   () => route.path === "/server/download" || route.path.startsWith("/server/download/"),
 );
-const workspace = ref<WorkspaceMode>(workspaceForPath(route.path) ?? "agent");
+const workspaceRoutes = reactive(createWorkspaceRouteHistory());
+const initialWorkspace =
+  rememberWorkspaceRoute(workspaceRoutes, route.path, route.fullPath) ?? "agent";
+const workspace = ref<WorkspaceMode>(initialWorkspace);
 const rightPanelOpen = ref(false);
+const appContent = ref<HTMLElement>();
+const workspaceScrollTop: Record<WorkspaceMode, number> = {
+  agent: 0,
+  server: 0,
+  launcher: 0,
+};
+const retainedRouteComponentNames = computed(() => {
+  const names: string[] = [];
+  for (const retainedWorkspace of ["agent", "server"] as const) {
+    const path = router.resolve(workspaceRoutes[retainedWorkspace]).path;
+    const page = clientUiRuntime.pages.value.find((candidate) => candidate.path === path);
+    const name = componentName(page?.component);
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+});
 
 watch(
-  () => route.path,
-  (path) => {
-    const routeWorkspace = workspaceForPath(path);
+  () => [route.path, route.fullPath] as const,
+  async ([path, fullPath], [previousPath]) => {
+    const routeWorkspace = rememberWorkspaceRoute(workspaceRoutes, path, fullPath);
+    const previousWorkspace = workspaceForPath(previousPath);
+    const changedWorkspace = previousWorkspace !== routeWorkspace;
+    if (changedWorkspace && previousWorkspace && appContent.value) {
+      workspaceScrollTop[previousWorkspace] = appContent.value.scrollTop;
+    }
     if (routeWorkspace) workspace.value = routeWorkspace;
+    if (!changedWorkspace) return;
+
+    await nextTick();
+    // 快速连续切换时，较早的 nextTick 不得覆盖最新工作区的滚动位置。
+    if (route.fullPath !== fullPath) return;
+    const content = appContent.value;
+    if (content) content.scrollTop = routeWorkspace ? workspaceScrollTop[routeWorkspace] : 0;
   },
 );
 
 function updateWorkspace(value: WorkspaceMode): void {
-  workspace.value = value;
   const routeWorkspace = workspaceForPath(route.path);
   if (routeWorkspace === value) return;
-  void router.push(value === "server" ? "/server/launch" : value === "agent" ? "/agent/chat" : "/");
+  const target = resolveWorkspaceRoute(workspaceRoutes, value, (path) =>
+    clientUiRuntime.pages.value.some((page) => page.path === path),
+  );
+  if (!target) return;
+  void router.push(target);
 }
 
-function workspaceForPath(path: string): WorkspaceMode | undefined {
-  if (path.startsWith("/server/")) return "server";
-  if (path.startsWith("/agent/")) return "agent";
-  if (path.startsWith("/launcher/")) return "launcher";
-  return undefined;
+/** KeepAlive 的 include 使用组件名，Client Entry 页面都以具名包装组件注册。 */
+function componentName(component: Component | undefined): string | undefined {
+  if (!component) return undefined;
+  const name =
+    typeof component === "function"
+      ? component.name
+      : (component as Readonly<{ name?: unknown }>).name;
+  return typeof name === "string" && name ? name : undefined;
 }
 </script>
 
@@ -68,6 +114,7 @@ function workspaceForPath(path: string): WorkspaceMode | undefined {
       />
       <div class="workspace-frame">
         <main
+          ref="appContent"
           class="app-content"
           :aria-label="
             settingsMode === 'general'
@@ -80,9 +127,11 @@ function workspaceForPath(path: string): WorkspaceMode | undefined {
           "
         >
           <RouterView v-slot="{ Component }">
-            <PageExtensionRoot v-if="activePageId" :key="activePageId" :page-id="activePageId">
+            <PageExtensionRoot v-if="activePageId" :page-id="activePageId">
               <UiEntryBoundary :runtime-id="activeRuntimeId">
-                <component :is="Component" />
+                <KeepAlive :include="retainedRouteComponentNames">
+                  <component :is="Component" />
+                </KeepAlive>
               </UiEntryBoundary>
             </PageExtensionRoot>
             <UiEntryBoundary v-else :runtime-id="activeRuntimeId">
