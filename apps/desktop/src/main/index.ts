@@ -19,6 +19,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerClientFeatures } from "./client-features";
 import { publishServerConsoleLine, registerDesktopShellBridge } from "./desktop-shell-bridge";
+import {
+  createElectronDesktopUpdateService,
+  type ElectronDesktopUpdateService,
+} from "./desktop-update";
 import { registerHostFeatures } from "./host-features";
 import { registerSmokePlugin, verifySmokeRuntime } from "./smoke";
 import { startPluginDeveloperControl } from "./developer-control";
@@ -47,7 +51,7 @@ const smokeMode = process.env.SEASHARD_SMOKE === "1";
 const developmentUrl = resolveDevelopmentUrl();
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const startedAt = new Date().toISOString();
-const seaShardVersion = "0.0.0";
+const seaShardVersion = app.isPackaged ? app.getVersion() : "0.0.0";
 const developerControlLaunch = resolvePluginDeveloperControlLaunch();
 const disposeDeveloperParentDisconnect = developerControlLaunch
   ? installDeveloperParentDisconnect()
@@ -64,6 +68,7 @@ if (developmentUrl) installDevelopmentControl();
 
 let kernel: PluginKernel | undefined;
 let bootstrapLoader: BootstrapLoader | undefined;
+let desktopUpdates: ElectronDesktopUpdateService | undefined;
 let bootstrapTask: Promise<void> | undefined;
 let shutdownTask: Promise<void> | undefined;
 let shutdownComplete = false;
@@ -139,6 +144,7 @@ async function waitForApplicationReady(): Promise<void> {
 async function bootstrap(): Promise<void> {
   await waitForApplicationReady();
   const host = resolveHost();
+  desktopUpdates = createElectronDesktopUpdateService(seaShardVersion);
   const userDataRoot = app.getPath("userData");
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
   const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
@@ -193,6 +199,7 @@ async function bootstrap(): Promise<void> {
   assertBootstrapContinues();
   await registerDesktopShellBridge({
     kernel: activeKernel,
+    desktopUpdates,
     moduleDirectory,
     ...(developmentUrl ? { developmentUrl } : {}),
     smokeMode,
@@ -262,6 +269,7 @@ async function shutdown(): Promise<void> {
     try {
       await disposeDeveloperControl?.();
       await kernel?.dispose();
+      desktopUpdates?.dispose();
       const activeUnits =
         kernel?.runtimeSnapshot().plugins.filter((plugin) => plugin.state === "active").length ?? 0;
       const diagnostics = kernel?.diagnostics() ?? {

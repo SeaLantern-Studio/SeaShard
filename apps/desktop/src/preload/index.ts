@@ -4,6 +4,7 @@ import {
   type AgentModelConfigurationClientService,
   type DesktopClientBootstrap,
   type ClientServiceCallRequest,
+  type DesktopUpdateSnapshot,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
   type ServerConsoleLine,
@@ -226,6 +227,17 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   dialog: Object.freeze({
     selectDirectory: () => ipcRenderer.invoke(desktopChannels.dialogSelectDirectory),
+  }),
+  updates: Object.freeze({
+    getSnapshot: () => ipcRenderer.invoke(desktopChannels.desktopUpdateSnapshot),
+    check: () => ipcRenderer.invoke(desktopChannels.desktopUpdateCheck),
+    apply: () => ipcRenderer.invoke(desktopChannels.desktopUpdateApply),
+    onSnapshotChanged: (listener: (snapshot: DesktopUpdateSnapshot) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopUpdateSnapshot): void =>
+        listener(snapshot);
+      ipcRenderer.on(desktopChannels.desktopUpdateChanged, handler);
+      return () => ipcRenderer.removeListener(desktopChannels.desktopUpdateChanged, handler);
+    },
   }),
   client: Object.freeze({
     getBootstrap: () => ipcRenderer.invoke(desktopChannels.clientBootstrap),

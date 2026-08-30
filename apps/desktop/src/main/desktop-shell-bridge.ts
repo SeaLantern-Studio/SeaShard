@@ -9,6 +9,7 @@ import {
   type AgentInvocationService,
   type AgentModelConfigurationService,
   type AgentSessionService,
+  type DesktopUpdateClientService,
   type JavaRuntimeManagerService,
   type ServerConfigurationService,
   type ServerConfigurationWriteRequest,
@@ -57,6 +58,7 @@ function onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () =>
 
 interface DesktopShellBridgeOptions {
   readonly kernel: PluginKernel;
+  readonly desktopUpdates: DesktopUpdateClientService;
   readonly moduleDirectory: string;
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
@@ -66,7 +68,7 @@ interface DesktopShellBridgeOptions {
 export async function registerDesktopShellBridge(
   options: DesktopShellBridgeOptions,
 ): Promise<void> {
-  const { kernel, moduleDirectory, developmentUrl, smokeMode } = options;
+  const { kernel, moduleDirectory, developmentUrl, smokeMode, desktopUpdates } = options;
   let smokeQuitScheduled = false;
   const agentSessions = kernel.service<AgentSessionService>(agentSessionContract);
   const agentInvocations = kernel.service<AgentInvocationService>(agentInvocationContract);
@@ -238,6 +240,10 @@ export async function registerDesktopShellBridge(
               javaRuntimes.setDisabled(installationId, disabled),
             listFileDownloadTasks,
             cancelFileDownload,
+            readDesktopUpdateSnapshot: () => desktopUpdates.getSnapshot(),
+            checkDesktopUpdate: () => desktopUpdates.check(),
+            applyDesktopUpdate: () => desktopUpdates.apply(),
+            onDesktopUpdateChanged: (listener) => desktopUpdates.onSnapshotChanged(listener),
             listServerCoreDownloadTasks: async () => await serverCoreSource.listTasks(),
             cancelServerCoreDownload: (taskId) => serverCoreSource.cancel(taskId),
             onRendererReady: (snapshot) => {

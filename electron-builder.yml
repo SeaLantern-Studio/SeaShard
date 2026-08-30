@@ -3,6 +3,10 @@ productName: SeaShard
 copyright: Copyright © SeaLantern Studio
 directories:
   output: release
+publish:
+  provider: github
+  owner: SeaLantern-Studio
+  repo: SeaShard
 files:
   - apps/desktop/dist/**/*
   - apps/plugin-host/dist/**/*

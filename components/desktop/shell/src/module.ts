@@ -216,6 +216,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           if (!window || window.isDestroyed()) return;
           window.webContents.send(desktopChannels.serverRuntimeConsoleLine, line);
         });
+        const disposeDesktopUpdateSubscription = config.onDesktopUpdateChanged((snapshot) => {
+          const window = primaryWindow;
+          if (!window || window.isDestroyed()) return;
+          window.webContents.send(desktopChannels.desktopUpdateChanged, snapshot);
+        });
 
         config.runtime.handleFileProtocol(clientPluginAssetScheme, (requestUrl) =>
           config.resolveClientPluginAssetPath(requestUrl),
@@ -696,6 +701,19 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           return config.cancelFileDownload(expectNonEmptyString(taskId, "file download task id"));
         });
 
+        config.runtime.handle(desktopChannels.desktopUpdateSnapshot, (event) => {
+          ownedWindow(event.sender.id);
+          return config.readDesktopUpdateSnapshot();
+        });
+        config.runtime.handle(desktopChannels.desktopUpdateCheck, (event) => {
+          ownedWindow(event.sender.id);
+          return config.checkDesktopUpdate();
+        });
+        config.runtime.handle(desktopChannels.desktopUpdateApply, (event) => {
+          ownedWindow(event.sender.id);
+          return config.applyDesktopUpdate();
+        });
+
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("runtime snapshot request rejected");
@@ -815,12 +833,16 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.offWindowAllClosed(handleWindowAllClosed);
           disposeClientEntrySubscription();
           disposeServerConsoleSubscription();
+          disposeDesktopUpdateSubscription();
           config.runtime.removeProtocolHandler(serverCoreIconScheme);
           config.runtime.removeProtocolHandler(clientPluginAssetScheme);
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
+          config.runtime.removeHandler(desktopChannels.desktopUpdateSnapshot);
+          config.runtime.removeHandler(desktopChannels.desktopUpdateCheck);
+          config.runtime.removeHandler(desktopChannels.desktopUpdateApply);
           config.runtime.removeHandler(desktopChannels.serverCoreTypes);
           config.runtime.removeHandler(desktopChannels.serverCoreVersions);
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);

@@ -13,6 +13,7 @@ import type {
   ServerSettingsClientService,
 } from "../server";
 import type { ClientServiceCallRequest, DesktopClientBootstrap } from "./client";
+import type { DesktopUpdateClientService } from "./update";
 
 export interface SeaShardDesktopApi {
   runtime: {
@@ -29,6 +30,7 @@ export interface SeaShardDesktopApi {
   serverRuntime: ServerRuntimeClientService;
   serverConfiguration: ServerConfigurationClientService;
   javaRuntime: JavaRuntimeClientService;
+  updates: DesktopUpdateClientService;
   dialog: {
     selectDirectory(): Promise<string | undefined>;
   };

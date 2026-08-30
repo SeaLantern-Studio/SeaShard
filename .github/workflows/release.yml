@@ -127,40 +127,58 @@ jobs:
             targets: nsis
             arch: x64
             asset_key: windows-x64
+            update_channel: latest
+            update_metadata: latest.yml
+            update_blockmap_extension: exe
+            supports_update: true
           - label: Windows ARM64
             runner: windows-latest
             platform: win
             targets: nsis
             arch: arm64
             asset_key: windows-arm64
+            update_channel: latest-arm64
+            update_metadata: latest-arm64.yml
+            update_blockmap_extension: exe
+            supports_update: true
           - label: macOS Intel x64
             runner: macos-latest
             platform: mac
             targets: dmg
             arch: x64
             asset_key: macos-x64
+            update_channel: latest
+            supports_update: false
           - label: macOS Apple Silicon
             runner: macos-latest
             platform: mac
             targets: dmg
             arch: arm64
             asset_key: macos-arm64
+            update_channel: latest-arm64
+            supports_update: false
           - label: Linux x64
             runner: ubuntu-latest
             platform: linux
             targets: AppImage deb
             arch: x64
             asset_key: linux-x64
+            update_channel: latest
+            update_metadata: latest-linux.yml
+            update_blockmap_extension: AppImage
+            supports_update: true
           - label: Linux ARM64
             runner: ubuntu-latest
             platform: linux
             targets: AppImage deb
             arch: arm64
             asset_key: linux-arm64
+            update_channel: latest
+            update_metadata: latest-linux-arm64.yml
+            update_blockmap_extension: AppImage
+            supports_update: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
@@ -195,6 +213,7 @@ jobs:
           --${{ matrix.arch }}
           --publish never
           --config.extraMetadata.version=${{ inputs.version }}
+          --config.publish.channel=${{ matrix.update_channel }}
           --config.artifactName="SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.\${ext}"
 
       - name: 保存平台产物
@@ -209,6 +228,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: 保存一键更新元数据
+        if: matrix.supports_update
+        uses: actions/upload-artifact@v4
+        with:
+          name: seashard-update-${{ matrix.asset_key }}
+          path: |
+            release/${{ matrix.update_metadata }}
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.${{ matrix.update_blockmap_extension }}.blockmap
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     name: 创建 Tag 和 Release
     needs:
@@ -217,35 +247,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: 检出 Release 校验脚本
+        uses: actions/checkout@v4
+
       - name: 汇总全部平台产物
         uses: actions/download-artifact@v4
         with:
+          pattern: seashard-*
           path: release-assets
           merge-multiple: true
+      - name: 获取 Release 说明
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: release-assets
 
       - name: 校验 Release 资产集合
-        shell: bash
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          expected=(
-            "SeaShard-${VERSION}-windows-x64.exe"
-            "SeaShard-${VERSION}-windows-arm64.exe"
-            "SeaShard-${VERSION}-macos-x64.dmg"
-            "SeaShard-${VERSION}-macos-arm64.dmg"
-            "SeaShard-${VERSION}-linux-x64.AppImage"
-            "SeaShard-${VERSION}-linux-x64.deb"
-            "SeaShard-${VERSION}-linux-arm64.AppImage"
-            "SeaShard-${VERSION}-linux-arm64.deb"
-            "release-notes.md"
-          )
-          for file in "${expected[@]}"; do
-            test -f "release-assets/${file}" || {
-              echo "缺少 Release 资产：${file}" >&2
-              exit 1
-            }
-          done
+        run: node scripts/generate-release-notes.ts validate-assets "$VERSION" release-assets
 
       - name: 创建 Tag 并发布 Release
         shell: bash
@@ -256,6 +276,7 @@ jobs:
           set -euo pipefail
           gh release create "v${VERSION}" \
             release-assets/SeaShard-* \
+            release-assets/latest*.yml \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "SeaShard ${VERSION}" \

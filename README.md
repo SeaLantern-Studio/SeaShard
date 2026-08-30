@@ -52,6 +52,8 @@ SeaShard 希望把常见的服务端管理流程集中到一套桌面界面中�
 
 前往 [GitHub Releases](https://github.com/SeaLantern-Studio/SeaShard/releases) 下载 SeaShard，并按照对应 Release 中的平台选择表获取安装包。
 
+安装完成后，可在 **设置 → 关于** 中手动检查新版本。Windows 与 Linux 安装包可以直接下载、安装和重启；macOS 会打开对应的 GitHub Release 下载页。
+
 ## 快速开始
 
 1. 安装并启动 SeaShard；

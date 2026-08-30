@@ -21,6 +21,9 @@
     "verify:sdk": "pnpm run build:sdk && node scripts/verify-sdk-packages.mjs",
     "verify:service-catalog": "node scripts/generate-service-catalog.mjs --check"
   },
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.84.3",
     "@types/node": "26.2.0",

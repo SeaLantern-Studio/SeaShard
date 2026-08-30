@@ -5,6 +5,7 @@ import {
   type ClientEntryPublication,
   type ClientServiceCallRequest,
   type DesktopShellService,
+  type DesktopUpdateSnapshot,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
   type RuntimeDiagnosticsService,
@@ -324,6 +325,21 @@ export const snapshot: RuntimeSnapshot = {
   components: [],
 };
 
+export const desktopUpdateSnapshot = {
+  state: "idle",
+  currentVersion: "1.2.3",
+  platform: "windows",
+  architecture: "x64",
+  packageType: "nsis",
+} satisfies DesktopUpdateSnapshot;
+
+export const availableDesktopUpdateSnapshot = {
+  ...desktopUpdateSnapshot,
+  state: "available",
+  latestVersion: "1.3.0",
+  releaseDate: "2026-08-27T12:00:00.000Z",
+} satisfies DesktopUpdateSnapshot;
+
 export const clientEntries: ClientEntryPublication = {
   revision: 1,
   entries: [
@@ -558,6 +574,8 @@ export async function createDesktopShellHarness(
   const failures: unknown[] = [];
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
+  let desktopUpdateListener: ((snapshot: DesktopUpdateSnapshot) => void) | undefined;
+  let desktopUpdateActions = 0;
   const clientServiceCalls: ClientServiceCallRequest[] = [];
   let agentModelConfiguration: AgentModelConfigurationSnapshot = {
     revision: "a".repeat(64),
@@ -628,6 +646,17 @@ export async function createDesktopShellHarness(
       rendererFile: "C:/SeaShard/index.html",
       smokeMode,
       reportOpenFailure: (error) => failures.push(error),
+      readDesktopUpdateSnapshot: async () => desktopUpdateSnapshot,
+      checkDesktopUpdate: async () => availableDesktopUpdateSnapshot,
+      applyDesktopUpdate: async () => {
+        desktopUpdateActions += 1;
+      },
+      onDesktopUpdateChanged: (listener) => {
+        desktopUpdateListener = listener;
+        return () => {
+          if (desktopUpdateListener === listener) desktopUpdateListener = undefined;
+        };
+      },
       onRendererReady: (value) => {
         readySnapshots.push(value);
       },
@@ -1045,8 +1074,14 @@ export async function createDesktopShellHarness(
       return serverConfigurationDocument;
     },
     clientServiceCalls,
+    get desktopUpdateActions() {
+      return desktopUpdateActions;
+    },
     get clientEntryListener() {
       return clientEntryListener;
+    },
+    get desktopUpdateListener() {
+      return desktopUpdateListener;
     },
     get serverConsoleListener() {
       return serverConsoleListener;

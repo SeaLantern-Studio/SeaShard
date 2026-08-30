@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -25,6 +25,50 @@ export interface ReleaseNotesInput {
 export function assertReleaseVersion(version: string): void {
   if (!releaseVersionPattern.test(version)) {
     throw new Error(`版本号必须使用不带 v 的三段数字格式，例如 1.0.0；收到：${version}`);
+  }
+}
+
+/**
+ * 安装包、平台更新清单与差分块必须同批进入 Release；缺少任一文件都会让对应平台
+ * 在下载或安装阶段失败。release-notes.md 只供 gh release create 读取，不作为附件发布。
+ */
+export function expectedReleaseBundleNames(version: string): readonly string[] {
+  assertReleaseVersion(version);
+  return [
+    `SeaShard-${version}-windows-x64.exe`,
+    `SeaShard-${version}-windows-arm64.exe`,
+    `SeaShard-${version}-macos-x64.dmg`,
+    `SeaShard-${version}-macos-arm64.dmg`,
+    `SeaShard-${version}-linux-x64.AppImage`,
+    `SeaShard-${version}-linux-x64.deb`,
+    `SeaShard-${version}-linux-arm64.AppImage`,
+    `SeaShard-${version}-linux-arm64.deb`,
+    `SeaShard-${version}-windows-x64.exe.blockmap`,
+    `SeaShard-${version}-windows-arm64.exe.blockmap`,
+    `SeaShard-${version}-linux-x64.AppImage.blockmap`,
+    `SeaShard-${version}-linux-arm64.AppImage.blockmap`,
+    "latest.yml",
+    "latest-arm64.yml",
+    "latest-linux.yml",
+    "latest-linux-arm64.yml",
+    "release-notes.md",
+  ];
+}
+
+export function assertReleaseBundle(version: string, actualNames: readonly string[]): void {
+  const expected = new Set(expectedReleaseBundleNames(version));
+  const actual = new Set(actualNames);
+  const missing = [...expected].filter((name) => !actual.has(name));
+  const unexpected = [...actual].filter((name) => !expected.has(name));
+  if (missing.length || unexpected.length) {
+    throw new Error(
+      [
+        missing.length ? `缺少 Release 资产：${missing.join("、")}` : "",
+        unexpected.length ? `存在未声明 Release 资产：${unexpected.join("、")}` : "",
+      ]
+        .filter(Boolean)
+        .join("；"),
+    );
   }
 }
 
@@ -130,9 +174,16 @@ async function runCommand(args: readonly string[]): Promise<void> {
     process.stdout.write(`Release version accepted: ${version}\n`);
     return;
   }
+  if (command === "validate-assets") {
+    const [version, directory] = values;
+    if (!version || !directory) throw new Error("validate-assets 缺少版本号或资产目录");
+    assertReleaseBundle(version, await readdir(directory));
+    process.stdout.write(`Release asset bundle accepted: ${version}\n`);
+    return;
+  }
   if (command !== "generate") {
     throw new Error(
-      "用法：generate-release-notes.ts validate <version> | generate <version> <owner/repo> <commit> <output> [previous-tag]",
+      "用法：generate-release-notes.ts validate <version> | validate-assets <version> <directory> | generate <version> <owner/repo> <commit> <output> [previous-tag]",
     );
   }
 

@@ -9,6 +9,8 @@ import test from "node:test";
 import {
   clientEntries,
   createDesktopShellHarness,
+  availableDesktopUpdateSnapshot,
+  desktopUpdateSnapshot,
   paperArtifact,
   serverConsoleLine,
   serverCoreTypes,
@@ -84,6 +86,20 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.desktopUpdateSnapshot, 1),
+    desktopUpdateSnapshot,
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.desktopUpdateCheck, 1),
+    availableDesktopUpdateSnapshot,
+  );
+  assert.equal(await runtime.invoke(desktopChannels.desktopUpdateApply, 1), undefined);
+  assert.equal(harness.desktopUpdateActions, 1);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.desktopUpdateSnapshot, 999),
+    /request rejected/u,
+  );
   assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreTypes, 1), serverCoreTypes);
   await assert.rejects(runtime.invoke(desktopChannels.serverCoreTypes, 999), /request rejected/);
   assert.deepEqual(await runtime.invoke(desktopChannels.serverCoreVersions, 1, "paper"), [
@@ -264,6 +280,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   const updatedEntries = { ...clientEntries, revision: 2 };
   harness.clientEntryListener?.(updatedEntries);
   harness.serverConsoleListener?.(serverConsoleLine);
+  harness.desktopUpdateListener?.(availableDesktopUpdateSnapshot);
   assert.deepEqual(first.sent, [
     {
       channel: desktopChannels.clientBootstrapChanged,
@@ -281,6 +298,10 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
       channel: desktopChannels.serverRuntimeConsoleLine,
       payload: serverConsoleLine,
     },
+    {
+      channel: desktopChannels.desktopUpdateChanged,
+      payload: availableDesktopUpdateSnapshot,
+    },
   ]);
 
   first.emit("ready-to-show");
@@ -297,6 +318,9 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.listenerCount("activate"), 0);
   assert.equal(runtime.listenerCount("window-all-closed"), 0);
   assert.equal(runtime.handlers.has(desktopChannels.runtimeSnapshot), false);
+  assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateSnapshot), false);
+  assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateCheck), false);
+  assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateApply), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreVersions), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
@@ -348,6 +372,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.dialogSelectDirectory), false);
   assert.equal(harness.clientEntryListener, undefined);
   assert.equal(harness.serverConsoleListener, undefined);
+  assert.equal(harness.desktopUpdateListener, undefined);
   assert.equal(runtime.protocolHandlers.has(serverCoreIconScheme), false);
   assert.equal(runtime.protocolHandlers.has(clientPluginAssetScheme), false);
   assert.deepEqual(harness.failures, []);

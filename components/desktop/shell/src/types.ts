@@ -4,6 +4,7 @@ import type {
   AgentSessionService,
   ClientEntryPublication,
   ClientServiceCallRequest,
+  DesktopUpdateSnapshot,
   FileDownloadClientService,
   FileDownloadTaskSnapshot,
   JavaRuntimeManagerService,
@@ -108,6 +109,10 @@ export interface DesktopShellConfig {
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
+  readDesktopUpdateSnapshot(): Promise<DesktopUpdateSnapshot>;
+  checkDesktopUpdate(): Promise<DesktopUpdateSnapshot>;
+  applyDesktopUpdate(): Promise<void>;
+  onDesktopUpdateChanged(listener: (snapshot: DesktopUpdateSnapshot) => void): () => void;
   listAgentModels(): ReturnType<AgentSessionService["listModels"]>;
   listAgentSessions(): ReturnType<AgentSessionService["listSessions"]>;
   readAgentSession(sessionId: string): ReturnType<AgentSessionService["getSession"]>;

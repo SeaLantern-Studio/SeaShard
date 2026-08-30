@@ -1,12 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertReleaseVersion, buildReleaseNotes } from "../scripts/generate-release-notes.ts";
+import {
+  assertReleaseBundle,
+  assertReleaseVersion,
+  buildReleaseNotes,
+  expectedReleaseBundleNames,
+} from "../scripts/generate-release-notes.ts";
 
 await test("manual release accepts only unprefixed three-part numeric versions", () => {
   assert.doesNotThrow(() => assertReleaseVersion("1.0.0"));
   for (const invalid of ["v1.0.0", "1.0", "1.0.0.0", "1.0.beta", " 1.0.0"] as const) {
     assert.throws(() => assertReleaseVersion(invalid), /不带 v 的三段数字格式/u);
   }
+});
+
+await test("release bundle includes installers and supported updater metadata", () => {
+  const bundle = expectedReleaseBundleNames("1.2.3");
+  assert.deepEqual(bundle, [
+    "SeaShard-1.2.3-windows-x64.exe",
+    "SeaShard-1.2.3-windows-arm64.exe",
+    "SeaShard-1.2.3-macos-x64.dmg",
+    "SeaShard-1.2.3-macos-arm64.dmg",
+    "SeaShard-1.2.3-linux-x64.AppImage",
+    "SeaShard-1.2.3-linux-x64.deb",
+    "SeaShard-1.2.3-linux-arm64.AppImage",
+    "SeaShard-1.2.3-linux-arm64.deb",
+    "SeaShard-1.2.3-windows-x64.exe.blockmap",
+    "SeaShard-1.2.3-windows-arm64.exe.blockmap",
+    "SeaShard-1.2.3-linux-x64.AppImage.blockmap",
+    "SeaShard-1.2.3-linux-arm64.AppImage.blockmap",
+    "latest.yml",
+    "latest-arm64.yml",
+    "latest-linux.yml",
+    "latest-linux-arm64.yml",
+    "release-notes.md",
+  ]);
+  assert.doesNotThrow(() => assertReleaseBundle("1.2.3", bundle));
+  assert.throws(
+    () =>
+      assertReleaseBundle(
+        "1.2.3",
+        bundle.filter((name) => name !== "latest-linux.yml"),
+      ),
+    /缺少 Release 资产：latest-linux\.yml/u,
+  );
 });
 
 await test("release notes map every supported platform and include the complete commit range", () => {
