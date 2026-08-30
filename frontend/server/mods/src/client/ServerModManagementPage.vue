@@ -9,7 +9,7 @@ import {
   type ServerRuntimeSnapshot,
 } from "@seashard/contracts";
 import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
-import { Cmz_Button, Cmz_Modal, Cmz_Spinner, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Modal, Cmz_Spinner, useToast } from "cmzya-modern-ui";
 import { Ban, ExternalLink, Plus, Puzzle, Search, Server, Trash2 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -250,7 +250,6 @@ function errorMessage(cause: unknown): string {
 
 <template>
   <section class="server-mod-page" aria-label="Mod">
-    <Cmz_Toast position="top-right" />
     <div class="server-mod-list-toolbar">
       <div class="server-mod-search">
         <Search :size="17" :stroke-width="1.8" aria-hidden="true" />

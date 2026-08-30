@@ -1,8 +1,13 @@
 import type {
+  DesktopUpdateFinishRequest,
+  DesktopUpdateFinishResult,
   DesktopUpdatePackageType,
   DesktopUpdatePlatform,
   DesktopUpdateProgress,
+  DesktopUpdateRestartRequirement,
   DesktopUpdateSnapshot,
+  ServerInstanceSnapshot,
+  ServerRuntimeSnapshot,
 } from "@seashard/contracts";
 
 export interface DesktopUpdateEnvironment {
@@ -95,6 +100,107 @@ export function isNewerDesktopVersion(currentVersion: string, latestVersion: str
   }
   return false;
 }
+export interface DesktopUpdateCompletionContext {
+  listServerInstances(): Promise<readonly ServerInstanceSnapshot[]>;
+  readServerRuntime(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  waitUntilServerStartupSettled(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  stopServerRuntime(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  waitUntilServerStopped(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  install(afterInstall: DesktopUpdateFinishRequest["afterInstall"]): void | Promise<void>;
+}
+
+/**
+ * 安装更新前按服务器真实生命周期完成停机。starting 必须先等启动事务结算，running
+ * 发送安全停止后必须等进程退出；任何一个实例失败都会保留已下载更新，不触发安装器。
+ */
+export async function coordinateDesktopUpdateCompletion(
+  context: DesktopUpdateCompletionContext,
+  request: DesktopUpdateFinishRequest,
+): Promise<DesktopUpdateFinishResult> {
+  const runningServers = await readRunningServers(context);
+  if (runningServers.length > 0 && !request.stopRunningServers) {
+    return Object.freeze({
+      outcome: "running-servers",
+      runningServers: Object.freeze(runningServers),
+    });
+  }
+
+  if (runningServers.length > 0) {
+    const results = await Promise.allSettled(
+      runningServers.map((server) => stopServerForDesktopUpdate(context, server)),
+    );
+    const failures = results.flatMap((result, index) => {
+      if (result.status === "fulfilled") return [];
+      const server = runningServers[index]!;
+      return [
+        Object.freeze({
+          instanceId: server.instanceId,
+          name: server.name,
+          reason: errorMessage(result.reason),
+        }),
+      ];
+    });
+    if (failures.length > 0) {
+      return Object.freeze({
+        outcome: "stop-failed",
+        failures: Object.freeze(failures),
+      });
+    }
+  }
+
+  await context.install(request.afterInstall);
+  return undefined;
+}
+
+/**
+ * starting 期间可能仍在下载核心且没有 ChildProcess，先等待启动队列；启动失败视为已
+ * 停止，启动成功再发送 stop。stopping 则只等待已有停机流程，避免重复写入停止命令。
+ */
+async function stopServerForDesktopUpdate(
+  context: DesktopUpdateCompletionContext,
+  server: DesktopUpdateRestartRequirement["runningServers"][number],
+): Promise<void> {
+  let snapshot: ServerRuntimeSnapshot = {
+    instanceId: server.instanceId,
+    state: server.state,
+  };
+  if (snapshot.state === "starting") {
+    snapshot = await context.waitUntilServerStartupSettled(server.instanceId);
+  }
+  if (snapshot.state === "stopped" || snapshot.state === "failed") return;
+  if (snapshot.state === "running") {
+    snapshot = await context.stopServerRuntime(server.instanceId);
+  }
+  if (snapshot.state === "stopped" || snapshot.state === "failed") return;
+  if (snapshot.state !== "stopping") {
+    throw new Error(`服务器进入了无法停机的 ${snapshot.state} 状态`);
+  }
+  const stopped = await context.waitUntilServerStopped(server.instanceId);
+  if (stopped.state !== "stopped" && stopped.state !== "failed") {
+    throw new Error(`服务器停机返回了未完成的 ${stopped.state} 状态`);
+  }
+}
+
+async function readRunningServers(
+  context: DesktopUpdateCompletionContext,
+): Promise<DesktopUpdateRestartRequirement["runningServers"][number][]> {
+  const instances = await context.listServerInstances();
+  const runtimeSnapshots = await Promise.all(
+    instances.map(async (instance) => ({
+      instance,
+      runtime: await context.readServerRuntime(instance.id),
+    })),
+  );
+  return runtimeSnapshots.flatMap(({ instance, runtime }) =>
+    runtime.state === "starting" || runtime.state === "running" || runtime.state === "stopping"
+      ? [{ instanceId: instance.id, name: instance.name, state: runtime.state }]
+      : [],
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * 单一状态机串联检查与平台更新动作，避免快速连点生成多份安装任务。Main 只通过
@@ -161,7 +267,7 @@ export class DesktopUpdateController {
     }
   }
 
-  async installAutomatically(download: () => Promise<unknown>, install: () => void): Promise<void> {
+  async downloadAutomatically(download: () => Promise<unknown>): Promise<void> {
     if (this.#actionTask) return this.#actionTask;
     this.#expectAvailableUpdate();
 
@@ -179,12 +285,11 @@ export class DesktopUpdateController {
         await download();
         this.#publish({
           ...this.#baseSnapshot(),
-          state: "installing",
+          state: "restart-required",
           ...(latestVersion ? { latestVersion } : {}),
           ...(releaseDate ? { releaseDate } : {}),
           progress: { ...(this.#snapshot.progress ?? zeroProgress), percent: 100 },
         });
-        install();
       } catch (error) {
         this.reportError(error);
         throw error;
@@ -195,6 +300,28 @@ export class DesktopUpdateController {
       await task;
     } finally {
       if (this.#actionTask === task) this.#actionTask = undefined;
+    }
+  }
+
+  /** 安装器只能消费已经完整下载的更新；发布 installing 后 Electron 将立即退出。 */
+  installDownloaded(install: () => void): void {
+    if (this.#snapshot.state !== "restart-required") {
+      throw new Error("软件更新尚未准备好重启");
+    }
+    const latestVersion = this.#snapshot.latestVersion;
+    const releaseDate = this.#snapshot.releaseDate;
+    try {
+      this.#publish({
+        ...this.#baseSnapshot(),
+        state: "installing",
+        ...(latestVersion ? { latestVersion } : {}),
+        ...(releaseDate ? { releaseDate } : {}),
+        progress: { ...(this.#snapshot.progress ?? zeroProgress), percent: 100 },
+      });
+      install();
+    } catch (error) {
+      this.reportError(error);
+      throw error;
     }
   }
 

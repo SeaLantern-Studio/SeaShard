@@ -96,6 +96,22 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   );
   assert.equal(await runtime.invoke(desktopChannels.desktopUpdateApply, 1), undefined);
   assert.equal(harness.desktopUpdateActions, 1);
+  const finishRequest = {
+    stopRunningServers: true,
+    afterInstall: "close",
+  } as const;
+  assert.equal(
+    await runtime.invoke(desktopChannels.desktopUpdateFinish, 1, finishRequest),
+    undefined,
+  );
+  assert.deepEqual(harness.desktopUpdateFinishes, [finishRequest]);
+  await assert.rejects(
+    runtime.invoke(desktopChannels.desktopUpdateFinish, 1, {
+      stopRunningServers: "yes",
+      afterInstall: "close",
+    }),
+    /must be a boolean/u,
+  );
   await assert.rejects(
     runtime.invoke(desktopChannels.desktopUpdateSnapshot, 999),
     /request rejected/u,
@@ -306,8 +322,18 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
 
   first.emit("ready-to-show");
   assert.equal(first.shown, true);
+  harness.setDesktopUpdateExitRequired(true);
   await runtime.invoke(desktopChannels.windowClose, 1);
   assert.equal(first.closeCount, 1);
+  assert.equal(first.destroyed, false);
+  assert.deepEqual(first.sent.at(-1), {
+    channel: desktopChannels.desktopUpdateExitDecisionRequired,
+    payload: undefined,
+  });
+  harness.setDesktopUpdateExitRequired(false);
+  await runtime.invoke(desktopChannels.windowClose, 1);
+  assert.equal(first.closeCount, 2);
+  assert.equal(first.destroyed, true);
   runtime.emit("activate");
   assert.equal(runtime.windows.length, 2, "activate must recreate a closed primary window");
 
@@ -321,6 +347,7 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateSnapshot), false);
   assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateCheck), false);
   assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateApply), false);
+  assert.equal(runtime.handlers.has(desktopChannels.desktopUpdateFinish), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreTypes), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreVersions), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverCoreArtifacts), false);
@@ -353,6 +380,8 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGet), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStart), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeStop), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeWaitStartupSettled), false);
+  assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeWaitStopped), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeSendCommand), false);
   assert.equal(runtime.handlers.has(desktopChannels.serverRuntimeGetLogs), false);
   assert.equal(runtime.handlers.has(desktopChannels.javaRuntimeScan), false);

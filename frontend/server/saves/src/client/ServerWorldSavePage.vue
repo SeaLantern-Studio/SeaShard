@@ -11,7 +11,7 @@ import {
   type ServerWorldStorageSnapshot,
 } from "@seashard/contracts";
 import type { ServerInstanceSelection } from "@seashard/server-ui-shared/server-selection";
-import { Cmz_Button, Cmz_Modal, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Modal, useToast } from "cmzya-modern-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import ServerWorldSaveDetail from "./components/ServerWorldSaveDetail.vue";
@@ -392,7 +392,6 @@ function errorMessage(cause: unknown): string {
 
 <template>
   <section class="server-world-save-page" aria-label="存档">
-    <Cmz_Toast position="top-right" />
     <ServerWorldSaveDetail
       v-if="viewMode === 'detail'"
       :detail-world-name="detailWorldName"

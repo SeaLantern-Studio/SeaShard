@@ -123,6 +123,20 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): 
         get: async (instanceId) => asJsonValue(manager.get(instanceId)),
         start: async (instanceId) => asJsonValue(await manager.start(instanceId)),
         stop: async (instanceId) => asJsonValue(await manager.stop(instanceId)),
+        waitUntilStartupSettled: async (instanceId, timeoutMs) =>
+          asJsonValue(
+            await manager.waitUntilStartupSettled(instanceId, {
+              timeoutMs: expectWaitTimeout(timeoutMs),
+            }),
+          ),
+        waitUntilStopped: async (instanceId, timeoutMs) =>
+          asJsonValue(
+            (
+              await manager.waitUntilStopped(instanceId, {
+                timeoutMs: expectWaitTimeout(timeoutMs),
+              })
+            ).snapshot,
+          ),
         sendCommand: async (instanceId, command) => {
           await manager.sendCommand(instanceId, command);
           return null;
@@ -141,6 +155,13 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): 
 
 function asJsonValue(value: unknown): JsonValue {
   return value as JsonValue;
+}
+
+function expectWaitTimeout(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new TypeError("server runtime wait timeout must be a positive safe integer");
+  }
+  return value as number;
 }
 
 export * from "./manager";

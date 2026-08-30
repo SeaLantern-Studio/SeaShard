@@ -7,7 +7,7 @@ import type {
   PluginMarketSearchResult,
   PluginMarketService,
 } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Spinner, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Spinner, useToast } from "cmzya-modern-ui";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -230,8 +230,6 @@ const selectedCurrentRelease = computed(() =>
 
 <template>
   <section class="plugin-market-page" aria-label="插件市场">
-    <Cmz_Toast position="top-right" />
-
     <template v-if="selectedPlugin">
       <header class="market-detail-toolbar">
         <Cmz_Button variant="outline" size="sm" @click="closeDetails">

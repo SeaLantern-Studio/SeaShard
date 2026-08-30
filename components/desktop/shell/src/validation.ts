@@ -5,6 +5,7 @@ import {
   serverModSearchLimits,
   type AgentInteractionResponseInput,
   type AgentModelConfigurationService,
+  type DesktopUpdateFinishRequest,
   type ClientServiceCallRequest,
   type AgentModelConnectionMutation,
   type AgentModelSelection,
@@ -39,6 +40,27 @@ export function expectString(value: unknown, label: string): string {
 export function expectSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
   return value as number;
+}
+export function expectDesktopUpdateFinishRequest(value: unknown): DesktopUpdateFinishRequest {
+  const record = expectRecord(value, "Desktop update finish request");
+  if (typeof record.stopRunningServers !== "boolean") {
+    throw new TypeError("stop running servers must be a boolean");
+  }
+  if (record.afterInstall !== "restart" && record.afterInstall !== "close") {
+    throw new TypeError("desktop update afterInstall must be restart or close");
+  }
+  return {
+    stopRunningServers: record.stopRunningServers,
+    afterInstall: record.afterInstall,
+  };
+}
+
+export function expectServerRuntimeWaitTimeout(value: unknown): number {
+  const timeoutMs = expectSafeInteger(value, "server runtime wait timeout");
+  if (timeoutMs < 1 || timeoutMs > 30 * 60 * 1_000) {
+    throw new TypeError("server runtime wait timeout must be between 1 and 1800000");
+  }
+  return timeoutMs;
 }
 
 /** 固定 IPC 只接受边界清晰的 Entry 身份、方法和 JSON 参数。 */

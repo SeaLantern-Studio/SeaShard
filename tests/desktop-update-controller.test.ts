@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  coordinateDesktopUpdateCompletion,
   DesktopUpdateController,
   isNewerDesktopVersion,
   resolveDesktopUpdateTarget,
 } from "../apps/desktop/src/main/desktop-update-controller.ts";
+import type {
+  ServerInstanceSnapshot,
+  ServerRuntimeSnapshot,
+} from "../packages/contracts/src/index.ts";
 
 const windowsEnvironment = {
   currentVersion: "1.2.3",
@@ -99,7 +104,7 @@ await test("desktop updater coalesces checks and projects an available release",
   assert.deepEqual(states, ["checking", "available"]);
 });
 
-await test("desktop updater reports download progress and starts one installer", async () => {
+await test("desktop updater downloads fully before a separate restart action", async () => {
   const controller = new DesktopUpdateController(windowsEnvironment);
   await controller.check(async () => ({ available: true, latestVersion: "1.3.0" }));
   let releaseDownload!: () => void;
@@ -108,23 +113,13 @@ await test("desktop updater reports download progress and starts one installer",
   });
   let downloads = 0;
   let installs = 0;
-  const update = controller.installAutomatically(
-    () => {
-      downloads += 1;
-      return downloadGate;
-    },
-    () => {
-      installs += 1;
-    },
-  );
-  const duplicate = controller.installAutomatically(
-    async () => {
-      downloads += 1;
-    },
-    () => {
-      installs += 1;
-    },
-  );
+  const update = controller.downloadAutomatically(() => {
+    downloads += 1;
+    return downloadGate;
+  });
+  const duplicate = controller.downloadAutomatically(async () => {
+    downloads += 1;
+  });
 
   controller.reportProgress({
     percent: 42.4,
@@ -141,9 +136,158 @@ await test("desktop updater reports download progress and starts one installer",
   assert.equal(downloads, 1);
   releaseDownload();
   await Promise.all([update, duplicate]);
+  assert.equal(installs, 0, "a completed download must not restart Electron immediately");
+  assert.equal(controller.getSnapshot().state, "restart-required");
+  assert.equal(controller.getSnapshot().progress?.percent, 100);
+
+  controller.installDownloaded(() => {
+    installs += 1;
+  });
   assert.equal(installs, 1);
   assert.equal(controller.getSnapshot().state, "installing");
-  assert.equal(controller.getSnapshot().progress?.percent, 100);
+});
+
+await test("desktop updater waits for startup and complete process exit before install", async () => {
+  const instances = [
+    createServerInstance("instance-paper", "Paper 生存服"),
+    createServerInstance("instance-velocity", "Velocity 代理"),
+  ];
+  const runtimeStates = new Map<string, ServerRuntimeSnapshot["state"]>([
+    ["instance-paper", "running"],
+    ["instance-velocity", "starting"],
+  ]);
+  const startupWaits: string[] = [];
+  const stopped: string[] = [];
+  const stopWaits: string[] = [];
+  const installs: string[] = [];
+  const context = {
+    listServerInstances: async () => instances,
+    readServerRuntime: async (instanceId: string) =>
+      ({
+        instanceId,
+        state: runtimeStates.get(instanceId) ?? "stopped",
+      }) satisfies ServerRuntimeSnapshot,
+    waitUntilServerStartupSettled: async (instanceId: string) => {
+      startupWaits.push(instanceId);
+      runtimeStates.set(instanceId, "running");
+      return { instanceId, state: "running" } satisfies ServerRuntimeSnapshot;
+    },
+    stopServerRuntime: async (instanceId: string) => {
+      stopped.push(instanceId);
+      runtimeStates.set(instanceId, "stopping");
+      return { instanceId, state: "stopping" } satisfies ServerRuntimeSnapshot;
+    },
+    waitUntilServerStopped: async (instanceId: string) => {
+      stopWaits.push(instanceId);
+      runtimeStates.set(instanceId, "stopped");
+      return { instanceId, state: "stopped" } satisfies ServerRuntimeSnapshot;
+    },
+    install: (afterInstall: "restart" | "close") => {
+      installs.push(afterInstall);
+    },
+  };
+
+  assert.deepEqual(
+    await coordinateDesktopUpdateCompletion(context, {
+      stopRunningServers: false,
+      afterInstall: "restart",
+    }),
+    {
+      outcome: "running-servers",
+      runningServers: [
+        { instanceId: "instance-paper", name: "Paper 生存服", state: "running" },
+        { instanceId: "instance-velocity", name: "Velocity 代理", state: "starting" },
+      ],
+    },
+  );
+  assert.deepEqual(stopped, []);
+  assert.deepEqual(installs, []);
+
+  assert.equal(
+    await coordinateDesktopUpdateCompletion(context, {
+      stopRunningServers: true,
+      afterInstall: "restart",
+    }),
+    undefined,
+  );
+  assert.deepEqual(startupWaits, ["instance-velocity"]);
+  assert.deepEqual(stopped, ["instance-paper", "instance-velocity"]);
+  assert.deepEqual(stopWaits, ["instance-paper", "instance-velocity"]);
+  assert.deepEqual(installs, ["restart"]);
+});
+
+await test("desktop updater treats a failed starting server as already settled", async () => {
+  const instance = createServerInstance("instance-paper", "Paper 生存服");
+  let stops = 0;
+  const installs: string[] = [];
+  const context = {
+    listServerInstances: async () => [instance],
+    readServerRuntime: async () =>
+      ({ instanceId: instance.id, state: "starting" }) satisfies ServerRuntimeSnapshot,
+    waitUntilServerStartupSettled: async () =>
+      ({
+        instanceId: instance.id,
+        state: "failed",
+        error: "核心准备失败",
+      }) satisfies ServerRuntimeSnapshot,
+    stopServerRuntime: async () => {
+      stops += 1;
+      return { instanceId: instance.id, state: "stopping" } satisfies ServerRuntimeSnapshot;
+    },
+    waitUntilServerStopped: async () =>
+      ({ instanceId: instance.id, state: "stopped" }) satisfies ServerRuntimeSnapshot,
+    install: (afterInstall: "restart" | "close") => {
+      installs.push(afterInstall);
+    },
+  };
+
+  assert.equal(
+    await coordinateDesktopUpdateCompletion(context, {
+      stopRunningServers: true,
+      afterInstall: "close",
+    }),
+    undefined,
+  );
+  assert.equal(stops, 0);
+  assert.deepEqual(installs, ["close"]);
+});
+
+await test("desktop updater reports stop failure without consuming the downloaded update", async () => {
+  const instance = createServerInstance("instance-paper", "Paper 生存服");
+  let installs = 0;
+  const context = {
+    listServerInstances: async () => [instance],
+    readServerRuntime: async () =>
+      ({ instanceId: instance.id, state: "running" }) satisfies ServerRuntimeSnapshot,
+    waitUntilServerStartupSettled: async () =>
+      ({ instanceId: instance.id, state: "running" }) satisfies ServerRuntimeSnapshot,
+    stopServerRuntime: async () =>
+      ({ instanceId: instance.id, state: "stopping" }) satisfies ServerRuntimeSnapshot,
+    waitUntilServerStopped: async () => {
+      throw new Error("safe stop timed out");
+    },
+    install: () => {
+      installs += 1;
+    },
+  };
+
+  assert.deepEqual(
+    await coordinateDesktopUpdateCompletion(context, {
+      stopRunningServers: true,
+      afterInstall: "restart",
+    }),
+    {
+      outcome: "stop-failed",
+      failures: [
+        {
+          instanceId: "instance-paper",
+          name: "Paper 生存服",
+          reason: "safe stop timed out",
+        },
+      ],
+    },
+  );
+  assert.equal(installs, 0);
 });
 
 await test("macOS updater compares releases and opens one manual download page", async () => {
@@ -193,3 +337,17 @@ await test("desktop updater exposes a retryable error after a failed check", asy
     error: "release metadata unavailable",
   });
 });
+
+function createServerInstance(id: string, name: string): ServerInstanceSnapshot {
+  return {
+    id,
+    name,
+    rootPath: `C:/SeaShard/${id}`,
+    coreJarPath: `C:/SeaShard/${id}/server.jar`,
+    storageMode: "managed",
+    source: "downloaded",
+    modLoader: null,
+    createdAt: "2026-08-27T00:00:00.000Z",
+    updatedAt: "2026-08-27T00:00:00.000Z",
+  };
+}

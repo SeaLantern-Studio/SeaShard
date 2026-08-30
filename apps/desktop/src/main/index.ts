@@ -72,6 +72,7 @@ let desktopUpdates: ElectronDesktopUpdateService | undefined;
 let bootstrapTask: Promise<void> | undefined;
 let shutdownTask: Promise<void> | undefined;
 let shutdownComplete = false;
+let gracefulQuitTask: Promise<void> | undefined;
 let stopping = false;
 let signalBootstrapStop!: () => void;
 const bootstrapStop = new Promise<void>((resolve) => {
@@ -269,7 +270,6 @@ async function shutdown(): Promise<void> {
     try {
       await disposeDeveloperControl?.();
       await kernel?.dispose();
-      desktopUpdates?.dispose();
       const activeUnits =
         kernel?.runtimeSnapshot().plugins.filter((plugin) => plugin.state === "active").length ?? 0;
       const diagnostics = kernel?.diagnostics() ?? {
@@ -294,20 +294,45 @@ async function shutdown(): Promise<void> {
   return shutdownTask;
 }
 
+/**
+ * 普通 app.quit 会先让 Host 完成完整释放。若本次进程内已有可安装更新，释放成功后
+ * 直接以“不重新启动”模式拉起安装器；崩溃与 app.exit(1) 不经过这里，只保留缓存。
+ */
+async function finishGracefulQuit(installDownloadedUpdate: boolean): Promise<void> {
+  let shutdownSucceeded = false;
+  try {
+    await shutdown();
+    shutdownSucceeded = true;
+  } catch (error) {
+    console.error("SeaShard shutdown failed", error);
+  }
+
+  shutdownComplete = true;
+  if (shutdownSucceeded && installDownloadedUpdate && desktopUpdates?.isRestartRequired()) {
+    try {
+      if (desktopUpdates.install("close")) return;
+    } catch (error) {
+      console.error("SeaShard update install on quit failed", error);
+    }
+  }
+  desktopUpdates?.dispose();
+  app.quit();
+}
+
 app.on("before-quit", (event) => {
   if (shutdownComplete) return;
   event.preventDefault();
-  void shutdown().finally(() => {
-    shutdownComplete = true;
-    app.quit();
-  });
+  gracefulQuitTask ??= finishGracefulQuit(desktopUpdates?.isRestartRequired() ?? false);
 });
 
 bootstrapTask = bootstrap();
 void bootstrapTask.catch((error) => {
   if (error instanceof BootstrapStoppedError) return;
   console.error("SeaShard bootstrap failed", error);
-  void shutdown().finally(() => app.exit(1));
+  void shutdown().finally(() => {
+    desktopUpdates?.dispose();
+    app.exit(1);
+  });
 });
 
 function resolvePluginDeveloperControlLaunch(): PluginDeveloperControlLaunch | undefined {

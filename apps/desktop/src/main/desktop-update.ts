@@ -1,4 +1,4 @@
-import type { DesktopUpdateClientService, DesktopUpdateSnapshot } from "@seashard/contracts";
+import type { DesktopUpdateFinishRequest, DesktopUpdateSnapshot } from "@seashard/contracts";
 import { app, net, shell } from "electron";
 import electronUpdater, { type ProgressInfo } from "electron-updater";
 import { readFileSync } from "node:fs";
@@ -16,7 +16,16 @@ const githubLatestReleaseApi =
   "https://api.github.com/repos/SeaLantern-Studio/SeaShard/releases/latest";
 const githubLatestReleasePage = "https://github.com/SeaLantern-Studio/SeaShard/releases/latest";
 
-export interface ElectronDesktopUpdateService extends DesktopUpdateClientService {
+export type ElectronDesktopUpdatePreparation = "external-download" | "restart-required";
+
+/** Electron 更新器只管理安装包；运行中服务器的停机决策由 Desktop Shell 集成层处理。 */
+export interface ElectronDesktopUpdateService {
+  getSnapshot(): DesktopUpdateSnapshot;
+  check(): Promise<DesktopUpdateSnapshot>;
+  prepare(): Promise<ElectronDesktopUpdatePreparation>;
+  isRestartRequired(): boolean;
+  install(afterInstall: DesktopUpdateFinishRequest["afterInstall"]): boolean;
+  onSnapshotChanged(listener: (snapshot: DesktopUpdateSnapshot) => void): () => void;
   dispose(): void;
 }
 
@@ -35,7 +44,7 @@ export function createElectronDesktopUpdateService(
   if (!manualMacDownload) {
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
-    updater.autoRunAppAfterInstall = true;
+    updater.autoRunAppAfterInstall = false;
     updater.allowPrerelease = false;
     updater.logger = console;
     if (environment.platform === "win32" && environment.architecture === "arm64") {
@@ -75,23 +84,31 @@ export function createElectronDesktopUpdateService(
   };
 
   return {
-    getSnapshot: async () => controller.getSnapshot(),
+    getSnapshot: () => controller.getSnapshot(),
     check: () => controller.check(checkForUpdates),
-    apply: () => {
+    prepare: async () => {
       if (manualMacDownload) {
-        return controller.openDownloadPage(() => shell.openExternal(githubLatestReleasePage));
+        await controller.openDownloadPage(() => shell.openExternal(githubLatestReleasePage));
+        return "external-download";
       }
-      return controller.installAutomatically(
-        async () => {
-          try {
-            return await updater.downloadUpdate();
-          } catch (error) {
-            throw readableUpdateError(error);
-          }
-        },
-        // 用户已经明确点击“一键更新”；NSIS/AppImage 静默替换，DEB 保留系统鉴权框。
-        () => updater.quitAndInstall(true, true),
+      await controller.downloadAutomatically(async () => {
+        try {
+          return await updater.downloadUpdate();
+        } catch (error) {
+          throw readableUpdateError(error);
+        }
+      });
+      return "restart-required";
+    },
+    isRestartRequired: () => controller.getSnapshot().state === "restart-required",
+    install: (afterInstall) => {
+      if (manualMacDownload) throw new Error("macOS 更新需要从下载页手动安装");
+      const relaunch = afterInstall === "restart";
+      controller.installDownloaded(
+        // NSIS/AppImage 静默替换；退出来源决定安装器完成后是否重新启动 SeaShard。
+        () => updater.quitAndInstall(true, relaunch),
       );
+      return controller.getSnapshot().state === "installing";
     },
     onSnapshotChanged: (listener: (snapshot: DesktopUpdateSnapshot) => void) =>
       controller.onSnapshotChanged(listener),

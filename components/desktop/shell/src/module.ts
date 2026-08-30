@@ -23,6 +23,7 @@ import {
   expectAgentModelDiscoveryInput,
   expectAgentSendMessageInput,
   expectAgentStartSessionInput,
+  expectDesktopUpdateFinishRequest,
   expectClientServiceCallRequest,
   expectClientServiceCallResult,
   expectNonEmptyString,
@@ -38,6 +39,7 @@ import {
   expectServerModSource,
   expectServerStartupDefaultsUpdate,
   expectServerWorldId,
+  expectServerRuntimeWaitTimeout,
   expectString,
 } from "./validation";
 
@@ -153,6 +155,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         );
         window.once("ready-to-show", () => {
           if (!config.smokeMode && !window.isDestroyed()) window.show();
+        });
+        window.on("close", (event) => {
+          if (!config.shouldConfirmDesktopUpdateExit()) return;
+          event.preventDefault();
+          window.webContents.send(desktopChannels.desktopUpdateExitDecisionRequired);
         });
         window.on("closed", () => {
           if (primaryWindow === window) primaryWindow = undefined;
@@ -626,6 +633,26 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           return config.stopServerRuntime(expectNonEmptyString(instanceId, "server instance id"));
         });
         config.runtime.handle(
+          desktopChannels.serverRuntimeWaitStartupSettled,
+          (event, instanceId, timeoutMs) => {
+            ownedWindow(event.sender.id);
+            return config.waitUntilServerStartupSettled(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectServerRuntimeWaitTimeout(timeoutMs),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverRuntimeWaitStopped,
+          (event, instanceId, timeoutMs) => {
+            ownedWindow(event.sender.id);
+            return config.waitUntilServerStopped(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectServerRuntimeWaitTimeout(timeoutMs),
+            );
+          },
+        );
+        config.runtime.handle(
           desktopChannels.serverRuntimeSendCommand,
           (event, instanceId, command) => {
             ownedWindow(event.sender.id);
@@ -712,6 +739,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
         config.runtime.handle(desktopChannels.desktopUpdateApply, (event) => {
           ownedWindow(event.sender.id);
           return config.applyDesktopUpdate();
+        });
+        config.runtime.handle(desktopChannels.desktopUpdateFinish, (event, request) => {
+          ownedWindow(event.sender.id);
+          return config.finishDesktopUpdate(expectDesktopUpdateFinishRequest(request));
         });
 
         config.runtime.handle(desktopChannels.runtimeSnapshot, async (event) => {
@@ -843,6 +874,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.desktopUpdateSnapshot);
           config.runtime.removeHandler(desktopChannels.desktopUpdateCheck);
           config.runtime.removeHandler(desktopChannels.desktopUpdateApply);
+          config.runtime.removeHandler(desktopChannels.desktopUpdateFinish);
           config.runtime.removeHandler(desktopChannels.serverCoreTypes);
           config.runtime.removeHandler(desktopChannels.serverCoreVersions);
           config.runtime.removeHandler(desktopChannels.serverCoreArtifacts);
@@ -879,6 +911,8 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverRuntimePreview);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStart);
           config.runtime.removeHandler(desktopChannels.serverRuntimeStop);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeWaitStartupSettled);
+          config.runtime.removeHandler(desktopChannels.serverRuntimeWaitStopped);
           config.runtime.removeHandler(desktopChannels.serverRuntimeSendCommand);
           config.runtime.removeHandler(desktopChannels.serverRuntimeGetLogs);
           config.runtime.removeHandler(desktopChannels.javaRuntimeScan);

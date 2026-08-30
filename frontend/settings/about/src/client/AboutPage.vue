@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import type { DesktopUpdateClientService, DesktopUpdateSnapshot } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import type {
+  DesktopUpdateClientService,
+  DesktopUpdateFinishResult,
+  DesktopUpdateRestartRequirement,
+  DesktopUpdateSnapshot,
+} from "@seashard/contracts";
+import { Cmz_Button, Cmz_Modal, useToast } from "cmzya-modern-ui";
 import { Download, ExternalLink, RefreshCw } from "lucide-vue-next";
-import { computed, onBeforeUnmount, onMounted, shallowRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 
 const props = defineProps<{
   updates: DesktopUpdateClientService;
@@ -10,10 +15,13 @@ const props = defineProps<{
 
 const toast = useToast();
 const snapshot = shallowRef<DesktopUpdateSnapshot>();
+const restartRequirement = shallowRef<DesktopUpdateRestartRequirement>();
+const restartWorking = ref(false);
 let disposeSnapshotListener: (() => void) | undefined;
 
 const busy = computed(
   () =>
+    restartWorking.value ||
     snapshot.value?.state === "checking" ||
     snapshot.value?.state === "downloading" ||
     snapshot.value?.state === "installing",
@@ -37,6 +45,8 @@ const updateStatus = computed(() => {
       return `v${value.latestVersion} 可用`;
     case "downloading":
       return `正在下载 ${Math.round(value.progress?.percent ?? 0)}%`;
+    case "restart-required":
+      return "更新已下载，等待重启";
     case "installing":
       return "正在安装并准备重启";
     case "error":
@@ -51,6 +61,8 @@ const actionLabel = computed(() => {
       return "检查中";
     case "downloading":
       return "下载中";
+    case "restart-required":
+      return "立即重启";
     case "installing":
       return "安装中";
     case "unsupported":
@@ -66,6 +78,7 @@ const progressPercent = computed(() =>
 onMounted(async () => {
   disposeSnapshotListener = props.updates.onSnapshotChanged((value) => {
     snapshot.value = value;
+    if (value.state !== "restart-required") restartRequirement.value = undefined;
   });
   try {
     snapshot.value = await props.updates.getSnapshot();
@@ -77,15 +90,15 @@ onMounted(async () => {
 onBeforeUnmount(() => disposeSnapshotListener?.());
 
 /**
- * 一个按钮遵循状态机前进：先检查；发现版本后，Windows/Linux 启动安装器，
- * macOS 交给系统浏览器打开 Release 下载页。
+ * 一个按钮遵循状态机前进：先检查并下载；安装包准备完成后由 Main 检查服务器，
+ * 只有没有活动服务器，或用户明确选择安全关服时，才允许进入安装重启。
  */
 async function checkOrInstall(): Promise<void> {
   const current = snapshot.value;
   if (!current || busy.value || current.state === "unsupported") return;
   if (current.state === "available") {
     try {
-      await props.updates.apply();
+      handleFinishResult(await props.updates.apply());
       if (manualDownload.value) toast.info({ title: "已打开 macOS 下载页" });
     } catch (error) {
       toast.error({
@@ -93,6 +106,10 @@ async function checkOrInstall(): Promise<void> {
         description: errorMessage(error),
       });
     }
+    return;
+  }
+  if (current.state === "restart-required") {
+    await requestRestart(false);
     return;
   }
 
@@ -111,6 +128,58 @@ async function checkOrInstall(): Promise<void> {
   }
 }
 
+/** “稍后重启”只关闭强制决策层；已下载状态保留，主按钮可再次发起重启检查。 */
+function deferRestart(): void {
+  restartRequirement.value = undefined;
+}
+
+async function requestRestart(stopRunningServers: boolean): Promise<void> {
+  if (restartWorking.value) return;
+  restartWorking.value = true;
+  try {
+    handleFinishResult(
+      await props.updates.finish({
+        stopRunningServers,
+        afterInstall: "restart",
+      }),
+    );
+  } catch (error) {
+    toast.error({
+      title: "软件更新失败",
+      description: errorMessage(error),
+    });
+  } finally {
+    restartWorking.value = false;
+  }
+}
+
+/**
+ * 停机失败是可恢复的业务结果：关闭确认层、保留 restart-required，并按服务器逐项展示
+ * 原因。安装器异常仍走调用异常分支，避免把安装错误误报成服务器错误。
+ */
+function handleFinishResult(result: DesktopUpdateFinishResult): void {
+  if (result?.outcome === "running-servers") {
+    restartRequirement.value = result;
+    return;
+  }
+  restartRequirement.value = undefined;
+  if (result?.outcome === "stop-failed") {
+    toast.error({
+      title: "停止服务器失败",
+      description: result.failures
+        .map((failure) => `${failure.name}：${failure.reason}`)
+        .join("；"),
+    });
+  }
+}
+function runtimeStateLabel(
+  state: DesktopUpdateRestartRequirement["runningServers"][number]["state"],
+): string {
+  if (state === "starting") return "启动中";
+  if (state === "stopping") return "停止中";
+  return "运行中";
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -118,8 +187,6 @@ function errorMessage(error: unknown): string {
 
 <template>
   <div class="about-settings-view">
-    <Cmz_Toast position="top-right" />
-
     <section class="about-product" aria-labelledby="about-product-name">
       <div class="about-brand-mark" aria-hidden="true">S</div>
       <div class="about-product-copy">
@@ -177,6 +244,34 @@ function errorMessage(error: unknown): string {
         </dd>
       </div>
     </dl>
+
+    <Cmz_Modal
+      :visible="Boolean(restartRequirement)"
+      title="更新需要重启"
+      width="520px"
+      :close-on-overlay="false"
+      :show-close-button="false"
+    >
+      <div class="update-restart-content">
+        <strong>以下服务器正在运行</strong>
+        <ul class="update-running-server-list">
+          <li v-for="server in restartRequirement?.runningServers" :key="server.instanceId">
+            <span>{{ server.name }}</span>
+            <small>{{ runtimeStateLabel(server.state) }}</small>
+          </li>
+        </ul>
+      </div>
+      <template #footer>
+        <div class="update-restart-actions">
+          <Cmz_Button variant="outline" :disabled="restartWorking" @click="deferRestart">
+            稍后重启
+          </Cmz_Button>
+          <Cmz_Button :loading="restartWorking" @click="requestRestart(true)">
+            关闭服务器并重启
+          </Cmz_Button>
+        </div>
+      </template>
+    </Cmz_Modal>
   </div>
 </template>
 
@@ -308,6 +403,76 @@ function errorMessage(error: unknown): string {
   border-radius: inherit;
   background: var(--sl-primary);
   transition: width 160ms ease-out;
+}
+
+.update-restart-content {
+  display: grid;
+  gap: var(--sl-space-md);
+  color: var(--sl-text-primary);
+}
+
+.update-restart-content strong {
+  font-size: var(--sl-font-size-base);
+}
+
+.update-running-server-list {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.update-running-server-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sl-space-md);
+  padding: 10px 12px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-bg-secondary);
+}
+
+.update-running-server-list li > span {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-running-server-list small {
+  flex-shrink: 0;
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.update-restart-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+}
+
+/* 更新决策层保留遮罩，但只覆盖工作区内容；标题栏、导航栏继续保持可见。 */
+:global(body:has(.about-settings-view) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.about-settings-view) .cmz-modal) {
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 @media (max-width: 680px) {

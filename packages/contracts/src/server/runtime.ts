@@ -1,5 +1,5 @@
 import { defineServiceContract } from "@seashard/plugin-sdk";
-import type { ServerInstanceSnapshot, ServerInstanceStartupSettings } from "./instance";
+import type { ServerInstanceStartupSettings } from "./instance";
 
 /** 服务器进程运行组件发布的 Host/Client 稳定 Contract。 */
 export const serverRuntimeContract =
@@ -137,6 +137,22 @@ export interface ServerRuntimeService {
    * @returns 结算后的进程快照。
    */
   stop(instanceId: string): Promise<ServerRuntimeSnapshot>;
+  /**
+   * 等待当前启动事务离开 starting；启动成功、启动失败或并发停止都会返回最终快照。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param timeoutMs 最长等待毫秒数。
+   * @returns 不再处于 starting 的当前进程快照。
+   */
+  waitUntilStartupSettled(instanceId: string, timeoutMs: number): Promise<ServerRuntimeSnapshot>;
+  /**
+   * 等待停止请求完成进程退出与运行资源释放。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param timeoutMs 最长等待毫秒数。
+   * @returns stopped 或 failed 的最终进程快照。
+   */
+  waitUntilStopped(instanceId: string, timeoutMs: number): Promise<ServerRuntimeSnapshot>;
   /**
    * 将一条控制台命令写入运行中服务端的标准输入。
    *

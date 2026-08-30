@@ -9,7 +9,6 @@ import {
   type AgentInvocationService,
   type AgentModelConfigurationService,
   type AgentSessionService,
-  type DesktopUpdateClientService,
   type JavaRuntimeManagerService,
   type ServerConfigurationService,
   type ServerConfigurationWriteRequest,
@@ -42,7 +41,15 @@ import {
 } from "@seashard/server-instance-manager";
 import { serverModSourceContract, type ServerModSourceService } from "@seashard/server-mod-source";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import {
+  coordinateDesktopUpdateCompletion,
+  type DesktopUpdateCompletionContext,
+} from "./desktop-update-controller";
+import type { ElectronDesktopUpdateService } from "./desktop-update";
 import { join } from "node:path";
+
+const desktopUpdateStartupSettlementTimeoutMs = 30 * 60 * 1_000;
+const desktopUpdateServerStopTimeoutMs = 60_000;
 
 const serverConsoleLineListeners = new Set<(line: ServerConsoleLine) => void>();
 
@@ -58,7 +65,7 @@ function onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () =>
 
 interface DesktopShellBridgeOptions {
   readonly kernel: PluginKernel;
-  readonly desktopUpdates: DesktopUpdateClientService;
+  readonly desktopUpdates: ElectronDesktopUpdateService;
   readonly moduleDirectory: string;
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
@@ -87,6 +94,31 @@ export async function registerDesktopShellBridge(
   const serverMods = kernel.service<ServerModSourceService>(serverModSourceContract);
   const serverRuntime = kernel.service<ServerRuntimeService>(serverRuntimeContract);
   const serverSettings = kernel.service<ServerSettingsClientService>(serverSettingsContract);
+  const desktopUpdateCompletionContext: DesktopUpdateCompletionContext = {
+    listServerInstances: () => serverInstances.list(),
+    readServerRuntime: (instanceId) => serverRuntime.get(instanceId),
+    waitUntilServerStartupSettled: (instanceId) =>
+      serverRuntime.waitUntilStartupSettled(instanceId, desktopUpdateStartupSettlementTimeoutMs),
+    stopServerRuntime: (instanceId) => serverRuntime.stop(instanceId),
+    waitUntilServerStopped: (instanceId) =>
+      serverRuntime.waitUntilStopped(instanceId, desktopUpdateServerStopTimeoutMs),
+    install: (afterInstall) => {
+      if (!desktopUpdates.install(afterInstall)) {
+        throw new Error("更新安装器未能启动");
+      }
+    },
+  };
+  const applyDesktopUpdate = async () => {
+    const preparation = await desktopUpdates.prepare();
+    if (preparation === "external-download") return undefined;
+    return coordinateDesktopUpdateCompletion(desktopUpdateCompletionContext, {
+      stopRunningServers: false,
+      afterInstall: "restart",
+    });
+  };
+  const finishDesktopUpdate = (request: Parameters<typeof coordinateDesktopUpdateCompletion>[1]) =>
+    coordinateDesktopUpdateCompletion(desktopUpdateCompletionContext, request);
+
   const listFileDownloadTasks = () => downloads.listUserVisibleTasks();
   /**
    * Renderer 只能取消已投影到公共下载条的任务，不能借任务 ID 操作图标缓存等内部下载。
@@ -227,6 +259,10 @@ export async function registerDesktopShellBridge(
             readServerRuntime: async (instanceId) => await serverRuntime.get(instanceId),
             startServerRuntime: async (instanceId) => await serverRuntime.start(instanceId),
             stopServerRuntime: async (instanceId) => await serverRuntime.stop(instanceId),
+            waitUntilServerStartupSettled: (instanceId, timeoutMs) =>
+              serverRuntime.waitUntilStartupSettled(instanceId, timeoutMs),
+            waitUntilServerStopped: (instanceId, timeoutMs) =>
+              serverRuntime.waitUntilStopped(instanceId, timeoutMs),
             sendServerCommand: (instanceId, command) =>
               serverRuntime.sendCommand(instanceId, command),
             readServerConsoleLines: async (instanceId, afterSequence) =>
@@ -240,9 +276,11 @@ export async function registerDesktopShellBridge(
               javaRuntimes.setDisabled(installationId, disabled),
             listFileDownloadTasks,
             cancelFileDownload,
-            readDesktopUpdateSnapshot: () => desktopUpdates.getSnapshot(),
+            readDesktopUpdateSnapshot: async () => desktopUpdates.getSnapshot(),
             checkDesktopUpdate: () => desktopUpdates.check(),
-            applyDesktopUpdate: () => desktopUpdates.apply(),
+            applyDesktopUpdate,
+            finishDesktopUpdate,
+            shouldConfirmDesktopUpdateExit: () => desktopUpdates.isRestartRequired(),
             onDesktopUpdateChanged: (listener) => desktopUpdates.onSnapshotChanged(listener),
             listServerCoreDownloadTasks: async () => await serverCoreSource.listTasks(),
             cancelServerCoreDownload: (taskId) => serverCoreSource.cancel(taskId),

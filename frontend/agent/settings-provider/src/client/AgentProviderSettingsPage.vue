@@ -12,14 +12,7 @@ import {
   type AgentModelSettings,
 } from "@seashard/contracts";
 import type { JsonObject, JsonValue } from "@seashard/plugin-sdk";
-import {
-  Cmz_Button,
-  Cmz_Input,
-  Cmz_Select,
-  Cmz_Spinner,
-  Cmz_Toast,
-  useToast,
-} from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Input, Cmz_Select, Cmz_Spinner, useToast } from "cmzya-modern-ui";
 import {
   AlertTriangle,
   Bot,
@@ -495,8 +488,6 @@ function errorMessage(error: unknown): string {
 
 <template>
   <section class="agent-settings-page" aria-label="供应商">
-    <Cmz_Toast position="top-right" />
-
     <header v-if="!editorOpen" class="agent-settings-header">
       <div class="agent-settings-title">
         <h1>供应商</h1>

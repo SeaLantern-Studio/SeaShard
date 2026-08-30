@@ -234,6 +234,31 @@ export class ServerRuntimeManager {
   }
 
   /**
+   * 更新、关闭等宿主级流程不能在 starting 阶段抢先发送 stop：此时核心准备事务可能
+   * 尚未创建子进程。这里等待同一实例队列结算，再返回可供调用方决定停机步骤的快照。
+   */
+  async waitUntilStartupSettled(
+    value: unknown,
+    options: ServerRuntimeWaitOptions,
+  ): Promise<ServerRuntimeSnapshot> {
+    this.ensureActive();
+    const instanceId = expectInstanceId(value);
+    const current = this.get(instanceId);
+    if (current.state !== "starting") return current;
+
+    const startupOperation = this.instanceOperations.get(instanceId);
+    if (!startupOperation) {
+      throw new Error(`server instance ${instanceId} has no active startup operation`);
+    }
+    await waitForRuntimeEvent(startupOperation, options, `等待服务器 ${instanceId} 启动事务结算`);
+    const snapshot = this.get(instanceId);
+    if (snapshot.state === "starting") {
+      throw new Error(`server instance ${instanceId} returned an incomplete startup state`);
+    }
+    return snapshot;
+  }
+
+  /**
    * 等待安全停止请求完成进程退出和实例生命周期释放。
    * 已结算的 stopped/failed 状态直接返回，便于 Agent 对重复等待保持幂等。
    */

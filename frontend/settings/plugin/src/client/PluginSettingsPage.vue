@@ -4,7 +4,7 @@ import type {
   PluginManagementService,
   PluginManagementSnapshot,
 } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Spinner, Cmz_Switch, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Spinner, Cmz_Switch, useToast } from "cmzya-modern-ui";
 import {
   ArrowLeft,
   ChevronRight,
@@ -184,8 +184,6 @@ function errorMessage(error: unknown): string {
 
 <template>
   <section class="plugin-settings-page" aria-label="插件设置">
-    <Cmz_Toast position="top-right" />
-
     <template v-if="selectedPlugin">
       <header class="plugin-detail-toolbar">
         <Cmz_Button variant="outline" size="sm" @click="selectedPluginId = undefined">

@@ -16,7 +16,7 @@ import {
   type AgentTodoSnapshot,
 } from "@seashard/contracts";
 import { agentWorkspace } from "@seashard/agent-ui-shared";
-import { Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { useToast } from "cmzya-modern-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import AgentConversationTimeline from "./components/AgentConversationTimeline.vue";
 import AgentMessageComposer from "./components/AgentMessageComposer.vue";
@@ -309,8 +309,6 @@ function delay(milliseconds: number): Promise<void> {
 
 <template>
   <section class="agent-conversation-page" aria-label="Agent 对话">
-    <Cmz_Toast position="top-right" />
-
     <AgentConversationTimeline
       :messages="session?.messages ?? []"
       :tool-calls="session?.toolCalls ?? []"

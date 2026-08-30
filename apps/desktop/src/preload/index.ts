@@ -4,6 +4,7 @@ import {
   type AgentModelConfigurationClientService,
   type DesktopClientBootstrap,
   type ClientServiceCallRequest,
+  type DesktopUpdateFinishRequest,
   type DesktopUpdateSnapshot,
   type SeaShardDesktopApi,
   type ServerCoreManagedDownloadRequest,
@@ -205,6 +206,10 @@ const api: SeaShardDesktopApi = Object.freeze({
     start: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverRuntimeStart, instanceId),
     stop: (instanceId: string) => ipcRenderer.invoke(desktopChannels.serverRuntimeStop, instanceId),
+    waitUntilStartupSettled: (instanceId: string, timeoutMs: number) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimeWaitStartupSettled, instanceId, timeoutMs),
+    waitUntilStopped: (instanceId: string, timeoutMs: number) =>
+      ipcRenderer.invoke(desktopChannels.serverRuntimeWaitStopped, instanceId, timeoutMs),
     sendCommand: (instanceId: string, command: string) =>
       ipcRenderer.invoke(desktopChannels.serverRuntimeSendCommand, instanceId, command),
     getLogs: (instanceId: string, afterSequence = 0) =>
@@ -232,6 +237,14 @@ const api: SeaShardDesktopApi = Object.freeze({
     getSnapshot: () => ipcRenderer.invoke(desktopChannels.desktopUpdateSnapshot),
     check: () => ipcRenderer.invoke(desktopChannels.desktopUpdateCheck),
     apply: () => ipcRenderer.invoke(desktopChannels.desktopUpdateApply),
+    finish: (request: DesktopUpdateFinishRequest) =>
+      ipcRenderer.invoke(desktopChannels.desktopUpdateFinish, request),
+    onExitDecisionRequired: (listener: () => void) => {
+      const handler = (): void => listener();
+      ipcRenderer.on(desktopChannels.desktopUpdateExitDecisionRequired, handler);
+      return () =>
+        ipcRenderer.removeListener(desktopChannels.desktopUpdateExitDecisionRequired, handler);
+    },
     onSnapshotChanged: (listener: (snapshot: DesktopUpdateSnapshot) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, snapshot: DesktopUpdateSnapshot): void =>
         listener(snapshot);

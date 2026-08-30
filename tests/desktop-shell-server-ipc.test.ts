@@ -336,6 +336,37 @@ await test("desktop shell routes settings, downloads, instances, and configurati
   );
   await runtime.invoke(desktopChannels.serverRuntimeStart, 1, "instance-paper");
   await runtime.invoke(desktopChannels.serverRuntimeStop, 1, "instance-paper");
+  assert.equal(
+    (
+      (await runtime.invoke(
+        desktopChannels.serverRuntimeWaitStartupSettled,
+        1,
+        "instance-paper",
+        60_000,
+      )) as { state: string }
+    ).state,
+    "stopped",
+  );
+  assert.equal(
+    (
+      (await runtime.invoke(
+        desktopChannels.serverRuntimeWaitStopped,
+        1,
+        "instance-paper",
+        60_000,
+      )) as { state: string }
+    ).state,
+    "stopped",
+  );
+  await assert.rejects(
+    runtime.invoke(
+      desktopChannels.serverRuntimeWaitStopped,
+      1,
+      "instance-paper",
+      30 * 60 * 1_000 + 1,
+    ),
+    /between 1 and 1800000/u,
+  );
   assert.deepEqual(
     await runtime.invoke(
       desktopChannels.serverInstancesSetWorldDatapackDisabled,

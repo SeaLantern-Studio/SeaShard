@@ -578,6 +578,56 @@ await test("disposal during asynchronous preparation prevents a late process spa
   assert.deepEqual(accessedPaths, []);
 });
 
+await test("startup settlement wait follows the active instance operation", async () => {
+  let markInstanceLookupStarted!: () => void;
+  let releaseInstances!: (instances: readonly ServerInstanceSnapshot[]) => void;
+  const lookupStarted = new Promise<void>((resolveStarted) => {
+    markInstanceLookupStarted = resolveStarted;
+  });
+  const instancesReady = new Promise<readonly ServerInstanceSnapshot[]>((resolveInstances) => {
+    releaseInstances = resolveInstances;
+  });
+  const { fileSystem } = createMemoryFileSystem(new Map([[vanillaInstance.coreJarPath, "jar"]]));
+  const child = new FakeServerProcess();
+  const manager = new ServerRuntimeManager({
+    listInstances: () => {
+      markInstanceLookupStarted();
+      return instancesReady;
+    },
+    scanJavaInstallations: async () => [java21],
+    readSettings: async () => settings,
+    ensureInstanceStartupSettings: (instanceId, startupSettings) =>
+      materializeTestStartupSettings(vanillaInstance, instanceId, startupSettings),
+    fileSystem,
+    spawnProcess: () => {
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+
+  const startup = manager.start(vanillaInstance.id);
+  await lookupStarted;
+  assert.equal(manager.get(vanillaInstance.id).state, "starting");
+  let waitSettled = false;
+  const wait = manager
+    .waitUntilStartupSettled(vanillaInstance.id, { timeoutMs: 1_000 })
+    .then((snapshot) => {
+      waitSettled = true;
+      return snapshot;
+    });
+  await new Promise<void>((resolveWait) => setImmediate(resolveWait));
+  assert.equal(waitSettled, false);
+
+  releaseInstances([vanillaInstance]);
+  assert.equal((await startup).state, "running");
+  assert.equal((await wait).state, "running");
+  await manager.stop(vanillaInstance.id);
+  const stopped = manager.waitUntilStopped(vanillaInstance.id, { timeoutMs: 1_000 });
+  child.finish(0, null);
+  await stopped;
+  await manager.dispose();
+});
+
 await test("asynchronous stdin failures are handled without escaping as unhandled errors", async () => {
   class FailingStdin extends Writable {
     override _write(

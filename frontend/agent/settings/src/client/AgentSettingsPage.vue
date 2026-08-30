@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AgentSettingsService, AgentSettingsSnapshot } from "@seashard/contracts";
-import { Cmz_Spinner, Cmz_Switch, Cmz_Toast, useToast } from "cmzya-modern-ui";
+import { Cmz_Spinner, Cmz_Switch, useToast } from "cmzya-modern-ui";
 import { onMounted, ref, shallowRef } from "vue";
 import "./AgentSettingsPage.css";
 
@@ -45,7 +45,6 @@ function errorMessage(error: unknown): string {
 
 <template>
   <section class="agent-general-settings-page" aria-label="Agent 常规设置">
-    <Cmz_Toast position="top-right" />
     <header class="agent-general-settings-header">
       <h1>常规</h1>
     </header>

@@ -19,7 +19,6 @@ import {
   Cmz_Markdown,
   Cmz_Modal,
   Cmz_Select,
-  Cmz_Toast,
   useToast,
   type SelectOption,
 } from "cmzya-modern-ui";
@@ -838,7 +837,6 @@ function errorMessage(error: unknown): string {
 
 <template>
   <section class="server-mod-download-page" aria-label="Mod 下载">
-    <Cmz_Toast position="top-right" />
     <template v-if="selectedProject">
       <div class="mod-detail-page">
         <button class="mod-detail-back" type="button" @click="returnToProjectList">

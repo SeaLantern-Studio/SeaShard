@@ -5,6 +5,7 @@ import {
   type ClientEntryPublication,
   type ClientServiceCallRequest,
   type DesktopShellService,
+  type DesktopUpdateFinishRequest,
   type DesktopUpdateSnapshot,
   type FileDownloadTaskSnapshot,
   type JavaInstallationSnapshot,
@@ -57,7 +58,7 @@ import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent
 export class FakeBrowserWindow extends EventEmitter {
   readonly webContents: {
     readonly id: number;
-    send: (channel: string, payload: unknown) => void;
+    send: (channel: string, payload?: unknown) => void;
     setWindowOpenHandler: (handler: (details: { url: string }) => unknown) => void;
     readonly session: {
       setPermissionRequestHandler: (
@@ -135,7 +136,13 @@ export class FakeBrowserWindow extends EventEmitter {
 
   close(): void {
     this.closeCount += 1;
-    this.destroy();
+    let prevented = false;
+    this.emit("close", {
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+    if (!prevented) this.destroy();
   }
 
   destroy(): void {
@@ -576,6 +583,8 @@ export async function createDesktopShellHarness(
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
   let desktopUpdateListener: ((snapshot: DesktopUpdateSnapshot) => void) | undefined;
   let desktopUpdateActions = 0;
+  let desktopUpdateExitRequired = false;
+  const desktopUpdateFinishes: DesktopUpdateFinishRequest[] = [];
   const clientServiceCalls: ClientServiceCallRequest[] = [];
   let agentModelConfiguration: AgentModelConfigurationSnapshot = {
     revision: "a".repeat(64),
@@ -650,7 +659,13 @@ export async function createDesktopShellHarness(
       checkDesktopUpdate: async () => availableDesktopUpdateSnapshot,
       applyDesktopUpdate: async () => {
         desktopUpdateActions += 1;
+        return undefined;
       },
+      finishDesktopUpdate: async (request) => {
+        desktopUpdateFinishes.push(request);
+        return undefined;
+      },
+      shouldConfirmDesktopUpdateExit: () => desktopUpdateExitRequired,
       onDesktopUpdateChanged: (listener) => {
         desktopUpdateListener = listener;
         return () => {
@@ -972,6 +987,8 @@ export async function createDesktopShellHarness(
         };
         return serverRuntime;
       },
+      waitUntilServerStartupSettled: async () => serverRuntime,
+      waitUntilServerStopped: async () => serverRuntime,
       sendServerCommand: async (_instanceId, command) => {
         serverCommands.push(command);
       },
@@ -1076,6 +1093,10 @@ export async function createDesktopShellHarness(
     clientServiceCalls,
     get desktopUpdateActions() {
       return desktopUpdateActions;
+    },
+    desktopUpdateFinishes,
+    setDesktopUpdateExitRequired(value: boolean) {
+      desktopUpdateExitRequired = value;
     },
     get clientEntryListener() {
       return clientEntryListener;

@@ -1,6 +1,17 @@
 <script setup lang="ts">
+import { Cmz_Button, Cmz_Modal, Cmz_Toast, useToast } from "cmzya-modern-ui";
 import { useClientUiRuntime } from "@seashard/ui-runtime";
-import { computed, KeepAlive, nextTick, reactive, ref, watch, type Component } from "vue";
+import {
+  computed,
+  KeepAlive,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+  type Component,
+} from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
@@ -19,6 +30,10 @@ import {
 const route = useRoute();
 const router = useRouter();
 const clientUiRuntime = useClientUiRuntime();
+const toast = useToast();
+const updateExitDecisionOpen = ref(false);
+const updateExitAction = ref<"restart" | "close">();
+let disposeUpdateExitDecision: (() => void) | undefined;
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
 );
@@ -74,6 +89,13 @@ watch(
     if (content) content.scrollTop = routeWorkspace ? workspaceScrollTop[routeWorkspace] : 0;
   },
 );
+onMounted(() => {
+  disposeUpdateExitDecision = window.seashard.updates.onExitDecisionRequired(() => {
+    updateExitDecisionOpen.value = true;
+  });
+});
+
+onBeforeUnmount(() => disposeUpdateExitDecision?.());
 
 function updateWorkspace(value: WorkspaceMode): void {
   const routeWorkspace = workspaceForPath(route.path);
@@ -94,11 +116,42 @@ function componentName(component: Component | undefined): string | undefined {
       : (component as Readonly<{ name?: unknown }>).name;
   return typeof name === "string" && name ? name : undefined;
 }
+/**
+ * 主窗口关闭已被 Main 暂停；两个选择都先走同一条安全停机链，成功后 Electron
+ * 安装器才获得退出控制权。停机失败时撤掉决策层，让用户处理服务器后再次关闭。
+ */
+async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promise<void> {
+  if (updateExitAction.value) return;
+  updateExitAction.value = afterInstall;
+  try {
+    const result = await window.seashard.updates.finish({
+      stopRunningServers: true,
+      afterInstall,
+    });
+    if (result?.outcome === "stop-failed") {
+      updateExitDecisionOpen.value = false;
+      toast.error({
+        title: "停止服务器失败",
+        description: result.failures
+          .map((failure) => `${failure.name}：${failure.reason}`)
+          .join("；"),
+      });
+    }
+  } catch (error) {
+    toast.error({
+      title: "软件更新失败",
+      description: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    updateExitAction.value = undefined;
+  }
+}
 </script>
 
 <template>
   <div class="app-layout" :style="{ '--sl-software-logo': `url(${logoSvg})` }">
     <div class="app-background"></div>
+    <Cmz_Toast position="top-right" />
     <AppSidebar
       :workspace="workspace"
       :settings-mode="settingsMode"
@@ -147,5 +200,69 @@ function componentName(component: Component | undefined): string | undefined {
         ></aside>
       </div>
     </div>
+    <Cmz_Modal
+      :visible="updateExitDecisionOpen"
+      title="安装更新"
+      width="480px"
+      :close-on-overlay="false"
+      :show-close-button="false"
+    >
+      <div class="app-update-exit-dialog">已下载的更新将在关闭前安装。请选择安装完成后的动作。</div>
+      <template #footer>
+        <div class="app-update-exit-actions">
+          <Cmz_Button
+            variant="outline"
+            :loading="updateExitAction === 'restart'"
+            :disabled="Boolean(updateExitAction)"
+            @click="finishUpdateBeforeExit('restart')"
+          >
+            更新并重启
+          </Cmz_Button>
+          <Cmz_Button
+            :loading="updateExitAction === 'close'"
+            :disabled="Boolean(updateExitAction)"
+            @click="finishUpdateBeforeExit('close')"
+          >
+            更新并关闭
+          </Cmz_Button>
+        </div>
+      </template>
+    </Cmz_Modal>
   </div>
 </template>
+
+<style scoped>
+.app-update-exit-dialog {
+  color: var(--sl-text-secondary);
+  line-height: 1.65;
+}
+
+.app-update-exit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+}
+
+/* 关闭决策属于应用级弹层，但仍只覆盖当前工作区，侧栏与标题栏保持可见。 */
+:global(body:has(.app-update-exit-dialog) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  overflow: hidden;
+  border-radius: var(--sl-radius-lg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:global(body:has(.right-sidebar.open):has(.app-update-exit-dialog) .cmz-modal-overlay) {
+  right: calc(var(--sl-sidebar-width) + 20px);
+}
+
+:global(body:has(.app-update-exit-dialog) .cmz-modal) {
+  background: var(--sl-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+</style>

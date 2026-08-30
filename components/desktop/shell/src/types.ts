@@ -4,6 +4,8 @@ import type {
   AgentSessionService,
   ClientEntryPublication,
   ClientServiceCallRequest,
+  DesktopUpdateFinishRequest,
+  DesktopUpdateFinishResult,
   DesktopUpdateSnapshot,
   FileDownloadClientService,
   FileDownloadTaskSnapshot,
@@ -111,7 +113,9 @@ export interface DesktopShellConfig {
   reportOpenFailure(error: unknown): void;
   readDesktopUpdateSnapshot(): Promise<DesktopUpdateSnapshot>;
   checkDesktopUpdate(): Promise<DesktopUpdateSnapshot>;
-  applyDesktopUpdate(): Promise<void>;
+  applyDesktopUpdate(): Promise<DesktopUpdateFinishResult>;
+  finishDesktopUpdate(request: DesktopUpdateFinishRequest): Promise<DesktopUpdateFinishResult>;
+  shouldConfirmDesktopUpdateExit(): boolean;
   onDesktopUpdateChanged(listener: (snapshot: DesktopUpdateSnapshot) => void): () => void;
   listAgentModels(): ReturnType<AgentSessionService["listModels"]>;
   listAgentSessions(): ReturnType<AgentSessionService["listSessions"]>;
@@ -261,6 +265,14 @@ export interface DesktopShellConfig {
   readServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["get"]>;
   startServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["start"]>;
   stopServerRuntime(instanceId: string): ReturnType<ServerRuntimeClientService["stop"]>;
+  waitUntilServerStartupSettled(
+    instanceId: string,
+    timeoutMs: number,
+  ): ReturnType<ServerRuntimeClientService["waitUntilStartupSettled"]>;
+  waitUntilServerStopped(
+    instanceId: string,
+    timeoutMs: number,
+  ): ReturnType<ServerRuntimeClientService["waitUntilStopped"]>;
   sendServerCommand(
     instanceId: string,
     command: string,
