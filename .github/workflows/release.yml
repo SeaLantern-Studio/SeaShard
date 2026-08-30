@@ -129,7 +129,6 @@ jobs:
             asset_key: windows-x64
             update_channel: latest
             update_metadata: latest.yml
-            update_blockmap_extension: exe
             supports_update: true
           - label: Windows ARM64
             runner: windows-latest
@@ -139,7 +138,6 @@ jobs:
             asset_key: windows-arm64
             update_channel: latest-arm64
             update_metadata: latest-arm64.yml
-            update_blockmap_extension: exe
             supports_update: true
           - label: macOS Intel x64
             runner: macos-latest
@@ -165,7 +163,6 @@ jobs:
             asset_key: linux-x64
             update_channel: latest
             update_metadata: latest-linux.yml
-            update_blockmap_extension: AppImage
             supports_update: true
           - label: Linux ARM64
             runner: ubuntu-latest
@@ -175,7 +172,6 @@ jobs:
             asset_key: linux-arm64
             update_channel: latest
             update_metadata: latest-linux-arm64.yml
-            update_blockmap_extension: AppImage
             supports_update: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -235,7 +231,7 @@ jobs:
           name: seashard-update-${{ matrix.asset_key }}
           path: |
             release/${{ matrix.update_metadata }}
-            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.${{ matrix.update_blockmap_extension }}.blockmap
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.*.blockmap
           if-no-files-found: error
           retention-days: 1
 

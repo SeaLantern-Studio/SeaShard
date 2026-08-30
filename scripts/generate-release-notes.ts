@@ -29,8 +29,8 @@ export function assertReleaseVersion(version: string): void {
 }
 
 /**
- * 安装包、平台更新清单与差分块必须同批进入 Release；缺少任一文件都会让对应平台
- * 在下载或安装阶段失败。release-notes.md 只供 gh release create 读取，不作为附件发布。
+ * 安装包、平台更新清单与 Windows 差分块必须同批进入 Release；缺少任一文件都会让
+ * 对应平台在下载或安装阶段失败。release-notes.md 只供 gh release create 读取。
  */
 export function expectedReleaseBundleNames(version: string): readonly string[] {
   assertReleaseVersion(version);
@@ -45,8 +45,6 @@ export function expectedReleaseBundleNames(version: string): readonly string[] {
     `SeaShard-${version}-linux-arm64.deb`,
     `SeaShard-${version}-windows-x64.exe.blockmap`,
     `SeaShard-${version}-windows-arm64.exe.blockmap`,
-    `SeaShard-${version}-linux-x64.AppImage.blockmap`,
-    `SeaShard-${version}-linux-arm64.AppImage.blockmap`,
     "latest.yml",
     "latest-arm64.yml",
     "latest-linux.yml",
