@@ -1,4 +1,8 @@
-import type { DesktopHostConnection, DesktopHostConnectionsSnapshot } from "@seashard/contracts";
+import type {
+  DesktopHostConnection,
+  DesktopHostConnectionsSnapshot,
+  DesktopHostInstallationState,
+} from "@seashard/contracts";
 import type {
   HostControlClient,
   HostControlEventName,
@@ -11,9 +15,12 @@ type HostEventListener = (hostId: string, payload: JsonValue) => void;
 
 export interface DesktopHostConnectionsOptions {
   readonly controllerSessionId: string;
+  readonly initialInstallation: DesktopHostInstallationState;
   readonly initialClient?: HostControlClient;
   readonly initialError?: string;
   connectLocal(): Promise<HostControlClient>;
+  readLocalInstallation(): Promise<DesktopHostInstallationState>;
+  installLocal(): Promise<void>;
 }
 
 /**
@@ -32,11 +39,13 @@ export class DesktopHostConnections {
   private stopControlEvents: (() => void) | undefined;
   private stopClientClosed: (() => void) | undefined;
   private connecting = false;
+  private installation: DesktopHostInstallationState;
   private error: string | undefined;
   private conflictAcknowledged = false;
   private disposed = false;
 
   constructor(private readonly options: DesktopHostConnectionsOptions) {
+    this.installation = options.initialInstallation;
     this.error = options.initialError;
     if (options.initialClient) this.attach(options.initialClient);
   }
@@ -92,6 +101,15 @@ export class DesktopHostConnections {
     };
   }
 
+  async install(hostId: string): Promise<DesktopHostConnectionsSnapshot> {
+    this.assertLocalHost(hostId);
+    await this.options.installLocal();
+    // 外部安装器由用户接管后暂时关闭提示；安装完成后通过“重新连接”刷新安装事实。
+    this.conflictAcknowledged = true;
+    this.publish();
+    return this.getSnapshot();
+  }
+
   async retry(hostId: string): Promise<DesktopHostConnectionsSnapshot> {
     this.assertLocalHost(hostId);
     if (this.clientValue) return this.getSnapshot();
@@ -99,6 +117,7 @@ export class DesktopHostConnections {
     this.error = undefined;
     this.publish();
     try {
+      this.installation = await this.options.readLocalInstallation();
       const client = await this.options.connectLocal();
       if (this.disposed) {
         client.dispose();
@@ -166,6 +185,7 @@ export class DesktopHostConnections {
 
   private attach(client: HostControlClient): void {
     this.detach(true);
+    this.installation = "installed";
     this.clientValue = client;
     this.error = undefined;
     this.conflictAcknowledged = client.hasControl;
@@ -229,6 +249,7 @@ export class DesktopHostConnections {
       transport: "local",
       endpoint: "当前设备",
       isDefault: true,
+      installation: this.installation,
       state: this.connecting
         ? "connecting"
         : client

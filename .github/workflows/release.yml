@@ -111,6 +111,7 @@ jobs:
             apps/desktop/dist
             apps/plugin-host/dist
             apps/database-worker/dist
+            apps/host/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -200,6 +201,19 @@ jobs:
           name: compiled-application
           path: apps
 
+      - name: 构建独立 Windows Host 安装包
+        if: matrix.platform == 'win'
+        shell: bash
+        run: |
+          pnpm exec electron-builder \
+            --config electron-builder.host.yml \
+            --win nsis \
+            --${{ matrix.arch }} \
+            --publish never \
+            --config.extraMetadata.version=${{ inputs.version }}
+          mkdir -p release
+          cp build/host-installer/SeaShardHostSetup.exe "release/SeaShard-Host-${{ matrix.asset_key }}.exe"
+
       - name: 构建平台安装包
         shell: bash
         run: >-
@@ -221,6 +235,7 @@ jobs:
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.dmg
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.deb
+            release/SeaShard-Host-${{ matrix.asset_key }}.exe
           if-no-files-found: error
           retention-days: 1
 

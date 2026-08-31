@@ -1,6 +1,11 @@
 import type { DesktopHostConnection, DesktopHostConnectionsSnapshot } from "@seashard/contracts";
 
-export type DesktopHostPromptKind = "occupied" | "outgoing" | "incoming" | "unavailable";
+export type DesktopHostPromptKind =
+  | "missing"
+  | "occupied"
+  | "outgoing"
+  | "incoming"
+  | "unavailable";
 
 export interface DesktopHostPrompt {
   host: DesktopHostConnection;
@@ -29,6 +34,11 @@ export function findHostPrompt(
     }
     if (host.pending && host.state === "control") {
       return { host, kind: "incoming" };
+    }
+  }
+  for (const host of snapshot.hosts) {
+    if (!host.conflictAcknowledged && host.installation === "missing") {
+      return { host, kind: "missing" };
     }
   }
   for (const host of snapshot.hosts) {

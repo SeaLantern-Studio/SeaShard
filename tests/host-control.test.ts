@@ -112,12 +112,15 @@ await test("Desktop projects Host conflicts as read-only and hides normal local 
   });
   const connections = new DesktopHostConnections({
     controllerSessionId: second.identity.sessionId,
+    initialInstallation: "installed",
     initialClient: second,
     connectLocal: () =>
       connectHostControlClient({
         dataRoot,
         identity: second.identity,
       }),
+    readLocalInstallation: async () => "installed",
+    installLocal: async () => {},
   });
   try {
     const occupied = connections.getSnapshot();
@@ -154,6 +157,33 @@ await test("Desktop projects Host conflicts as read-only and hides normal local 
     first.dispose();
     await server.dispose();
     await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+await test("Desktop guides installation without starting a missing Host", async () => {
+  let installGuides = 0;
+  const connections = new DesktopHostConnections({
+    controllerSessionId: "desktop-missing",
+    initialInstallation: "missing",
+    initialError: "本机尚未安装 SeaShard Host",
+    connectLocal: async () => {
+      throw new Error("Host must remain stopped");
+    },
+    readLocalInstallation: async () => "missing",
+    installLocal: async () => {
+      installGuides += 1;
+    },
+  });
+  try {
+    const missing = connections.getSnapshot();
+    assert.equal(missing.hosts[0]?.installation, "missing");
+    assert.equal(findHostPrompt(missing)?.kind, "missing");
+
+    const guided = await connections.install("local");
+    assert.equal(installGuides, 1);
+    assert.equal(findHostPrompt(guided), undefined);
+  } finally {
+    connections.dispose();
   }
 });
 

@@ -1,4 +1,5 @@
 export type DesktopHostTransport = "local" | "ssh";
+export type DesktopHostInstallationState = "installed" | "missing";
 export type DesktopHostConnectionState =
   | "connecting"
   | "control"
@@ -25,6 +26,7 @@ export interface DesktopHostConnection {
   readonly endpoint: string;
   readonly isDefault: boolean;
   readonly state: DesktopHostConnectionState;
+  readonly installation: DesktopHostInstallationState;
   readonly holder?: DesktopHostControllerIdentity;
   readonly pending?: DesktopHostControlRequest;
   readonly error?: string;
@@ -40,6 +42,7 @@ export interface DesktopHostConnectionsSnapshot {
 
 export interface DesktopHostConnectionsClientService {
   getSnapshot(): Promise<DesktopHostConnectionsSnapshot>;
+  install(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   retry(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   disconnect(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   requestControl(hostId: string): Promise<DesktopHostConnectionsSnapshot>;

@@ -99,4 +99,8 @@ function isDatabaseService(value: unknown): value is DatabaseService {
   );
 }
 
-export { pluginDocumentDataCapsule, SQLitePluginDocumentStorage } from "./document-storage";
+export {
+  pluginDocumentDataCapsule,
+  SQLitePluginDocumentStorage,
+  type PluginDocumentMigrationRow,
+} from "./document-storage";

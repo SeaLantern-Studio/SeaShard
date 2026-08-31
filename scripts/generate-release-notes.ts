@@ -37,6 +37,8 @@ export function expectedReleaseBundleNames(version: string): readonly string[] {
   return [
     `SeaShard-${version}-windows-x64.exe`,
     `SeaShard-${version}-windows-arm64.exe`,
+    "SeaShard-Host-windows-x64.exe",
+    "SeaShard-Host-windows-arm64.exe",
     `SeaShard-${version}-macos-x64.dmg`,
     `SeaShard-${version}-macos-arm64.dmg`,
     `SeaShard-${version}-linux-x64.AppImage`,
@@ -100,6 +102,13 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
       "ARM64",
       asset(`SeaShard-${input.version}-windows-arm64.exe`),
       "骁龙等 Windows ARM 设备",
+    ],
+    ["Windows Host", "x64", asset("SeaShard-Host-windows-x64.exe"), "只安装独立 Host 的受控机器"],
+    [
+      "Windows Host",
+      "ARM64",
+      asset("SeaShard-Host-windows-arm64.exe"),
+      "只安装独立 Host 的 ARM 受控机器",
     ],
     [
       "macOS",

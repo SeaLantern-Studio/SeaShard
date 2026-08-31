@@ -10,6 +10,7 @@ node_modules/
 dist/
 out/
 release/
+/build/host-installer/
 
 # Runtime data
 .data/

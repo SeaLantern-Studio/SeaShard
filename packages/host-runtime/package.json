@@ -1,0 +1,21 @@
+{
+  "name": "@seashard/host-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/bootstrap-runtime": "workspace:*",
+    "@seashard/contracts": "workspace:*",
+    "@seashard/database-sqlite": "workspace:*",
+    "@seashard/download": "workspace:*",
+    "@seashard/host-control": "workspace:*",
+    "@seashard/java-runtime-manager": "workspace:*",
+    "@seashard/plugin-foundation": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  }
+}

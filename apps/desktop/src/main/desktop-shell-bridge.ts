@@ -144,6 +144,7 @@ export async function registerDesktopShellBridge(
             smokeMode,
             reportOpenFailure: (error) => console.error("Desktop window open failed", error),
             readHostConnections: () => kernel.hosts.getSnapshot(),
+            installLocalHost: (hostId) => kernel.hosts.install(hostId),
             retryHostConnection: (hostId) => kernel.hosts.retry(hostId),
             disconnectHost: (hostId) => kernel.hosts.disconnect(hostId),
             requestHostControl: (hostId) => kernel.hosts.requestControl(hostId),

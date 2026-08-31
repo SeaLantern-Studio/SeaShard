@@ -1,3 +1,4 @@
+import { hostWorkerDeploymentContract } from "@seashard/host-control";
 import type { JsonValue, PluginBinding, ServiceProvider } from "@seashard/plugin-sdk";
 import {
   automaticPluginBindingId,
@@ -6,12 +7,6 @@ import {
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
 import type { DesktopHostConnections } from "./desktop-host-connections";
-
-export const hostWorkerDeploymentContract = "seashard.internal.host-worker-deployment";
-
-interface HostWorkerDeploymentSnapshot {
-  readonly packages: readonly HostWorkerPackageDeployment[];
-}
 
 interface HostWorkerServiceDescriptor {
   readonly contract: string;
@@ -24,27 +19,6 @@ interface HostWorkerDeploymentResult {
     readonly state: "active" | "failed";
     readonly error?: string;
   }[];
-}
-
-/**
- * Host 端只负责校验、安装和运行 Worker 包，不解析插件业务语义。
- * 同步采用完整期望状态：先部署全部目标，再回收不再声明 Host Worker 的旧部署。
- */
-export function registerHostWorkerDeploymentService(kernel: PluginKernel): void {
-  kernel.registerCoreService(hostWorkerDeploymentContract, {
-    describe: async () => projectDeploymentResult(kernel) as unknown as JsonValue,
-    async synchronize(value) {
-      const snapshot = parseDeploymentSnapshot(value);
-      const desiredIds = new Set(snapshot.packages.map(({ pluginId }) => pluginId));
-      for (const deployment of snapshot.packages) {
-        await kernel.deployHostWorkerPackage(deployment);
-      }
-      for (const pluginId of await kernel.listHostWorkerPluginIds()) {
-        if (!desiredIds.has(pluginId)) await kernel.removeHostWorkerPackage(pluginId);
-      }
-      return projectDeploymentResult(kernel) as unknown as JsonValue;
-    },
-  });
 }
 
 /**
@@ -188,35 +162,6 @@ function requireWorkerBinding(
   return binding;
 }
 
-function projectDeploymentResult(kernel: PluginKernel): HostWorkerDeploymentResult {
-  return {
-    services: projectWorkerServices(kernel),
-    runtimes: kernel
-      .runtimeSnapshot()
-      .plugins.filter(
-        ({ runtimeId }) => runtimeId.startsWith("plugin:") || runtimeId.startsWith("dev:"),
-      )
-      .map(({ runtimeId, state, error }) => ({
-        runtimeId,
-        state,
-        ...(error ? { error } : {}),
-      })),
-  };
-}
-
-function projectWorkerServices(kernel: PluginKernel): readonly HostWorkerServiceDescriptor[] {
-  const contracts = new Map<string, Set<string>>();
-  for (const service of kernel.services.snapshot()) {
-    if (!service.runtimeId.startsWith("plugin:") && !service.runtimeId.startsWith("dev:")) continue;
-    const methods = contracts.get(service.contract) ?? new Set<string>();
-    for (const method of service.methods) methods.add(method);
-    contracts.set(service.contract, methods);
-  }
-  return [...contracts.entries()]
-    .map(([contract, methods]) => ({ contract, methods: [...methods].sort() }))
-    .sort((left, right) => left.contract.localeCompare(right.contract));
-}
-
 function parseDeploymentResult(value: JsonValue): HostWorkerDeploymentResult {
   const record = requireRecord(value, "Host Worker deployment result");
   if (!Array.isArray(record.services) || !Array.isArray(record.runtimes)) {
@@ -247,42 +192,6 @@ function parseDeploymentResult(value: JsonValue): HostWorkerDeploymentResult {
       };
     }),
   };
-}
-function parseDeploymentSnapshot(value: JsonValue): HostWorkerDeploymentSnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Host Worker deployment snapshot must be an object");
-  }
-  const packages = Reflect.get(value, "packages");
-  if (!Array.isArray(packages)) {
-    throw new TypeError("Host Worker deployment packages must be an array");
-  }
-  return { packages: packages.map(parseDeploymentPackage) };
-}
-
-function parseDeploymentPackage(value: unknown): HostWorkerPackageDeployment {
-  const record = requireRecord(value, "Host Worker deployment package");
-  const pluginId = requireString(record.pluginId, "pluginId");
-  const digest = requireString(record.digest, "digest");
-  const sourceRoot = requireString(record.sourceRoot, "sourceRoot");
-  const source = record.source;
-  if (source !== "installed" && source !== "development") {
-    throw new TypeError("Host Worker deployment source is invalid");
-  }
-  if (!Array.isArray(record.entries)) {
-    throw new TypeError("Host Worker deployment entries must be an array");
-  }
-  const entries = record.entries.map((entryValue) => {
-    const entry = requireRecord(entryValue, "Host Worker deployment entry");
-    if (typeof entry.enabled !== "boolean") {
-      throw new TypeError("Host Worker deployment enabled flag is invalid");
-    }
-    return {
-      entryId: requireString(entry.entryId, "entryId"),
-      enabled: entry.enabled,
-      config: entry.config as JsonValue,
-    };
-  });
-  return { pluginId, digest, source, sourceRoot, entries };
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

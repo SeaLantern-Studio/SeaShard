@@ -771,6 +771,10 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           ownedWindow(event.sender.id);
           return config.readHostConnections();
         });
+        config.runtime.handle(desktopChannels.hostConnectionsInstall, (event, hostId) => {
+          ownedWindow(event.sender.id);
+          return config.installLocalHost(expectNonEmptyString(hostId, "Host id"));
+        });
         config.runtime.handle(desktopChannels.hostConnectionsRetry, (event, hostId) => {
           ownedWindow(event.sender.id);
           return config.retryHostConnection(expectNonEmptyString(hostId, "Host id"));
@@ -931,6 +935,7 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
           config.runtime.removeHandler(desktopChannels.hostConnectionsSnapshot);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsInstall);
           config.runtime.removeHandler(desktopChannels.hostConnectionsRetry);
           config.runtime.removeHandler(desktopChannels.hostConnectionsDisconnect);
           config.runtime.removeHandler(desktopChannels.hostConnectionsRequestControl);

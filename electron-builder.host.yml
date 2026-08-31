@@ -1,39 +1,35 @@
-appId: studio.sealantern.seashard
-productName: SeaShard
+appId: studio.sealantern.seashard.host
+productName: SeaShard Host
 copyright: Copyright © SeaLantern Studio
 directories:
-  output: release
+  output: build/host-installer
 publish:
   provider: github
   owner: SeaLantern-Studio
   repo: SeaShard
-artifactName: SeaShardSetup.${ext}
+artifactName: SeaShardHostSetup.${ext}
 files:
-  - apps/desktop/dist/**/*
+  - apps/host/dist/**/*
   - apps/plugin-host/dist/**/*
   - apps/database-worker/dist/**/*
   - package.json
 asar: true
 asarUnpack:
+  - apps/host/dist/**/*
   - apps/plugin-host/dist/**/*
   - apps/database-worker/dist/**/*
 npmRebuild: false
 extraMetadata:
-  main: apps/desktop/dist/main/index.js
+  main: apps/host/dist/index.js
 win:
+  executableName: SeaShardHost
   target:
     - nsis
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-mac:
-  target:
-    - dmg
-  category: public.app-category.utilities
-  sign: null
-linux:
-  target:
-    - AppImage
-    - deb
-  category: Utility
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  runAfterFinish: false
+  include: build/host-installer.nsh

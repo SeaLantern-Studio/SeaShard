@@ -126,6 +126,9 @@ importers:
       '@seashard/host-control':
         specifier: workspace:*
         version: link:../../packages/host-control
+      '@seashard/host-installation':
+        specifier: workspace:*
+        version: link:../../packages/host-installation
       '@seashard/java-runtime-manager':
         specifier: workspace:*
         version: link:../../components/game/java-runtime-manager
@@ -243,6 +246,18 @@ importers:
       vue-router:
         specifier: 5.0.3
         version: 5.0.3(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
+
+  apps/host:
+    dependencies:
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../../packages/host-control
+      '@seashard/host-installation':
+        specifier: workspace:*
+        version: link:../../packages/host-installation
+      '@seashard/host-runtime':
+        specifier: workspace:*
+        version: link:../../packages/host-runtime
 
   apps/plugin-host:
     dependencies:
@@ -1035,6 +1050,41 @@ importers:
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk/dist
+
+  packages/host-installation: {}
+
+  packages/host-runtime:
+    dependencies:
+      '@seashard/bootstrap-runtime':
+        specifier: workspace:*
+        version: link:../bootstrap-runtime
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../contracts/dist
+      '@seashard/database-sqlite':
+        specifier: workspace:*
+        version: link:../../components/data/database-sqlite
+      '@seashard/download':
+        specifier: workspace:*
+        version: link:../../components/network/download
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../host-control
+      '@seashard/java-runtime-manager':
+        specifier: workspace:*
+        version: link:../../components/game/java-runtime-manager
+      '@seashard/plugin-foundation':
+        specifier: workspace:*
+        version: link:../../components/plugin/foundation
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../plugin-system
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
 
   packages/plugin-sdk:
     publishDirectory: dist

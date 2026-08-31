@@ -19,6 +19,8 @@ await test("release bundle includes installers and supported updater metadata", 
   assert.deepEqual(bundle, [
     "SeaShard-1.2.3-windows-x64.exe",
     "SeaShard-1.2.3-windows-arm64.exe",
+    "SeaShard-Host-windows-x64.exe",
+    "SeaShard-Host-windows-arm64.exe",
     "SeaShard-1.2.3-macos-x64.dmg",
     "SeaShard-1.2.3-macos-arm64.dmg",
     "SeaShard-1.2.3-linux-x64.AppImage",
@@ -59,6 +61,8 @@ await test("release notes map every supported platform and include the complete 
   for (const file of [
     "SeaShard-1.2.3-windows-x64.exe",
     "SeaShard-1.2.3-windows-arm64.exe",
+    "SeaShard-Host-windows-x64.exe",
+    "SeaShard-Host-windows-arm64.exe",
     "SeaShard-1.2.3-macos-x64.dmg",
     "SeaShard-1.2.3-macos-arm64.dmg",
     "SeaShard-1.2.3-linux-x64.AppImage",

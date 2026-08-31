@@ -27,6 +27,7 @@ const api: SeaShardDesktopApi = Object.freeze({
   }),
   hosts: Object.freeze({
     getSnapshot: () => ipcRenderer.invoke(desktopChannels.hostConnectionsSnapshot),
+    install: (hostId: string) => ipcRenderer.invoke(desktopChannels.hostConnectionsInstall, hostId),
     retry: (hostId: string) => ipcRenderer.invoke(desktopChannels.hostConnectionsRetry, hostId),
     disconnect: (hostId: string) =>
       ipcRenderer.invoke(desktopChannels.hostConnectionsDisconnect, hostId),

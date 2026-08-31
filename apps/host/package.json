@@ -1,0 +1,12 @@
+{
+  "name": "@seashard/host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "dependencies": {
+    "@seashard/host-installation": "workspace:*",
+    "@seashard/host-control": "workspace:*",
+    "@seashard/host-runtime": "workspace:*"
+  }
+}

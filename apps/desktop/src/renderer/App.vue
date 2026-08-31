@@ -46,6 +46,8 @@ const hostChromeVisible = computed(() => shouldShowHostChrome(hostConnections.va
 const hostPrompt = computed(() => findHostPrompt(hostConnections.value));
 const hostPromptTitle = computed(() => {
   switch (hostPrompt.value?.kind) {
+    case "missing":
+      return "需要安装本机 Host";
     case "occupied":
       return "本机 Host 正在使用";
     case "outgoing":
@@ -62,6 +64,8 @@ const hostPromptBody = computed(() => {
   const prompt = hostPrompt.value;
   if (!prompt) return "";
   switch (prompt.kind) {
+    case "missing":
+      return "本机尚未安装 SeaShard Host。安装后，Controller 才能管理这台设备上的服务器实例。";
     case "occupied":
       return `${prompt.host.holder?.label ?? "另一个 Controller"} 正在控制本机 Host。你可以只读使用，或发起接管请求。`;
     case "outgoing":
@@ -79,7 +83,8 @@ const activePageId = computed(() =>
   typeof route.meta.pageId === "string" ? route.meta.pageId : undefined,
 );
 const settingsMode = computed<SettingsMode | undefined>(() => {
-  if (route.path === "/server-settings" || route.path.startsWith("/server-settings/")) return "server";
+  if (route.path === "/server-settings" || route.path.startsWith("/server-settings/"))
+    return "server";
   if (route.path.startsWith("/settings/")) return "general";
   if (route.path === "/agent/settings" || route.path.startsWith("/agent/settings/")) return "agent";
   return undefined;
@@ -226,6 +231,10 @@ async function rejectHostControl(prompt: DesktopHostPrompt): Promise<void> {
 
 async function acknowledgeHost(host: DesktopHostConnection): Promise<void> {
   await runHostAction("acknowledge", () => window.seashard.hosts.acknowledgeConflict(host.id));
+}
+
+async function installHost(host: DesktopHostConnection): Promise<void> {
+  await runHostAction("install", () => window.seashard.hosts.install(host.id));
 }
 
 async function retryHost(host: DesktopHostConnection): Promise<void> {
@@ -396,6 +405,23 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
               @click="confirmHostControl(hostPrompt)"
             >
               允许接管
+            </Cmz_Button>
+          </template>
+          <template v-else-if="hostPrompt.kind === 'missing'">
+            <Cmz_Button
+              variant="outline"
+              :loading="hostAction === 'acknowledge'"
+              :disabled="Boolean(hostAction)"
+              @click="acknowledgeHost(hostPrompt.host)"
+            >
+              稍后
+            </Cmz_Button>
+            <Cmz_Button
+              :loading="hostAction === 'install'"
+              :disabled="Boolean(hostAction)"
+              @click="installHost(hostPrompt.host)"
+            >
+              获取 Host
             </Cmz_Button>
           </template>
           <template v-else>

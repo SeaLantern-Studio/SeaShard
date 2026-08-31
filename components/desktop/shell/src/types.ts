@@ -113,6 +113,7 @@ export interface DesktopShellConfig {
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
   readHostConnections(): DesktopHostConnectionsSnapshot;
+  installLocalHost(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   retryHostConnection(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   disconnectHost(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
   requestHostControl(hostId: string): Promise<DesktopHostConnectionsSnapshot>;

@@ -7,6 +7,7 @@ export const desktopChannels = {
   hostConnectionsSnapshot: "seashard.host-connections.snapshot",
   hostConnectionsChanged: "seashard.host-connections.changed",
   hostConnectionsRetry: "seashard.host-connections.retry",
+  hostConnectionsInstall: "seashard.host-connections.install",
   hostConnectionsDisconnect: "seashard.host-connections.disconnect",
   hostConnectionsRequestControl: "seashard.host-connections.request-control",
   hostConnectionsConfirmControl: "seashard.host-connections.confirm-control",

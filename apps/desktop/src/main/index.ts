@@ -4,27 +4,23 @@ import {
   desktopShellContract,
   serverCoreIconScheme,
 } from "@seashard/contracts";
+import { readHostInstallation } from "@seashard/host-installation";
 import {
   connectHostControlClient,
   HostControlRpcError,
   type HostControlClient,
 } from "@seashard/host-control";
 import { createSQLiteBootstrapDescriptor, SQLiteDatabaseBroker } from "@seashard/database-sqlite";
-import {
-  createPluginFoundationBootstrapDescriptor,
-  type SQLitePluginDocumentStorage,
-} from "@seashard/plugin-foundation";
+import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import {
   PluginKernel,
-  automaticPluginBindingId,
-  automaticPluginBindingPrefix,
   pluginDeveloperControlProtocolVersion,
   type PluginDeveloperControlLaunch,
   type PluginKernelOptions,
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
 import { Context } from "cordis";
-import { app, protocol } from "electron";
+import { app, protocol, shell } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -35,21 +31,15 @@ import { registerControllerServerFeatures } from "./controller-server-features";
 import { ControllerHostServiceGateway } from "./controller-host-services";
 import { registerDesktopShellBridge } from "./desktop-shell-bridge";
 import { ControllerServerEventBus, DesktopControllerKernel } from "./desktop-controller-kernel";
-import {
-  startDesktopHostControlServer,
-  type DesktopHostControlServer,
-} from "./desktop-host-control";
 import { DesktopHostConnections } from "./desktop-host-connections";
 import {
   createElectronDesktopUpdateService,
   type ElectronDesktopUpdateService,
 } from "./desktop-update";
-import { registerHostFeatures } from "./host-features";
 import { registerSmokePlugin, verifySmokeRuntime } from "./smoke";
-import {
-  HostWorkerDeploymentCoordinator,
-  registerHostWorkerDeploymentService,
-} from "./host-worker-deployment";
+import { HostWorkerDeploymentCoordinator } from "./host-worker-deployment";
+import { migrateLegacyHostState } from "./legacy-host-migration";
+import { LocalHostProcessLauncher } from "./local-host-process";
 import { startPluginDeveloperControl } from "./developer-control";
 
 protocol.registerSchemesAsPrivileged([
@@ -91,14 +81,11 @@ if (smokeMode) {
 
 if (developmentUrl) installDevelopmentControl();
 
-let kernel: PluginKernel | undefined;
-let bootstrapLoader: BootstrapLoader | undefined;
-let legacyHostPluginStorage: SQLitePluginDocumentStorage | undefined;
 let controllerBootstrapLoader: BootstrapLoader | undefined;
 let controllerServerDatabase: SQLiteDatabaseBroker | undefined;
 let desktopUpdates: ElectronDesktopUpdateService | undefined;
-let hostControlServer: DesktopHostControlServer | undefined;
 let hostConnections: DesktopHostConnections | undefined;
+let localHostProcess: LocalHostProcessLauncher | undefined;
 let controllerKernel: DesktopControllerKernel | undefined;
 let hostWorkerDeployments: HostWorkerDeploymentCoordinator | undefined;
 let bootstrapTask: Promise<void> | undefined;
@@ -106,7 +93,6 @@ let shutdownTask: Promise<void> | undefined;
 let controllerCloseTask: Promise<void> | undefined;
 let shutdownComplete = false;
 let gracefulQuitTask: Promise<void> | undefined;
-let ownsHost = false;
 let stopping = false;
 let signalBootstrapStop!: () => void;
 const bootstrapStop = new Promise<void>((resolve) => {
@@ -185,6 +171,15 @@ async function bootstrap(): Promise<void> {
   desktopUpdates = createElectronDesktopUpdateService(seaShardVersion);
   const userDataRoot = app.getPath("userData");
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
+  if (!app.isPackaged) {
+    localHostProcess ??= new LocalHostProcessLauncher({
+      hostEntry: resolveDevelopmentHostEntry(),
+      executable: process.execPath,
+      dataRoot,
+      seaShardVersion,
+      managedLifecycle: true,
+    });
+  }
 
   let connectedHost: HostControlClient | undefined;
   let initialHostError: string | undefined;
@@ -196,11 +191,18 @@ async function bootstrap(): Promise<void> {
   }
   assertBootstrapContinues();
 
+  const localInstallation = (await readHostInstallation(dataRoot)) ? "installed" : "missing";
   hostConnections = new DesktopHostConnections({
     controllerSessionId: controllerIdentity.sessionId,
+    initialInstallation: localInstallation,
     ...(connectedHost ? { initialClient: connectedHost } : {}),
     ...(initialHostError ? { initialError: initialHostError } : {}),
     connectLocal: () => connectLocalHost(dataRoot),
+    readLocalInstallation: async () =>
+      (await readHostInstallation(dataRoot)) ? "installed" : "missing",
+    installLocal: async () => {
+      await shell.openExternal(resolveHostInstallerDownloadUrl());
+    },
   });
 
   // 每个 Desktop 都启动自己的完整 Controller Runtime；operation 模式只省略窗口。
@@ -265,15 +267,12 @@ async function bootstrap(): Promise<void> {
     isStopping: () => stopping,
   });
   await registerClientFeatures(applicationKernel);
-  if (ownsHost && kernel && legacyHostPluginStorage) {
-    const legacyPluginIds = await migrateLegacyHostPlugins(kernel, applicationKernel);
-    await migrateLegacyPluginDocuments({
-      source: legacyHostPluginStorage,
-      target: controllerRoot["plugin-foundation"].storage,
-      ownerIds: [...legacyPluginIds, "seashard.server-settings"],
-      targetId: createHash("sha256").update(controllerDataRoot).digest("hex"),
-    });
-  }
+  await migrateLegacyHostState({
+    client: hostConnections.clientFor("local"),
+    controller: applicationKernel,
+    targetStorage: controllerRoot["plugin-foundation"].storage,
+    targetId: createControllerDataId(controllerDataRoot),
+  });
   await registerSmokePlugin(applicationKernel);
   developmentPlugin = await registerDevelopmentPlugin(applicationKernel, developerControlLaunch);
 
@@ -304,79 +303,38 @@ async function bootstrap(): Promise<void> {
   if (developmentUrl) console.log(`SEASHARD_DEV_WINDOW_READY ${developmentUrl}`);
 }
 
-async function startLocalHost(dataRoot: string): Promise<void> {
-  const host = resolveHost();
-  const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
-  const root = new Context();
-  bootstrapLoader = new BootstrapLoader(root);
-  await bootstrapLoader.start([
-    createSQLiteBootstrapDescriptor({
-      dataRoot,
-      workerEntry: databaseWorkerEntry,
-    }),
-    createPluginFoundationBootstrapDescriptor({
-      dataRoot,
-      workerEntry: databaseWorkerEntry,
-      seaShardVersion,
-    }),
-  ]);
-  legacyHostPluginStorage = root["plugin-foundation"].storage;
-  ownsHost = true;
-  assertBootstrapContinues();
-  kernel = await PluginKernel.create({
-    dataRoot,
-    seaShardVersion,
-    pluginHostEntry: join(moduleDirectory, "../../../plugin-host/dist/index.js"),
-    hostProfile: "electron",
-    platform: host.platform,
-    architecture: host.architecture,
-    root,
-    store: root["plugin-foundation"].store,
-    pluginStorage: root["plugin-foundation"].storage,
-    executionLocation: "host",
-    agentExtensions: false,
-  });
-  assertBootstrapContinues();
-  const activeKernel = kernel;
-  await registerHostFeatures({
-    kernel: activeKernel,
-    seaShardVersion,
-  });
-  assertBootstrapContinues();
-  registerHostWorkerDeploymentService(activeKernel);
-  await activeKernel.start();
-  assertBootstrapContinues();
-  hostControlServer = await startDesktopHostControlServer(activeKernel, dataRoot, startedAt);
+function resolveHostInstallerDownloadUrl(): string {
+  if (process.platform !== "win32") {
+    return "https://github.com/SeaLantern-Studio/SeaShard/releases/latest";
+  }
+  const architecture = process.arch === "arm64" ? "windows-arm64" : "windows-x64";
+  return `https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/SeaShard-Host-${architecture}.exe`;
+}
+
+function resolveDevelopmentHostEntry(): string {
+  return join(moduleDirectory, "../../../host/dist/index.js");
 }
 
 async function connectLocalHost(dataRoot: string): Promise<HostControlClient> {
   const existing = await tryConnectHost(dataRoot);
   if (existing) return existing;
 
-  try {
-    await startLocalHost(dataRoot);
-  } catch (error) {
-    // 并发启动时，失去 dataRoot 租约的 Controller 等待胜者发布 Host；其他错误会进入界面状态。
-    await disposeFailedLocalHostStart();
-    const racedHost = await waitForHost(dataRoot);
-    if (racedHost) return racedHost;
-    throw error;
+  // 开发工具链需要同进程树的源码 Host；发行版 Controller 永远不代替安装器启动 Host。
+  if (localHostProcess) {
+    await localHostProcess.ensureStarted();
+    const startedHost = await waitForHost(dataRoot);
+    if (startedHost) return startedHost;
+    throw new HostControlRpcError("HOST_START_FAILED", "开发 Host 已启动，但没有发布控制端点");
   }
-  return connectHostControlClient({ dataRoot, identity: controllerIdentity });
-}
 
-async function disposeFailedLocalHostStart(): Promise<void> {
-  await disposeDeveloperControl?.().catch(() => undefined);
-  disposeDeveloperControl = undefined;
-  await hostControlServer?.dispose().catch(() => undefined);
-  hostControlServer = undefined;
-  await kernel?.dispose().catch(() => undefined);
-  kernel = undefined;
-  await bootstrapLoader?.dispose().catch(() => undefined);
-  bootstrapLoader = undefined;
-  legacyHostPluginStorage = undefined;
-  developmentPlugin = undefined;
-  ownsHost = false;
+  const installation = await readHostInstallation(dataRoot);
+  if (!installation) {
+    throw new HostControlRpcError("HOST_NOT_INSTALLED", "本机尚未安装 SeaShard Host");
+  }
+  throw new HostControlRpcError(
+    "HOST_UNAVAILABLE",
+    "本机 SeaShard Host 已安装但未运行，请启动 Host 后重新连接",
+  );
 }
 
 async function tryConnectHost(dataRoot: string): Promise<HostControlClient | undefined> {
@@ -426,9 +384,7 @@ async function closeControllerWindow(): Promise<void> {
     controllerBootstrapLoader = undefined;
     hostConnections?.dispose();
     hostConnections = undefined;
-    const keepHostAlive =
-      ownsHost && !smokeMode && !developmentUrl && developerControlLaunch === undefined;
-    if (!keepHostAlive) app.quit();
+    app.quit();
   })();
   return controllerCloseTask;
 }
@@ -442,6 +398,7 @@ async function shutdown(): Promise<void> {
     // 这条屏障同时覆盖父 IPC 断开、正常退出和启动失败三条路径。
     await bootstrapTask?.catch(() => undefined);
     try {
+      const hadController = Boolean(controllerKernel);
       await controllerKernel?.dispose();
       controllerKernel = undefined;
       hostConnections?.dispose();
@@ -449,42 +406,22 @@ async function shutdown(): Promise<void> {
       await disposeDeveloperControl?.();
       hostWorkerDeployments?.dispose();
       hostWorkerDeployments = undefined;
-      await hostControlServer?.dispose();
-      hostControlServer = undefined;
-      await kernel?.dispose();
-      const activeUnits =
-        kernel?.runtimeSnapshot().plugins.filter((plugin) => plugin.state === "active").length ?? 0;
-      const diagnostics = kernel?.diagnostics() ?? {
-        services: 0,
-        contributions: 0,
-        clientEntries: 0,
-      };
-      if (smokeMode) {
-        console.log(
-          `SEASHARD_SMOKE_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services} contributions=${diagnostics.contributions}`,
-        );
-      }
-      if (developmentUrl) {
-        console.log(
-          `SEASHARD_DEV_DISPOSED activeUnits=${activeUnits} services=${diagnostics.services}`,
-        );
-      }
+      if (smokeMode && hadController) console.log("SEASHARD_SMOKE_CONTROLLER_DISPOSED");
+      if (developmentUrl && hadController) console.log("SEASHARD_DEV_CONTROLLER_DISPOSED");
     } finally {
       await controllerBootstrapLoader?.dispose();
       controllerBootstrapLoader = undefined;
       await controllerServerDatabase?.close();
       controllerServerDatabase = undefined;
-      await bootstrapLoader?.dispose();
-      bootstrapLoader = undefined;
-      legacyHostPluginStorage = undefined;
+      await localHostProcess?.dispose();
+      localHostProcess = undefined;
     }
   })();
   return shutdownTask;
 }
 
 /**
- * 普通 app.quit 会先让 Host 完成完整释放。若本次进程内已有可安装更新，释放成功后
- * 直接以“不重新启动”模式拉起安装器；崩溃与 app.exit(1) 不经过这里，只保留缓存。
+ * Controller 更新只关闭 Controller 自身；独立安装的 Host 及其服务器运行事实保持不变。
  */
 async function finishGracefulQuit(installDownloadedUpdate: boolean): Promise<void> {
   let shutdownSucceeded = false;
@@ -554,77 +491,6 @@ async function registerDevelopmentPlugin(
   return activeKernel.refreshDevelopmentDirectory(launch.pluginRoot, previousPluginId);
 }
 
-/** 将旧 Host Runtime 中的正式插件复制到当前 Controller，不修改或删除旧数据。 */
-async function migrateLegacyHostPlugins(
-  legacyHost: PluginKernel,
-  controller: PluginKernel,
-): Promise<readonly string[]> {
-  const currentIds = new Set(
-    (await controller.registry.listCurrentPackages()).map(({ manifest }) => manifest.id),
-  );
-  const legacyRecords = (await legacyHost.registry.listCurrentPackages()).filter(
-    ({ source }) => source === "installed",
-  );
-  for (const legacy of legacyRecords) {
-    if (currentIds.has(legacy.manifest.id)) continue;
-    const prepared = await controller.prepareDirectory(legacy.rootPath);
-    try {
-      const imported = await prepared.commit({
-        digest: prepared.digest,
-        acknowledgeFullMachineAccess: true,
-      });
-      const legacyBindings = await legacyHost.registry.listBindings(legacy.manifest.id);
-      const nextBindings = imported.manifest.entries.map((entry) => {
-        const previous = legacyBindings.find(({ entryId }) => entryId === entry.id);
-        return {
-          id: automaticPluginBindingId("plugin", imported.manifest.id, entry.id),
-          pluginId: imported.manifest.id,
-          entryId: entry.id,
-          scopeType: "global" as const,
-          scopeId: "global",
-          enabled: previous?.enabled ?? true,
-          config: previous?.config ?? {},
-        };
-      });
-      await controller.registry.replacePackageSelectionAndBindings(
-        imported.manifest.id,
-        imported,
-        automaticPluginBindingPrefix("plugin", imported.manifest.id),
-        nextBindings,
-      );
-      currentIds.add(imported.manifest.id);
-    } finally {
-      await prepared.dispose();
-    }
-  }
-  return legacyRecords.map(({ manifest }) => manifest.id);
-}
-
-const legacyPluginDocumentMigrationId = "host-plugin-documents-to-controller-v1";
-
-/**
- * 标准插件文档迁移先幂等写入 Controller，再在旧 Host 数据库记录完成标记。
- * 若进程在两步之间退出，下一次导入使用 create-only 冲突策略安全重放。
- */
-async function migrateLegacyPluginDocuments(options: {
-  readonly source: SQLitePluginDocumentStorage;
-  readonly target: SQLitePluginDocumentStorage;
-  readonly ownerIds: readonly string[];
-  readonly targetId: string;
-}): Promise<void> {
-  const completed = await options.source.readMigrationMarker(legacyPluginDocumentMigrationId);
-  if (completed) return;
-
-  const documents = await options.source.exportOwners(options.ownerIds);
-  await options.target.importDocuments(documents);
-  await options.source.completeMigration({
-    migrationId: legacyPluginDocumentMigrationId,
-    targetId: options.targetId,
-    documentCount: documents.length,
-    completedAt: new Date().toISOString(),
-  });
-}
-
 /** 插件开发控制通道属于 Controller Plugin Runtime，与服务器 Host 生命周期解耦。 */
 async function startControllerDeveloperControl(
   activeKernel: PluginKernel,
@@ -662,6 +528,10 @@ async function startControllerDeveloperControl(
     type: "seashard:plugin-developer-control-ready",
     sessionId: launch.sessionId,
   });
+}
+
+function createControllerDataId(dataRoot: string): string {
+  return createHash("sha256").update(dataRoot).digest("hex");
 }
 
 function resolveHost(): Pick<PluginKernelOptions, "platform" | "architecture"> {

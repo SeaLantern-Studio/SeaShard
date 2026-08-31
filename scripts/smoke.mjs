@@ -80,7 +80,8 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_SMOKE_AGENT_SERVER_RESOURCE count=0",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
     "SEASHARD_PLUGIN_HOST_DISPOSED runtime=smoke.external-plugin",
-    "SEASHARD_SMOKE_DISPOSED activeUnits=0 services=0 contributions=0",
+    "SEASHARD_SMOKE_CONTROLLER_DISPOSED",
+    "SEASHARD_HOST_STOPPED",
   ];
   if (label === "install") required.push("SEASHARD_PLUGIN_SMOKE_TRUST_REJECTED");
   const missing = required.filter((marker) => !output.includes(marker));

@@ -2,6 +2,27 @@ import type { JsonValue } from "@seashard/plugin-sdk";
 
 export const hostControlProtocolVersion = 1;
 
+export const hostWorkerDeploymentContract = "seashard.internal.host-worker-deployment";
+export const legacyHostMigrationContract = "seashard.internal.legacy-host-migration";
+export const hostLifecycleContract = "seashard.internal.host-lifecycle";
+
+export interface LegacyHostMigrationBindingSnapshot {
+  readonly entryId: string;
+  readonly enabled: boolean;
+  readonly config: JsonValue;
+}
+
+export interface LegacyHostMigrationPackageSnapshot {
+  readonly pluginId: string;
+  readonly rootPath: string;
+  readonly bindings: readonly LegacyHostMigrationBindingSnapshot[];
+}
+
+export interface LegacyHostMigrationSnapshot {
+  readonly documentsCompleted: boolean;
+  readonly packages: readonly LegacyHostMigrationPackageSnapshot[];
+}
+
 export interface HostControlDescriptor {
   readonly protocolVersion: typeof hostControlProtocolVersion;
   readonly socketPath: string;
@@ -12,7 +33,7 @@ export interface HostControlDescriptor {
 }
 
 export interface HostControllerIdentity {
-  /** 每次 Desktop 进程启动生成的新会话标识。 */
+  /** 每次 Controller 进程启动生成的新会话标识。 */
   readonly sessionId: string;
   /** 便于接管提示辨认来源，不参与授权。 */
   readonly label: string;

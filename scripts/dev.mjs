@@ -10,6 +10,7 @@ const mainConfig = join(root, "apps/desktop/vite.main.config.ts");
 const preloadConfig = join(root, "apps/desktop/vite.preload.config.ts");
 const pluginHostConfig = join(root, "apps/plugin-host/vite.config.ts");
 const databaseWorkerConfig = join(root, "apps/database-worker/vite.config.ts");
+const hostConfig = join(root, "apps/host/vite.config.ts");
 const rendererConfig = join(root, "vite.config.ts");
 const devtoolsPort = process.env.SEASHARD_DEVTOOLS_PORT ?? "9222";
 
@@ -39,6 +40,7 @@ async function main() {
     startBundleWatcher("preload", preloadConfig),
     startBundleWatcher("plugin-host", pluginHostConfig),
     startBundleWatcher("database-worker", databaseWorkerConfig),
+    startBundleWatcher("host", hostConfig),
   ]);
   bundleWatchers.push(...records.map((record) => record.watcher));
   await Promise.all(records.map((record) => record.initialBuild));

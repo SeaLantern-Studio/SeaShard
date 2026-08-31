@@ -42,6 +42,7 @@ function acceptSnapshot(value: DesktopHostConnectionsSnapshot): void {
 }
 
 function statusLabel(host: DesktopHostConnection): string {
+  if (host.installation === "missing") return "未安装";
   switch (host.state) {
     case "connecting":
       return "连接中";
@@ -139,7 +140,15 @@ function notifyFailure(title: string, error: unknown): void {
 
         <div class="host-connection-actions">
           <Cmz_Button
-            v-if="host.state === 'error' || host.state === 'disconnected'"
+            v-if="host.installation === 'missing'"
+            size="sm"
+            :loading="workingHostId === host.id"
+            @click="execute(host, () => props.hosts.install(host.id))"
+          >
+            获取 Host
+          </Cmz_Button>
+          <Cmz_Button
+            v-else-if="host.state === 'error' || host.state === 'disconnected'"
             size="sm"
             :loading="workingHostId === host.id"
             @click="execute(host, () => props.hosts.retry(host.id))"

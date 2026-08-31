@@ -42,8 +42,8 @@ export interface StartHostControlServerOptions {
 }
 
 /**
- * Host 是控制权的唯一裁决点。每条长连接对应一个 Desktop Controller，读取可并发，
- * 写调用则在进入领域 Service 前校验当前 holder，避免旧控制端继续发出操作。
+ * Host 是控制权的唯一裁决点。每条长连接对应一个 Controller，读取可并发，写调用则
+ * 在进入领域 Service 前校验当前 holder，避免旧控制端继续发出操作。
  */
 export async function startHostControlServer(
   options: StartHostControlServerOptions,
@@ -320,7 +320,7 @@ export async function startHostControlServer(
 
   function requireHolder(connection: ControllerConnection): void {
     if (holderSessionId !== connection.identity.sessionId) {
-      throw rpcError("CONTROL_REQUIRED", "当前 Desktop 没有 Host 写控制权，请先完成接管");
+      throw rpcError("CONTROL_REQUIRED", "当前 Controller 没有 Host 写控制权，请先完成接管");
     }
   }
 

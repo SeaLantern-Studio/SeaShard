@@ -6,14 +6,14 @@ import {
 } from "@seashard/java-runtime-manager";
 import type { PluginKernel } from "@seashard/plugin-system";
 
-interface HostFeatureOptions {
+export interface HostFeatureOptions {
   readonly kernel: PluginKernel;
   readonly seaShardVersion: string;
 }
 
 /**
- * Host 只发布设备侧通用能力。服务器实例、配置、资源和启动策略均由 Controller 解释，
- * 因此这里不注册任何服务器领域 Provider。
+ * Host 只发布设备侧通用能力。服务器实例、配置、资源和启动策略均由 Controller
+ * 解释，因此 Host Runtime 不注册服务器领域 Provider。
  */
 export async function registerHostFeatures(options: HostFeatureOptions): Promise<void> {
   const { kernel, seaShardVersion } = options;

@@ -34,7 +34,7 @@ export interface ConnectHostControlClientOptions {
   readonly timeoutMs?: number;
 }
 
-/** 持久 Host 连接；一个实例严格对应一个 Desktop Controller 会话。 */
+/** 持久 Host 连接；一个实例严格对应一个 Controller 会话。 */
 export class HostControlClient {
   private readonly pending = new Map<
     string,
@@ -95,7 +95,6 @@ export class HostControlClient {
     return this.controlSnapshotValue.holder?.sessionId === this.identity.sessionId;
   }
 
-
   on(event: HostControlEventName, listener: HostEventListener): () => void {
     const listeners = this.eventListeners.get(event) ?? new Set<HostEventListener>();
     listeners.add(listener);
@@ -128,7 +127,6 @@ export class HostControlClient {
       },
     ) as TService;
   }
-
 
   async requestControl(): Promise<HostControlSnapshot> {
     const result = (await this.request("request-control", null)) as unknown as HostControlSnapshot;
