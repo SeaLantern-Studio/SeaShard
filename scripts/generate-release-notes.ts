@@ -103,13 +103,6 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
       asset(`SeaShard-${input.version}-windows-arm64.exe`),
       "骁龙等 Windows ARM 设备",
     ],
-    ["Windows Host", "x64", asset("SeaShard-Host-windows-x64.exe"), "只安装独立 Host 的受控机器"],
-    [
-      "Windows Host",
-      "ARM64",
-      asset("SeaShard-Host-windows-arm64.exe"),
-      "只安装独立 Host 的 ARM 受控机器",
-    ],
     [
       "macOS",
       "Apple Silicon",

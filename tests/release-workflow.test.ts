@@ -61,8 +61,6 @@ await test("release notes map every supported platform and include the complete 
   for (const file of [
     "SeaShard-1.2.3-windows-x64.exe",
     "SeaShard-1.2.3-windows-arm64.exe",
-    "SeaShard-Host-windows-x64.exe",
-    "SeaShard-Host-windows-arm64.exe",
     "SeaShard-1.2.3-macos-x64.dmg",
     "SeaShard-1.2.3-macos-arm64.dmg",
     "SeaShard-1.2.3-linux-x64.AppImage",
@@ -72,6 +70,7 @@ await test("release notes map every supported platform and include the complete 
   ] as const) {
     assert.match(notes, new RegExp(file.replaceAll(".", "\\."), "u"));
   }
+  assert.doesNotMatch(notes, /SeaShard-Host-windows-(?:x64|arm64)\.exe/u);
   assert.match(notes, /feat\(plugin\): 添加插件市场/u);
   assert.match(notes, /fix\(runtime\): 修复重载/u);
   assert.match(notes, /compare\/v1\.2\.2\.\.\.v1\.2\.3/u);
