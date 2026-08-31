@@ -1,5 +1,5 @@
 export type WorkspaceMode = "agent" | "server" | "launcher";
-export type SettingsMode = "general" | "agent";
+export type SettingsMode = "general" | "agent" | "server";
 
 export type WorkspaceRouteHistory = Record<WorkspaceMode, string>;
 

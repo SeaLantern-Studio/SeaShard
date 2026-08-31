@@ -30,7 +30,7 @@ export default defineClientUiModule({
       {
         name: "navigation.page",
         id: "server-startup-settings",
-        path: "/settings/server/startup",
+        path: "/server-settings/startup",
         label: "启动",
         description: "服务器默认启动参数",
         order: 5,
@@ -46,7 +46,7 @@ export default defineClientUiModule({
       {
         name: "navigation.page",
         id: "server-download-settings",
-        path: "/settings/server/download",
+        path: "/server-settings/download",
         label: "下载",
         description: "服务器资源下载位置",
         order: 10,

@@ -12,6 +12,7 @@ import {
   Package,
   Play,
   Puzzle,
+  Server,
   Settings,
   Terminal,
   Upload,
@@ -34,11 +35,24 @@ const sidebarNav = ref<HTMLElement>();
 const navIndicator = ref<HTMLElement>();
 const lastWorkspacePath = ref("/");
 const settingsPages = computed(() =>
-  runtime.pages.value.filter((page) => page.navigation !== false && page.placement === "settings"),
+  runtime.pages.value.filter(
+    (page) =>
+      page.navigation !== false &&
+      page.placement === "settings" &&
+      page.settingsGroup !== "server",
+  ),
 );
 const agentSettingsPages = computed(() =>
   runtime.pages.value.filter(
     (page) => page.navigation !== false && page.placement === "agent-settings",
+  ),
+);
+const serverSettingsPages = computed(() =>
+  runtime.pages.value.filter(
+    (page) =>
+      page.navigation !== false &&
+      page.placement === "settings" &&
+      page.settingsGroup === "server",
   ),
 );
 const serverNavigationPages = computed(() =>
@@ -49,7 +63,6 @@ const workspaceSidebar = computed(() =>
 );
 const settingsNavigationGroups = [
   { id: "game", label: "游戏设置" },
-  { id: "server", label: "服务器设置" },
   { id: "launcher", label: "启动器设置" },
   { id: "software", label: "软件设置" },
 ] as const satisfies readonly { id: SettingsNavigationGroup; label: string }[];
@@ -73,6 +86,7 @@ const otherDownloadPages = computed(() =>
 const sidebarLabel = computed(() => {
   if (props.settingsMode === "general") return "设置导航";
   if (props.settingsMode === "agent") return "Agent 设置导航";
+  if (props.settingsMode === "server") return "服务器设置导航";
   if (props.downloadMode) return "下载导航";
   return "主导航";
 });
@@ -83,6 +97,7 @@ const sidebarMenuKey = computed(() => {
 });
 const settingsEntryPath = computed(() => settingsPages.value[0]?.path);
 const agentSettingsPath = computed(() => agentSettingsPages.value[0]?.path);
+const serverSettingsPath = computed(() => serverSettingsPages.value[0]?.path);
 const instancePrimaryItems = [
   { id: "launch", label: "启动", icon: Play },
   { id: "download", label: "下载", icon: Download },
@@ -152,10 +167,18 @@ function openAgentSettings(): void {
   const path = agentSettingsPath.value;
   if (path) navigate(path);
 }
+function openServerSettings(): void {
+  const path = serverSettingsPath.value;
+  if (path) navigate(path);
+}
 
 function leaveSettings(): void {
   if (props.settingsMode === "agent") {
     navigate("/agent/chat");
+    return;
+  }
+  if (props.settingsMode === "server") {
+    navigate(lastWorkspacePath.value.startsWith("/server/") ? lastWorkspacePath.value : "/server/launch");
     return;
   }
   navigate(lastWorkspacePath.value);
@@ -262,7 +285,11 @@ function updateNavIndicator(): void {
 watch(
   () => route.fullPath,
   (path) => {
-    if (!path.startsWith("/settings/") && !path.startsWith("/agent/settings")) {
+    if (
+      !path.startsWith("/settings/") &&
+      !path.startsWith("/agent/settings") &&
+      !path.startsWith("/server-settings")
+    ) {
       lastWorkspacePath.value = path;
     }
     activeServerItem.value = serverItemForPath(path);
@@ -276,6 +303,7 @@ watch(
     () => props.workspace,
     settingsPages,
     agentSettingsPages,
+    serverSettingsPages,
     downloadPages,
     serverNavigationPages,
     activeInstanceItem,
@@ -350,18 +378,31 @@ onUnmounted(() => {
               </section>
             </template>
           </div>
-          <div v-else-if="props.settingsMode === 'agent'" class="settings-mode-nav">
+          <div
+            v-else-if="props.settingsMode === 'agent' || props.settingsMode === 'server'"
+            class="settings-mode-nav"
+          >
             <button type="button" class="workspace-row mode-back" @click="leaveSettings">
               <ArrowLeft :size="16" :stroke-width="1.8" />
-              <span>返回 Agent</span>
+              <span>{{ props.settingsMode === "agent" ? "返回 Agent" : "返回服务器" }}</span>
             </button>
 
-            <section class="settings-section" aria-labelledby="agent-settings-label">
-              <h3 id="agent-settings-label" class="workspace-section-title">
-                <span class="workspace-section-title-text">Agent 设置</span>
+            <section
+              class="settings-section"
+              :aria-labelledby="`${props.settingsMode}-settings-label`"
+            >
+              <h3
+                :id="`${props.settingsMode}-settings-label`"
+                class="workspace-section-title"
+              >
+                <span class="workspace-section-title-text">
+                  {{ props.settingsMode === "agent" ? "Agent 设置" : "服务器设置" }}
+                </span>
               </h3>
               <button
-                v-for="page in agentSettingsPages"
+                v-for="page in props.settingsMode === 'agent'
+                  ? agentSettingsPages
+                  : serverSettingsPages"
                 :key="page.id"
                 type="button"
                 class="nav-item settings-nav-item"
@@ -511,6 +552,20 @@ onUnmounted(() => {
             >
               <Bot class="nav-icon" :size="20" :stroke-width="1.8" />
               <span class="nav-label">Agent 设置</span>
+            </button>
+            <button
+              v-if="props.workspace === 'server'"
+              type="button"
+              class="nav-item"
+              :class="{ active: serverSettingsPath && isActive(serverSettingsPath) }"
+              :disabled="!serverSettingsPath"
+              :aria-current="
+                serverSettingsPath && isActive(serverSettingsPath) ? 'page' : undefined
+              "
+              @click="openServerSettings"
+            >
+              <Server class="nav-icon" :size="20" :stroke-width="1.8" />
+              <span class="nav-label">服务器设置</span>
             </button>
             <button
               type="button"

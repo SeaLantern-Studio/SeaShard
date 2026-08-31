@@ -79,6 +79,7 @@ const activePageId = computed(() =>
   typeof route.meta.pageId === "string" ? route.meta.pageId : undefined,
 );
 const settingsMode = computed<SettingsMode | undefined>(() => {
+  if (route.path === "/server-settings" || route.path.startsWith("/server-settings/")) return "server";
   if (route.path.startsWith("/settings/")) return "general";
   if (route.path === "/agent/settings" || route.path.startsWith("/agent/settings/")) return "agent";
   return undefined;
@@ -296,9 +297,11 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
               ? '设置内容'
               : settingsMode === 'agent'
                 ? 'Agent 设置内容'
-                : downloadMode
-                  ? '下载内容'
-                  : '工作区内容'
+                : settingsMode === 'server'
+                  ? '服务器设置内容'
+                  : downloadMode
+                    ? '下载内容'
+                    : '工作区内容'
           "
         >
           <RouterView v-slot="{ Component }">
