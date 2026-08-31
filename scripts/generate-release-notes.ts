@@ -143,7 +143,7 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     ? `以下内容包含 ${input.previousTag} 发布后到当前版本的全部提交。`
     : "这是首个公开 Release，以下内容包含当前仓库历史中的全部提交。";
 
-  return `# SeaShard ${input.version}\n\n## 下载指引\n\n${table}\n\n> 当前构建未进行商业代码签名。Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认后继续。\n\n## 更新内容\n\n${rangeDescription}\n\n${changelog}\n\n## 完整变更\n\n${comparison}\n`;
+  return `## 下载指引\n\n${table}\n\n> 当前构建未进行商业代码签名。Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认后继续。\n\n## 更新内容\n\n${rangeDescription}\n\n${changelog}\n\n## 完整变更\n\n${comparison}\n`;
 }
 
 function escapeMarkdown(value: string): string {

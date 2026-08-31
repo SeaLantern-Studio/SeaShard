@@ -38,5 +38,10 @@
     Delete "$R9\host-shutdown.request"
     ${ifNot} ${isUpdated}
       DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_EXECUTABLE_FILENAME}"
+      ; 只清理“Host 已安装”的所有权记录；数据库、插件数据和 servers 实例目录全部保留。
+      Delete "$R9\host-installation\standalone"
+      RMDir "$R9\host-installation\owners"
+      RMDir "$R9\host-installation"
+      Delete "$R9\host-installation.json"
     ${endif}
 !macroend

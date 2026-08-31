@@ -71,6 +71,8 @@ await test("release notes map every supported platform and include the complete 
     assert.match(notes, new RegExp(file.replaceAll(".", "\\."), "u"));
   }
   assert.doesNotMatch(notes, /SeaShard-Host-windows-(?:x64|arm64)\.exe/u);
+  assert.match(notes, /^## 下载指引/u);
+  assert.doesNotMatch(notes, /^# SeaShard /u);
   assert.match(notes, /feat\(plugin\): 添加插件市场/u);
   assert.match(notes, /fix\(runtime\): 修复重载/u);
   assert.match(notes, /compare\/v1\.2\.2\.\.\.v1\.2\.3/u);
