@@ -1,4 +1,4 @@
-import type { ServerCoreArtifact } from "./core";
+import type { ServerCoreArtifact } from "./core.js";
 
 /** 当前 Client 平台提供的服务器核心下载交互；Desktop 使用系统目录选择窗口。 */
 export const serverCoreDownloadContract = "seashard.server-core-download";

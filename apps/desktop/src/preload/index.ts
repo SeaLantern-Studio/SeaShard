@@ -25,6 +25,28 @@ const api: SeaShardDesktopApi = Object.freeze({
   runtime: Object.freeze({
     getSnapshot: () => ipcRenderer.invoke(desktopChannels.runtimeSnapshot),
   }),
+  hosts: Object.freeze({
+    getSnapshot: () => ipcRenderer.invoke(desktopChannels.hostConnectionsSnapshot),
+    retry: (hostId: string) => ipcRenderer.invoke(desktopChannels.hostConnectionsRetry, hostId),
+    disconnect: (hostId: string) =>
+      ipcRenderer.invoke(desktopChannels.hostConnectionsDisconnect, hostId),
+    requestControl: (hostId: string) =>
+      ipcRenderer.invoke(desktopChannels.hostConnectionsRequestControl, hostId),
+    confirmControl: (hostId: string, requestId: string) =>
+      ipcRenderer.invoke(desktopChannels.hostConnectionsConfirmControl, hostId, requestId),
+    rejectControl: (hostId: string, requestId: string) =>
+      ipcRenderer.invoke(desktopChannels.hostConnectionsRejectControl, hostId, requestId),
+    acknowledgeConflict: (hostId: string) =>
+      ipcRenderer.invoke(desktopChannels.hostConnectionsAcknowledgeConflict, hostId),
+    onChanged: (listener: Parameters<SeaShardDesktopApi["hosts"]["onChanged"]>[0]) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        snapshot: Parameters<typeof listener>[0],
+      ): void => listener(snapshot);
+      ipcRenderer.on(desktopChannels.hostConnectionsChanged, handler);
+      return () => ipcRenderer.removeListener(desktopChannels.hostConnectionsChanged, handler);
+    },
+  }),
   agent: Object.freeze({
     listModels: () => ipcRenderer.invoke(desktopChannels.agentModelsList),
     listSessions: () => ipcRenderer.invoke(desktopChannels.agentSessionsList),

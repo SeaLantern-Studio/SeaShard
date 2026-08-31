@@ -12,11 +12,46 @@ await test("third-party manifest parser normalizes entries to global scope", () 
     entries: [
       {
         ...validPluginPackageManifest.entries[0],
+        execution: "controller",
         activationScopes: ["global"],
         permissions: ["example.echo"],
       },
     ],
   });
+});
+
+await test("entry execution location is normalized and Host is limited to Node entries", () => {
+  const workerManifest = {
+    ...validPluginPackageManifest,
+    entries: [
+      {
+        ...validPluginPackageManifest.entries[0],
+        execution: "host" as const,
+      },
+    ],
+  };
+  assert.equal(parsePluginManifest(workerManifest, "0.0.0").entries[0]?.execution, "host");
+
+  assert.throws(
+    () =>
+      parsePluginManifest(
+        {
+          ...validPluginPackageManifest,
+          entries: [
+            {
+              id: "example.client",
+              runtime: "client",
+              execution: "host",
+              module: "./dist/client.js",
+              targets: ["desktop"],
+              uses: {},
+            },
+          ],
+        },
+        "0.0.0",
+      ),
+    /execution host is only valid for host entries/,
+  );
 });
 
 await test("third-party manifest parser rejects internal scope and permission fields", () => {

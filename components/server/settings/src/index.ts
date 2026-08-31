@@ -29,6 +29,7 @@ export const serverSettingsManifest: PluginManifest = {
     {
       id: "server-settings.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

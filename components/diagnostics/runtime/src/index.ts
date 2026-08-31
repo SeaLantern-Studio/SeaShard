@@ -27,6 +27,7 @@ export const runtimeDiagnosticsManifest: PluginManifest = {
     {
       id: "runtime-diagnostics.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

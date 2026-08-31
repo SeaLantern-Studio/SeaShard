@@ -99,9 +99,10 @@ const manifest = {
   },
   entries: [
     {
-      id: "host",
+      id: "controller",
       runtime: "host",
-      module: "dist/host.js",
+      execution: "controller",
+      module: "dist/controller.js",
       uses: {
         [runtimeDiagnosticsContract]: ["getSnapshot"],
       },
@@ -109,7 +110,7 @@ const manifest = {
   ],
 } satisfies PluginPackageManifest;
 
-const hostModule: PluginModule = {
+const controllerModule: PluginModule = {
   apply(context) {
     const diagnostics = context.service<RuntimeDiagnosticsService>(runtimeDiagnosticsContract);
     void diagnostics.getSnapshot();
@@ -142,7 +143,7 @@ const clientModule = defineClientUiModule({
 });
 
 void manifest;
-void hostModule;
+void controllerModule;
 void clientModule;
 `;
   // 使用本地最小 Vue 包满足 UI SDK 的 peer，验证过程保持完全离线。

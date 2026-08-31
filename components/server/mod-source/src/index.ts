@@ -32,6 +32,7 @@ export const serverModSourceManifest: PluginManifest = {
     {
       id: "server-mod-source.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

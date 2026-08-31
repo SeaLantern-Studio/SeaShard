@@ -181,18 +181,20 @@
   color: var(--sl-primary);
 }
 
-.panel-toggle {
-  display: flex;
-  width: 32px;
+.host-indicator {
+  display: inline-flex;
   height: 32px;
   flex-shrink: 0;
   align-items: center;
-  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
   border: 1px solid var(--sl-border-light);
   border-radius: var(--sl-radius-full);
   background: var(--sl-surface);
   color: var(--sl-text-secondary);
-  box-shadow: var(--sl-shadow-sm);
+  font-size: var(--sl-font-size-xs);
+  font-weight: 650;
+  white-space: nowrap;
   -webkit-app-region: no-drag;
   transition:
     color var(--sl-transition-fast),
@@ -200,15 +202,23 @@
     background-color var(--sl-transition-fast);
 }
 
-.panel-toggle:hover {
+.host-indicator:hover,
+.host-indicator.active {
   color: var(--sl-text-primary);
+  border-color: color-mix(in srgb, currentcolor 28%, var(--sl-border-light));
   background: var(--sl-bg-tertiary);
 }
 
-.panel-toggle.active {
-  color: var(--sl-primary);
-  border-color: color-mix(in srgb, var(--sl-primary) 28%, var(--sl-border-light));
-  background: var(--sl-primary-bg);
+.host-indicator[data-state="attention"] {
+  color: var(--sl-warning);
+}
+
+.host-indicator[data-state="error"] {
+  color: var(--sl-error);
+}
+
+.host-indicator[data-state="connected"] {
+  color: var(--sl-success);
 }
 
 .window-controls {

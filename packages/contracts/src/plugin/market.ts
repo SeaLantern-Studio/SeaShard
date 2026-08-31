@@ -4,6 +4,7 @@ import type {
   CpuArchitecture,
   HostProfile,
   OperatingSystem,
+  PluginExecutionLocation,
   PluginRuntime,
 } from "@seashard/plugin-sdk";
 
@@ -36,6 +37,7 @@ export interface PluginMarketCompatibility {
 export interface PluginMarketEntry {
   readonly id: string;
   readonly runtime: PluginRuntime;
+  readonly execution?: PluginExecutionLocation;
   readonly uses: Readonly<Record<string, readonly string[]>>;
   readonly hostProfiles?: readonly HostProfile[];
   readonly targets?: readonly ClientTarget[];

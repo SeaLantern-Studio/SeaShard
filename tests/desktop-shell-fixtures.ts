@@ -5,6 +5,7 @@ import {
   type ClientEntryPublication,
   type ClientServiceCallRequest,
   type DesktopShellService,
+  type DesktopHostConnectionsSnapshot,
   type DesktopUpdateFinishRequest,
   type DesktopUpdateSnapshot,
   type FileDownloadTaskSnapshot,
@@ -582,6 +583,7 @@ export async function createDesktopShellHarness(
   const readySnapshots: RuntimeSnapshot[] = [];
   let clientEntryListener: ((publication: ClientEntryPublication) => void) | undefined;
   let desktopUpdateListener: ((snapshot: DesktopUpdateSnapshot) => void) | undefined;
+  let hostConnectionsListener: ((snapshot: DesktopHostConnectionsSnapshot) => void) | undefined;
   let desktopUpdateActions = 0;
   let desktopUpdateExitRequired = false;
   const desktopUpdateFinishes: DesktopUpdateFinishRequest[] = [];
@@ -648,6 +650,22 @@ export async function createDesktopShellHarness(
     artifactFileName: paperArtifact.fileName,
     destinationFileName: "custom-paper.jar",
   } as const;
+  const hostConnectionsSnapshot: DesktopHostConnectionsSnapshot = {
+    revision: 1,
+    controllerSessionId: "desktop-test",
+    hosts: [
+      {
+        id: "local",
+        label: "本机 Host",
+        transport: "local",
+        endpoint: "当前设备",
+        isDefault: true,
+        state: "control",
+        holder: { sessionId: "desktop-test", label: "Desktop Test" },
+        conflictAcknowledged: true,
+      },
+    ],
+  };
   const shell = await activateDesktopShell(
     {
       runtime,
@@ -655,6 +673,19 @@ export async function createDesktopShellHarness(
       rendererFile: "C:/SeaShard/index.html",
       smokeMode,
       reportOpenFailure: (error) => failures.push(error),
+      readHostConnections: () => hostConnectionsSnapshot,
+      retryHostConnection: async () => hostConnectionsSnapshot,
+      disconnectHost: async () => hostConnectionsSnapshot,
+      requestHostControl: async () => hostConnectionsSnapshot,
+      confirmHostControl: async () => hostConnectionsSnapshot,
+      rejectHostControl: async () => hostConnectionsSnapshot,
+      acknowledgeHostConflict: () => hostConnectionsSnapshot,
+      onHostConnectionsChanged: (listener) => {
+        hostConnectionsListener = listener;
+        return () => {
+          if (hostConnectionsListener === listener) hostConnectionsListener = undefined;
+        };
+      },
       readDesktopUpdateSnapshot: async () => desktopUpdateSnapshot,
       checkDesktopUpdate: async () => availableDesktopUpdateSnapshot,
       applyDesktopUpdate: async () => {

@@ -37,6 +37,7 @@ export const serverInstanceManagerManifest: PluginManifest = {
     {
       id: "server-instance-manager.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

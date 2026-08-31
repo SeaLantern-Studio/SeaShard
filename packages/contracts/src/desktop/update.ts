@@ -1,4 +1,4 @@
-import type { ServerProcessState } from "../server/runtime";
+import type { ServerProcessState } from "../server/runtime.js";
 export type DesktopUpdateState =
   | "unsupported"
   | "idle"

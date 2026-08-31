@@ -14,6 +14,7 @@ export const downloadManifest: PluginManifest = {
     {
       id: "download.host",
       runtime: "host",
+      execution: "host",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

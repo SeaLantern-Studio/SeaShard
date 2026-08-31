@@ -1,5 +1,5 @@
 import { defineServiceContract } from "@seashard/plugin-sdk";
-import type { RuntimePhase } from "../shared";
+import type { RuntimePhase } from "../shared.js";
 
 /** 内建运行诊断组件发布的类型化 Service contract。 */
 export const runtimeDiagnosticsContract = defineServiceContract<RuntimeDiagnosticsService>(

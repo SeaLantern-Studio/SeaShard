@@ -11,6 +11,7 @@ export const pluginManagementManifest: PluginManifest = {
     {
       id: "plugin-management.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron"],
       activationScopes: ["global"],
@@ -22,7 +23,7 @@ export const pluginManagementManifest: PluginManifest = {
   },
 };
 
-/** 插件管理依赖 Kernel 的收敛事务，因此作为内建 Host 组件发布窄 Service。 */
+/** 插件管理依赖 Kernel 的收敛事务，因此作为内建 Controller 组件发布窄 Service。 */
 export function createPluginManagementModule(kernel: PluginKernel): PluginModule {
   return {
     provides: [pluginManagementContract],

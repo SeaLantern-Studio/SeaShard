@@ -102,14 +102,16 @@ async function applyBootstrap(
 
   await runtime.reconcile(snapshot);
   const currentRoute = router.currentRoute.value;
+  const landingPage =
+    runtime.pages.value.find((page) => page.id === "agent-conversation") ??
+    runtime.pages.value.find((page) => page.id === "host-connections");
   if (currentRoute.path === "/") {
-    const agentPage = runtime.pages.value.find((page) => page.id === "agent-conversation");
-    if (agentPage) await router.replace(agentPage.path);
+    if (landingPage) await router.replace(landingPage.path);
     return;
   }
   const currentPage = runtime.pages.value.find((page) => page.path === currentRoute.path);
   if (!currentPage) {
-    await router.replace("/");
+    if (landingPage) await router.replace(landingPage.path);
     return;
   }
   // 首次加载深链接时路由可能先按“未匹配”完成解析；Entry 注册后必须按名称重新解析。

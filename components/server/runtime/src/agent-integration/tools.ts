@@ -188,7 +188,7 @@ async function stopServer(
   execution.signal?.throwIfAborted();
   const input = parseRuntimeToolInput(value, "server_stop");
   const instance = await findInstance(options, input.instanceId);
-  if (options.getRuntime(input.instanceId).state !== "running") {
+  if ((await options.getRuntime(input.instanceId)).state !== "running") {
     throw new Error(`server instance ${input.instanceId} is not running`);
   }
   execution.signal?.throwIfAborted();

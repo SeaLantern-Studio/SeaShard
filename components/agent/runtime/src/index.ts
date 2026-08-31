@@ -28,6 +28,7 @@ export const agentRuntimeManifest: PluginManifest = {
     {
       id: "agent-runtime.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

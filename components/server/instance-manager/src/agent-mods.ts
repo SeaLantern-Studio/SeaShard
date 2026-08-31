@@ -22,7 +22,8 @@ const maximumNameLength = 200;
 const maximumVersionLength = 100;
 const maximumDescriptionLength = 1_000;
 const maximumSourceIdentityLength = 128;
-const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const instanceIdPattern =
+  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 
 const resourceInputProperties: Readonly<Record<string, true>> = {
   query: true,
@@ -63,8 +64,8 @@ interface InstalledModsQuery {
 const instanceIdProperty: JsonObject = {
   type: "string",
   minLength: 1,
-  maxLength: 128,
-  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+  maxLength: 257,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$",
   description: "服务器实例 ID；可先读取 server://instances 获取。",
 };
 

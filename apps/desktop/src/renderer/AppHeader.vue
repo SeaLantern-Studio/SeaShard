@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DesktopHostConnectionsSnapshot } from "@seashard/contracts";
 import type { UiThemeMode } from "@seashard/ui-sdk";
 import {
   Bot,
@@ -8,14 +9,14 @@ import {
   Minus,
   Monitor,
   Moon,
-  PanelRightClose,
-  PanelRightOpen,
+  Network,
   Server,
   Square,
   Sun,
   X,
 } from "lucide-vue-next";
 import { computed, ref } from "vue";
+import { shouldShowHostChrome } from "./host-connections";
 import { appearanceService } from "./appearance";
 import DownloadTaskPill from "./DownloadTaskPill.vue";
 import type { SettingsMode, WorkspaceMode } from "./workspace-layout";
@@ -24,6 +25,7 @@ const props = defineProps<{
   workspace: WorkspaceMode;
   settingsMode?: SettingsMode;
   rightPanelOpen: boolean;
+  hostConnections?: DesktopHostConnectionsSnapshot;
 }>();
 const emit = defineEmits<{
   "update:workspace": [value: WorkspaceMode];
@@ -34,6 +36,33 @@ const currentTheme = computed(() => appearanceService.settings.value.theme);
 const themeIndicatorOffset = computed(() => {
   const themeOrder: UiThemeMode[] = ["auto", "light", "dark"];
   return themeOrder.indexOf(currentTheme.value) * 26;
+});
+const hostIndicator = computed(() => {
+  const snapshot = props.hostConnections;
+  if (!snapshot) return undefined;
+  const hosts = snapshot.hosts;
+  const visible = shouldShowHostChrome(snapshot);
+  const online = hosts.filter(
+    (host) => host.state === "control" || host.state === "read-only",
+  ).length;
+  const hasError = hosts.some((host) => host.state === "error" || host.state === "disconnected");
+  const hasAttention = hosts.some((host) => host.state === "read-only" || Boolean(host.pending));
+  const label =
+    hosts.length > 1
+      ? `${online}/${hosts.length} Host`
+      : hosts[0]?.pending
+        ? "Host 控制请求"
+        : hosts[0]?.state === "read-only"
+          ? "本机 Host · 只读"
+          : hosts[0]?.state === "connecting"
+            ? "Host 连接中"
+            : hasError
+              ? "Host 未连接"
+              : "Host";
+  return {
+    label,
+    state: hasError ? "error" : hasAttention ? "attention" : "connected",
+  };
 });
 
 function setTheme(theme: UiThemeMode): void {
@@ -147,17 +176,18 @@ async function closeWindow(): Promise<void> {
       <DownloadTaskPill />
 
       <button
-        v-if="!props.settingsMode"
+        v-if="!props.settingsMode && hostIndicator"
         type="button"
-        class="panel-toggle"
+        class="host-indicator"
         :class="{ active: props.rightPanelOpen }"
-        :title="props.rightPanelOpen ? '收起右侧栏' : '展开右侧栏'"
-        :aria-label="props.rightPanelOpen ? '收起右侧栏' : '展开右侧栏'"
+        :data-state="hostIndicator.state"
+        :title="props.rightPanelOpen ? '收起 Host 状态' : '查看 Host 状态'"
+        :aria-label="props.rightPanelOpen ? '收起 Host 状态' : '查看 Host 状态'"
         :aria-pressed="props.rightPanelOpen"
         @click="emit('toggle-right-panel')"
       >
-        <PanelRightClose v-if="props.rightPanelOpen" :size="17" :stroke-width="1.8" />
-        <PanelRightOpen v-else :size="17" :stroke-width="1.8" />
+        <Network :size="15" :stroke-width="1.9" />
+        <span>{{ hostIndicator.label }}</span>
       </button>
 
       <div class="window-controls">

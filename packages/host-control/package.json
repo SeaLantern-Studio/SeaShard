@@ -1,0 +1,12 @@
+{
+  "name": "@seashard/host-control",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/plugin-sdk": "workspace:*"
+  }
+}

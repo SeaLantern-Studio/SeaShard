@@ -1,0 +1,174 @@
+.host-connections-page {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  padding: 10px 0 40px;
+}
+
+.host-connections-header {
+  padding-bottom: 26px;
+}
+
+.host-connections-header h1,
+.host-connection-name-row h2 {
+  margin: 0;
+  color: var(--sl-text-primary);
+}
+
+.host-connections-header h1 {
+  font-size: 1.75rem;
+  font-weight: 680;
+  letter-spacing: -0.04em;
+}
+
+.host-connections-loading {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+}
+
+.host-connections-list {
+  display: grid;
+  gap: var(--sl-space-md);
+}
+
+.host-connection-card {
+  padding: 18px;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-bg-secondary);
+}
+
+.host-connection-main,
+.host-connection-name-row,
+.host-state,
+.host-connection-actions,
+.host-detail-row {
+  display: flex;
+  align-items: center;
+}
+
+.host-connection-main {
+  gap: var(--sl-space-md);
+}
+
+.host-connection-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+  color: var(--sl-text-secondary);
+  border: 1px solid var(--sl-border-light);
+}
+
+.host-connection-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.host-connection-name-row {
+  gap: 8px;
+}
+
+.host-connection-name-row h2 {
+  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-default-badge {
+  padding: 2px 7px;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+  font-size: var(--sl-font-size-xs);
+  font-weight: 600;
+}
+
+.host-connection-endpoint {
+  display: block;
+  margin-top: 4px;
+  color: var(--sl-text-tertiary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.host-state {
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-surface);
+  color: var(--sl-text-secondary);
+  font-size: var(--sl-font-size-sm);
+  font-weight: 600;
+}
+
+.host-state[data-state="control"] {
+  background: var(--sl-success-bg);
+  color: var(--sl-success);
+}
+
+.host-state[data-state="read-only"],
+.host-state[data-state="connecting"] {
+  background: var(--sl-warning-bg);
+  color: var(--sl-warning);
+}
+
+.host-state[data-state="error"] {
+  background: var(--sl-error-bg);
+  color: var(--sl-error);
+}
+
+.host-state .spinning {
+  animation: host-connection-spin 900ms linear infinite;
+}
+
+.host-connection-details {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+}
+
+.host-detail-row {
+  justify-content: space-between;
+  gap: var(--sl-space-lg);
+  color: var(--sl-text-tertiary);
+  font-size: var(--sl-font-size-sm);
+}
+
+.host-detail-row strong {
+  overflow: hidden;
+  color: var(--sl-text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-detail-row--attention strong {
+  color: var(--sl-warning);
+}
+
+.host-connection-error {
+  color: var(--sl-error);
+  font-size: var(--sl-font-size-sm);
+  line-height: 1.55;
+}
+
+.host-connection-actions {
+  justify-content: flex-end;
+  gap: var(--sl-space-sm);
+  margin-top: 16px;
+}
+
+@keyframes host-connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -2,7 +2,7 @@ import type {
   ServerModLoader,
   ServerResourceSourceIndex,
   ServerResourceSourceMetadata,
-} from "./resource";
+} from "./resource.js";
 
 /** 服务器实例管理 Contract；Host 完整类型由实例管理组件关联。 */
 export const serverInstanceManagerContract = "seashard.server-instance-manager";

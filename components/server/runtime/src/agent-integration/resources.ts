@@ -129,7 +129,7 @@ async function readServerRuntime(
   const instanceId = expectInstanceId(request.pathParams.instanceId);
   const instance = await findInstance(options, instanceId);
   execution.signal?.throwIfAborted();
-  const snapshot = options.getRuntime(instanceId);
+  const snapshot = await options.getRuntime(instanceId);
   const projected = projectRuntime(instance, snapshot);
   return input.json
     ? { mimeType: "application/json", content: projected }
@@ -146,7 +146,7 @@ async function readServerLogs(
   const instanceId = expectInstanceId(request.pathParams.instanceId);
   const instance = await findInstance(options, instanceId);
   execution.signal?.throwIfAborted();
-  const page = paginateLogs(options.getLogs(instanceId), input);
+  const page = paginateLogs(await options.getLogs(instanceId), input);
   return input.json
     ? {
         mimeType: "application/json",

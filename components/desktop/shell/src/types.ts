@@ -4,6 +4,7 @@ import type {
   AgentSessionService,
   ClientEntryPublication,
   ClientServiceCallRequest,
+  DesktopHostConnectionsSnapshot,
   DesktopUpdateFinishRequest,
   DesktopUpdateFinishResult,
   DesktopUpdateSnapshot,
@@ -111,6 +112,16 @@ export interface DesktopShellConfig {
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
   reportOpenFailure(error: unknown): void;
+  readHostConnections(): DesktopHostConnectionsSnapshot;
+  retryHostConnection(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
+  disconnectHost(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
+  requestHostControl(hostId: string): Promise<DesktopHostConnectionsSnapshot>;
+  confirmHostControl(hostId: string, requestId: string): Promise<DesktopHostConnectionsSnapshot>;
+  rejectHostControl(hostId: string, requestId: string): Promise<DesktopHostConnectionsSnapshot>;
+  acknowledgeHostConflict(hostId: string): DesktopHostConnectionsSnapshot;
+  onHostConnectionsChanged(
+    listener: (snapshot: DesktopHostConnectionsSnapshot) => void,
+  ): () => void;
   readDesktopUpdateSnapshot(): Promise<DesktopUpdateSnapshot>;
   checkDesktopUpdate(): Promise<DesktopUpdateSnapshot>;
   applyDesktopUpdate(): Promise<DesktopUpdateFinishResult>;

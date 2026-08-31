@@ -4,6 +4,7 @@ import type {
   CpuArchitecture,
   HostProfile,
   OperatingSystem,
+  PluginExecutionLocation,
   PluginEntryManifest,
   PluginManifest,
 } from "@seashard/plugin-sdk";
@@ -17,6 +18,10 @@ const contractPattern = /^[a-z0-9](?:[a-z0-9.:-]{0,126}[a-z0-9])?$/;
 const methodPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const hostProfiles = ["electron", "node", "docker"] as const satisfies readonly HostProfile[];
 const clientTargets = ["desktop", "web", "mobile"] as const satisfies readonly ClientTarget[];
+const executionLocations = [
+  "controller",
+  "host",
+] as const satisfies readonly PluginExecutionLocation[];
 const activationScopeValues = [
   "global",
   "workspace",
@@ -140,7 +145,17 @@ function parseEntry(
 ): PluginEntryManifest {
   const path = `manifest.entries[${index}]`;
   const value = objectAt(input, path, issues);
-  const publicFields = ["id", "runtime", "module", "hostProfiles", "targets", "uses", "os", "arch"];
+  const publicFields = [
+    "id",
+    "runtime",
+    "execution",
+    "module",
+    "hostProfiles",
+    "targets",
+    "uses",
+    "os",
+    "arch",
+  ];
   rejectUnknown(
     value,
     mode === "internal" ? [...publicFields, "activationScopes", "permissions"] : publicFields,
@@ -150,6 +165,9 @@ function parseEntry(
 
   const id = patternedString(value.id, `${path}.id`, entryIdPattern, issues);
   const runtime = enumAt(value.runtime, `${path}.runtime`, ["host", "client"] as const, issues);
+  const execution =
+    optionalEnumAt(value.execution, `${path}.execution`, executionLocations, issues) ??
+    (mode === "package" ? "controller" : undefined);
   const module = stringAt(value.module, `${path}.module`, issues);
   if (module && !isSafeModulePath(module)) {
     issues.push(`${path}.module must be a relative ESM .js or .mjs path without traversal`);
@@ -181,6 +199,7 @@ function parseEntry(
     id,
     runtime,
     module,
+    ...(execution === undefined ? {} : { execution }),
     ...(uses === undefined ? {} : { uses }),
     activationScopes: [...scopes],
     permissions,
@@ -199,6 +218,9 @@ function parseEntry(
     entry.targets = enumArrayAt(value.targets, `${path}.targets`, clientTargets, issues);
     if (value.hostProfiles !== undefined) {
       issues.push(`${path}.hostProfiles is only valid for host entries`);
+    }
+    if (execution === "host") {
+      issues.push(`${path}.execution host is only valid for host entries`);
     }
   }
 
@@ -271,6 +293,16 @@ function enumAt<const T extends string>(
     return values[0];
   }
   return input as T;
+}
+
+function optionalEnumAt<const T extends string>(
+  input: unknown,
+  path: string,
+  values: readonly T[],
+  issues: string[],
+): T | undefined {
+  if (input === undefined) return undefined;
+  return enumAt(input, path, values, issues);
 }
 
 function enumArrayAt<const T extends string>(

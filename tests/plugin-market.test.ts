@@ -39,6 +39,7 @@ const catalogFixture = {
             {
               id: "example.host",
               runtime: "host",
+              execution: "host",
               uses: {
                 "seashard.server-runtime": ["get", "sendCommand"],
               },
@@ -91,6 +92,7 @@ await test("plugin market downloads one Release Catalog and searches it locally"
   assert.equal(first.plugins[0]?.id, "sea-author.example-plugin");
   assert.equal(cached.plugins[0]?.owners[0], "sea-author");
   assert.deepEqual(refreshed.plugins, first.plugins);
+  assert.equal(first.plugins[0]?.releases[0]?.entries[0]?.execution, "host");
 });
 
 await test("plugin market accepts empty queries and paginates the static catalog", async () => {

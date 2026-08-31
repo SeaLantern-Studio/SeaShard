@@ -1,10 +1,12 @@
 import {
   javaRuntimeManagerContract,
   serverInstanceManagerContract,
+  serverRuntimeAgentContract,
   serverRuntimeContract,
   serverSettingsContract,
   type JavaRuntimeManagerService,
   type ServerConsoleLine,
+  type ServerRuntimeAgentService,
   type ServerRuntimeService,
   type ServerSettingsClientService,
 } from "@seashard/contracts";
@@ -36,6 +38,7 @@ export const serverRuntimeManifest: PluginManifest = {
     {
       id: "server-runtime.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],
@@ -55,7 +58,7 @@ export const serverRuntimeManifest: PluginManifest = {
 export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): PluginModule {
   return {
     inject: [serverInstanceManagerContract, javaRuntimeManagerContract, serverSettingsContract],
-    provides: [serverRuntimeContract],
+    provides: [serverRuntimeContract, serverRuntimeAgentContract],
     apply(ctx) {
       const instances = ctx.service<ServerInstanceManagerService>(serverInstanceManagerContract);
       const javaRuntime = ctx.service<JavaRuntimeManagerService>(javaRuntimeManagerContract);
@@ -147,6 +150,29 @@ export function createServerRuntimeModule(options: ServerRuntimeModuleOptions): 
         keyof ServerRuntimeService,
         (...arguments_: unknown[]) => Promise<JsonValue>
       >);
+      ctx.provide(serverRuntimeAgentContract, {
+        startWithReceipt: async (instanceId) =>
+          asJsonValue(await manager.startWithReceipt(instanceId)),
+        stopWithReceipt: async (instanceId) =>
+          asJsonValue(await manager.stopWithReceipt(instanceId)),
+        sendCommandWithReceipt: async (instanceId, command) =>
+          asJsonValue(await manager.sendCommandWithReceipt(instanceId, command)),
+        waitUntilReady: async (instanceId, timeoutMs) =>
+          asJsonValue(
+            await manager.waitUntilReady(instanceId, {
+              timeoutMs: expectWaitTimeout(timeoutMs),
+            }),
+          ),
+        waitUntilStoppedWithReceipt: async (instanceId, timeoutMs) =>
+          asJsonValue(
+            await manager.waitUntilStopped(instanceId, {
+              timeoutMs: expectWaitTimeout(timeoutMs),
+            }),
+          ),
+      } satisfies Record<
+        keyof ServerRuntimeAgentService,
+        (...arguments_: unknown[]) => Promise<JsonValue>
+      >);
 
       return () => manager.dispose();
     },
@@ -170,3 +196,4 @@ export * from "./process";
 export * from "./preparation-runner";
 export * from "./runtime-files";
 export * from "./profiles";
+export * from "./agent-integration";

@@ -1,6 +1,9 @@
 import type { ClientUiModuleLoader } from "@seashard/ui-runtime";
 
 export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleLoader>> = {
+  "seashard.host-connections-ui/host-connections.client": {
+    load: () => import("@seashard/host-connections-ui/client"),
+  },
   "seashard.agent-conversation-ui/agent-conversation.client": {
     load: () => import("@seashard/agent-conversation-ui/client"),
   },

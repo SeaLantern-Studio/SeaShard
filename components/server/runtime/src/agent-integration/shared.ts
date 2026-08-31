@@ -3,7 +3,7 @@ import type {
   ServerInstanceSnapshot,
   ServerRuntimeSnapshot,
 } from "@seashard/contracts";
-import type { JsonObject, JsonValue } from "@seashard/plugin-sdk";
+import type { Awaitable, JsonObject, JsonValue } from "@seashard/plugin-sdk";
 import type {
   ServerRuntimeCommandReceipt,
   ServerRuntimeReadyReceipt,
@@ -17,8 +17,8 @@ export const maximumAgentLineLength = 4_096;
 
 export interface ServerRuntimeAgentRegistrationOptions {
   listInstances(): Promise<readonly ServerInstanceSnapshot[]>;
-  getRuntime(instanceId: string): ServerRuntimeSnapshot;
-  getLogs(instanceId: string): readonly ServerConsoleLine[];
+  getRuntime(instanceId: string): Awaitable<ServerRuntimeSnapshot>;
+  getLogs(instanceId: string): Awaitable<readonly ServerConsoleLine[]>;
   start(instanceId: string): Promise<ServerRuntimeStartReceipt>;
   stop(instanceId: string): Promise<ServerRuntimeStopReceipt>;
   sendCommand(instanceId: string, command: string): Promise<ServerRuntimeCommandReceipt>;
@@ -41,8 +41,8 @@ export const jsonOutputProperty: JsonObject = {
 export const instanceIdProperty: JsonObject = {
   type: "string",
   minLength: 1,
-  maxLength: 128,
-  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+  maxLength: 257,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$",
   description: "服务器实例 ID；可先读取 server://instances 获取。",
 };
 
@@ -69,8 +69,11 @@ export function expectObject(
 }
 
 export function expectInstanceId(value: JsonValue | undefined): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(value)) {
-    throw new TypeError("server runtime instance id must be a plain identifier");
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u.test(value)
+  ) {
+    throw new TypeError("server runtime instance id must be a valid identifier");
   }
   return value;
 }

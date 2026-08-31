@@ -15,13 +15,14 @@ import type { CreateManagedServerInstanceRequest } from "./types";
 const maximumIdentityLength = 128;
 const maximumArtifactFileNameLength = 512;
 const maximumInstanceNameLength = 200;
-const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const instanceIdPattern =
+  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 
 const instanceIdProperty: JsonObject = {
   type: "string",
   minLength: 1,
-  maxLength: 128,
-  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+  maxLength: 257,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$",
   description: "目标服务器实例 ID；必须来自 server://instances。",
 };
 

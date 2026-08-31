@@ -321,6 +321,305 @@ await test("plugin foundation exposes managed storage with runtime isolation and
   }
 });
 
+await test("plugin document migration is replay-safe and marks the source after import", async () => {
+  const sourceDirectory = await mkdtemp(join(tmpdir(), "seashard-storage-source-"));
+  const targetDirectory = await mkdtemp(join(tmpdir(), "seashard-storage-target-"));
+  const sourceRoot = new Context();
+  const targetRoot = new Context();
+  const sourceLoader = new BootstrapLoader(sourceRoot);
+  const targetLoader = new BootstrapLoader(targetRoot);
+  const descriptor = (dataRoot: string) => [
+    createPluginFoundationBootstrapDescriptor({
+      dataRoot,
+      workerEntry: databaseWorkerEntry,
+      seaShardVersion: "0.0.0",
+    }),
+    createSQLiteBootstrapDescriptor({
+      dataRoot,
+      workerEntry: databaseWorkerEntry,
+      readWorkers: 1,
+    }),
+  ];
+  const execution: ExecutionContext = {
+    actorType: "plugin",
+    actorId: "example.migrated-plugin",
+    runtimeId: "plugin:example.migrated-plugin:worker",
+    scopeType: "global",
+    scopeId: "global",
+    scopeChain: [{ type: "global", id: "global" }],
+    permissions: [],
+    permissionRevision: 1,
+  };
+
+  try {
+    await sourceLoader.start(descriptor(sourceDirectory));
+    await targetLoader.start(descriptor(targetDirectory));
+    const source = sourceRoot["plugin-foundation"].storage;
+    const target = targetRoot["plugin-foundation"].storage;
+    await source.for(execution).put("state/value", { origin: "source" });
+    await target.for(execution).put("state/preserved", { origin: "target" });
+
+    const rows = await source.exportOwners([execution.actorId]);
+    await target.importDocuments(rows);
+    await target.importDocuments(rows);
+    await source.completeMigration({
+      migrationId: "test-host-to-controller-v1",
+      targetId: "controller-test",
+      documentCount: rows.length,
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await source.completeMigration({
+      migrationId: "test-host-to-controller-v1",
+      targetId: "ignored-replay",
+      documentCount: 99,
+      completedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    assert.deepEqual((await target.for(execution).get("state/value"))?.value, {
+      origin: "source",
+    });
+    assert.deepEqual((await target.for(execution).get("state/preserved"))?.value, {
+      origin: "target",
+    });
+    assert.deepEqual(await source.readMigrationMarker("test-host-to-controller-v1"), {
+      migrationId: "test-host-to-controller-v1",
+      targetId: "controller-test",
+      documentCount: rows.length,
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+  } finally {
+    await targetLoader.dispose();
+    await sourceLoader.dispose();
+    await rm(targetDirectory, { recursive: true, force: true });
+    await rm(sourceDirectory, { recursive: true, force: true });
+  }
+});
+
+await test("Controller and Host kernels activate only their declared Entry locations", async () => {
+  const controllerDirectory = await mkdtemp(join(tmpdir(), "seashard-controller-entry-"));
+  const hostDirectory = await mkdtemp(join(tmpdir(), "seashard-host-entry-"));
+  const controllerRoot = new Context();
+  const hostRoot = new Context();
+  const controllerLoader = new BootstrapLoader(controllerRoot);
+  const hostLoader = new BootstrapLoader(hostRoot);
+  let controller: PluginKernel | undefined;
+  let host: PluginKernel | undefined;
+  const descriptor = (dataRoot: string) => [
+    createPluginFoundationBootstrapDescriptor({
+      dataRoot,
+      workerEntry: databaseWorkerEntry,
+      seaShardVersion: "0.0.0",
+    }),
+    createSQLiteBootstrapDescriptor({
+      dataRoot,
+      workerEntry: databaseWorkerEntry,
+      readWorkers: 1,
+    }),
+  ];
+  const manifest: PluginManifest = {
+    id: "example.entry-location",
+    version: "1.0.0",
+    publisher: "example",
+    entries: [
+      {
+        id: "controller",
+        runtime: "host",
+        execution: "controller",
+        module: "./dist/controller.js",
+        hostProfiles: ["node"],
+        activationScopes: ["global"],
+        permissions: [],
+      },
+      {
+        id: "worker",
+        runtime: "host",
+        execution: "host",
+        module: "./dist/worker.js",
+        hostProfiles: ["node"],
+        activationScopes: ["global"],
+        permissions: [],
+      },
+    ],
+    compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+  };
+  const registration = {
+    manifest,
+    loaders: {
+      controller: { load: async () => ({ apply() {} }) },
+      worker: { load: async () => ({ apply() {} }) },
+    },
+    bindings: [
+      {
+        id: "core.entry-location.controller",
+        entryId: "controller",
+        scopeType: "global" as const,
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+      {
+        id: "core.entry-location.worker",
+        entryId: "worker",
+        scopeType: "global" as const,
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  };
+
+  try {
+    await controllerLoader.start(descriptor(controllerDirectory));
+    await hostLoader.start(descriptor(hostDirectory));
+    controller = await PluginKernel.create({
+      dataRoot: controllerDirectory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      executionLocation: "controller",
+      platform: "win32",
+      architecture: "x64",
+      root: controllerRoot,
+      store: controllerRoot["plugin-foundation"].store,
+      pluginStorage: controllerRoot["plugin-foundation"].storage,
+    });
+    host = await PluginKernel.create({
+      dataRoot: hostDirectory,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      executionLocation: "host",
+      platform: "win32",
+      architecture: "x64",
+      root: hostRoot,
+      store: hostRoot["plugin-foundation"].store,
+      pluginStorage: hostRoot["plugin-foundation"].storage,
+      agentExtensions: false,
+    });
+    await controller.registerBuiltIn(registration);
+    await host.registerBuiltIn(registration);
+    await controller.start();
+    await host.start();
+
+    assert.deepEqual(
+      controller.runtimeSnapshot().plugins.map(({ runtimeId }) => runtimeId),
+      ["core.entry-location.controller"],
+    );
+    assert.deepEqual(
+      host.runtimeSnapshot().plugins.map(({ runtimeId }) => runtimeId),
+      ["core.entry-location.worker"],
+    );
+  } finally {
+    await host?.dispose();
+    await controller?.dispose();
+    await hostLoader.dispose();
+    await controllerLoader.dispose();
+    await rm(hostDirectory, { recursive: true, force: true });
+    await rm(controllerDirectory, { recursive: true, force: true });
+  }
+});
+
+await test("Host Worker deployment verifies package digest and reconciles exact Worker bindings", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-host-worker-"));
+  const sourceRoot = join(directory, "source");
+  const hostRoot = join(directory, "host");
+  const root = new Context();
+  const loader = new BootstrapLoader(root);
+  let kernel: PluginKernel | undefined;
+  try {
+    await mkdir(join(sourceRoot, "dist"), { recursive: true });
+    await writeFile(
+      join(sourceRoot, "plugin.json"),
+      `${JSON.stringify(
+        {
+          id: "example.host-worker",
+          version: "1.0.0",
+          publisher: "example",
+          entries: [
+            {
+              id: "worker",
+              runtime: "host",
+              execution: "host",
+              module: "./dist/worker.js",
+              hostProfiles: ["node"],
+              uses: {},
+            },
+          ],
+          compatibility: { seaShard: ">=0.0.0 <1.0.0" },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(join(sourceRoot, "dist", "worker.js"), "export function apply() {}\n");
+    await loader.start([
+      createPluginFoundationBootstrapDescriptor({
+        dataRoot: hostRoot,
+        workerEntry: databaseWorkerEntry,
+        seaShardVersion: "0.0.0",
+      }),
+      createSQLiteBootstrapDescriptor({
+        dataRoot: hostRoot,
+        workerEntry: databaseWorkerEntry,
+        readWorkers: 1,
+      }),
+    ]);
+    kernel = await PluginKernel.create({
+      dataRoot: hostRoot,
+      seaShardVersion: "0.0.0",
+      pluginHostEntry: "unused-plugin-host.js",
+      hostProfile: "node",
+      executionLocation: "host",
+      platform: "win32",
+      architecture: "x64",
+      root,
+      store: root["plugin-foundation"].store,
+      pluginStorage: root["plugin-foundation"].storage,
+      agentExtensions: false,
+    });
+    await kernel.start();
+    const candidate = await kernel.installer.inspectDevelopmentDirectory(sourceRoot);
+
+    await kernel.deployHostWorkerPackage({
+      pluginId: candidate.manifest.id,
+      digest: candidate.digest,
+      source: "installed",
+      sourceRoot,
+      entries: [{ entryId: "worker", enabled: false, config: {} }],
+    });
+
+    assert.deepEqual(await kernel.listHostWorkerPluginIds(), ["example.host-worker"]);
+    assert.deepEqual(await root["plugin-foundation"].store.listBindings("example.host-worker"), [
+      {
+        id: "plugin:example.host-worker:worker",
+        pluginId: "example.host-worker",
+        entryId: "worker",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: false,
+        config: {},
+      },
+    ]);
+    await assert.rejects(
+      kernel.deployHostWorkerPackage({
+        pluginId: candidate.manifest.id,
+        digest: "0".repeat(64),
+        source: "installed",
+        sourceRoot,
+        entries: [{ entryId: "worker", enabled: false, config: {} }],
+      }),
+      /digest changed/,
+    );
+
+    await kernel.removeHostWorkerPackage("example.host-worker");
+    assert.deepEqual(await kernel.listHostWorkerPluginIds(), []);
+  } finally {
+    await kernel?.dispose();
+    await loader.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 await test("package installation enables every Entry without activating incompatible Hosts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "seashard-install-enable-"));
   const root = new Context();

@@ -1,12 +1,16 @@
 # SeaShard 第三方插件开发指南
 
-本文面向使用 `@seashard/plugin-sdk` 0.2.x、`@seashard/contracts` 0.2.x 与 `@seashard/ui-sdk` 0.2.x 开发 SeaShard 第三方插件的开发者。完成快速开始后，你将得到一个可以验证、热重载、打包、安装并跨应用重启运行的插件。
+本文面向使用 `@seashard/plugin-sdk` 0.3.x、`@seashard/contracts` 0.3.x 与 `@seashard/ui-sdk` 0.3.x 开发 SeaShard 第三方插件的开发者。完成快速开始后，你将得到一个可以验证、热重载、打包、安装并跨应用重启运行的插件。
 
 ## 1. 当前开放范围
 
-第三方安装包可以声明 `runtime: "host"` 的 Host Entry 和 `runtime: "client"` 的 Client Entry，也可以在同一个包中同时提供两者。
+第三方安装包可以声明 `runtime: "host"` 的 Node Entry 和 `runtime: "client"` 的 Client Entry。Node Entry 再通过 `execution` 选择实际位置：
 
-Host Entry 在独立 Node.js 子进程中执行，可以：
+- `execution: "controller"`：Controller Entry；这是既有清单省略 `execution` 时的兼容默认值；
+- `execution: "host"`：Host Worker Entry；只允许与 `runtime: "host"` 一起使用；
+- Client Entry 固定运行在 Controller，不能选择 Host。
+
+Controller Entry 在 Controller 的独立 Node.js 插件子进程中执行，可以：
 
 - 调用 SeaShard 公开 Service Contract；
 - 向其他组件提供 JSON Service；
@@ -27,11 +31,11 @@ Client Entry 在禁用 Node.js 集成的 Desktop Renderer 中执行，可以：
 
 ### 安全边界
 
-第三方插件包按完整摘要授予信任。Host Entry 拥有 Node.js 完整能力；Client Entry 与 SeaShard 界面共享 Renderer 页面，但该 Renderer 保持 `sandbox: true`、`contextIsolation: true` 和 `nodeIntegration: false`。
+第三方插件包按完整摘要授予信任。Node Entry 拥有其执行机器上的 Node.js 完整能力；Client Entry 与 SeaShard 界面共享 Renderer 页面，但该 Renderer 保持 `sandbox: true`、`contextIsolation: true` 和 `nodeIntegration: false`。
 
 - 安装命令会对插件的精确摘要授予完整机器访问信任；
 - `plugin.json` 中的 `uses` 只限制插件调用哪些 SeaShard Service 方法；
-- `uses` 无法限制插件直接访问文件系统、网络、环境变量或启动子进程；
+- `uses` 无法限制 Node Entry 直接访问其执行机器的文件系统、网络、环境变量或启动子进程；
 - Client Entry 是在 SeaShard 主 Renderer 中执行的可信脚本，可以影响应用界面并访问 Renderer 已暴露的 Preload API；
 - 只安装你信任且已经审查过的插件；
 - 插件不得直接修改 SeaShard 核心数据库或 `plugin-data/documents.sqlite3`。
@@ -74,11 +78,11 @@ acme-greeter/
 ├─ package.json
 ├─ tsconfig.json
 ├─ src/
-│  └─ host.ts
+│  └─ controller.ts
 └─ bundle/
    ├─ plugin.json
    └─ dist/
-      └─ host.js
+      └─ controller.js
 ```
 
 `bundle/` 是唯一交给 SeaShard 校验和打包的目录。这样 `node_modules`、TypeScript 源码、编辑器配置和测试文件不会进入插件包。
@@ -93,12 +97,12 @@ acme-greeter/
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "pnpm run typecheck && esbuild src/host.ts --bundle --platform=node --format=esm --target=es2023 --outfile=bundle/dist/host.js",
-    "watch": "esbuild src/host.ts --bundle --platform=node --format=esm --target=es2023 --sourcemap --watch --outfile=bundle/dist/host.js"
+    "build": "pnpm run typecheck && esbuild src/controller.ts --bundle --platform=node --format=esm --target=es2023 --outfile=bundle/dist/controller.js",
+    "watch": "esbuild src/controller.ts --bundle --platform=node --format=esm --target=es2023 --sourcemap --watch --outfile=bundle/dist/controller.js"
   },
   "devDependencies": {
-    "@seashard/contracts": "^0.2.0",
-    "@seashard/plugin-sdk": "^0.2.0",
+    "@seashard/contracts": "^0.3.0",
+    "@seashard/plugin-sdk": "^0.3.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0"
@@ -106,7 +110,7 @@ acme-greeter/
 }
 ```
 
-示例使用 esbuild 将运行时依赖一起打进 `bundle/dist/host.js`。Host 不会为插件包安装 npm 依赖，因此入口产物不能依赖包外的 `node_modules`。
+示例使用 esbuild 将运行时依赖一起打进 `bundle/dist/controller.js`。SeaShard 不会为插件包安装 npm 依赖，因此入口产物不能依赖包外的 `node_modules`。
 
 ### 3.3 创建 `tsconfig.json`
 
@@ -134,9 +138,10 @@ acme-greeter/
   "publisher": "acme",
   "entries": [
     {
-      "id": "greeter.host",
+      "id": "greeter.controller",
       "runtime": "host",
-      "module": "./dist/host.js",
+      "execution": "controller",
+      "module": "./dist/controller.js",
       "hostProfiles": ["electron"],
       "uses": {
         "seashard.runtime-diagnostics": ["getSnapshot"]
@@ -149,9 +154,9 @@ acme-greeter/
 }
 ```
 
-### 3.5 创建 `src/host.ts`
+### 3.5 创建 `src/controller.ts`
 
-这个示例读取 SeaShard 运行状态，并向 Agent 注册 `acme_runtime-summary` 工具。
+这个示例作为 Controller Entry 读取 SeaShard 运行状态，并向 Controller 的唯一 Agent Runtime 注册 `acme_runtime-summary` 工具。
 
 ```ts
 import { runtimeDiagnosticsContract, type RuntimeDiagnosticsService } from "@seashard/contracts";
@@ -169,19 +174,19 @@ export async function apply(context: PluginContext, _config: JsonValue) {
       namespace: "acme",
       name: "runtime-summary",
       title: "读取 SeaShard 运行摘要",
-      description: "读取当前 Host 状态以及 active 或 failed 组件数量。",
+      description: "读取当前 Controller 状态以及 active 或 failed 组件数量。",
       inputSchema: {
         type: "object",
         properties: {},
         additionalProperties: false,
       },
-      outputDescription: "Host 状态和组件数量。",
+      outputDescription: "Controller 状态和组件数量。",
       examples: [{}],
     },
     async () => {
       const snapshot = await diagnostics.getSnapshot();
       return {
-        hostState: snapshot.state,
+        controllerState: snapshot.state,
         componentCount: snapshot.components.length,
         failedCount: snapshot.components.filter((component) => component.phase === "failed").length,
       };
@@ -203,7 +208,7 @@ pnpm run build
 bundle/
 ├─ plugin.json
 └─ dist/
-   └─ host.js
+   └─ controller.js
 ```
 
 ### 3.7 校验插件包目录
@@ -214,7 +219,7 @@ seashard plugin validate ./bundle
 
 成功输出包括插件 ID、版本、摘要、Entry 数量和文件数量。`validate` 不执行插件代码。
 
-### 3.8 启动开发 Host
+### 3.8 启动开发 Controller
 
 终端一持续构建入口：
 
@@ -222,7 +227,7 @@ seashard plugin validate ./bundle
 pnpm run watch
 ```
 
-终端二启动真实 SeaShard Desktop Host：
+终端二启动真实 SeaShard Desktop Controller：
 
 ```bash
 seashard plugin dev ./bundle
@@ -232,13 +237,13 @@ seashard plugin dev ./bundle
 
 1. 校验 `bundle/plugin.json` 和全部包文件；
 2. 以当前目录摘要创建只存在于本次进程的开发包；
-3. 启动真实 Desktop Host；
-4. 激活 `dev:acme.greeter:greeter.host` Runtime；
+3. 启动真实 Desktop Controller；
+4. 在 Manifest 指定的位置激活 `dev:acme.greeter:greeter.controller` Runtime；
 5. 监听 `bundle/` 变化并在构建产物更新后停止旧 Runtime、启动新 Runtime。
 
 打开 Agent 后，可以明确要求它调用 `acme_runtime-summary`。插件的 `console.log` 和异常会显示在运行 `plugin dev` 的终端。
 
-按 `Ctrl+C` 会等待文件监听器、Plugin Runtime、Plugin Host 和 Desktop Host 完成清理后退出。开发覆盖不会写入正式插件数据库。
+按 `Ctrl+C` 会等待文件监听器、Plugin Runtime、Plugin Host 和 Desktop Controller 完成清理后退出。开发覆盖不会写入正式插件数据库。声明 `execution: "host"` 的开发 Entry 会由 Controller 同步到当前持有控制权的 Host；旁观 Controller 只读取既有 Worker Service。
 
 ## 4. CLI 工作流
 
@@ -254,15 +259,15 @@ seashard plugin reload [runtime-id]
 seashard plugin logs [runtime-id]
 ```
 
-| 命令       | 行为                                                                  |
-| ---------- | --------------------------------------------------------------------- |
-| `validate` | 校验 Manifest、兼容范围、路径、文件限制、Entry 模块和摘要，不执行代码 |
-| `build`    | 执行目标目录 `package.json` 的 `scripts.build`，随后校验同一目录      |
-| `pack`     | 把目标目录全部文件写入确定性 `.seashard-plugin` 压缩包                |
-| `install`  | 通过真实 Host 安装并启用压缩包或目录快照                              |
-| `dev`      | 启动真实 Desktop Host，监视目录并重建开发 Runtime                     |
-| `reload`   | 手动重载活动开发会话中的 Host Runtime                                 |
-| `logs`     | 读取有界的 Runtime 生命周期和失败记录                                 |
+| 命令       | 行为                                                                        |
+| ---------- | --------------------------------------------------------------------------- |
+| `validate` | 校验 Manifest、兼容范围、位置、路径、文件限制、Entry 模块和摘要，不执行代码 |
+| `build`    | 执行目标目录 `package.json` 的 `scripts.build`，随后校验同一目录            |
+| `pack`     | 把目标目录全部文件写入确定性 `.seashard-plugin` 压缩包                      |
+| `install`  | 通过真实 Controller 安装并启用压缩包或目录快照                              |
+| `dev`      | 启动真实 Desktop Controller，监视目录并重建开发 Runtime                     |
+| `reload`   | 手动重载活动开发会话中的 Node Runtime                                       |
+| `logs`     | 读取有界的 Runtime 生命周期和失败记录                                       |
 
 推荐使用“项目根目录 + 独立 `bundle/`”结构。此结构下由项目自己的 `pnpm run build` 或 `pnpm run watch` 生成产物，再把 `bundle/` 传给 SeaShard CLI。
 
@@ -270,7 +275,7 @@ seashard plugin logs [runtime-id]
 
 ### 4.2 在软件内管理插件
 
-`plugin dev` 启动的 Desktop 会把当前目录显示在“软件设置 → 插件设置”中，并标记为“临时加载”。这里可以查看插件包、Host/Client Entry、Runtime ID、Service 权限、信任状态和 SHA-256 摘要。
+`plugin dev` 启动的 Desktop 会把当前目录显示在“软件设置 → 插件设置”中，并标记为“临时加载”。这里可以查看插件包、Controller/Host Worker/Client Entry、Runtime ID、Service 权限、信任状态和 SHA-256 摘要。
 
 插件卡片上的开关控制整个插件包：
 
@@ -301,7 +306,7 @@ failed
 只查看指定 Runtime：
 
 ```bash
-seashard plugin logs dev:acme.greeter:greeter.host
+seashard plugin logs dev:acme.greeter:greeter.controller
 ```
 
 `plugin logs` 展示生命周期和失败原因。插件自己的标准输出与标准错误仍在 `plugin dev` 终端中。
@@ -309,7 +314,7 @@ seashard plugin logs dev:acme.greeter:greeter.host
 ### 4.4 手动重载
 
 ```bash
-seashard plugin reload dev:acme.greeter:greeter.host
+seashard plugin reload dev:acme.greeter:greeter.controller
 ```
 
 省略 Runtime ID 时，命令会处理当前发现的全部插件开发会话。并行开发多个插件时应传入 Runtime ID。
@@ -335,10 +340,10 @@ Inspect 会输出：
 - Contract 名称、所有者和说明；
 - 方法签名、参数、返回值和关联 JSON 类型；
 - 可以直接复制进 `plugin.json` 的 `uses`；
-- 活动 Host 中的 Provider；
+- 活动 Controller 或 Host Worker 中的 Provider；
 - 编译期目录与运行时 Provider 的方法漂移。
 
-没有活动 Host 时，编译期 Contract 仍可查询，状态显示为 `inactive`。
+没有活动 Controller 时，编译期 Contract 仍可查询，状态显示为 `inactive`。
 
 ## 5. `plugin.json` 参考
 
@@ -351,37 +356,70 @@ Inspect 会输出：
 | `publisher`                    | 是   | 发布者标识，使用与插件 ID 相同的字符规则                                     |
 | `entries`                      | 是   | 至少一个 Entry，Entry ID 在包内唯一                                          |
 | `compatibility.seaShard`       | 是   | SeaShard 语义化版本范围                                                      |
-| `compatibility.clientProtocol` | 否   | Client 协议范围；纯 Host 插件通常省略                                        |
+| `compatibility.clientProtocol` | 否   | Client 协议范围；纯 Node 插件通常省略                                        |
 
 Manifest 采用严格校验。拼错字段、未知字段、重复 Entry ID 和不合法范围都会导致整个包被拒绝。`atomic` 当前不作为第三方开发行为开关，第三方包应省略它。
 
-### 5.2 Host Entry 字段
+### 5.2 Node Entry 字段
 
-| 字段           | 必需 | 规则                                                             |
-| -------------- | ---- | ---------------------------------------------------------------- |
-| `id`           | 是   | 包内稳定 Entry ID，字符规则与插件 ID 相同                        |
-| `runtime`      | 是   | `host`                                                           |
-| `module`       | 是   | 以 `./` 开头的包内 ESM `.js` 或 `.mjs` 路径                      |
-| `hostProfiles` | 是   | 非空数组，可选 `electron`、`node`、`docker`                      |
-| `uses`         | 是   | Contract 到方法名数组的映射；不调用任何 Service 时使用 `{}`      |
-| `os`           | 否   | `win32`、`darwin`、`linux`、`aix`、`freebsd`、`openbsd`、`sunos` |
-| `arch`         | 否   | `x64`、`arm64`、`ia32`、`arm`、`riscv64`、`ppc64`、`s390x`       |
+| 字段           | 必需 | 规则                                                                                 |
+| -------------- | ---- | ------------------------------------------------------------------------------------ |
+| `id`           | 是   | 包内稳定 Entry ID，字符规则与插件 ID 相同                                            |
+| `runtime`      | 是   | `host`，表示 Node.js 运行时                                                          |
+| `execution`    | 否   | `controller` 或 `host`；省略时兼容为 `controller`                                    |
+| `module`       | 是   | 以 `./` 开头的包内 ESM `.js` 或 `.mjs` 路径                                          |
+| `hostProfiles` | 是   | 非空数组，可选 `electron`、`node`、`docker`                                          |
+| `uses`         | 是   | Contract 到方法名数组的映射；不调用任何 Service 时使用 `{}`                          |
+| `os`           | 否   | 按实际执行位置过滤：`win32`、`darwin`、`linux`、`aix`、`freebsd`、`openbsd`、`sunos` |
+| `arch`         | 否   | `x64`、`arm64`、`ia32`、`arm`、`riscv64`、`ppc64`、`s390x`                           |
+
+`execution: "controller"` 创建 Controller Entry；`execution: "host"` 创建 Host Worker Entry。Host Worker 不承载 Agent Runtime，适合贴近目标机器运行并通过 JSON Service 返回事实。第三方 Agent Tool 与 Agent Resource 放在 Controller Entry；AI Provider Type 仍只允许 Core 内建组件注册。
+
+同一个插件需要同时执行机器操作与 Controller 业务时，应拆成两个 Entry，并把稳定 Contract 放入共享源码：
+
+```json
+{
+  "entries": [
+    {
+      "id": "machine.worker",
+      "runtime": "host",
+      "execution": "host",
+      "module": "./dist/worker.js",
+      "hostProfiles": ["electron", "node", "docker"],
+      "uses": {}
+    },
+    {
+      "id": "machine.controller",
+      "runtime": "host",
+      "execution": "controller",
+      "module": "./dist/controller.js",
+      "hostProfiles": ["electron", "node", "docker"],
+      "uses": {
+        "acme.machine-facts": ["readSnapshot"]
+      }
+    }
+  ]
+}
+```
+
+`worker.js` 通过 `context.provide()` 发布 `acme.machine-facts`；`controller.js` 通过 `context.service()` 使用它。两个模块不能依赖共享进程、文件路径、环境变量或内存状态。
 
 `module` 不允许绝对路径、反斜杠、空路径段、`..` 或非 JavaScript 扩展名。
 
 ### 5.3 Client Entry 字段
 
-| 字段      | 必需 | 规则                                                        |
-| --------- | ---- | ----------------------------------------------------------- |
-| `id`      | 是   | 包内稳定 Entry ID，字符规则与插件 ID 相同                   |
-| `runtime` | 是   | `client`                                                    |
-| `module`  | 是   | 以 `./` 开头的包内浏览器 ESM `.js` 或 `.mjs` 路径           |
-| `targets` | 是   | 非空数组；Desktop 页面使用 `desktop`                        |
-| `uses`    | 是   | Contract 到方法名数组的映射；不调用任何 Service 时使用 `{}` |
-| `os`      | 否   | 与 Host Entry 相同的操作系统过滤条件                        |
-| `arch`    | 否   | 与 Host Entry 相同的处理器架构过滤条件                      |
+| 字段        | 必需 | 规则                                                        |
+| ----------- | ---- | ----------------------------------------------------------- |
+| `id`        | 是   | 包内稳定 Entry ID，字符规则与插件 ID 相同                   |
+| `runtime`   | 是   | `client`                                                    |
+| `execution` | 否   | 只能是 `controller`；通常省略                               |
+| `module`    | 是   | 以 `./` 开头的包内浏览器 ESM `.js` 或 `.mjs` 路径           |
+| `targets`   | 是   | 非空数组；Desktop 页面使用 `desktop`                        |
+| `uses`      | 是   | Contract 到方法名数组的映射；不调用任何 Service 时使用 `{}` |
+| `os`        | 否   | 与 Node Entry 相同的操作系统过滤条件                        |
+| `arch`      | 否   | 与 Node Entry 相同的处理器架构过滤条件                      |
 
-Client Entry 不能声明 `hostProfiles`。需要 Client Entry 的插件应填写 `compatibility.clientProtocol`，当前 Desktop Client 协议使用范围 `>=1 <2`。
+Client Entry 不能声明 `hostProfiles` 或 `execution: "host"`。需要 Client Entry 的插件应填写 `compatibility.clientProtocol`，当前 Desktop Client 协议使用范围 `>=1 <2`。
 
 安装时，SeaShard 会为包中的每个 Entry 创建稳定 Binding：
 
@@ -395,7 +433,7 @@ plugin:<plugin-id>:<entry-id>
 dev:<plugin-id>:<entry-id>
 ```
 
-所有第三方 Binding 当前都是全局范围。被 `hostProfiles`、`targets`、`os` 或 `arch` 排除的 Entry 会保留在已安装包中，但不会在不兼容的 Host 或 Client 上激活。
+所有第三方 Binding 当前都是全局范围。被 `execution`、`hostProfiles`、`targets`、`os` 或 `arch` 排除的 Entry 会保留在已安装包中，但只在匹配的 Controller、Host 或 Client 上激活。
 
 ### 5.4 `uses` 是方法级授权
 
@@ -415,12 +453,12 @@ dev:<plugin-id>:<entry-id>
 - Contract 必须使用公开 Catalog 中的稳定名称；
 - 方法名区分大小写；
 - 每个方法数组至少包含一个值且不能重复；
-- 未声明的方法调用会被 Host 拒绝；
+- 未声明的方法调用会被 Runtime 拒绝；
 - `uses` 不会自动等待 Provider 启动，模块还需要通过 `inject` 声明启动依赖。
 
-## 6. Host Entry 模块协议
+## 6. Node Entry 模块协议
 
-Host Entry 是 ESM 模块。运行时读取以下命名导出：
+Controller Entry 与 Host Worker Entry 都是 ESM 模块。运行时读取以下命名导出：
 
 ```ts
 import type { JsonValue, PluginContext, StandardSchema } from "@seashard/plugin-sdk";
@@ -595,7 +633,7 @@ export const apply = clientModule.apply;
 在插件开发项目中安装前端依赖：
 
 ```bash
-pnpm add -D @seashard/ui-sdk@^0.2.0 vue@^3.5.0
+pnpm add -D @seashard/ui-sdk@^0.3.0 vue@^3.5.0
 ```
 
 使用 esbuild 生成完整浏览器 ESM：
@@ -612,10 +650,10 @@ pnpm add -D @seashard/ui-sdk@^0.2.0 vue@^3.5.0
 Client 包必须满足以下条件：
 
 - 把 Vue、UI SDK 和其他运行时依赖打进产物，不能留下浏览器无法解析的裸 npm import；
-- 不导入 Node.js、Electron、SeaShard 内部源码路径或只面向 Host 的模块；
+- 不导入 Node.js、Electron、SeaShard 内部源码路径或只面向 Node Entry 的模块；
 - 每个前端页面作为独立组件包和独立 Client Entry 发布；
 - 跨页面共享状态通过独立 shared 包和明确的 Service Contract 组织；
-- `context.service()` 可以调用 Renderer 本地 Service 或 Host Service；每个方法都必须在当前 Client Entry 的 `uses` 中声明；
+- `context.service()` 可以调用 Renderer 本地 Service、Controller Service 或经 Controller 代理的 Host Worker Service；每个方法都必须在当前 Client Entry 的 `uses` 中声明；
 - 模块顶层不启动永久副作用，监听器和其他资源通过 `context.effect()` 注册清理函数。
 
 ### 7.1 加载与刷新
@@ -853,23 +891,11 @@ export interface GreeterService {
 export const greeterContract = defineServiceContract<GreeterService>("acme.greeter");
 ```
 
-Service 参数和返回值必须是 JSON 值或 `void`。不能跨边界传递函数、类实例、`Buffer`、流、DOM 对象、Electron 对象、Node 句柄或循环引用。
+### 8.3 从 Client 调用插件自己的 Node Service
 
-### 8.3 从 Client 调用插件自己的 Host Service
+同一个插件包可以由 Controller Entry 或 Host Worker Entry 提供业务 Service，再由 Client Entry 渲染页面并调用。Contract 放在前后端共同依赖的源码包中。
 
-同一个插件包可以由 Host Entry 提供业务 Service，再由 Client Entry 渲染页面并调用。Contract 放在前后端共同依赖的源码包中：
-
-```ts
-import { defineServiceContract } from "@seashard/plugin-sdk";
-
-export interface GreeterService {
-  greet(name: string): Promise<string>;
-}
-
-export const greeterContract = defineServiceContract<GreeterService>("acme.greeter");
-```
-
-Host Entry 发布 Service：
+Node Entry 发布 Service：
 
 ```ts
 import type { JsonValue, PluginContext } from "@seashard/plugin-sdk";
@@ -925,7 +951,8 @@ ClientUiContext Service Proxy
 → 当前 Client Runtime 与包摘要校验
 → Manifest uses 方法授权
 → Main Service Registry
-→ Host Entry Provider
+→ Controller Entry Provider
+  或 Controller 转发到 Host Worker Provider
 ```
 
 Runtime ID 和包摘要必须同时匹配当前活动 Entry。插件刷新、升级或停用后，旧 Client 模块与旧 Service Proxy 会立即失效。参数和返回值在 IPC 两端按 JSON 边界校验；Provider 错误以 Promise rejection 返回 Client。
@@ -980,7 +1007,11 @@ export async function replaceSettings(context: PluginContext) {
 
 存储命名空间由插件 ID 和 Runtime ID 决定。插件不能指定其他命名空间，也不能读取另一个 Binding 的文档。
 
+托管存储跟随 Entry 的实际执行位置。0.3.0 首次启动时，SeaShard 会把旧版默认运行在 Host 的标准插件文档幂等导入 Controller，并在源端记录完成标记；重复启动不会覆盖 Controller 中已经存在的文档。插件作者以后主动把既有 Entry 从 Controller 改为 Host Worker，或反向调整执行位置时，仍需自行设计该插件的配置与文档迁移，不能假设存储会随 Manifest 自动移动。
+
 ## 10. Agent 能力
+
+第三方 Agent Tool 与 Agent Resource 只允许由 Controller Entry 注册。Host Worker 应发布 JSON Service，由 Controller Entry 读取机器事实后再接入唯一的 Agent Runtime。AI Provider Type 仍由 Core 内建组件统一注册。
 
 ### 10.1 Agent Tool
 
@@ -1189,13 +1220,9 @@ acme.greeter-0.1.0.seashard-plugin
 
 ### 12.2 安装归档
 
-```bash
-seashard plugin install ./acme.greeter-0.1.0.seashard-plugin
-```
+安装成功后，CLI 输出插件 ID、版本、来源和摘要。Controller 会选择该版本、为每个 Entry 创建自动 Binding，激活适用于当前环境的 Controller Entry，把 Client Entry 发布给 Desktop Renderer，并把显式 `execution: "host"` 的 Worker 同步到当前持有控制权的 Host。
 
-安装成功后，CLI 输出插件 ID、版本、来源和摘要。Host 会选择该版本、为每个 Entry 创建自动 Binding，激活适用于当前环境的 Host Entry，并把 Client Entry 发布给 Desktop Renderer。
-
-已经进入官方 Registry 的版本也可以在“软件设置 → 插件市场”中一键安装或更新。市场页面只向 Host 发送插件 ID 和版本；Host 会从当前 Catalog 重新解析下载地址，限制 GitHub Release 下载主机，并依次校验归档 SHA-256、包内 Manifest 身份和 `packageDigest`，通过后选择该版本、创建自动 Binding 并立即启用。页面会把摘要一致的版本标记为“已安装”；同 ID 的 `plugin dev` 开发版本生效时会禁用市场安装，避免正式包被开发覆盖后造成状态误判。
+已经进入官方 Registry 的版本也可以在“软件设置 → 插件市场”中一键安装或更新。市场页面只向 Controller 发送插件 ID 和版本；Controller 会从当前 Catalog 重新解析下载地址，限制 GitHub Release 下载主机，并依次校验归档 SHA-256、包内 Manifest 身份和 `packageDigest`，通过后选择该版本、创建自动 Binding 并立即启用。页面会把摘要一致的版本标记为“已安装”；同 ID 的 `plugin dev` 开发版本生效时会禁用市场安装，避免正式包被开发覆盖后造成状态误判。
 
 ### 12.3 安装目录快照
 
@@ -1265,7 +1292,7 @@ Registry CI 会下载指定 Release Asset，校验归档 SHA-256、安全解包�
 执行：
 
 ```bash
-seashard plugin logs dev:acme.greeter:greeter.host
+seashard plugin logs dev:acme.greeter:greeter.controller
 ```
 
 重点检查：

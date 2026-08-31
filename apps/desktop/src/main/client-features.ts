@@ -3,10 +3,14 @@ import { agentConversationUiManifest } from "@seashard/agent-conversation-ui";
 import { agentSettingsUiManifest } from "@seashard/agent-settings-ui";
 import { agentSettingsProviderUiManifest } from "@seashard/agent-settings-provider-ui";
 import { pluginManagementUiRuntimeId, pluginMarketUiRuntimeId } from "@seashard/contracts";
-import { pluginMarketUiManifest } from "@seashard/plugin-market-ui";
 import { gameSettingsUiManifest } from "@seashard/game-settings-ui";
-import { personalizationUiManifest } from "@seashard/personalization-ui";
+import {
+  hostConnectionsUiManifest,
+  hostConnectionsUiRuntimeId,
+} from "@seashard/host-connections-ui";
 import type { PluginKernel } from "@seashard/plugin-system";
+import { pluginMarketUiManifest } from "@seashard/plugin-market-ui";
+import { personalizationUiManifest } from "@seashard/personalization-ui";
 import { pluginSettingsUiManifest } from "@seashard/plugin-settings-ui";
 import { runtimeDiagnosticsUiManifest } from "@seashard/runtime-diagnostics-ui";
 import { serverConfigurationUiManifest } from "@seashard/server-configuration-ui";
@@ -25,6 +29,21 @@ import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
 /** 注册只发布 Renderer Client Entry 的内置功能。 */
 export async function registerClientFeatures(kernel: PluginKernel): Promise<void> {
+  // Host 连接管理属于 Controller 应用页面；Host 断开时仍保持发布。
+  await kernel.registerBuiltIn({
+    manifest: hostConnectionsUiManifest,
+    loaders: {},
+    bindings: [
+      {
+        id: hostConnectionsUiRuntimeId,
+        entryId: "host-connections.client",
+        scopeType: "global",
+        scopeId: "global",
+        enabled: true,
+        config: null,
+      },
+    ],
+  });
   // Agent 对话页独立发布，与侧栏通过专用 shared 包共享 Session 选择状态。
   await kernel.registerBuiltIn({
     manifest: agentConversationUiManifest,

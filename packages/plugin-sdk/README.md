@@ -1,6 +1,6 @@
 # @seashard/plugin-sdk
 
-SeaShard Host 插件的公开开发 SDK，提供插件清单、生命周期、Service、Contribution、资源、Agent 能力和 JSON 数据类型。
+SeaShard 插件的公开开发 SDK，提供插件清单、执行位置、生命周期、Service、Contribution、资源、Agent 能力和 JSON 数据类型。
 
 ## 安装
 
@@ -12,7 +12,7 @@ pnpm add @seashard/plugin-sdk @seashard/contracts
 
 ## 插件清单
 
-第三方插件必须在每个 Entry 的 `uses` 中声明可能调用的 Contract 方法。Scope 与内部权限元数据由 SeaShard Host 管理，不属于第三方清单。
+第三方插件必须在每个 Entry 的 `uses` 中声明可能调用的 Contract 方法。`runtime` 选择 Node（`host`）或 Renderer（`client`）运行时；Node Entry 的 `execution` 选择 `controller` 或 `host`。Scope 与内部权限元数据由 SeaShard 管理，不属于第三方清单。
 
 ```json
 {
@@ -21,9 +21,10 @@ pnpm add @seashard/plugin-sdk @seashard/contracts
   "publisher": "example",
   "entries": [
     {
-      "id": "hello.host",
+      "id": "hello.controller",
       "runtime": "host",
-      "module": "./dist/host.js",
+      "execution": "controller",
+      "module": "./dist/controller.js",
       "hostProfiles": ["electron", "node", "docker"],
       "uses": {
         "seashard.runtime-diagnostics": ["getSnapshot"]
@@ -36,9 +37,9 @@ pnpm add @seashard/plugin-sdk @seashard/contracts
 }
 ```
 
-## Host Entry
+## Controller Entry 与 Host Worker Entry
 
-Host Entry 以命名导出提供 `apply`。所有生命周期资源都应通过 `PluginContext` 注册，由 Host 在 Entry 停用时统一释放。
+Node Entry 以命名导出提供 `apply`。省略 `execution` 时按 `controller` 处理；`execution: "host"` 会把该 Entry 作为 Host Worker 部署到当前 Host。Client Entry 固定属于 Controller。所有生命周期资源都应通过 `PluginContext` 注册，由对应位置的 Plugin Kernel 在 Entry 停用时统一释放。
 
 ```ts
 import { runtimeDiagnosticsContract, type RuntimeDiagnosticsService } from "@seashard/contracts";
@@ -53,6 +54,8 @@ export async function apply(context: PluginContext, _config: JsonValue) {
   });
 }
 ```
+
+Controller Entry 可以注册第三方 Agent Tool 和 Resource；AI Provider Type 仍只允许 Core 内建组件注册。Host Worker 不承载 Agent Runtime，它通过 `context.provide()` 发布的 JSON Service 会由 Controller 代理给已声明相应 `uses` 的 Controller 或 Client Entry。
 
 具体 Contract 名称、方法和数据类型由 `@seashard/contracts` 提供。Client Entry 使用 `@seashard/ui-sdk`。
 

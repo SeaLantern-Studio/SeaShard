@@ -6,6 +6,7 @@ import {
   type AgentResourceReadRequest,
   type AgentResourceReadResult,
   type AgentToolExecutionContext,
+  type Awaitable,
   type JsonObject,
   type JsonValue,
   type PluginContext,
@@ -36,8 +37,8 @@ const cancelInputProperties: Readonly<Record<string, true>> = {
 };
 
 export interface DownloadAgentRegistrationOptions {
-  listTasks(): readonly DownloadTaskSnapshot[];
-  snapshot(taskId: string): DownloadTaskSnapshot | undefined;
+  listTasks(): Awaitable<readonly DownloadTaskSnapshot[]>;
+  snapshot(taskId: string): Awaitable<DownloadTaskSnapshot | undefined>;
   cancel(taskId: string): Promise<boolean>;
 }
 
@@ -145,8 +146,7 @@ async function readDownloadTasks(
 ): Promise<AgentResourceReadResult> {
   execution.signal?.throwIfAborted();
   const query = parseDownloadTasksQuery(request.input);
-  const visibleTasks = options
-    .listTasks()
+  const visibleTasks = (await options.listTasks())
     .filter(
       (task) =>
         isUserVisibleDownloadTask(task) &&
@@ -205,9 +205,9 @@ async function cancelDownloadTask(
 ): Promise<JsonValue> {
   execution.signal?.throwIfAborted();
   const taskId = parseCancelDownloadInput(value);
-  const task = options
-    .listTasks()
-    .find((candidate) => candidate.id === taskId && isUserVisibleDownloadTask(candidate));
+  const task = (await options.listTasks()).find(
+    (candidate) => candidate.id === taskId && isUserVisibleDownloadTask(candidate),
+  );
   if (!task) throw new Error(`用户可见下载任务不存在：${taskId}`);
 
   if (isFinishedDownloadState(task.state)) {
@@ -217,7 +217,7 @@ async function cancelDownloadTask(
   execution.signal?.throwIfAborted();
   const cancelled = await options.cancel(taskId);
   execution.signal?.throwIfAborted();
-  const latest = options.snapshot(taskId);
+  const latest = await options.snapshot(taskId);
   const projectedTask =
     latest && isUserVisibleDownloadTask(latest)
       ? projectDownloadTask(latest)

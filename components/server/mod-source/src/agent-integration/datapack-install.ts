@@ -66,8 +66,8 @@ const readableVersionProperty: JsonObject = {
 const instanceIdProperty: JsonObject = {
   type: "string",
   minLength: 1,
-  maxLength: 128,
-  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+  maxLength: 257,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$",
   description: "目标服务器实例 ID；可先读取 server://instances 获取。",
 };
 const worldIdProperty: JsonObject = {

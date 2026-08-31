@@ -31,50 +31,57 @@ SeaShard 是一个以插件系统为核心、原生支持智能助手的 Minecra
 - 不把尚未开始实施的商业云、移动端和调度系统写成当前能力；
 - 不为未出现的兼容需求建立迁移层和旧格式适配。
 
-## 2. 当前总体架构
+## 2. 总体架构
 
 ```mermaid
 flowchart TB
-    subgraph Desktop[Electron Desktop]
-        MAIN[Main Host]
-        PRELOAD[Typed Preload]
-        RENDERER[Vue Renderer]
-    end
-
-    subgraph Bootstrap[Protected Bootstrap]
-        DB[SQLite Component]
+    subgraph Controller[Desktop 或 Server Controller]
+        CONTROL[Controller Main]
+        DB[Controller SQLite]
         FOUNDATION[Plugin Foundation]
+        KERNEL[完整 Plugin Runtime]
+        SERVICES[Application / Domain Services]
+        AGENT[唯一 Agent Runtime]
+        CLIENTS[全部 Client Entries]
+        PRELOAD[Typed Preload 或 Web Bridge]
+        RENDERER[用户界面]
     end
 
-    subgraph Kernel[Plugin Kernel]
-        REGISTRY[Package / Binding Registry]
-        RUNTIME[Host Runtime]
-        SERVICES[Service / Event / Contribution Registries]
-        CLIENTS[Client Entry Publication]
+    subgraph Host[SeaShard Host]
+        HOSTRUNTIME[服务器范围 Host Runtime]
+        WORKERS[Host Worker Runtime]
+        INSTANCES[Minecraft 服务器实例]
     end
 
-    subgraph Entries[Product Entries]
-        HOST[Built-in and External Host Entries]
-        CLIENT[Built-in Client Entries]
+    subgraph Entries[插件执行组件]
+        CONTROLLERENTRY[Controller Entries]
+        HOSTWORKER[服务器相关 Host Worker Entries]
     end
 
-    MAIN --> DB
-    MAIN --> FOUNDATION
-    DB --> REGISTRY
-    FOUNDATION --> REGISTRY
-    REGISTRY --> RUNTIME
-    RUNTIME --> HOST
-    HOST --> SERVICES
-    REGISTRY --> CLIENTS
+    DB --> FOUNDATION
+    FOUNDATION --> KERNEL
+    KERNEL --> CONTROLLERENTRY
+    CONTROLLERENTRY --> SERVICES
+    CONTROLLERENTRY --> AGENT
+    KERNEL --> CLIENTS
     CLIENTS --> PRELOAD
     PRELOAD --> RENDERER
-    RENDERER --> CLIENT
+    CONTROL -->|服务器范围 Host Contract| HOSTRUNTIME
+    HOSTRUNTIME --> INSTANCES
+    HOSTRUNTIME --> WORKERS
+    HOSTWORKER --> WORKERS
 ```
 
-启动顺序只有两个层级：
+Controller 与 Host 遵循不可互换的职责边界：
 
-1. `BootstrapLoader` 启动 SQLite 与 Plugin Foundation 等不可由普通插件替换的基础设施；
-2. `PluginKernel` 注册内置 Package，解析当前 Entry，启动 Host Entry，发布 Client Entry，最后打开 Renderer。
+1. 每个 Desktop Controller 或 Server Controller 都独立启动 Controller SQLite、Plugin Foundation、完整 Plugin Runtime、全部 Client Entry 和唯一 Agent Runtime；
+2. 插件安装、插件市场、应用设置、用户界面、领域逻辑、跨 Host 聚合以及 Agent 会话、模型、凭据、Tool、Resource 和 Provider 全部归 Controller；
+3. Host 是服务器实例的受控执行外壳，只把本机或远程 Minecraft 服务器实例及其必要机器能力挂载给 Controller；
+4. Host 只运行服务器管理所需的最小 Runtime，以及必须贴近服务器实例执行的 Host Worker；通用插件后端、应用页面和 Agent Runtime 不进入 Host；
+5. Agent Tool 由 Controller Entry 或 Controller Worker 注册，实例能力只接收 `instanceId`；Controller 返回的 ID 始终包含 Host 身份，调用时也允许使用省略 Host 的实例 ID 简写，连接变化只改变相关服务器能力的可用状态，不改变 Agent Runtime；
+6. Controller 退出时，交互式 Agent 随之停止。需要常驻 Agent 时必须持续运行 Server Controller，不能把 Agent 生命周期转移给 Host；
+7. Host 可以在 Controller 断开后继续维持已经运行的服务器进程、容器、服务器范围持久任务和 Host Worker，但不能继续模型循环或用户交互；
+8. Host 启动或连接失败只影响对应服务器实例，不能阻止 Controller、插件市场、Agent 和其他应用功能启动。
 
 当前普通插件运行时保持简单：
 
@@ -83,6 +90,26 @@ flowchart TB
 - Entry 变化时先停止旧 Fiber，再启动新 Fiber；
 - 不维护候选代次、双实例发布、调用租约或热切换状态机；
 - 启动失败记录为当前 Runtime 的失败状态；版本选择失败时恢复之前选中的 Package。
+
+### 2.1 Controller 与 Host 连接体验
+
+- 单个 Controller 正常控制单个本机 Host 时，不显示顶部 Host 指示器和右侧 Host 栏；
+- 出现连接失败、只读占用、控制权请求或多个 Host 时，顶部显示 Host 状态入口，右侧栏承载当前连接概览与快捷操作；
+- Host 连接、Agent、插件目录、插件设置、关于、个性化以及服务器管理页面均由 Controller Client Entry 提供；
+- Host 断开时，服务器页面保留并将对应实例事实标记为未知，依赖连接的操作不可用；其他应用页面和 Agent 会话不受影响；
+- 同一 Host 同时只接受一个 Controller 的变更请求；其他已连接 Controller 保持只读观察；
+- 后连接的 Controller 可以发起接管请求。请求端确认接管，或当前控制端允许交出后，Host 原子切换控制权并拒绝旧控制端后续写入；
+- Host 占用、接管和连接失败全部在 SeaShard 内容区域内处理，不调用操作系统原生弹窗；
+- 本机连接和后续 SSH 连接共享同一数组快照、状态模型与界面，不为远程 Host 建立第二套交互。
+
+### 2.2 实例寻址
+
+- Host 只生成和理解自身范围内的 `hostLocalInstanceId`；
+- Controller 挂载实例时，将 Host 身份与 Host 内实例 ID 组合成规范 `instanceId`，形式可以是经过统一编码的 `hostId:hostLocalInstanceId`；
+- Client Entry、内部组件、普通插件和 Agent Tool 获取到的始终是规范完整 ID，并将其作为不透明标识原样保存和传递；
+- 实例 Service、实例事件和实例相关能力只使用一个 `instanceId` 参数，不附加独立的 `hostId` 参数；
+- 调用实例能力时既可传规范完整 ID，也可只传 `hostLocalInstanceId` 简写。Controller 对完整 ID 直接路由；对简写在各 Host 上报的实例目录中查找，唯一命中时自动路由，零命中时返回实例不存在，多处命中时返回实例 ID 歧义并要求改传完整 ID；
+- 只有 Host 连接管理、Host 状态、Host Worker 部署和跨 Host 编排等以 Host 本身为领域对象的能力才单独使用 `hostId`。
 
 ## 3. 组件、插件包与 Entry
 
@@ -111,10 +138,12 @@ example-plugin/
    └─ client.js
 ```
 
-Entry 只有两种运行位置：
+Entry 先声明运行时，再独立声明执行位置：
 
-- `host`：注册 Service、Event、工具、资源、后台行为和其他 Host 能力；
-- `client`：运行于 Client UI Runtime，注册页面和侧栏等 UI Contribution。
+- `runtime: "host"`：Node Entry，可注册 Service、Event、工具、资源和后台行为；
+- `runtime: "client"`：Client UI Entry，注册页面和侧栏等 UI Contribution；
+- Node Entry 使用 `execution: "controller" | "host"` 选择 Controller Entry 或 Host Worker Entry；
+- Client Entry 固定属于 Controller。既有第三方 Node Entry 省略 `execution` 时兼容为 `controller`。
 
 插件源码可以使用 TypeScript、JavaScript 或 Vue，安装包中只能包含已经构建完成的 ESM JavaScript、CSS 和资源。
 
@@ -131,6 +160,7 @@ Entry 只有两种运行位置：
     {
       "id": "server-tools.host",
       "runtime": "host",
+      "execution": "controller",
       "module": "./dist/host.js",
       "hostProfiles": ["electron", "node", "docker"],
       "uses": {
@@ -243,11 +273,11 @@ Installer 已负责：
 - 展示 Manifest、摘要、Entry 与能力使用声明；
 - 创建全局 Binding 和配置；
 - 启用、停用、重载、升级、回退和卸载；
-- 展示启动失败原因和 Plugin Host 日志。
+- 展示启动失败原因以及 Controller Plugin Worker、Host Worker 日志。
 
 ### 5.3 生命周期
 
-Host Entry 统一导出 `apply(ctx, config)`，可以返回清理函数。模块顶层不得创建长期副作用。
+Controller Entry 与 Host Worker Entry 都统一导出 `apply(ctx, config)`，并在各自执行位置的 Runtime 中运行，可以返回清理函数。模块顶层不得创建长期副作用。
 
 停用或重载时：
 
@@ -255,7 +285,7 @@ Host Entry 统一导出 `apply(ctx, config)`，可以返回清理函数。模块
 2. 释放对应 Cordis Fiber；
 3. 撤销 Service、Event、Contribution、工具和资源注册；
 4. 等待组件主动清理；
-5. 关闭外部 Plugin Host；
+5. 关闭对应的外部 Controller Plugin Worker 或 Host Worker；
 6. 启动新的 Runtime。
 
 如果 Entry 拥有无法立即交接的外部资源，它必须在清理函数中明确关闭，或让停用失败并向用户报告。运行时不推测端口、文件锁和子进程的资源语义。
@@ -328,29 +358,29 @@ Core Host 持有权威业务状态。Renderer 只保存当前选择、表单草�
 
 ### 9.1 基础设施
 
-| 能力 | 当前状态 |
-|---|---|
-| SQLite Bootstrap | 已实现 |
-| Plugin Foundation 与托管存储 | 已实现 |
-| Plugin Installer、Registry、Runtime | 已实现底层能力 |
-| External Node Plugin Host | 已实现 |
-| Desktop Shell、Preload 与 IPC 安全边界 | 已实现 |
-| Runtime Diagnostics | 已实现最小投影 |
-| 公共文件下载 | 已实现 |
+| 能力                                   | 当前状态       |
+| -------------------------------------- | -------------- |
+| SQLite Bootstrap                       | 已实现         |
+| Plugin Foundation 与托管存储           | 已实现         |
+| Plugin Installer、Registry、Runtime    | 已实现底层能力 |
+| External Node Plugin Host              | 已实现         |
+| Desktop Shell、Preload 与 IPC 安全边界 | 已实现         |
+| Runtime Diagnostics                    | 已实现最小投影 |
+| 公共文件下载                           | 已实现         |
 
 ### 9.2 服务器与游戏
 
-| 能力 | 当前状态 |
-|---|---|
-| 服务端核心目录与下载 | 已实现 |
-| Modrinth/CurseForge 服务端资源来源 | 已实现 |
-| 服务器设置 | 已实现 |
-| 服务器实例管理 | 已实现 |
-| Java 运行环境发现与选择 | 已实现 |
-| 服务器启动、停止、命令和日志 | 已实现 |
-| 服务器配置文件管理 | 已实现 |
-| 世界、备份、数据包和 Mod 管理 | 已实现当前纵切 |
-| Minecraft 客户端实例与启动 | 尚未形成完整纵切 |
+| 能力                               | 当前状态         |
+| ---------------------------------- | ---------------- |
+| 服务端核心目录与下载               | 已实现           |
+| Modrinth/CurseForge 服务端资源来源 | 已实现           |
+| 服务器设置                         | 已实现           |
+| 服务器实例管理                     | 已实现           |
+| Java 运行环境发现与选择            | 已实现           |
+| 服务器启动、停止、命令和日志       | 已实现           |
+| 服务器配置文件管理                 | 已实现           |
+| 世界、备份、数据包和 Mod 管理      | 已实现当前纵切   |
+| Minecraft 客户端实例与启动         | 尚未形成完整纵切 |
 
 ### 9.3 Client Entry
 
@@ -377,19 +407,22 @@ Core Host 持有权威业务状态。Renderer 只保存当前选择、表单草�
 - Renderer 不取得文件系统、Cordis Context、数据库连接或任意 IPC；
 - 系统目录选择、打开文件夹和窗口操作由 Desktop Shell 提供收窄接口。
 
-### 10.2 第三方 Host 插件
+### 10.2 第三方 Controller 插件与 Host Worker
 
-外部 Host Entry 在独立 Node 子进程运行。该进程提供故障和生命周期隔离，不提供操作系统安全隔离。插件仍可直接访问用户文件、网络和子进程。
+外部 Controller Entry 在控制器侧独立 Node 子进程中运行。该进程提供故障和生命周期隔离，不提供操作系统安全隔离；插件仍可直接访问控制器所在机器的用户文件、网络和子进程。Controller 插件可以注册应用 Service、Client Entry 和 Agent Tool、Resource、Provider。
 
-因此当前安装模型是“用户完全信任该插件获得本机代码执行能力”。能力使用声明只说明它通过 SeaShard Contract 调用了什么，不能描述成操作系统权限或沙箱。
+Host Worker 只部署必须贴近 Minecraft 服务器实例运行的代码，并获得对应受控主机上的完整机器权限。它不能注册或持有 Agent Runtime、模型凭据、会话、插件市场或其他通用应用能力。
 
-Main 负责：
+因此当前安装模型是“用户完全信任 Controller 插件获得控制器机器代码执行能力，并单独信任其 Host Worker 获得目标服务器机器代码执行能力”。能力使用声明只说明它通过 SeaShard Contract 调用了什么，不能描述成操作系统权限或沙箱。
 
-- 将 Plugin Host Session 绑定到确定的 Runtime 身份；
+Controller Main 负责：
+
+- 将 Plugin Runtime Session 绑定到确定的 Runtime 身份和执行位置；
 - 使用 Main 持有的 Manifest 检查 Contract 方法；
 - 不信任子进程回传的执行身份和能力集合；
 - 在子进程退出时撤销其全部注册；
-- 对存储、消息大小、超时和协议结构执行统一边界检查。
+- 对存储、消息大小、超时和协议结构执行统一边界检查；
+- 禁止 Host Worker 注册 Controller 应用能力或 Agent Runtime。
 
 更细的用户授权、方法批准、资源限制和受限 Runtime 等方案延后，由团队在拥有真实插件生态反馈后单独设计。
 

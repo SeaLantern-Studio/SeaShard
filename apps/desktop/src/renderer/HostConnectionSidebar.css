@@ -1,0 +1,139 @@
+.host-sidebar-content {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+  overflow: hidden;
+}
+
+.host-sidebar-heading,
+.host-sidebar-card-main,
+.host-sidebar-actions {
+  display: flex;
+  align-items: center;
+}
+
+.host-sidebar-heading {
+  min-height: 30px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.host-sidebar-heading h2 {
+  margin: 0;
+  color: var(--sl-text-primary);
+  font-size: 0.95rem;
+  font-weight: 680;
+}
+
+.host-sidebar-heading button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--sl-radius-sm);
+  color: var(--sl-text-tertiary);
+}
+
+.host-sidebar-heading button:hover {
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+}
+
+.host-sidebar-list {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.host-sidebar-card {
+  padding: 11px;
+  border: 1px solid var(--sl-border-light);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-bg-secondary);
+}
+
+.host-sidebar-card-main {
+  gap: 8px;
+}
+
+.host-sidebar-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: var(--sl-radius-sm);
+  background: var(--sl-surface);
+  color: var(--sl-text-secondary);
+}
+
+.host-sidebar-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.host-sidebar-copy strong,
+.host-sidebar-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-sidebar-copy strong {
+  color: var(--sl-text-primary);
+  font-size: var(--sl-font-size-sm);
+  font-weight: 650;
+}
+
+.host-sidebar-copy span {
+  margin-top: 2px;
+  color: var(--sl-text-tertiary);
+  font-size: var(--sl-font-size-xs);
+}
+
+.host-sidebar-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--sl-text-tertiary);
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
+.host-sidebar-state[data-state="control"] {
+  color: var(--sl-success);
+}
+
+.host-sidebar-state[data-state="read-only"] {
+  color: var(--sl-warning);
+}
+
+.host-sidebar-state[data-state="error"] {
+  color: var(--sl-error);
+}
+
+.host-sidebar-holder,
+.host-sidebar-error {
+  margin-top: 9px;
+  font-size: var(--sl-font-size-xs);
+  line-height: 1.45;
+}
+
+.host-sidebar-holder {
+  color: var(--sl-text-tertiary);
+}
+
+.host-sidebar-error {
+  color: var(--sl-error);
+}
+
+.host-sidebar-actions {
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}

@@ -61,6 +61,7 @@ interface RuntimeRegistries {
   contributions: ContributionRegistry;
   events: PluginEventBus;
   storage: PluginStorageBroker;
+  agentExtensions: boolean;
 }
 
 /**
@@ -676,6 +677,9 @@ function createLocalPluginContext(
       return registration.id;
     },
     agentTool(definition, execute) {
+      if (!registries.agentExtensions) {
+        return `disabled:${entry.runtimeId}:tool:${definition.namespace}_${definition.name}`;
+      }
       const registration = registries.agentTools.register(
         entry.runtimeId,
         scope,
@@ -689,6 +693,9 @@ function createLocalPluginContext(
       return registration.id;
     },
     aiProviderType(definition) {
+      if (!registries.agentExtensions) {
+        return `disabled:${entry.runtimeId}:provider:${definition.id}`;
+      }
       const registration = registries.agentProviderTypes.register(
         entry.runtimeId,
         scope,
@@ -698,6 +705,7 @@ function createLocalPluginContext(
       return registration.id;
     },
     agentResources(resources) {
+      if (!registries.agentExtensions) return;
       for (const [pattern, resource] of Object.entries(resources)) {
         const registration = registries.agentResources.register(
           entry.runtimeId,

@@ -34,7 +34,7 @@ const packageManifest = {
       default: "./index.js",
     },
   },
-  files: ["index.js", "index.d.ts", "README.md", "LICENSE"],
+  files: ["**/*.js", "**/*.d.ts", "README.md", "LICENSE"],
   engines: sourceManifest.engines,
   ...(sourceManifest.peerDependencies ? { peerDependencies: sourceManifest.peerDependencies } : {}),
 };

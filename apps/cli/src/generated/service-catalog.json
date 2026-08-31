@@ -70,13 +70,13 @@
           "name": "AgentActivityPresentationField",
           "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
           "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
-          "source": "packages/plugin-sdk/src/index.ts:328"
+          "source": "packages/plugin-sdk/src/index.ts:334"
         },
         {
           "name": "AgentActivityPresentationIcon",
           "description": "",
           "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
-          "source": "packages/plugin-sdk/src/index.ts:335"
+          "source": "packages/plugin-sdk/src/index.ts:341"
         },
         {
           "name": "AgentAskInteraction",
@@ -196,7 +196,7 @@
           "name": "AgentToolConfirmationLevel",
           "description": "",
           "declaration": "export type AgentToolConfirmationLevel = 0 | 1 | 2;",
-          "source": "packages/plugin-sdk/src/index.ts:298"
+          "source": "packages/plugin-sdk/src/index.ts:304"
         },
         {
           "name": "JsonObject",
@@ -571,13 +571,13 @@
           "name": "AgentActivityPresentationField",
           "description": "Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。",
           "declaration": "/** Agent 资源展示字段只供 Tool Call 卡片使用，永不进入模型上下文。 */\nexport interface AgentActivityPresentationField {\n  readonly label?: string;\n  readonly value: string;\n  readonly unit?: string;\n}",
-          "source": "packages/plugin-sdk/src/index.ts:328"
+          "source": "packages/plugin-sdk/src/index.ts:334"
         },
         {
           "name": "AgentActivityPresentationIcon",
           "description": "",
           "declaration": "export type AgentActivityPresentationIcon = (typeof agentActivityPresentationIcons)[number];",
-          "source": "packages/plugin-sdk/src/index.ts:335"
+          "source": "packages/plugin-sdk/src/index.ts:341"
         },
         {
           "name": "AgentConfiguredModel",
@@ -1018,7 +1018,7 @@
       "contract": "seashard.plugin-management",
       "owner": "seashard.plugin-management",
       "description": "只向内置插件设置 Client Entry 开放的管理能力。",
-      "source": "packages/contracts/src/plugin/management.ts:5",
+      "source": "packages/contracts/src/plugin/management.ts:10",
       "methods": [
         {
           "name": "list",
@@ -1073,34 +1073,40 @@
       ],
       "types": [
         {
+          "name": "PluginExecutionLocation",
+          "description": "",
+          "declaration": "export type PluginExecutionLocation = \"controller\" | \"host\";",
+          "source": "packages/plugin-sdk/src/index.ts:11"
+        },
+        {
           "name": "PluginManagementEntrySnapshot",
           "description": "第三方包内单个 Entry 的只读运行状态。",
-          "declaration": "/** 第三方包内单个 Entry 的只读运行状态。 */\nexport interface PluginManagementEntrySnapshot {\n  readonly id: string;\n  readonly runtimeId: string;\n  readonly runtime: PluginRuntime;\n  readonly enabled: boolean;\n  readonly state: PluginManagementEntryState;\n  readonly uses: Readonly<Record<string, readonly string[]>>;\n  readonly error?: string;\n}",
-          "source": "packages/contracts/src/plugin/management.ts:13"
+          "declaration": "/** 第三方包内单个 Entry 的只读运行状态。 */\nexport interface PluginManagementEntrySnapshot {\n  readonly id: string;\n  readonly runtimeId: string;\n  readonly runtime: PluginRuntime;\n  readonly execution?: PluginExecutionLocation;\n  readonly enabled: boolean;\n  readonly state: PluginManagementEntryState;\n  readonly uses: Readonly<Record<string, readonly string[]>>;\n  readonly error?: string;\n}",
+          "source": "packages/contracts/src/plugin/management.ts:18"
         },
         {
           "name": "PluginManagementEntryState",
           "description": "",
           "declaration": "export type PluginManagementEntryState = \"active\" | \"failed\" | \"inactive\";",
-          "source": "packages/contracts/src/plugin/management.ts:10"
+          "source": "packages/contracts/src/plugin/management.ts:15"
         },
         {
           "name": "PluginManagementSnapshot",
-          "description": "当前 Host 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。",
-          "declaration": "/** 当前 Host 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。 */\nexport interface PluginManagementSnapshot {\n  readonly id: string;\n  readonly version: string;\n  readonly publisher: string;\n  readonly source: Exclude<PluginSourceKind, \"builtin\">;\n  readonly trust: Exclude<PluginTrustLevel, \"builtin\" | \"official\">;\n  readonly digest: string;\n  readonly installedAt: string;\n  readonly enabled: boolean;\n  readonly entries: readonly PluginManagementEntrySnapshot[];\n}",
-          "source": "packages/contracts/src/plugin/management.ts:24"
+          "description": "当前 Controller 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。",
+          "declaration": "/** 当前 Controller 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。 */\nexport interface PluginManagementSnapshot {\n  readonly id: string;\n  readonly version: string;\n  readonly publisher: string;\n  readonly source: Exclude<PluginSourceKind, \"builtin\">;\n  readonly trust: Exclude<PluginTrustLevel, \"builtin\" | \"official\">;\n  readonly digest: string;\n  readonly installedAt: string;\n  readonly enabled: boolean;\n  readonly entries: readonly PluginManagementEntrySnapshot[];\n}",
+          "source": "packages/contracts/src/plugin/management.ts:30"
         },
         {
           "name": "PluginSourceKind",
           "description": "",
           "declaration": "export type PluginSourceKind = \"builtin\" | \"development\" | \"installed\";",
-          "source": "packages/plugin-sdk/src/index.ts:12"
+          "source": "packages/plugin-sdk/src/index.ts:13"
         },
         {
           "name": "PluginTrustLevel",
           "description": "",
           "declaration": "export type PluginTrustLevel = \"builtin\" | \"official\" | \"local-full-trust\" | \"package-full-trust\";",
-          "source": "packages/plugin-sdk/src/index.ts:13"
+          "source": "packages/plugin-sdk/src/index.ts:14"
         }
       ]
     },
@@ -1108,7 +1114,7 @@
       "contract": "seashard.plugin-market",
       "owner": "seashard.plugin-market",
       "description": "内建市场页使用的官方静态插件注册目录。",
-      "source": "packages/contracts/src/plugin/market.ts:12",
+      "source": "packages/contracts/src/plugin/market.ts:13",
       "methods": [
         {
           "name": "search",
@@ -1139,7 +1145,7 @@
           "name": "CpuArchitecture",
           "description": "",
           "declaration": "export type CpuArchitecture = \"x64\" | \"arm64\" | \"ia32\" | \"arm\" | \"riscv64\" | \"ppc64\" | \"s390x\";",
-          "source": "packages/plugin-sdk/src/index.ts:23"
+          "source": "packages/plugin-sdk/src/index.ts:24"
         },
         {
           "name": "HostProfile",
@@ -1151,49 +1157,55 @@
           "name": "OperatingSystem",
           "description": "",
           "declaration": "export type OperatingSystem =\n  | \"win32\"\n  | \"darwin\"\n  | \"linux\"\n  | \"aix\"\n  | \"freebsd\"\n  | \"openbsd\"\n  | \"sunos\";",
-          "source": "packages/plugin-sdk/src/index.ts:15"
+          "source": "packages/plugin-sdk/src/index.ts:16"
+        },
+        {
+          "name": "PluginExecutionLocation",
+          "description": "",
+          "declaration": "export type PluginExecutionLocation = \"controller\" | \"host\";",
+          "source": "packages/plugin-sdk/src/index.ts:11"
         },
         {
           "name": "PluginMarketCompatibility",
           "description": "插件发布包声明的 SeaShard 与 Client Protocol 兼容范围。",
           "declaration": "/** 插件发布包声明的 SeaShard 与 Client Protocol 兼容范围。 */\nexport interface PluginMarketCompatibility {\n  readonly seaShard: string;\n  readonly clientProtocol?: string;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:30"
+          "source": "packages/contracts/src/plugin/market.ts:31"
         },
         {
           "name": "PluginMarketEntry",
           "description": "Registry CI 从发布包 Manifest 中提取的单个 Entry 摘要。",
-          "declaration": "/** Registry CI 从发布包 Manifest 中提取的单个 Entry 摘要。 */\nexport interface PluginMarketEntry {\n  readonly id: string;\n  readonly runtime: PluginRuntime;\n  readonly uses: Readonly<Record<string, readonly string[]>>;\n  readonly hostProfiles?: readonly HostProfile[];\n  readonly targets?: readonly ClientTarget[];\n  readonly os?: readonly OperatingSystem[];\n  readonly arch?: readonly CpuArchitecture[];\n}",
-          "source": "packages/contracts/src/plugin/market.ts:36"
+          "declaration": "/** Registry CI 从发布包 Manifest 中提取的单个 Entry 摘要。 */\nexport interface PluginMarketEntry {\n  readonly id: string;\n  readonly runtime: PluginRuntime;\n  readonly execution?: PluginExecutionLocation;\n  readonly uses: Readonly<Record<string, readonly string[]>>;\n  readonly hostProfiles?: readonly HostProfile[];\n  readonly targets?: readonly ClientTarget[];\n  readonly os?: readonly OperatingSystem[];\n  readonly arch?: readonly CpuArchitecture[];\n}",
+          "source": "packages/contracts/src/plugin/market.ts:37"
         },
         {
           "name": "PluginMarketPlugin",
           "description": "官方注册目录中的完整插件记录；列表与详情共享同一份已校验数据。",
           "declaration": "/** 官方注册目录中的完整插件记录；列表与详情共享同一份已校验数据。 */\nexport interface PluginMarketPlugin {\n  readonly id: string;\n  readonly name: string;\n  readonly summary: string;\n  readonly owners: readonly string[];\n  readonly source: PluginMarketSource;\n  readonly license: string;\n  readonly releases: readonly PluginMarketRelease[];\n}",
-          "source": "packages/contracts/src/plugin/market.ts:67"
+          "source": "packages/contracts/src/plugin/market.ts:69"
         },
         {
           "name": "PluginMarketRelease",
           "description": "Registry CI 校验后的不可变发布记录。\n\narchiveSha256 固定下载归档字节，packageDigest 固定 SeaShard 解包后的包内容身份。",
           "declaration": "/**\n * Registry CI 校验后的不可变发布记录。\n *\n * archiveSha256 固定下载归档字节，packageDigest 固定 SeaShard 解包后的包内容身份。\n */\nexport interface PluginMarketRelease {\n  readonly version: string;\n  readonly tag: string;\n  readonly releaseUrl: string;\n  readonly downloadUrl: string;\n  readonly archiveSha256: string;\n  readonly packageDigest: string;\n  readonly publisher: string;\n  readonly compatibility: PluginMarketCompatibility;\n  readonly entries: readonly PluginMarketEntry[];\n  readonly fileCount: number;\n  readonly unpackedSize: number;\n  readonly yanked: boolean;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:51"
+          "source": "packages/contracts/src/plugin/market.ts:53"
         },
         {
           "name": "PluginMarketSearchRequest",
           "description": "",
           "declaration": "export interface PluginMarketSearchRequest {\n  readonly query: string;\n  readonly page: number;\n  readonly pageSize: number;\n  /** 忽略 Host 内存缓存，重新下载官方 Latest Release Catalog。 */\n  readonly refresh?: boolean;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:77"
+          "source": "packages/contracts/src/plugin/market.ts:79"
         },
         {
           "name": "PluginMarketSearchResult",
           "description": "",
           "declaration": "export interface PluginMarketSearchResult {\n  readonly totalCount: number;\n  readonly page: number;\n  readonly pageSize: number;\n  readonly fetchedAt: string;\n  readonly plugins: readonly PluginMarketPlugin[];\n}",
-          "source": "packages/contracts/src/plugin/market.ts:85"
+          "source": "packages/contracts/src/plugin/market.ts:87"
         },
         {
           "name": "PluginMarketSource",
           "description": "注册目录中可公开展示的插件源码位置。",
           "declaration": "/** 注册目录中可公开展示的插件源码位置。 */\nexport interface PluginMarketSource {\n  readonly type: \"github\";\n  readonly repository: string;\n  readonly url: string;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:23"
+          "source": "packages/contracts/src/plugin/market.ts:24"
         }
       ]
     },
@@ -1201,7 +1213,7 @@
       "contract": "seashard.plugin-market-install",
       "owner": "seashard.plugin-market",
       "description": "只向内建插件市场页面开放的安装能力。",
-      "source": "packages/contracts/src/plugin/market.ts:14",
+      "source": "packages/contracts/src/plugin/market.ts:15",
       "methods": [
         {
           "name": "list",
@@ -1237,13 +1249,13 @@
           "name": "PluginMarketInstallationSnapshot",
           "description": "插件市场用于判断安装、更新和开发覆盖状态的最小投影。",
           "declaration": "/** 插件市场用于判断安装、更新和开发覆盖状态的最小投影。 */\nexport interface PluginMarketInstallationSnapshot {\n  readonly id: string;\n  readonly version: string;\n  readonly digest: string;\n  readonly source: \"installed\" | \"development\";\n  readonly enabled: boolean;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:105"
+          "source": "packages/contracts/src/plugin/market.ts:107"
         },
         {
           "name": "PluginMarketInstallRequest",
           "description": "一键安装只传 Registry 主键；下载地址和摘要始终由 Host 从受信 Catalog 重新解析。",
           "declaration": "/** 一键安装只传 Registry 主键；下载地址和摘要始终由 Host 从受信 Catalog 重新解析。 */\nexport interface PluginMarketInstallRequest {\n  readonly pluginId: string;\n  readonly version: string;\n  readonly acknowledgeFullMachineAccess: true;\n}",
-          "source": "packages/contracts/src/plugin/market.ts:114"
+          "source": "packages/contracts/src/plugin/market.ts:116"
         }
       ]
     },
@@ -2738,6 +2750,115 @@
           "source": "packages/contracts/src/server/runtime.ts:87"
         }
       ]
+    },
+    {
+      "contract": "seashard.server-runtime-agent",
+      "owner": "seashard.server-runtime",
+      "description": "Host 提供给 Controller Agent 适配层的服务器运行事务能力。",
+      "source": "packages/contracts/src/server/runtime.ts:139",
+      "methods": [
+        {
+          "name": "startWithReceipt",
+          "signature": "startWithReceipt(instanceId: string): Promise<ServerRuntimeStartReceipt>",
+          "description": "启动服务器并返回本次启动的日志边界。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeStartReceipt>",
+            "description": "启动状态与首条启动日志序号。"
+          },
+          "throws": []
+        },
+        {
+          "name": "stopWithReceipt",
+          "signature": "stopWithReceipt(instanceId: string): Promise<ServerRuntimeStopReceipt>",
+          "description": "请求安全停止并返回实际停止命令的日志边界。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeStopReceipt>",
+            "description": "停止状态与停止命令日志序号。"
+          },
+          "throws": []
+        },
+        {
+          "name": "sendCommandWithReceipt",
+          "signature": "sendCommandWithReceipt(instanceId: string, command: string): Promise<ServerRuntimeCommandReceipt>",
+          "description": "向服务器控制台写入命令并返回输入日志序号。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "command",
+              "type": "string",
+              "description": "不带换行符的服务端命令。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeCommandReceipt>",
+            "description": "已接受状态与命令日志序号。"
+          },
+          "throws": []
+        },
+        {
+          "name": "waitUntilReady",
+          "signature": "waitUntilReady(instanceId: string, timeoutMs: number): Promise<ServerRuntimeReadyReceipt>",
+          "description": "等待核心输出启动完成标志。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "timeoutMs",
+              "type": "number",
+              "description": "最长等待毫秒数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeReadyReceipt>",
+            "description": "Host 识别到的启动完成回执。"
+          },
+          "throws": []
+        },
+        {
+          "name": "waitUntilStoppedWithReceipt",
+          "signature": "waitUntilStoppedWithReceipt(instanceId: string, timeoutMs: number): Promise<ServerRuntimeStoppedReceipt>",
+          "description": "等待进程退出与实例运行锁释放。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "timeoutMs",
+              "type": "number",
+              "description": "最长等待毫秒数。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerRuntimeStoppedReceipt>",
+            "description": "释放完成后的运行状态。"
+          },
+          "throws": []
+        }
+      ],
+      "types": []
     },
     {
       "contract": "seashard.server-settings",

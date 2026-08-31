@@ -297,6 +297,7 @@ function projectManagedEntry(entry: PluginManagementEntrySnapshot): JsonObject {
   return {
     id: entry.id,
     runtime: entry.runtime,
+    ...(entry.execution ? { execution: entry.execution } : {}),
     enabled: entry.enabled,
     state: entry.state,
     hasError: entry.state === "failed",

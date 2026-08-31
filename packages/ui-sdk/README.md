@@ -139,9 +139,9 @@ const dispose = context.serverSelection.subscribe((instanceId) => {
 
 `subscribe()` 注册时立即投递当前值，插件刷新、停用或升级时由 Client Runtime 自动释放；插件也可以提前调用返回的 `dispose()`。选择可能为 `undefined`，也可能在异步读取期间变化。它只表示 Shell 当前选择，不证明实例仍然存在；执行服务器操作前仍应通过公开的服务器 Service 验证实例 ID。
 
-## 调用插件 Host Service
+## 调用插件 Node Service
 
-Host Entry 通过 `context.provide()` 发布 JSON Service 后，Client Entry 可以使用同一类型化 Contract：
+Controller Entry 或 Host Worker Entry 通过 `context.provide()` 发布 JSON Service 后，Client Entry 可以使用同一类型化 Contract。Host Worker Service 由 Controller 代理，Client 不直接连接 Host：
 
 ```ts
 import { defineServiceContract } from "@seashard/plugin-sdk";

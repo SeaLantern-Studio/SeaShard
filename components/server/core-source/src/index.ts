@@ -21,6 +21,7 @@ export const serverCoreSourceManifest: PluginManifest = {
     {
       id: "server-core-source.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

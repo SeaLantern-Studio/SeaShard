@@ -5,13 +5,13 @@ import type {
   JsonObject,
   JsonValue,
 } from "@seashard/plugin-sdk";
-import type { AgentConfiguredModel, AgentModelSelection } from "./model";
+import type { AgentConfiguredModel, AgentModelSelection } from "./model.js";
 import type {
   AgentInteractionResponseInput,
   AgentPendingInteraction,
   AgentPermissionMode,
-} from "./interaction";
-import type { AgentTodoSnapshot } from "./todo";
+} from "./interaction.js";
+import type { AgentTodoSnapshot } from "./todo.js";
 
 /** Agent Session 的创建、读取与续写 Contract。 */
 export const agentSessionContract =

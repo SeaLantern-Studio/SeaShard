@@ -169,7 +169,7 @@ export function pageRootSlot(pageId: string): PageRootSlotName {
   return `page.${pageId}.root`;
 }
 
-/** Client Entry 与 Host Entry 保持相同的 apply/disposer 外形，但使用独立 Context。 */
+/** Client Entry 与 Node Entry 保持相同的 apply/disposer 外形，但使用独立 Context。 */
 export interface ClientUiModule {
   apply(ctx: ClientUiContext, config: JsonValue): Awaitable<Disposable | void>;
 }

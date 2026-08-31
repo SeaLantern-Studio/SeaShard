@@ -1,5 +1,5 @@
 import { defineServiceContract } from "@seashard/plugin-sdk";
-import type { ServerInstanceStartupSettings } from "./instance";
+import type { ServerInstanceStartupSettings } from "./instance.js";
 
 /** 服务器进程运行组件发布的 Host/Client 稳定 Contract。 */
 export const serverRuntimeContract =
@@ -101,6 +101,89 @@ export interface ServerConsoleLine {
   stream: ServerConsoleStream;
   text: string;
   timestamp: string;
+}
+
+/** Agent 适配器使用的启动回执；日志序号与启动状态由 Host 在同一事务中生成。 */
+export interface ServerRuntimeStartReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+  readonly startedLogSequence: number;
+}
+
+/** Agent 适配器使用的安全停止回执。 */
+export interface ServerRuntimeStopReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+  readonly stopCommandLogSequence: number;
+}
+
+/** Agent 适配器使用的控制台命令回执。 */
+export interface ServerRuntimeCommandReceipt {
+  readonly accepted: true;
+  readonly commandLogSequence: number;
+}
+
+/** Host 识别核心启动完成标志后返回的可序列化回执。 */
+export interface ServerRuntimeReadyReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+  readonly readyLogSequence: number;
+  readonly readyAt: string;
+  readonly readyMarker: string;
+}
+
+/** Host 完成进程退出与实例运行锁释放后返回的回执。 */
+export interface ServerRuntimeStoppedReceipt {
+  readonly snapshot: ServerRuntimeSnapshot;
+}
+
+/** Controller Agent 调用 Host 时使用的运行事务回执；Renderer 不暴露这组内部方法。 */
+export const serverRuntimeAgentContract =
+  defineServiceContract<ServerRuntimeAgentService>("seashard.server-runtime-agent");
+
+/** Host 提供给 Controller Agent 适配层的服务器运行事务能力。 */
+export interface ServerRuntimeAgentService {
+  /**
+   * 启动服务器并返回本次启动的日志边界。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 启动状态与首条启动日志序号。
+   */
+  startWithReceipt(instanceId: string): Promise<ServerRuntimeStartReceipt>;
+  /**
+   * 请求安全停止并返回实际停止命令的日志边界。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 停止状态与停止命令日志序号。
+   */
+  stopWithReceipt(instanceId: string): Promise<ServerRuntimeStopReceipt>;
+  /**
+   * 向服务器控制台写入命令并返回输入日志序号。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param command 不带换行符的服务端命令。
+   * @returns 已接受状态与命令日志序号。
+   */
+  sendCommandWithReceipt(
+    instanceId: string,
+    command: string,
+  ): Promise<ServerRuntimeCommandReceipt>;
+  /**
+   * 等待核心输出启动完成标志。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param timeoutMs 最长等待毫秒数。
+   * @returns Host 识别到的启动完成回执。
+   */
+  waitUntilReady(instanceId: string, timeoutMs: number): Promise<ServerRuntimeReadyReceipt>;
+  /**
+   * 等待进程退出与实例运行锁释放。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param timeoutMs 最长等待毫秒数。
+   * @returns 释放完成后的运行状态。
+   */
+  waitUntilStoppedWithReceipt(
+    instanceId: string,
+    timeoutMs: number,
+  ): Promise<ServerRuntimeStoppedReceipt>;
 }
 
 /** Host 侧服务器进程能力；仅启动实例元数据中明确声明且已实现运行策略的核心。 */

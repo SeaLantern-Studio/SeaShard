@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DesktopHostConnectionsSnapshot, DesktopHostConnection } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Modal, Cmz_Toast, useToast } from "cmzya-modern-ui";
 import { useClientUiRuntime } from "@seashard/ui-runtime";
 import {
@@ -9,15 +10,18 @@ import {
   onMounted,
   reactive,
   ref,
+  shallowRef,
   watch,
   type Component,
 } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
+import HostConnectionSidebar from "./HostConnectionSidebar.vue";
 import logoSvg from "./assets/logo.svg";
 import PageExtensionRoot from "./PageExtensionRoot.vue";
 import UiEntryBoundary from "./UiEntryBoundary.vue";
+import { findHostPrompt, shouldShowHostChrome, type DesktopHostPrompt } from "./host-connections";
 import {
   createWorkspaceRouteHistory,
   rememberWorkspaceRoute,
@@ -34,6 +38,40 @@ const toast = useToast();
 const updateExitDecisionOpen = ref(false);
 const updateExitAction = ref<"restart" | "close">();
 let disposeUpdateExitDecision: (() => void) | undefined;
+const hostConnections = shallowRef<DesktopHostConnectionsSnapshot>();
+const hostAction = ref<string>();
+let disposeHostConnections: (() => void) | undefined;
+let latestHostRevision = -1;
+const hostChromeVisible = computed(() => shouldShowHostChrome(hostConnections.value));
+const hostPrompt = computed(() => findHostPrompt(hostConnections.value));
+const hostPromptTitle = computed(() => {
+  switch (hostPrompt.value?.kind) {
+    case "occupied":
+      return "本机 Host 正在使用";
+    case "outgoing":
+      return "确认接管 Host";
+    case "incoming":
+      return "收到 Host 接管请求";
+    case "unavailable":
+      return "本机 Host 连接失败";
+    default:
+      return "Host 连接";
+  }
+});
+const hostPromptBody = computed(() => {
+  const prompt = hostPrompt.value;
+  if (!prompt) return "";
+  switch (prompt.kind) {
+    case "occupied":
+      return `${prompt.host.holder?.label ?? "另一个 Controller"} 正在控制本机 Host。你可以只读使用，或发起接管请求。`;
+    case "outgoing":
+      return "接管请求已创建。确认后，当前 Controller 将失去控制权，本窗口取得本机 Host 的控制权。";
+    case "incoming":
+      return `${prompt.host.pending?.requester.label ?? "另一个 Controller"} 请求接管本机 Host。允许后，本窗口会切换为只读。`;
+    case "unavailable":
+      return prompt.host.error ?? "本机 Host 当前不可用，可以重新连接或进入 Host 连接页处理。";
+  }
+});
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
 );
@@ -89,13 +127,40 @@ watch(
     if (content) content.scrollTop = routeWorkspace ? workspaceScrollTop[routeWorkspace] : 0;
   },
 );
+function acceptHostSnapshot(snapshot: DesktopHostConnectionsSnapshot): void {
+  if (snapshot.revision < latestHostRevision) return;
+  latestHostRevision = snapshot.revision;
+  hostConnections.value = snapshot;
+}
+
 onMounted(() => {
   disposeUpdateExitDecision = window.seashard.updates.onExitDecisionRequired(() => {
     updateExitDecisionOpen.value = true;
   });
+  disposeHostConnections = window.seashard.hosts.onChanged(acceptHostSnapshot);
+  void window.seashard.hosts
+    .getSnapshot()
+    .then(acceptHostSnapshot)
+    .catch((error) => {
+      toast.error({
+        title: "读取 Host 状态失败",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    });
 });
 
-onBeforeUnmount(() => disposeUpdateExitDecision?.());
+onBeforeUnmount(() => {
+  disposeUpdateExitDecision?.();
+  disposeHostConnections?.();
+});
+
+watch(
+  [hostChromeVisible, settingsMode],
+  ([visible, mode]) => {
+    if (!visible || mode) rightPanelOpen.value = false;
+  },
+  { immediate: true },
+);
 
 function updateWorkspace(value: WorkspaceMode): void {
   const routeWorkspace = workspaceForPath(route.path);
@@ -116,6 +181,62 @@ function componentName(component: Component | undefined): string | undefined {
       : (component as Readonly<{ name?: unknown }>).name;
   return typeof name === "string" && name ? name : undefined;
 }
+async function runHostAction(
+  key: string,
+  action: () => Promise<DesktopHostConnectionsSnapshot>,
+): Promise<boolean> {
+  if (hostAction.value) return false;
+  hostAction.value = key;
+  try {
+    acceptHostSnapshot(await action());
+    return true;
+  } catch (error) {
+    toast.error({
+      title: "Host 操作失败",
+      description: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  } finally {
+    hostAction.value = undefined;
+  }
+}
+
+function currentPendingRequest(prompt: DesktopHostPrompt): string {
+  const requestId = prompt.host.pending?.requestId;
+  if (!requestId) throw new Error("Host 接管请求已失效");
+  return requestId;
+}
+
+async function requestHostControl(host: DesktopHostConnection): Promise<void> {
+  await runHostAction("request", () => window.seashard.hosts.requestControl(host.id));
+}
+
+async function confirmHostControl(prompt: DesktopHostPrompt): Promise<void> {
+  await runHostAction("confirm", () =>
+    window.seashard.hosts.confirmControl(prompt.host.id, currentPendingRequest(prompt)),
+  );
+}
+
+async function rejectHostControl(prompt: DesktopHostPrompt): Promise<void> {
+  await runHostAction("reject", () =>
+    window.seashard.hosts.rejectControl(prompt.host.id, currentPendingRequest(prompt)),
+  );
+}
+
+async function acknowledgeHost(host: DesktopHostConnection): Promise<void> {
+  await runHostAction("acknowledge", () => window.seashard.hosts.acknowledgeConflict(host.id));
+}
+
+async function retryHost(host: DesktopHostConnection): Promise<void> {
+  await runHostAction("retry", () => window.seashard.hosts.retry(host.id));
+}
+
+async function manageHostConnections(prompt?: DesktopHostPrompt): Promise<void> {
+  if (prompt) await acknowledgeHost(prompt.host);
+  rightPanelOpen.value = false;
+  await router.push("/settings/hosts");
+}
+
 /**
  * 主窗口关闭已被 Main 暂停；两个选择都先走同一条安全停机链，成功后 Electron
  * 安装器才获得退出控制权。停机失败时撤掉决策层，让用户处理服务器后再次关闭。
@@ -162,6 +283,7 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
         :workspace="workspace"
         :settings-mode="settingsMode"
         :right-panel-open="rightPanelOpen"
+        :host-connections="hostConnections"
         @update:workspace="updateWorkspace"
         @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
       />
@@ -193,13 +315,113 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
           </RouterView>
         </main>
         <aside
+          v-if="hostChromeVisible && !settingsMode && hostConnections"
           class="right-sidebar"
-          :class="{ open: rightPanelOpen && !settingsMode }"
-          aria-label="右侧栏"
-          :aria-hidden="!!settingsMode || !rightPanelOpen"
-        ></aside>
+          :class="{ open: rightPanelOpen }"
+          aria-label="Host 状态"
+          :aria-hidden="!rightPanelOpen"
+        >
+          <HostConnectionSidebar :snapshot="hostConnections" @manage="manageHostConnections()" />
+        </aside>
       </div>
     </div>
+    <Cmz_Modal
+      :visible="Boolean(hostPrompt)"
+      :title="hostPromptTitle"
+      width="460px"
+      :close-on-overlay="false"
+      :show-close-button="false"
+    >
+      <div v-if="hostPrompt" class="app-region-dialog host-control-dialog">
+        {{ hostPromptBody }}
+      </div>
+      <template v-if="hostPrompt" #footer>
+        <div class="app-region-dialog-actions">
+          <template v-if="hostPrompt.kind === 'occupied'">
+            <Cmz_Button
+              variant="outline"
+              :disabled="Boolean(hostAction)"
+              @click="manageHostConnections(hostPrompt)"
+            >
+              管理连接
+            </Cmz_Button>
+            <Cmz_Button
+              variant="outline"
+              :loading="hostAction === 'acknowledge'"
+              :disabled="Boolean(hostAction)"
+              @click="acknowledgeHost(hostPrompt.host)"
+            >
+              只读使用
+            </Cmz_Button>
+            <Cmz_Button
+              :loading="hostAction === 'request'"
+              :disabled="Boolean(hostAction)"
+              @click="requestHostControl(hostPrompt.host)"
+            >
+              请求接管
+            </Cmz_Button>
+          </template>
+          <template v-else-if="hostPrompt.kind === 'outgoing'">
+            <Cmz_Button
+              variant="outline"
+              :loading="hostAction === 'reject'"
+              :disabled="Boolean(hostAction)"
+              @click="rejectHostControl(hostPrompt)"
+            >
+              保持只读
+            </Cmz_Button>
+            <Cmz_Button
+              :loading="hostAction === 'confirm'"
+              :disabled="Boolean(hostAction)"
+              @click="confirmHostControl(hostPrompt)"
+            >
+              确认接管
+            </Cmz_Button>
+          </template>
+          <template v-else-if="hostPrompt.kind === 'incoming'">
+            <Cmz_Button
+              variant="outline"
+              :loading="hostAction === 'reject'"
+              :disabled="Boolean(hostAction)"
+              @click="rejectHostControl(hostPrompt)"
+            >
+              保持控制
+            </Cmz_Button>
+            <Cmz_Button
+              :loading="hostAction === 'confirm'"
+              :disabled="Boolean(hostAction)"
+              @click="confirmHostControl(hostPrompt)"
+            >
+              允许接管
+            </Cmz_Button>
+          </template>
+          <template v-else>
+            <Cmz_Button
+              variant="outline"
+              :disabled="Boolean(hostAction)"
+              @click="manageHostConnections(hostPrompt)"
+            >
+              管理连接
+            </Cmz_Button>
+            <Cmz_Button
+              variant="outline"
+              :loading="hostAction === 'acknowledge'"
+              :disabled="Boolean(hostAction)"
+              @click="acknowledgeHost(hostPrompt.host)"
+            >
+              稍后
+            </Cmz_Button>
+            <Cmz_Button
+              :loading="hostAction === 'retry'"
+              :disabled="Boolean(hostAction)"
+              @click="retryHost(hostPrompt.host)"
+            >
+              重新连接
+            </Cmz_Button>
+          </template>
+        </div>
+      </template>
+    </Cmz_Modal>
     <Cmz_Modal
       :visible="updateExitDecisionOpen"
       title="安装更新"
@@ -207,9 +429,11 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
       :close-on-overlay="false"
       :show-close-button="false"
     >
-      <div class="app-update-exit-dialog">已下载的更新将在关闭前安装。请选择安装完成后的动作。</div>
+      <div class="app-region-dialog app-update-exit-dialog">
+        已下载的更新将在关闭前安装。请选择安装完成后的动作。
+      </div>
       <template #footer>
-        <div class="app-update-exit-actions">
+        <div class="app-region-dialog-actions app-update-exit-actions">
           <Cmz_Button
             variant="outline"
             :loading="updateExitAction === 'restart'"
@@ -237,14 +461,23 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
   line-height: 1.65;
 }
 
-.app-update-exit-actions {
+.host-control-dialog {
+  color: var(--sl-text-secondary);
+  line-height: 1.65;
+}
+
+.app-region-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--sl-space-sm);
 }
 
+.app-update-exit-actions {
+  display: flex;
+}
+
 /* 关闭决策属于应用级弹层，但仍只覆盖当前工作区，侧栏与标题栏保持可见。 */
-:global(body:has(.app-update-exit-dialog) .cmz-modal-overlay) {
+:global(body:has(.app-region-dialog) .cmz-modal-overlay) {
   top: calc(var(--sl-header-height) + 8px);
   right: 12px;
   bottom: 12px;
@@ -255,11 +488,11 @@ async function finishUpdateBeforeExit(afterInstall: "restart" | "close"): Promis
   -webkit-backdrop-filter: none;
 }
 
-:global(body:has(.right-sidebar.open):has(.app-update-exit-dialog) .cmz-modal-overlay) {
+:global(body:has(.right-sidebar.open):has(.app-region-dialog) .cmz-modal-overlay) {
   right: calc(var(--sl-sidebar-width) + 20px);
 }
 
-:global(body:has(.app-update-exit-dialog) .cmz-modal) {
+:global(body:has(.app-region-dialog) .cmz-modal) {
   background: var(--sl-surface);
   box-shadow: none;
   backdrop-filter: none;

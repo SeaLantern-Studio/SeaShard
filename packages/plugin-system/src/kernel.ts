@@ -7,6 +7,7 @@ import type {
   ExecutionContext,
   GlobalPluginBindingInput,
   JsonValue,
+  PluginExecutionLocation,
   PluginBinding,
   PluginStorageBroker,
   RuntimeControlSnapshot,
@@ -55,6 +56,24 @@ export interface PluginKernelOptions {
   root: Context;
   store: PluginStore;
   pluginStorage: PluginStorageBroker;
+  /** 当前 Kernel 执行的 Node Entry 位置；省略时兼容既有 Controller 调用。 */
+  executionLocation?: PluginExecutionLocation;
+  /** Host 壳层不保留 Agent 扩展注册；Controller 保持默认开启。 */
+  agentExtensions?: boolean;
+}
+
+export interface HostWorkerEntryDeployment {
+  readonly entryId: string;
+  readonly enabled: boolean;
+  readonly config: JsonValue;
+}
+
+export interface HostWorkerPackageDeployment {
+  readonly pluginId: string;
+  readonly digest: string;
+  readonly source: "installed" | "development";
+  readonly sourceRoot: string;
+  readonly entries: readonly HostWorkerEntryDeployment[];
 }
 
 export class PluginKernel {
@@ -73,6 +92,11 @@ export class PluginKernel {
     (snapshot: ResolvedClientEntrySnapshot) => void
   >();
   private clientEntries: ResolvedEntry[] = [];
+  private readonly reconciledListeners = new Set<() => Promise<void>>();
+  private externalRuntimeStates = new Map<
+    string,
+    { readonly state: "active" | "failed"; readonly error?: string }
+  >();
   private clientEntryFingerprint = "";
   private clientEntryRevision = 0;
   private disposeTask?: Promise<void>;
@@ -95,6 +119,7 @@ export class PluginKernel {
         contributions: this.contributions,
         events: this.events,
         storage: options.pluginStorage,
+        agentExtensions: options.agentExtensions !== false,
       },
       options.pluginHostEntry,
       (runtimeId, error) => {
@@ -115,20 +140,26 @@ export class PluginKernel {
   registerBuiltIn(registration: BuiltInPackageRegistration): Promise<PluginPackageRecord> {
     return this.registry.registerBuiltIn(registration);
   }
-
   registerCoreService(
     contract: string,
     provider: ServiceProvider,
     options?: ServiceProvideOptions,
-  ): void {
-    const dispose = this.services.register(
+  ): () => void {
+    const disposeRegistration = this.services.register(
       contract,
       "seashard.core",
       globalScope(),
       provider,
       options,
     );
+    let active = true;
+    const dispose = () => {
+      if (!active) return;
+      active = false;
+      disposeRegistration();
+    };
     this.coreDisposers.push(dispose);
+    return dispose;
   }
 
   restrictServiceCalls(contract: string, authorize: ServiceCallAuthorizer): void {
@@ -139,6 +170,11 @@ export class PluginKernel {
     return this.installer.prepareDirectory(sourceRoot);
   }
 
+  /** Controller 基础设施可在每次插件期望状态收敛后同步外部 Host Worker。 */
+  onReconciled(listener: () => Promise<void>): () => void {
+    this.reconciledListeners.add(listener);
+    return () => this.reconciledListeners.delete(listener);
+  }
   /**
    * 将开发目录重新校验为进程内覆盖，并按最新 Manifest 重建全部开发 Binding。
    *
@@ -186,6 +222,108 @@ export class PluginKernel {
       await this.reconcile();
       throw error;
     }
+  }
+
+  /**
+   * Host 只接受 Controller 指定且在 Manifest 中显式声明 `execution: host` 的 Entry。
+   * 安装目录仍由 Host 自己复制、重算摘要并授予精确摘要信任，RPC 不能直接注入包记录。
+   */
+  async deployHostWorkerPackage(deployment: HostWorkerPackageDeployment): Promise<void> {
+    if ((this.options.executionLocation ?? "controller") !== "host") {
+      throw new Error("host worker packages can only be deployed into a Host Plugin Kernel");
+    }
+    if (deployment.source === "development") {
+      const candidate = await this.installer.inspectDevelopmentDirectory(deployment.sourceRoot);
+      if (candidate.digest !== deployment.digest) {
+        throw new Error(`host worker package digest changed: ${deployment.pluginId}`);
+      }
+      const record = this.installer.createDevelopmentRecord(candidate, {
+        digest: candidate.digest,
+        acknowledgeFullMachineAccess: true,
+      });
+      this.assertHostWorkerDeployment(record, deployment);
+      this.registry.setDevelopmentPackage(
+        record,
+        undefined,
+        createWorkerBindings(record, deployment.entries, "dev"),
+      );
+      await this.reconcile();
+      await this.assertSelectedHostBindingsActive(record);
+      return;
+    }
+
+    const prepared = await this.prepareDirectory(deployment.sourceRoot);
+    try {
+      if (prepared.digest !== deployment.digest) {
+        throw new Error(`host worker package digest changed: ${deployment.pluginId}`);
+      }
+      const record = await prepared.commit({
+        digest: prepared.digest,
+        acknowledgeFullMachineAccess: true,
+      });
+      this.assertHostWorkerDeployment(record, deployment);
+      this.registry.clearDevelopmentPackage(record.manifest.id);
+      const prefix = automaticPluginBindingPrefix("plugin", record.manifest.id);
+      const previous = await this.currentPackage(record.manifest.id);
+      const previousBindings = (await this.registry.listBindings(record.manifest.id)).filter(
+        (binding) => binding.id.startsWith(prefix),
+      );
+      const bindings = createWorkerBindings(record, deployment.entries, "plugin");
+      await this.registry.replacePackageSelectionAndBindings(
+        record.manifest.id,
+        record,
+        prefix,
+        bindings,
+      );
+      try {
+        await this.reconcile();
+        await this.assertSelectedHostBindingsActive(record);
+      } catch (error) {
+        await this.registry.replacePackageSelectionAndBindings(
+          record.manifest.id,
+          previous,
+          prefix,
+          previous ? previousBindings : [],
+        );
+        await this.reconcile();
+        throw error;
+      }
+    } finally {
+      await prepared.dispose();
+    }
+  }
+
+  /** 清理由 Controller 部署的显式 Host Worker；旧式未声明位置的 Host 数据不在此范围。 */
+  async removeHostWorkerPackage(pluginId: string): Promise<void> {
+    const development = this.registry
+      .listDevelopmentPackages()
+      .find((record) => record.manifest.id === pluginId);
+    if (development) this.registry.clearDevelopmentPackage(pluginId);
+
+    const current = await this.currentPackage(pluginId);
+    if (current?.manifest.entries.some((entry) => entry.execution === "host")) {
+      if (development) await this.reconcile();
+      await this.uninstallThirdPartyPlugin(pluginId);
+      return;
+    }
+    if (development) await this.reconcile();
+  }
+
+  async listHostWorkerPluginIds(): Promise<readonly string[]> {
+    const packages = new Map(
+      (await this.registry.listCurrentPackages()).map((record) => [record.manifest.id, record]),
+    );
+    for (const record of this.registry.listDevelopmentPackages()) {
+      packages.set(record.manifest.id, record);
+    }
+    return [...packages.values()]
+      .filter(
+        (record) =>
+          record.source !== "builtin" &&
+          record.manifest.entries.some((entry) => entry.execution === "host"),
+      )
+      .map((record) => record.manifest.id)
+      .sort();
   }
 
   /**
@@ -249,6 +387,17 @@ export class PluginKernel {
     return this.runtime.lifecycle(runtimeId);
   }
 
+  /** Host Worker 同步器发布远端 Runtime 状态，供插件管理页与 Agent 观察真实执行结果。 */
+  setExternalRuntimeStates(
+    states: readonly {
+      readonly runtimeId: string;
+      readonly state: "active" | "failed";
+      readonly error?: string;
+    }[],
+  ): void {
+    this.externalRuntimeStates = new Map(states.map((state) => [state.runtimeId, { ...state }]));
+  }
+
   /** 只投影当前实际生效的第三方版本；开发包覆盖同 ID 的已安装版本。 */
   async listThirdPartyPlugins(): Promise<readonly PluginManagementSnapshot[]> {
     const packages = new Map<string, PluginPackageRecord>();
@@ -260,9 +409,13 @@ export class PluginKernel {
     }
 
     const persistentBindings = await this.registry.listBindings();
-    const hostRuntimes = new Map(
-      this.runtime.snapshot().plugins.map((runtime) => [runtime.runtimeId, runtime]),
-    );
+    const hostRuntimes = new Map<
+      string,
+      { readonly state: "active" | "failed"; readonly error?: string }
+    >([
+      ...this.externalRuntimeStates,
+      ...this.runtime.snapshot().plugins.map((runtime) => [runtime.runtimeId, runtime] as const),
+    ]);
     const clientRuntimeIds = new Set(this.clientEntries.map(({ runtimeId }) => runtimeId));
 
     return [...packages.values()]
@@ -298,6 +451,7 @@ export class PluginKernel {
                 entry.id,
               ),
             runtime: entry.runtime,
+            execution: entry.execution ?? "controller",
             enabled,
             state,
             uses: entry.uses ?? {},
@@ -530,15 +684,29 @@ export class PluginKernel {
   }
 
   private async reconcile(): Promise<void> {
-    const entries = await this.registry.resolve({
+    const resolved = await this.registry.resolve({
       hostProfile: this.options.hostProfile,
       clientTarget: this.options.clientTarget,
       platform: this.options.platform,
       architecture: this.options.architecture,
     });
+    const entries = resolved.filter((entry) => this.executesHere(entry));
     const clientEntries = entries.filter((entry) => entry.host === "client");
     await this.runtime.reconcile(entries.filter((entry) => entry.host !== "client"));
     this.publishClientEntries(clientEntries);
+    for (const listener of this.reconciledListeners) await listener();
+  }
+
+  /**
+   * 旧第三方清单未声明 execution 时继续归 Controller；内建 Entry 则跟随注册它的 Kernel，
+   * 让现有编译期组件能渐进补齐显式位置而不改变发布后的行为。
+   */
+  private executesHere(entry: ResolvedEntry): boolean {
+    const kernelLocation = this.options.executionLocation ?? "controller";
+    const entryLocation =
+      entry.entry.execution ??
+      (entry.package.source === "builtin" ? kernelLocation : ("controller" as const));
+    return entryLocation === kernelLocation;
   }
 
   private publishClientEntries(entries: ResolvedEntry[]): void {
@@ -588,6 +756,29 @@ export class PluginKernel {
     }
   }
 
+  private assertHostWorkerDeployment(
+    record: PluginPackageRecord,
+    deployment: HostWorkerPackageDeployment,
+  ): void {
+    if (record.manifest.id !== deployment.pluginId) {
+      throw new Error(
+        `host worker package ID mismatch: expected ${deployment.pluginId}, received ${record.manifest.id}`,
+      );
+    }
+    const declared = record.manifest.entries
+      .filter((entry) => entry.runtime === "host" && entry.execution === "host")
+      .map((entry) => entry.id)
+      .sort();
+    const requested = deployment.entries.map(({ entryId }) => entryId).sort();
+    if (
+      declared.length === 0 ||
+      declared.length !== requested.length ||
+      declared.some((entryId, index) => entryId !== requested[index])
+    ) {
+      throw new Error(`host worker deployment does not match Manifest: ${record.manifest.id}`);
+    }
+  }
+
   private async assertSelectedHostBindingsActive(record: PluginPackageRecord): Promise<void> {
     // 与 reconcile 共用 Registry 的环境解析结果；不适用于当前 Host 的 Entry 会被正常保留，
     // 但不会被误判为“应该已经激活”。
@@ -600,6 +791,7 @@ export class PluginKernel {
       })
     ).filter(
       (entry) =>
+        this.executesHere(entry) &&
         entry.host !== "client" &&
         entry.package.manifest.id === record.manifest.id &&
         entry.package.digest === record.digest,
@@ -617,11 +809,13 @@ export class PluginKernel {
   }
 
   private async disposeKernel(): Promise<void> {
+    this.externalRuntimeStates.clear();
     await this.runtime.dispose();
     // 开发包从未写入数据库；清空覆盖表后，后续 Host 只会看到原持久化选择。
     this.registry.clearDevelopmentPackages();
     for (const dispose of this.coreDisposers.reverse()) dispose();
     this.clientEntryListeners.clear();
+    this.reconciledListeners.clear();
   }
 }
 
@@ -634,4 +828,20 @@ function thirdPartyTrust(record: PluginPackageRecord): "local-full-trust" | "pac
     return record.trust;
   }
   throw new Error(`third-party plugin uses an invalid trust level: ${record.manifest.id}`);
+}
+
+function createWorkerBindings(
+  record: PluginPackageRecord,
+  entries: readonly HostWorkerEntryDeployment[],
+  namespace: "dev" | "plugin",
+): PluginBinding[] {
+  return entries.map((entry) => ({
+    id: automaticPluginBindingId(namespace, record.manifest.id, entry.entryId),
+    pluginId: record.manifest.id,
+    entryId: entry.entryId,
+    scopeType: "global",
+    scopeId: "global",
+    enabled: entry.enabled,
+    config: entry.config,
+  }));
 }

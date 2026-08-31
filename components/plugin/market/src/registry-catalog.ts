@@ -243,13 +243,25 @@ function parseCompatibility(value: unknown, path: string): PluginMarketCompatibi
 
 function parseEntry(value: unknown, path: string): PluginMarketEntry {
   const entry = expectRecord(value, path);
-  rejectUnknown(entry, ["id", "runtime", "uses", "hostProfiles", "targets", "os", "arch"], path);
+  rejectUnknown(
+    entry,
+    ["id", "runtime", "execution", "uses", "hostProfiles", "targets", "os", "arch"],
+    path,
+  );
   if (entry.runtime !== "host" && entry.runtime !== "client") {
     throw new TypeError(`${path}.runtime must be host or client`);
+  }
+  if (
+    entry.execution !== undefined &&
+    entry.execution !== "controller" &&
+    entry.execution !== "host"
+  ) {
+    throw new TypeError(`${path}.execution must be controller or host`);
   }
   const result: PluginMarketEntry = {
     id: expectPattern(entry.id, `${path}.id`, pluginIdPattern),
     runtime: entry.runtime,
+    ...(entry.execution === undefined ? {} : { execution: entry.execution }),
     uses: parseUses(entry.uses, `${path}.uses`),
     ...(entry.hostProfiles === undefined
       ? {}
@@ -301,6 +313,9 @@ function parseEntry(value: unknown, path: string): PluginMarketEntry {
   }
   if (result.runtime === "client" && (!result.targets || result.hostProfiles)) {
     throw new TypeError(`${path} has invalid Client platform fields`);
+  }
+  if (result.runtime === "client" && result.execution === "host") {
+    throw new TypeError(`${path}.execution host is only valid for host entries`);
   }
   return result;
 }

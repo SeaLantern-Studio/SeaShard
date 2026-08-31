@@ -1,6 +1,6 @@
 {
   "name": "@seashard/contracts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "SeaShard 稳定 Service Contract 与 JSON 数据类型。",
   "keywords": [
     "contracts",
@@ -24,7 +24,7 @@
     "@seashard/plugin-sdk": "workspace:*"
   },
   "peerDependencies": {
-    "@seashard/plugin-sdk": "^0.2.0"
+    "@seashard/plugin-sdk": "^0.3.0"
   },
   "engines": {
     "node": ">=24.11.0"

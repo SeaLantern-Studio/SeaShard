@@ -12,7 +12,6 @@ import {
   type JavaRuntimeManagerService,
   type ServerConfigurationService,
   type ServerConfigurationWriteRequest,
-  type ServerConsoleLine,
   type ServerModSearchRequest,
   type ServerModSource,
   type ServerModrinthResourceType,
@@ -26,11 +25,6 @@ import {
   desktopShellManifest,
 } from "@seashard/desktop-shell";
 import { downloadContract, type DownloadService } from "@seashard/download";
-import {
-  projectClientEntryPublication,
-  resolveClientPluginAssetPath,
-  type PluginKernel,
-} from "@seashard/plugin-system";
 import {
   serverCoreSourceContract,
   type ServerCoreSourceService,
@@ -47,35 +41,32 @@ import {
 } from "./desktop-update-controller";
 import type { ElectronDesktopUpdateService } from "./desktop-update";
 import { join } from "node:path";
+import type { DesktopControllerKernel } from "./desktop-controller-kernel";
 
 const desktopUpdateStartupSettlementTimeoutMs = 30 * 60 * 1_000;
 const desktopUpdateServerStopTimeoutMs = 60_000;
 
-const serverConsoleLineListeners = new Set<(line: ServerConsoleLine) => void>();
-
-/** 把运行组件的增量日志发布给当前 Desktop Shell，不让组件直接依赖 Electron。 */
-export function publishServerConsoleLine(line: ServerConsoleLine): void {
-  for (const listener of serverConsoleLineListeners) listener(line);
-}
-
-function onServerConsoleLine(listener: (line: ServerConsoleLine) => void): () => void {
-  serverConsoleLineListeners.add(listener);
-  return () => serverConsoleLineListeners.delete(listener);
-}
-
 interface DesktopShellBridgeOptions {
-  readonly kernel: PluginKernel;
+  readonly kernel: DesktopControllerKernel;
   readonly desktopUpdates: ElectronDesktopUpdateService;
   readonly moduleDirectory: string;
   readonly developmentUrl?: string;
   readonly smokeMode: boolean;
+  readonly onControllerWindowAllClosed: () => void;
 }
 
 /** 注册 Electron Shell，并把 Kernel 中的领域 Contract 适配为 IPC 服务。 */
 export async function registerDesktopShellBridge(
   options: DesktopShellBridgeOptions,
 ): Promise<void> {
-  const { kernel, moduleDirectory, developmentUrl, smokeMode, desktopUpdates } = options;
+  const {
+    kernel,
+    moduleDirectory,
+    developmentUrl,
+    smokeMode,
+    desktopUpdates,
+    onControllerWindowAllClosed,
+  } = options;
   let smokeQuitScheduled = false;
   const agentSessions = kernel.service<AgentSessionService>(agentSessionContract);
   const agentInvocations = kernel.service<AgentInvocationService>(agentInvocationContract);
@@ -135,28 +126,36 @@ export async function registerDesktopShellBridge(
       "desktop-shell.host": {
         load: async () =>
           createDesktopShellModule({
-            runtime: createElectronDesktopShellRuntime(
-              app,
-              BrowserWindow,
-              ipcMain,
-              dialog,
-              protocol,
-              net,
-              shell,
-            ),
+            runtime: {
+              ...createElectronDesktopShellRuntime(
+                app,
+                BrowserWindow,
+                ipcMain,
+                dialog,
+                protocol,
+                net,
+                shell,
+              ),
+              quit: onControllerWindowAllClosed,
+            },
             preloadPath: join(moduleDirectory, "../preload/index.cjs"),
             rendererFile: join(moduleDirectory, "../renderer/index.html"),
             ...(developmentUrl ? { developmentUrl } : {}),
             smokeMode,
             reportOpenFailure: (error) => console.error("Desktop window open failed", error),
-            resolveClientPluginAssetPath: async (requestUrl) =>
-              await resolveClientPluginAssetPath(kernel.clientEntrySnapshot(), requestUrl),
-            readClientEntryPublication: () =>
-              projectClientEntryPublication(kernel.clientEntrySnapshot()),
-            onClientEntriesChanged: (listener) =>
-              kernel.onClientEntriesChanged((snapshot) =>
-                listener(projectClientEntryPublication(snapshot)),
-              ),
+            readHostConnections: () => kernel.hosts.getSnapshot(),
+            retryHostConnection: (hostId) => kernel.hosts.retry(hostId),
+            disconnectHost: (hostId) => kernel.hosts.disconnect(hostId),
+            requestHostControl: (hostId) => kernel.hosts.requestControl(hostId),
+            confirmHostControl: (hostId, requestId) =>
+              kernel.hosts.confirmControl(hostId, requestId),
+            rejectHostControl: (hostId, requestId) => kernel.hosts.rejectControl(hostId, requestId),
+            acknowledgeHostConflict: (hostId) => kernel.hosts.acknowledgeConflict(hostId),
+            onHostConnectionsChanged: (listener) => kernel.hosts.onChanged(listener),
+            resolveClientPluginAssetPath: (requestUrl) =>
+              kernel.resolveClientPluginAssetPath(requestUrl),
+            readClientEntryPublication: () => kernel.readClientEntryPublication(),
+            onClientEntriesChanged: (listener) => kernel.onClientEntriesChanged(listener),
             callClientService: (request) => kernel.callClientService(request),
             listAgentModels: async () => await agentSessions.listModels(),
             listAgentSessions: async () => await agentSessions.listSessions(),
@@ -267,7 +266,7 @@ export async function registerDesktopShellBridge(
               serverRuntime.sendCommand(instanceId, command),
             readServerConsoleLines: async (instanceId, afterSequence) =>
               await serverRuntime.getLogs(instanceId, afterSequence),
-            onServerConsoleLine,
+            onServerConsoleLine: (listener) => kernel.onServerConsoleLine(listener),
             scanJavaInstallations: async () => await javaRuntimes.scan(),
             inspectJavaInstallation: async (executablePath) =>
               await javaRuntimes.inspect(executablePath),

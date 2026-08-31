@@ -8,6 +8,7 @@ export type JsonObject = { [key: string]: JsonValue };
 export type HostProfile = "electron" | "node" | "docker";
 export type ClientTarget = "desktop" | "web" | "mobile";
 export type PluginRuntime = "host" | "client";
+export type PluginExecutionLocation = "controller" | "host";
 export type ActivationScope = "global" | "workspace" | "server" | "agent" | "client-session";
 export type PluginSourceKind = "builtin" | "development" | "installed";
 export type PluginTrustLevel = "builtin" | "official" | "local-full-trust" | "package-full-trust";
@@ -38,6 +39,11 @@ export type ContractMethodUses = Readonly<Record<string, readonly string[]>>;
 export interface PluginEntryManifest {
   id: string;
   runtime: PluginRuntime;
+  /**
+   * Node Entry 的执行位置。省略时兼容既有插件并在 Controller 执行；
+   * Client Entry 固定属于 Controller，不能选择 Host。
+   */
+  execution?: PluginExecutionLocation;
   module: string;
   hostProfiles?: HostProfile[];
   targets?: ClientTarget[];

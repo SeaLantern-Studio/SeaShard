@@ -2,6 +2,7 @@ import {
   clientPluginAssetScheme,
   desktopChannels,
   type DesktopClientBootstrap,
+  type DesktopHostConnectionsSnapshot,
   serverCoreIconScheme,
 } from "../packages/contracts/src/index.ts";
 import assert from "node:assert/strict";
@@ -86,6 +87,32 @@ await test("desktop shell owns the primary window and releases its lifecycle", a
   );
   assert.equal(await runtime.invoke(desktopChannels.runtimeSnapshot, 1), snapshot);
   await assert.rejects(runtime.invoke(desktopChannels.runtimeSnapshot, 999), /request rejected/);
+  const hostConnections = (await runtime.invoke(
+    desktopChannels.hostConnectionsSnapshot,
+    1,
+  )) as DesktopHostConnectionsSnapshot;
+  assert.equal(hostConnections.controllerSessionId, "desktop-test");
+  assert.equal(hostConnections.hosts[0]?.state, "control");
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.hostConnectionsRequestControl, 1, "local"),
+    hostConnections,
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.hostConnectionsConfirmControl, 1, "local", "request-1"),
+    hostConnections,
+  );
+  assert.deepEqual(
+    await runtime.invoke(desktopChannels.hostConnectionsRejectControl, 1, "local", "request-1"),
+    hostConnections,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.hostConnectionsRetry, 1, ""),
+    /non-empty string/u,
+  );
+  await assert.rejects(
+    runtime.invoke(desktopChannels.hostConnectionsSnapshot, 999),
+    /request rejected/u,
+  );
   assert.deepEqual(
     await runtime.invoke(desktopChannels.desktopUpdateSnapshot, 1),
     desktopUpdateSnapshot,

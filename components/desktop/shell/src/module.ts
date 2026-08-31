@@ -51,6 +51,7 @@ export const desktopShellManifest: PluginManifest = {
     {
       id: "desktop-shell.host",
       runtime: "host",
+      execution: "controller",
       module: "./dist/host.js",
       hostProfiles: ["electron"],
       activationScopes: ["global"],
@@ -228,6 +229,11 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           if (!window || window.isDestroyed()) return;
           window.webContents.send(desktopChannels.desktopUpdateChanged, snapshot);
         });
+        const disposeHostConnectionsSubscription = config.onHostConnectionsChanged((snapshot) => {
+          const window = primaryWindow;
+          if (!window || window.isDestroyed()) return;
+          window.webContents.send(desktopChannels.hostConnectionsChanged, snapshot);
+        });
 
         config.runtime.handleFileProtocol(clientPluginAssetScheme, (requestUrl) =>
           config.resolveClientPluginAssetPath(requestUrl),
@@ -247,8 +253,17 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             return sha256 ? config.resolveServerCoreIconPath(sha256) : undefined;
           }
           if (url.hostname === serverInstanceIconHost) {
-            const instanceId = /^\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/u.exec(url.pathname)?.[1];
-            return instanceId ? config.resolveServerInstanceIconPath(instanceId) : undefined;
+            let instanceId: string;
+            try {
+              instanceId = decodeURIComponent(url.pathname.slice(1));
+            } catch {
+              return undefined;
+            }
+            return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u.test(
+              instanceId,
+            )
+              ? config.resolveServerInstanceIconPath(instanceId)
+              : undefined;
           }
           return undefined;
         });
@@ -752,6 +767,49 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           const snapshot = await diagnostics.getSnapshot();
           return snapshot;
         });
+        config.runtime.handle(desktopChannels.hostConnectionsSnapshot, (event) => {
+          ownedWindow(event.sender.id);
+          return config.readHostConnections();
+        });
+        config.runtime.handle(desktopChannels.hostConnectionsRetry, (event, hostId) => {
+          ownedWindow(event.sender.id);
+          return config.retryHostConnection(expectNonEmptyString(hostId, "Host id"));
+        });
+        config.runtime.handle(desktopChannels.hostConnectionsDisconnect, (event, hostId) => {
+          ownedWindow(event.sender.id);
+          return config.disconnectHost(expectNonEmptyString(hostId, "Host id"));
+        });
+        config.runtime.handle(desktopChannels.hostConnectionsRequestControl, (event, hostId) => {
+          ownedWindow(event.sender.id);
+          return config.requestHostControl(expectNonEmptyString(hostId, "Host id"));
+        });
+        config.runtime.handle(
+          desktopChannels.hostConnectionsConfirmControl,
+          (event, hostId, requestId) => {
+            ownedWindow(event.sender.id);
+            return config.confirmHostControl(
+              expectNonEmptyString(hostId, "Host id"),
+              expectNonEmptyString(requestId, "Host control request id"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.hostConnectionsRejectControl,
+          (event, hostId, requestId) => {
+            ownedWindow(event.sender.id);
+            return config.rejectHostControl(
+              expectNonEmptyString(hostId, "Host id"),
+              expectNonEmptyString(requestId, "Host control request id"),
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.hostConnectionsAcknowledgeConflict,
+          (event, hostId) => {
+            ownedWindow(event.sender.id);
+            return config.acknowledgeHostConflict(expectNonEmptyString(hostId, "Host id"));
+          },
+        );
         config.runtime.handle(desktopChannels.serverCoreTypes, async (event) => {
           if (!ownsWebContents(event.sender.id)) {
             throw new Error("server core types request rejected");
@@ -865,12 +923,20 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           disposeClientEntrySubscription();
           disposeServerConsoleSubscription();
           disposeDesktopUpdateSubscription();
+          disposeHostConnectionsSubscription();
           config.runtime.removeProtocolHandler(serverCoreIconScheme);
           config.runtime.removeProtocolHandler(clientPluginAssetScheme);
           const window = primaryWindow;
           primaryWindow = undefined;
           if (window && !window.isDestroyed()) window.destroy();
           config.runtime.removeHandler(desktopChannels.runtimeSnapshot);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsSnapshot);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsRetry);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsDisconnect);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsRequestControl);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsConfirmControl);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsRejectControl);
+          config.runtime.removeHandler(desktopChannels.hostConnectionsAcknowledgeConflict);
           config.runtime.removeHandler(desktopChannels.desktopUpdateSnapshot);
           config.runtime.removeHandler(desktopChannels.desktopUpdateCheck);
           config.runtime.removeHandler(desktopChannels.desktopUpdateApply);

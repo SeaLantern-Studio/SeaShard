@@ -171,22 +171,28 @@ export class PluginRegistry {
    * 开发覆盖不写数据库；Host 正常退出、崩溃或被强制结束后都不会留下开发记录。
    * Manifest 重新注册时一次替换包记录和全部 Entry Binding，避免旧 Entry 残留。
    */
-  setDevelopmentPackage(record: PluginPackageRecord, previousPluginId?: string): void {
+  setDevelopmentPackage(
+    record: PluginPackageRecord,
+    previousPluginId?: string,
+    replacementBindings?: readonly PluginBinding[],
+  ): void {
     if (record.source !== "development") {
       throw new Error(`development package must use development source: ${record.manifest.id}`);
     }
     const current = this.developmentPackages.get(record.manifest.id);
     const enabled = current?.bindings.every((binding) => binding.enabled) ?? true;
-    const bindings = record.manifest.entries.map((entry): PluginBinding => ({
-      id: automaticPluginBindingId("dev", record.manifest.id, entry.id),
-      pluginId: record.manifest.id,
-      entryId: entry.id,
-      scopeType: "global",
-      scopeId: "global",
-      enabled,
-      // 第三方插件应以空启动配置运行，并通过自身 Storage 或公开配置 Service 管理设置。
-      config: {},
-    }));
+    const bindings =
+      replacementBindings?.map((binding) => ({ ...binding })) ??
+      record.manifest.entries.map((entry): PluginBinding => ({
+        id: automaticPluginBindingId("dev", record.manifest.id, entry.id),
+        pluginId: record.manifest.id,
+        entryId: entry.id,
+        scopeType: "global",
+        scopeId: "global",
+        enabled,
+        // 第三方插件应以空启动配置运行，并通过自身 Storage 或公开配置 Service 管理设置。
+        config: {},
+      }));
     for (const binding of bindings) assertBinding(record, binding);
     if (previousPluginId && previousPluginId !== record.manifest.id) {
       this.developmentPackages.delete(previousPluginId);
@@ -196,6 +202,10 @@ export class PluginRegistry {
 
   clearDevelopmentPackages(): void {
     this.developmentPackages.clear();
+  }
+
+  clearDevelopmentPackage(pluginId: string): void {
+    this.developmentPackages.delete(pluginId);
   }
 
   listDevelopmentPackages(): readonly PluginPackageRecord[] {

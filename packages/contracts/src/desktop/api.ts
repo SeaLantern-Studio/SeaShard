@@ -1,6 +1,6 @@
 import type { JsonValue } from "@seashard/plugin-sdk";
-import type { AgentClientService, AgentModelConfigurationClientService } from "../agent";
-import type { RuntimeSnapshot } from "../plugin";
+import type { AgentClientService, AgentModelConfigurationClientService } from "../agent/index.js";
+import type { RuntimeSnapshot } from "../plugin/index.js";
 import type {
   FileDownloadClientService,
   JavaRuntimeClientService,
@@ -11,14 +11,16 @@ import type {
   ServerModSourceClientService,
   ServerRuntimeClientService,
   ServerSettingsClientService,
-} from "../server";
-import type { ClientServiceCallRequest, DesktopClientBootstrap } from "./client";
-import type { DesktopUpdateClientService } from "./update";
+} from "../server/index.js";
+import type { ClientServiceCallRequest, DesktopClientBootstrap } from "./client.js";
+import type { DesktopHostConnectionsClientService } from "./host.js";
+import type { DesktopUpdateClientService } from "./update.js";
 
 export interface SeaShardDesktopApi {
   runtime: {
     getSnapshot(): Promise<RuntimeSnapshot>;
   };
+  hosts: DesktopHostConnectionsClientService;
   agent: AgentClientService;
   serverCore: ServerCoreSourceClientService;
   agentModels: AgentModelConfigurationClientService;

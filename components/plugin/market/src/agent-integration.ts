@@ -129,7 +129,7 @@ export function registerPluginMarketAgentIntegration(
       name: "install",
       title: "安装第三方插件",
       description:
-        "从 SeaShard 官方 Registry 安装指定插件版本；若本地已有该插件，则立即返回当前本地状态，不下载、不更新且不改变启用状态。未安装时，Host 会重新解析受信 Release 并校验归档与包摘要。",
+        "从 SeaShard 官方 Registry 安装指定插件版本；若本地已有该插件，则立即返回当前本地状态，不下载、不更新且不改变启用状态。未安装时，Controller 会重新解析受信 Release 并校验归档与包摘要。",
       confirmationLevel: 2,
       inputSchema: installInputSchema,
       outputDescription:
@@ -272,6 +272,13 @@ function projectMarketPlugin(
 
 function projectMarketRelease(release: PluginMarketRelease): JsonObject {
   const runtimes = [...new Set(release.entries.map((entry) => entry.runtime))];
+  const executionLocations = [
+    ...new Set(
+      release.entries.map((entry) =>
+        entry.runtime === "client" ? "controller" : (entry.execution ?? "controller"),
+      ),
+    ),
+  ];
   return {
     version: release.version,
     publisher: release.publisher,
@@ -288,6 +295,7 @@ function projectMarketRelease(release: PluginMarketRelease): JsonObject {
     },
     entryCount: release.entries.length,
     runtimes,
+    executionLocations,
     yanked: release.yanked,
   };
 }

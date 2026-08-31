@@ -1,5 +1,10 @@
 import { defineServiceContract } from "@seashard/plugin-sdk";
-import type { PluginRuntime, PluginSourceKind, PluginTrustLevel } from "@seashard/plugin-sdk";
+import type {
+  PluginExecutionLocation,
+  PluginRuntime,
+  PluginSourceKind,
+  PluginTrustLevel,
+} from "@seashard/plugin-sdk";
 
 /** 软件设置中的第三方插件管理页面使用的受限 Contract。 */
 export const pluginManagementContract = defineServiceContract<PluginManagementService>(
@@ -14,13 +19,14 @@ export interface PluginManagementEntrySnapshot {
   readonly id: string;
   readonly runtimeId: string;
   readonly runtime: PluginRuntime;
+  readonly execution?: PluginExecutionLocation;
   readonly enabled: boolean;
   readonly state: PluginManagementEntryState;
   readonly uses: Readonly<Record<string, readonly string[]>>;
   readonly error?: string;
 }
 
-/** 当前 Host 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。 */
+/** 当前 Controller 实际采用的第三方包；开发覆盖与已安装版本按插件 ID 合并。 */
 export interface PluginManagementSnapshot {
   readonly id: string;
   readonly version: string;

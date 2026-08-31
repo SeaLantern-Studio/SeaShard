@@ -21,6 +21,7 @@ export const javaRuntimeManagerManifest: PluginManifest = {
     {
       id: "java-runtime-manager.host",
       runtime: "host",
+      execution: "host",
       module: "./dist/host.js",
       hostProfiles: ["electron", "node", "docker"],
       activationScopes: ["global"],

@@ -120,6 +120,12 @@ importers:
       '@seashard/game-settings-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/game
+      '@seashard/host-connections-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/host-connections
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../../packages/host-control
       '@seashard/java-runtime-manager':
         specifier: workspace:*
         version: link:../../components/game/java-runtime-manager
@@ -907,6 +913,27 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  frontend/settings/host-connections:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
   frontend/settings/personalization:
     dependencies:
       '@seashard/plugin-sdk':
@@ -1002,6 +1029,12 @@ importers:
     publishDirectory: dist
 
   packages/database: {}
+
+  packages/host-control:
+    dependencies:
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk/dist
 
   packages/plugin-sdk:
     publishDirectory: dist

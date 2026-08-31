@@ -20,6 +20,40 @@ interface DocumentRow extends DatabaseRow {
   expires_at: string | null;
 }
 
+interface MigrationDocumentRow extends DatabaseRow {
+  owner_id: string;
+  runtime_id: string;
+  document_key: string;
+  value_json: string;
+  revision: number;
+  updated_at: string;
+  expires_at: string | null;
+}
+
+interface MigrationMarkerRow extends DatabaseRow {
+  migration_id: string;
+  target_id: string;
+  document_count: number;
+  completed_at: string;
+}
+
+export interface PluginDocumentMigrationRow {
+  readonly ownerId: string;
+  readonly runtimeId: string;
+  readonly documentKey: string;
+  readonly valueJson: string;
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly expiresAt: string | null;
+}
+
+export interface PluginDocumentMigrationMarker {
+  readonly migrationId: string;
+  readonly targetId: string;
+  readonly documentCount: number;
+  readonly completedAt: string;
+}
+
 const maximumDocumentBytes = 1024 * 1024;
 const maximumTtlMs = 365 * 24 * 60 * 60 * 1_000;
 const storageKeyPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9._/-]{0,254})?$/;
@@ -32,9 +66,9 @@ const storageKeyPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9._/-]{0,254})?$/;
  */
 export const pluginDocumentDataCapsule = defineDataCapsule({
   namespace: "plugin_documents",
-  schemaVersion: 1,
+  schemaVersion: 2,
   compatibilityFloor: 1,
-  tables: ["plugin_documents"],
+  tables: ["plugin_documents", "plugin_document_migrations"],
   migrations: [
     {
       version: 1,
@@ -58,6 +92,26 @@ export const pluginDocumentDataCapsule = defineDataCapsule({
           sql: `SELECT COUNT(*) = 1 AS valid
                   FROM sqlite_schema
                  WHERE type = 'table' AND name = 'plugin_documents'`,
+          column: "valid",
+          equals: 1,
+        },
+      ],
+    },
+    {
+      version: 2,
+      statements: [
+        `CREATE TABLE plugin_document_migrations (
+          migration_id TEXT PRIMARY KEY,
+          target_id TEXT NOT NULL,
+          document_count INTEGER NOT NULL,
+          completed_at TEXT NOT NULL
+        ) STRICT`,
+      ],
+      verify: [
+        {
+          sql: `SELECT COUNT(*) = 1 AS valid
+                  FROM sqlite_schema
+                 WHERE type = 'table' AND name = 'plugin_document_migrations'`,
           column: "valid",
           equals: 1,
         },
@@ -149,6 +203,41 @@ export const pluginDocumentDataCapsule = defineDataCapsule({
                AND document_key = ?
                AND revision = ?`,
     },
+    {
+      id: "migration.read",
+      access: "read",
+      result: "get",
+      sql: `SELECT migration_id, target_id, document_count, completed_at
+              FROM plugin_document_migrations
+             WHERE migration_id = ?`,
+    },
+    {
+      id: "migration.export-owner",
+      access: "read",
+      result: "all",
+      sql: `SELECT owner_id, runtime_id, document_key, value_json, revision, updated_at, expires_at
+              FROM plugin_documents
+             WHERE owner_id = ?
+             ORDER BY runtime_id, document_key`,
+    },
+    {
+      id: "migration.import-document",
+      access: "write",
+      result: "run",
+      sql: `INSERT INTO plugin_documents (
+              owner_id, runtime_id, document_key, value_json, revision, updated_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_id, runtime_id, document_key) DO NOTHING`,
+    },
+    {
+      id: "migration.complete",
+      access: "write",
+      result: "run",
+      sql: `INSERT INTO plugin_document_migrations (
+              migration_id, target_id, document_count, completed_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(migration_id) DO NOTHING`,
+    },
   ],
 });
 
@@ -173,6 +262,90 @@ export class SQLitePluginDocumentStorage implements PluginStorageBroker {
       put: (key, value, options) => this.put(ownerId, runtimeId, key, value, options),
       delete: (key, options) => this.delete(ownerId, runtimeId, key, options),
     };
+  }
+
+  /** 读取源数据库中的完成标记；存在即代表目标导入已经提交。 */
+  async readMigrationMarker(
+    migrationId: string,
+  ): Promise<PluginDocumentMigrationMarker | undefined> {
+    requireMigrationIdentity(migrationId, "migration id");
+    const result = await this.repository.execute("migration.read", [migrationId]);
+    if (result.kind !== "get") throw unexpectedResult("migration.read", result.kind);
+    if (!result.row) return undefined;
+    const row = result.row as MigrationMarkerRow;
+    return {
+      migrationId: row.migration_id,
+      targetId: row.target_id,
+      documentCount: row.document_count,
+      completedAt: row.completed_at,
+    };
+  }
+
+  /** 只导出明确属于待迁移第三方插件的原始行，Host 内建组件数据继续留在原库。 */
+  async exportOwners(ownerIds: readonly string[]): Promise<readonly PluginDocumentMigrationRow[]> {
+    const rows: PluginDocumentMigrationRow[] = [];
+    for (const ownerId of [...new Set(ownerIds)].sort()) {
+      requireMigrationIdentity(ownerId, "plugin owner id");
+      const result = await this.repository.execute("migration.export-owner", [ownerId]);
+      if (result.kind !== "all") throw unexpectedResult("migration.export-owner", result.kind);
+      for (const value of result.rows) {
+        const row = value as MigrationDocumentRow;
+        rows.push({
+          ownerId: row.owner_id,
+          runtimeId: row.runtime_id,
+          documentKey: row.document_key,
+          valueJson: row.value_json,
+          revision: row.revision,
+          updatedAt: row.updated_at,
+          expiresAt: row.expires_at,
+        });
+      }
+    }
+    return rows;
+  }
+
+  /**
+   * 目标导入使用 create-only 语义。进程若在写入后、源标记前退出，下一次重放不会覆盖
+   * Controller 已经产生的新文档。
+   */
+  async importDocuments(rows: readonly PluginDocumentMigrationRow[]): Promise<void> {
+    const batchSize = 256;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize);
+      const results = await this.repository.transaction(
+        batch.map((row) => ({
+          command: "migration.import-document",
+          parameters: [
+            row.ownerId,
+            row.runtimeId,
+            row.documentKey,
+            row.valueJson,
+            row.revision,
+            row.updatedAt,
+            row.expiresAt,
+          ],
+        })),
+      );
+      if (results.some((result) => result.kind !== "run")) {
+        throw new Error("plugin document migration returned an unexpected database result");
+      }
+    }
+  }
+
+  /** 目标批次全部提交后才在源库落完成标记，构成可安全重放的两阶段迁移。 */
+  async completeMigration(marker: PluginDocumentMigrationMarker): Promise<void> {
+    requireMigrationIdentity(marker.migrationId, "migration id");
+    requireMigrationIdentity(marker.targetId, "migration target id");
+    if (!Number.isSafeInteger(marker.documentCount) || marker.documentCount < 0) {
+      throw new RangeError("migration document count must be a non-negative safe integer");
+    }
+    const result = await this.repository.execute("migration.complete", [
+      marker.migrationId,
+      marker.targetId,
+      marker.documentCount,
+      marker.completedAt,
+    ]);
+    if (result.kind !== "run") throw unexpectedResult("migration.complete", result.kind);
   }
 
   private async get(
@@ -271,6 +444,12 @@ function requiredDocument(
   if (result.kind !== "get") throw unexpectedResult(command, result.kind);
   if (!result.row) throw new Error(`database command ${command} returned no document`);
   return decodeDocument(result.row as DocumentRow);
+}
+
+function requireMigrationIdentity(value: string, label: string): void {
+  if (!value || value.length > 255 || value.includes("\0")) {
+    throw new TypeError(`${label} is invalid`);
+  }
 }
 
 function decodeDocument(row: DocumentRow): PluginStoredDocument {

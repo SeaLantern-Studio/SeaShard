@@ -40,6 +40,7 @@ const loadFailed = ref(false);
 const selectedPlugin = ref<PluginMarketPlugin>();
 const installations = ref<readonly PluginMarketInstallationSnapshot[]>([]);
 const installingKeys = ref<ReadonlySet<string>>(new Set());
+const installerAvailable = ref(true);
 let disposed = false;
 let requestSequence = 0;
 
@@ -63,15 +64,20 @@ async function loadPlugins(reportFailure: boolean, forceRefresh = false): Promis
   if (!result.value) loading.value = true;
   if (forceRefresh) refreshing.value = true;
   try {
-    const [snapshot, installed] = await Promise.all([
-      props.market.search({
-        query: query.value,
-        page: page.value,
-        pageSize,
-        ...(forceRefresh ? { refresh: true } : {}),
-      }),
-      props.installer.list(),
-    ]);
+    const snapshot = await props.market.search({
+      query: query.value,
+      page: page.value,
+      pageSize,
+      ...(forceRefresh ? { refresh: true } : {}),
+    });
+    let installed: readonly PluginMarketInstallationSnapshot[] = [];
+    try {
+      installed = await props.installer.list();
+      installerAvailable.value = true;
+    } catch {
+      // 官方目录属于 Controller 能力；插件 Runtime 不可用只禁用安装，不得拖垮市场页面。
+      installerAvailable.value = false;
+    }
     if (disposed || sequence !== requestSequence) return;
     result.value = snapshot;
     installations.value = installed;
@@ -136,6 +142,7 @@ function isInstalling(pluginId: string, version: string): boolean {
 }
 
 function installActionLabel(plugin: PluginMarketPlugin, release: PluginMarketRelease): string {
+  if (!installerAvailable.value) return "安装服务不可用";
   const installed = installedPlugin(plugin.id);
   if (installed?.source === "development") return "开发版本";
   if (installed?.digest === release.packageDigest) return "已安装";
@@ -145,6 +152,7 @@ function installActionLabel(plugin: PluginMarketPlugin, release: PluginMarketRel
 function canInstall(plugin: PluginMarketPlugin, release: PluginMarketRelease): boolean {
   const installed = installedPlugin(plugin.id);
   return (
+    installerAvailable.value &&
     !release.yanked &&
     installed?.source !== "development" &&
     installed?.digest !== release.packageDigest &&
@@ -209,8 +217,18 @@ async function installRelease(
 
 function runtimeSummary(release: PluginMarketRelease | undefined): string {
   if (!release) return "无可用版本";
-  const runtimes = [...new Set(release.entries.map((entry) => entry.runtime))];
-  return runtimes.map((runtime) => (runtime === "host" ? "Host" : "Client")).join("、");
+  const locations = [
+    ...new Set(
+      release.entries.map((entry) =>
+        entry.runtime === "client"
+          ? "Client"
+          : entry.execution === "host"
+            ? "Host Worker"
+            : "Controller",
+      ),
+    ),
+  ];
+  return locations.join("、");
 }
 
 function formatSize(bytes: number): string {

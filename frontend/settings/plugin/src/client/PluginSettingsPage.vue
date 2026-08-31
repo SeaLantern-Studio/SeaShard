@@ -163,6 +163,11 @@ function entryStateLabel(entry: PluginManagementEntrySnapshot): string {
   return "未运行";
 }
 
+function entryLocationLabel(entry: PluginManagementEntrySnapshot): string {
+  if (entry.runtime === "client") return "Client";
+  return entry.execution === "host" ? "Host Worker" : "Controller";
+}
+
 function activeEntryCount(plugin: PluginManagementSnapshot): number {
   return plugin.entries.filter(({ state }) => state === "active").length;
 }
@@ -257,7 +262,7 @@ function errorMessage(error: unknown): string {
             <dl>
               <div>
                 <dt>运行环境</dt>
-                <dd>{{ entry.runtime === "host" ? "Host" : "Client" }}</dd>
+                <dd>{{ entryLocationLabel(entry) }}</dd>
               </div>
               <div>
                 <dt>Runtime ID</dt>

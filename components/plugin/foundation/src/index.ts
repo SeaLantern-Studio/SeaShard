@@ -1,7 +1,6 @@
 import type { BootstrapDescriptor } from "@seashard/bootstrap-runtime";
 import type { DatabaseService } from "@seashard/database";
 import { SQLiteDatabaseBroker } from "@seashard/database-sqlite";
-import type { PluginStorageBroker } from "@seashard/plugin-sdk";
 import { PluginStore } from "@seashard/plugin-system";
 import { Context, Service } from "cordis";
 import { createHash } from "node:crypto";
@@ -27,7 +26,7 @@ export class PluginFoundationService extends Service {
   constructor(
     ctx: Context,
     readonly store: PluginStore,
-    readonly storage: PluginStorageBroker,
+    readonly storage: SQLitePluginDocumentStorage,
   ) {
     super(ctx, "plugin-foundation");
   }
@@ -51,7 +50,7 @@ export function createPluginFoundationBootstrapDescriptor(
   return {
     id: "seashard.plugin-foundation",
     buildDigest: createHash("sha256")
-      .update("seashard.plugin-foundation.bootstrap.v1")
+      .update("seashard.plugin-foundation.bootstrap.v2")
       .digest("hex"),
     inject: ["database"],
     provides: ["plugin-foundation"],
