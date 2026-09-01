@@ -13,10 +13,11 @@ import {
 await test("standalone Host ownership survives bundled product reuse", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "seashard-host-installation-"));
   try {
-    await registerStandaloneHost(dataRoot);
+    await registerStandaloneHost(dataRoot, "deb");
     assert.deepEqual(await registerBundledHostOwner(dataRoot, "desktop"), {
       schemaVersion: 1,
       kind: "standalone",
+      packageType: "deb",
       owners: [],
     });
     assert.equal((await releaseBundledHostOwner(dataRoot, "desktop")).removeHost, false);

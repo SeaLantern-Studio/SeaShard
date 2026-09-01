@@ -5,7 +5,14 @@ import {
   DesktopUpdateController,
   isNewerDesktopVersion,
   resolveDesktopUpdateTarget,
+  type DesktopUpdateCheckResult,
 } from "../apps/desktop/src/main/desktop-update-controller.ts";
+import {
+  isLocalHostUpdateAvailable,
+  parseSeaShardRelease,
+  resolveLocalHostReleaseAsset,
+  resolveHostUpdatePackageType,
+} from "../apps/desktop/src/main/local-host-update.ts";
 import type {
   ServerInstanceSnapshot,
   ServerRuntimeSnapshot,
@@ -53,17 +60,9 @@ await test("desktop updater coalesces checks and projects an available release",
   const controller = new DesktopUpdateController(windowsEnvironment);
   const states: string[] = [];
   controller.onSnapshotChanged((snapshot) => states.push(snapshot.state));
-  let releaseCheck!: (value: {
-    available: boolean;
-    latestVersion: string;
-    releaseDate: string;
-  }) => void;
+  let releaseCheck!: (value: DesktopUpdateCheckResult) => void;
   let checks = 0;
-  const gate = new Promise<{
-    available: boolean;
-    latestVersion: string;
-    releaseDate: string;
-  }>((resolve) => {
+  const gate = new Promise<DesktopUpdateCheckResult>((resolve) => {
     releaseCheck = resolve;
   });
   const check = () => {
@@ -75,11 +74,13 @@ await test("desktop updater coalesces checks and projects an available release",
   const second = controller.check(check);
   assert.equal(controller.getSnapshot().state, "checking");
   assert.equal(checks, 1);
-  releaseCheck({
-    available: true,
-    latestVersion: "1.3.0",
-    releaseDate: "2026-08-27T12:00:00.000Z",
-  });
+  releaseCheck(
+    updateCheckResult(["controller"], {
+      currentVersion: "1.2.3",
+      latestVersion: "1.3.0",
+      updateAvailable: false,
+    }),
+  );
 
   assert.deepEqual(await Promise.all([first, second]), [
     {
@@ -89,6 +90,13 @@ await test("desktop updater coalesces checks and projects an available release",
       architecture: "x64",
       packageType: "nsis",
       latestVersion: "1.3.0",
+      availableComponents: ["controller"],
+      localHost: {
+        installed: true,
+        currentVersion: "1.2.3",
+        latestVersion: "1.3.0",
+        updateAvailable: false,
+      },
       releaseDate: "2026-08-27T12:00:00.000Z",
     },
     {
@@ -98,6 +106,13 @@ await test("desktop updater coalesces checks and projects an available release",
       architecture: "x64",
       packageType: "nsis",
       latestVersion: "1.3.0",
+      availableComponents: ["controller"],
+      localHost: {
+        installed: true,
+        currentVersion: "1.2.3",
+        latestVersion: "1.3.0",
+        updateAvailable: false,
+      },
       releaseDate: "2026-08-27T12:00:00.000Z",
     },
   ]);
@@ -106,7 +121,7 @@ await test("desktop updater coalesces checks and projects an available release",
 
 await test("desktop updater downloads fully before a separate restart action", async () => {
   const controller = new DesktopUpdateController(windowsEnvironment);
-  await controller.check(async () => ({ available: true, latestVersion: "1.3.0" }));
+  await controller.check(async () => updateCheckResult(["controller"]));
   let releaseDownload!: () => void;
   const downloadGate = new Promise<void>((resolve) => {
     releaseDownload = resolve;
@@ -140,8 +155,9 @@ await test("desktop updater downloads fully before a separate restart action", a
   assert.equal(controller.getSnapshot().state, "restart-required");
   assert.equal(controller.getSnapshot().progress?.percent, 100);
 
-  controller.installDownloaded(() => {
+  await controller.installDownloaded(async () => {
     installs += 1;
+    return "controller-installing";
   });
   assert.equal(installs, 1);
   assert.equal(controller.getSnapshot().state, "installing");
@@ -300,7 +316,7 @@ await test("macOS updater compares releases and opens one manual download page",
     ...windowsEnvironment,
     platform: "darwin",
   });
-  await controller.check(async () => ({ available: true, latestVersion: "1.3.0" }));
+  await controller.check(async () => updateCheckResult(["controller"]));
   let releaseOpen!: () => void;
   const openGate = new Promise<void>((resolve) => {
     releaseOpen = resolve;
@@ -337,6 +353,172 @@ await test("desktop updater exposes a retryable error after a failed check", asy
     error: "release metadata unavailable",
   });
 });
+
+await test("Host-only update stays in Controller and consumes only the Host component", async () => {
+  const controller = new DesktopUpdateController(windowsEnvironment);
+  await controller.check(async () =>
+    updateCheckResult(["local-host"], {
+      currentVersion: "1.1.0",
+      latestVersion: "1.3.0",
+      updateAvailable: true,
+    }),
+  );
+
+  await controller.downloadAutomatically(async () => undefined);
+  assert.equal(controller.getSnapshot().state, "host-install-ready");
+  await controller.installDownloaded(async () => "host-completed");
+  assert.deepEqual(controller.getSnapshot(), {
+    state: "current",
+    currentVersion: "1.2.3",
+    platform: "windows",
+    architecture: "x64",
+    packageType: "nsis",
+    latestVersion: "1.3.0",
+    availableComponents: [],
+    localHost: {
+      installed: true,
+      currentVersion: "1.3.0",
+      latestVersion: "1.3.0",
+      updateAvailable: false,
+    },
+    releaseDate: "2026-08-27T12:00:00.000Z",
+  });
+});
+
+await test("Controller and Host updates remain separate through one safe-stop gate", async () => {
+  const controller = new DesktopUpdateController(windowsEnvironment);
+  await controller.check(async () =>
+    updateCheckResult(["controller", "local-host"], {
+      currentVersion: "1.1.0",
+      latestVersion: "1.3.0",
+      updateAvailable: true,
+    }),
+  );
+  const downloads: string[] = [];
+  await controller.downloadAutomatically(async () => {
+    controller.setDownloadComponent("local-host");
+    downloads.push(controller.getSnapshot().downloadComponent!);
+    controller.setDownloadComponent("controller");
+    downloads.push(controller.getSnapshot().downloadComponent!);
+  });
+
+  assert.deepEqual(downloads, ["local-host", "controller"]);
+  assert.equal(controller.getSnapshot().state, "restart-required");
+  await controller.installDownloaded(async () => "controller-installing");
+  assert.equal(controller.getSnapshot().state, "installing");
+});
+
+await test("Host Release selection verifies digest and never downgrades newer Host", () => {
+  const digest = "a".repeat(64);
+  const release = parseSeaShardRelease({
+    tag_name: "v1.3.0",
+    published_at: "2026-08-27T12:00:00.000Z",
+    assets: [
+      {
+        name: "SeaShard-Host-linux-x64.deb",
+        size: 42,
+        digest: `sha256:${digest}`,
+        browser_download_url:
+          "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v1.3.0/SeaShard-Host-linux-x64.deb",
+      },
+      {
+        name: "SeaShard-Host-linux-x64.AppImage",
+        size: 84,
+        digest: `sha256:${digest}`,
+        browser_download_url:
+          "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v1.3.0/SeaShard-Host-linux-x64.AppImage",
+      },
+    ],
+  });
+  assert.equal(
+    resolveLocalHostReleaseAsset(release, {
+      platform: "linux",
+      architecture: "x64",
+      packageType: "deb",
+    }).name,
+    "SeaShard-Host-linux-x64.deb",
+  );
+  assert.equal(
+    resolveLocalHostReleaseAsset(release, {
+      platform: "linux",
+      architecture: "x64",
+      packageType: "appimage",
+    }).name,
+    "SeaShard-Host-linux-x64.AppImage",
+  );
+  assert.equal(
+    resolveLocalHostReleaseAsset(release, {
+      platform: "linux",
+      architecture: "x64",
+      packageType: "deb",
+    }).sha256,
+    digest,
+  );
+  assert.equal(isLocalHostUpdateAvailable(true, undefined, "1.3.0"), true);
+  assert.equal(isLocalHostUpdateAvailable(true, "1.2.9", "1.3.0"), true);
+  assert.equal(isLocalHostUpdateAvailable(true, "1.3.0", "1.3.0"), false);
+  assert.equal(isLocalHostUpdateAvailable(true, "1.4.0", "1.3.0"), false);
+  assert.equal(isLocalHostUpdateAvailable(false, undefined, "1.3.0"), false);
+});
+
+await test("mixed Linux installs select the Host package type independently", () => {
+  assert.equal(
+    resolveHostUpdatePackageType({
+      platform: "linux",
+      descriptorPackageType: "deb",
+      legacyEnvironment: { APPIMAGE: "/controller/SeaShard.AppImage" },
+    }),
+    "deb",
+  );
+  assert.equal(
+    resolveHostUpdatePackageType({
+      platform: "linux",
+      descriptorPackageType: "appimage",
+      legacyExecutablePath: "/opt/SeaShard/seashard-host",
+    }),
+    "appimage",
+  );
+  assert.equal(
+    resolveHostUpdatePackageType({
+      platform: "linux",
+      legacyExecutablePath: "/opt/SeaShard Host/seashard-host",
+      installationKind: "standalone",
+    }),
+    "deb",
+  );
+  assert.equal(
+    resolveHostUpdatePackageType({
+      platform: "linux",
+      legacyEnvironment: {
+        SEASHARD_HOST_INSTALLED_EXECUTABLE: "/home/test/.local/share/SeaShard/host/runtime/AppRun",
+      },
+    }),
+    "appimage",
+  );
+  assert.equal(
+    resolveHostUpdatePackageType({
+      platform: "linux",
+      installationKind: "standalone",
+    }),
+    undefined,
+  );
+});
+
+function updateCheckResult(
+  availableComponents: DesktopUpdateCheckResult["availableComponents"],
+  localHost: Omit<DesktopUpdateCheckResult["localHost"], "installed"> = {
+    currentVersion: "1.3.0",
+    latestVersion: "1.3.0",
+    updateAvailable: false,
+  },
+): DesktopUpdateCheckResult {
+  return {
+    latestVersion: "1.3.0",
+    availableComponents,
+    localHost: { installed: true, ...localHost },
+    releaseDate: "2026-08-27T12:00:00.000Z",
+  };
+}
 
 function createServerInstance(id: string, name: string): ServerInstanceSnapshot {
   return {

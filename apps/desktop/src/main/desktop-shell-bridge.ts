@@ -93,9 +93,22 @@ export async function registerDesktopShellBridge(
     stopServerRuntime: (instanceId) => serverRuntime.stop(instanceId),
     waitUntilServerStopped: (instanceId) =>
       serverRuntime.waitUntilStopped(instanceId, desktopUpdateServerStopTimeoutMs),
-    install: (afterInstall) => {
-      if (!desktopUpdates.install(afterInstall)) {
-        throw new Error("更新安装器未能启动");
+    install: async (afterInstall) => {
+      const updateSnapshot = desktopUpdates.getSnapshot();
+      const updatesLocalHost = updateSnapshot.availableComponents?.includes("local-host") ?? false;
+      const disconnectBeforeInstall = updatesLocalHost && updateSnapshot.platform !== "macos";
+      if (disconnectBeforeInstall) {
+        // 主动释放旧 RPC 客户端，避免新 Host 已就绪时 retry 仍误用即将关闭的连接。
+        await kernel.hosts.disconnect("local");
+      }
+      try {
+        const result = await desktopUpdates.install(afterInstall);
+        if (result.localHostUpdated && !result.controllerInstallerStarted) {
+          await kernel.hosts.retry("local");
+        }
+      } catch (error) {
+        if (disconnectBeforeInstall) await kernel.hosts.retry("local").catch(() => undefined);
+        throw error;
       }
     },
   };

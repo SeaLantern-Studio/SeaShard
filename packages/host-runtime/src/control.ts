@@ -29,10 +29,14 @@ export function startHostRuntimeControlServer(
   kernel: PluginKernel,
   dataRoot: string,
   startedAt: string,
+  seaShardVersion: string,
+  packageType?: HostControlServer["descriptor"]["packageType"],
 ): Promise<HostControlServer> {
   return startHostControlServer({
     dataRoot,
     startedAt,
+    seaShardVersion,
+    packageType,
     handlers: {
       callService: ({ contract, method, args }) => kernel.callService(contract, method, [...args]),
       isMutation: isHostMutation,

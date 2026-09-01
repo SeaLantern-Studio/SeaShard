@@ -23,6 +23,8 @@ export interface LegacyHostMigrationSnapshot {
   readonly packages: readonly LegacyHostMigrationPackageSnapshot[];
 }
 
+export type HostPackageType = "appimage" | "deb" | "nsis" | "pkg";
+
 export interface HostControlDescriptor {
   readonly protocolVersion: typeof hostControlProtocolVersion;
   readonly socketPath: string;
@@ -30,6 +32,10 @@ export interface HostControlDescriptor {
   readonly token: string;
   readonly pid: number;
   readonly startedAt: string;
+  /** 旧版 Host 描述文件没有该字段；Controller 将缺失版本视为可独立升级。 */
+  readonly seaShardVersion?: string;
+  /** 安装包类型由 Host 自己报告；旧版描述文件允许缺失。 */
+  readonly packageType?: HostPackageType;
 }
 
 export interface HostControllerIdentity {

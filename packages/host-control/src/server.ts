@@ -39,6 +39,8 @@ export interface StartHostControlServerOptions {
   readonly dataRoot: string;
   readonly handlers: HostControlHandlers;
   readonly startedAt?: string;
+  readonly seaShardVersion?: string;
+  readonly packageType?: HostControlDescriptor["packageType"];
 }
 
 /**
@@ -60,6 +62,8 @@ export async function startHostControlServer(
     token,
     pid: process.pid,
     startedAt: options.startedAt ?? new Date().toISOString(),
+    ...(options.seaShardVersion ? { seaShardVersion: options.seaShardVersion } : {}),
+    ...(options.packageType ? { packageType: options.packageType } : {}),
   };
   const connections = new Map<Socket, ControllerConnection>();
   let revision = 0;

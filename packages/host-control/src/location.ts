@@ -47,7 +47,13 @@ export async function readHostControlDescriptor(
     typeof value.token !== "string" ||
     !/^[a-f0-9]{64}$/u.test(value.token) ||
     typeof value.pid !== "number" ||
-    typeof value.startedAt !== "string"
+    typeof value.startedAt !== "string" ||
+    (value.seaShardVersion !== undefined && !/^\d+\.\d+\.\d+$/u.test(value.seaShardVersion)) ||
+    (value.packageType !== undefined &&
+      value.packageType !== "appimage" &&
+      value.packageType !== "deb" &&
+      value.packageType !== "nsis" &&
+      value.packageType !== "pkg")
   ) {
     throw new TypeError(`invalid SeaShard Host descriptor: ${location.descriptorPath}`);
   }

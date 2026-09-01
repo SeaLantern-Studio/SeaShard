@@ -145,7 +145,6 @@ jobs:
             platform: mac
             targets: pkg
             arch: x64
-            host_unpack_dir: mac
             asset_key: macos-x64
             update_channel: latest
             supports_update: false
@@ -154,7 +153,6 @@ jobs:
             platform: mac
             targets: pkg
             arch: arm64
-            host_unpack_dir: mac-arm64
             asset_key: macos-arm64
             update_channel: latest-arm64
             supports_update: false
@@ -227,14 +225,6 @@ jobs:
             mac)
               cp build/host-installer/SeaShardHostSetup.pkg \
                 "release/SeaShard-Host-${{ matrix.asset_key }}.pkg"
-              mkdir -p build/macos-controller-extra-pkgs
-              pkgbuild \
-                --component "build/host-installer/${{ matrix.host_unpack_dir }}/SeaShardHost.app" \
-                --install-location /Applications \
-                --identifier studio.sealantern.seashard.host \
-                --version "${{ inputs.version }}" \
-                --scripts build/macos-host-scripts \
-                build/macos-controller-extra-pkgs/SeaShardHostComponent.pkg
               ;;
             linux)
               chmod +x build/host-installer/SeaShardHostSetup.AppImage

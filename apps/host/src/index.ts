@@ -1,14 +1,19 @@
-import { ensureStandaloneHostAutostart, resolveDefaultHostDataRoot } from "./autostart";
+import {
+  ensureStandaloneHostAutostart,
+  resolveDefaultHostDataRoot,
+  resolveHostPackageType,
+} from "./autostart";
 import { registerStandaloneHost } from "@seashard/host-installation";
 import { startSeaShardHost, type SeaShardHostRuntime } from "@seashard/host-runtime";
-import { existsSync } from "node:fs";
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+const seaShardVersion = resolveSeaShardVersion();
 const shutdownRequestFileName = "host-shutdown.request";
+const hostPackageType = resolveHostPackageType();
 let runtime: SeaShardHostRuntime | undefined;
 let shutdownTask: Promise<void> | undefined;
 let activeDataRoot: string | undefined;
@@ -19,7 +24,7 @@ async function main(): Promise<void> {
     readArgument("--data-root") ??
     process.env.SEASHARD_HOST_DATA_DIR ??
     resolveDefaultHostDataRoot();
-  await registerStandaloneHost(dataRoot);
+  await registerStandaloneHost(dataRoot, hostPackageType);
   activeDataRoot = dataRoot;
   await ensureStandaloneHostAutostart({ dataRoot }).catch((error) => {
     // 启动登记属于安装便利能力；失败时保留当前 Host 进程，交给 Controller 展示连接事实。
@@ -28,8 +33,9 @@ async function main(): Promise<void> {
 
   runtime = await startSeaShardHost({
     dataRoot,
-    seaShardVersion: process.env.SEASHARD_VERSION ?? "0.0.0",
+    seaShardVersion,
     databaseWorkerEntry: resolveHostSiblingEntry("database-worker"),
+    packageType: hostPackageType,
     pluginHostEntry: resolveHostSiblingEntry("plugin-host"),
     hostProfile: "node",
     requestShutdown: () => void shutdown(),
@@ -55,6 +61,22 @@ function resolveHostSiblingEntry(application: "database-worker" | "plugin-host")
     if (existsSync(unpackedEntry)) return unpackedEntry;
   }
   return join(moduleDirectory, `../../${application}/dist/index.js`);
+}
+
+/** electron-builder 会把 Release 版本写入 app.asar 根 package.json；开发环境继续使用 0.0.0。 */
+function resolveSeaShardVersion(): string {
+  const environmentVersion = process.env.SEASHARD_VERSION;
+  if (environmentVersion) return environmentVersion;
+  try {
+    const metadata = JSON.parse(
+      readFileSync(join(moduleDirectory, "../../../package.json"), "utf8"),
+    ) as { version?: unknown };
+    return typeof metadata.version === "string" && /^\d+\.\d+\.\d+$/u.test(metadata.version)
+      ? metadata.version
+      : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
 }
 
 function readArgument(name: string): string | undefined {

@@ -19,6 +19,8 @@ await test("Host allows concurrent readers and transfers one write controller", 
   const writes: string[] = [];
   const server = await startHostControlServer({
     dataRoot,
+    seaShardVersion: "1.3.0",
+    packageType: "deb",
     handlers: {
       async callService(call) {
         if (call.method === "writeValue") {
@@ -53,6 +55,8 @@ await test("Host allows concurrent readers and transfers one write controller", 
     }>("test.control");
 
     assert.equal(first.hasControl, true);
+    assert.equal(first.hostVersion, "1.3.0");
+    assert.equal(first.hostPackageType, "deb");
     assert.equal(second.hasControl, false);
     assert.equal(await secondService.getValue(), "visible");
     await assert.rejects(

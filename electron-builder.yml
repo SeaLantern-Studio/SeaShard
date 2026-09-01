@@ -32,8 +32,6 @@ mac:
     - pkg
   category: public.app-category.utilities
   sign: null
-pkg:
-  extraPkgsDir: macos-controller-extra-pkgs
 linux:
   target:
     - AppImage
@@ -42,11 +40,12 @@ linux:
   extraResources:
     - from: build/linux-controller-host-installer/SeaShardHostSetup.AppImage
       to: host-installer/SeaShardHostSetup.AppImage
+    - from: build/linux-host-appimage-install.sh
+      to: host-installer/install.sh
 deb:
   afterInstall: build/linux-controller-after-install.tpl
-  # Controller DEB 会启动内嵌的独立 Host AppImage；通过包依赖确保 AppImage
-  # 在 Debian、Ubuntu 与 Kali 的新旧 FUSE2 包命名下都能直接运行。
-  # 使用 fpm 追加依赖，避免 deb.depends 覆盖 electron-builder 的默认依赖集。
+  # Controller 自身的 Electron Runtime 直接链接 ALSA；使用替代依赖同时覆盖新式
+  # t64 发行版和仍提供旧包名的 Debian/Ubuntu。
   fpm:
     - --depends
-    - libfuse2t64 | libfuse2
+    - libasound2t64 | libasound2

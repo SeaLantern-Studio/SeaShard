@@ -1,4 +1,6 @@
 import type {
+  DesktopLocalHostUpdateSnapshot,
+  DesktopUpdateComponent,
   DesktopUpdateFinishRequest,
   DesktopUpdateFinishResult,
   DesktopUpdatePackageType,
@@ -20,10 +22,16 @@ export interface DesktopUpdateEnvironment {
 }
 
 export interface DesktopUpdateCheckResult {
-  readonly available: boolean;
   readonly latestVersion: string;
+  readonly availableComponents: readonly DesktopUpdateComponent[];
+  readonly localHost: DesktopLocalHostUpdateSnapshot;
   readonly releaseDate?: string;
 }
+
+export type DesktopUpdateInstallDisposition =
+  | "controller-installing"
+  | "host-completed"
+  | "external";
 
 interface ResolvedDesktopUpdateTarget {
   readonly platform: DesktopUpdatePlatform;
@@ -247,10 +255,13 @@ export class DesktopUpdateController {
       });
       try {
         const result = await checkForUpdates();
+        const availableComponents = Object.freeze([...result.availableComponents]);
         this.#publish({
           ...this.#baseSnapshot(),
-          state: result.available ? "available" : "current",
+          state: availableComponents.length > 0 ? "available" : "current",
           latestVersion: result.latestVersion,
+          availableComponents,
+          localHost: Object.freeze({ ...result.localHost }),
           ...(result.releaseDate ? { releaseDate: result.releaseDate } : {}),
         });
         return this.#snapshot;
@@ -272,22 +283,19 @@ export class DesktopUpdateController {
     this.#expectAvailableUpdate();
 
     const task = (async () => {
-      const latestVersion = this.#snapshot.latestVersion;
-      const releaseDate = this.#snapshot.releaseDate;
       this.#publish({
         ...this.#baseSnapshot(),
         state: "downloading",
-        ...(latestVersion ? { latestVersion } : {}),
-        ...(releaseDate ? { releaseDate } : {}),
         progress: zeroProgress,
       });
       try {
         await download();
+        const components = this.#snapshot.availableComponents ?? [];
+        const controllerInstallsInApp =
+          components.includes("controller") && this.#snapshot.packageType !== "dmg";
         this.#publish({
           ...this.#baseSnapshot(),
-          state: "restart-required",
-          ...(latestVersion ? { latestVersion } : {}),
-          ...(releaseDate ? { releaseDate } : {}),
+          state: controllerInstallsInApp ? "restart-required" : "host-install-ready",
           progress: { ...(this.#snapshot.progress ?? zeroProgress), percent: 100 },
         });
       } catch (error) {
@@ -303,22 +311,60 @@ export class DesktopUpdateController {
     }
   }
 
-  /** 安装器只能消费已经完整下载的更新；发布 installing 后 Electron 将立即退出。 */
-  installDownloaded(install: () => void): void {
-    if (this.#snapshot.state !== "restart-required") {
-      throw new Error("软件更新尚未准备好重启");
+  setDownloadComponent(component: DesktopUpdateComponent): void {
+    if (this.#snapshot.state !== "downloading") return;
+    this.#publish({
+      ...this.#snapshot,
+      downloadComponent: component,
+      progress: zeroProgress,
+    });
+  }
+
+  /**
+   * Host 与 Controller 安装包已经分别下载。Host 安装完成后可留在当前进程；Controller
+   * 安装器启动后 Electron 将退出。外部安装器保持 available，等待用户完成系统安装。
+   */
+  async installDownloaded(install: () => Promise<DesktopUpdateInstallDisposition>): Promise<void> {
+    if (
+      this.#snapshot.state !== "restart-required" &&
+      this.#snapshot.state !== "host-install-ready"
+    ) {
+      throw new Error("软件更新尚未准备好安装");
     }
-    const latestVersion = this.#snapshot.latestVersion;
-    const releaseDate = this.#snapshot.releaseDate;
     try {
       this.#publish({
         ...this.#baseSnapshot(),
         state: "installing",
-        ...(latestVersion ? { latestVersion } : {}),
-        ...(releaseDate ? { releaseDate } : {}),
         progress: { ...(this.#snapshot.progress ?? zeroProgress), percent: 100 },
       });
-      install();
+      const disposition = await install();
+      if (disposition === "controller-installing") return;
+      if (disposition === "external") {
+        this.#publish({
+          ...this.#baseSnapshot(),
+          state: "available",
+        });
+        return;
+      }
+
+      const remainingComponents = (this.#snapshot.availableComponents ?? []).filter(
+        (component) => component !== "local-host",
+      );
+      const localHost = this.#snapshot.localHost;
+      this.#publish({
+        ...this.#baseSnapshot(),
+        state: remainingComponents.length > 0 ? "available" : "current",
+        availableComponents: Object.freeze(remainingComponents),
+        ...(localHost
+          ? {
+              localHost: Object.freeze({
+                ...localHost,
+                currentVersion: localHost.latestVersion,
+                updateAvailable: false,
+              }),
+            }
+          : {}),
+      });
     } catch (error) {
       this.reportError(error);
       throw error;
@@ -326,8 +372,8 @@ export class DesktopUpdateController {
   }
 
   /**
-   * 未签名 macOS 构建保留版本检查，但把安装交还给浏览器和 Finder。这里仍复用
-   * actionTask，避免连点按钮一次打开多个 Release 页面。
+   * 未签名 macOS Controller 构建把安装交还给浏览器和 Finder。这里仍复用 actionTask，
+   * 避免连点按钮一次打开多个 Release 页面。
    */
   async openDownloadPage(open: () => Promise<void>): Promise<void> {
     if (this.#actionTask) return this.#actionTask;
@@ -367,11 +413,9 @@ export class DesktopUpdateController {
 
   reportError(error: unknown): void {
     if (this.#snapshot.state === "unsupported") return;
-    const latestVersion = this.#snapshot.latestVersion;
     this.#publish({
       ...this.#baseSnapshot(),
       state: "error",
-      ...(latestVersion ? { latestVersion } : {}),
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -388,6 +432,12 @@ export class DesktopUpdateController {
       platform: this.#snapshot.platform,
       architecture: this.#snapshot.architecture,
       packageType: this.#snapshot.packageType,
+      ...(this.#snapshot.latestVersion ? { latestVersion: this.#snapshot.latestVersion } : {}),
+      ...(this.#snapshot.releaseDate ? { releaseDate: this.#snapshot.releaseDate } : {}),
+      ...(this.#snapshot.availableComponents
+        ? { availableComponents: this.#snapshot.availableComponents }
+        : {}),
+      ...(this.#snapshot.localHost ? { localHost: this.#snapshot.localHost } : {}),
     };
   }
 

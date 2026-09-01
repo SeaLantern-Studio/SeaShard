@@ -54,3 +54,5 @@ deb:
   fpm:
     - --before-remove
     - build/linux-host-before-remove.sh
+    - --depends
+    - libasound2t64 | libasound2

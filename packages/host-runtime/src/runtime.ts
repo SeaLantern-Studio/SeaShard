@@ -1,6 +1,6 @@
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
-import { type HostControlServer } from "@seashard/host-control";
+import { type HostControlServer, type HostPackageType } from "@seashard/host-control";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import { PluginKernel, type PluginKernelOptions } from "@seashard/plugin-system";
 import { Context } from "cordis";
@@ -13,6 +13,7 @@ import { registerHostWorkerDeploymentService } from "./worker-deployment";
 export interface StartSeaShardHostOptions {
   readonly dataRoot: string;
   readonly seaShardVersion: string;
+  readonly packageType?: HostPackageType;
   readonly databaseWorkerEntry: string;
   readonly pluginHostEntry: string;
   readonly startedAt?: string;
@@ -94,7 +95,13 @@ export async function startSeaShardHost(
     registerLegacyHostMigrationService(kernel, root["plugin-foundation"].storage);
     registerHostLifecycleService(kernel, options.requestShutdown);
     await kernel.start();
-    controlServer = await startHostRuntimeControlServer(kernel, options.dataRoot, startedAt);
+    controlServer = await startHostRuntimeControlServer(
+      kernel,
+      options.dataRoot,
+      startedAt,
+      options.seaShardVersion,
+      options.packageType,
+    );
     return new SeaShardHostRuntime(
       options.dataRoot,
       startedAt,

@@ -6,12 +6,22 @@ export type DesktopUpdateState =
   | "current"
   | "available"
   | "downloading"
+  | "host-install-ready"
   | "restart-required"
   | "installing"
   | "error";
 
 export type DesktopUpdatePlatform = "windows" | "linux" | "macos" | "other";
 export type DesktopUpdatePackageType = "nsis" | "dmg" | "appimage" | "deb" | "unsupported";
+
+export type DesktopUpdateComponent = "controller" | "local-host";
+
+export interface DesktopLocalHostUpdateSnapshot {
+  readonly installed: boolean;
+  readonly currentVersion?: string;
+  readonly latestVersion?: string;
+  readonly updateAvailable: boolean;
+}
 
 export interface DesktopUpdateProgress {
   readonly percent: number;
@@ -65,6 +75,9 @@ export interface DesktopUpdateSnapshot {
   readonly latestVersion?: string;
   readonly releaseDate?: string;
   readonly progress?: DesktopUpdateProgress;
+  readonly availableComponents?: readonly DesktopUpdateComponent[];
+  readonly downloadComponent?: DesktopUpdateComponent;
+  readonly localHost?: DesktopLocalHostUpdateSnapshot;
   readonly reason?: string;
   readonly error?: string;
 }

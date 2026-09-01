@@ -113,11 +113,12 @@
 !endif
 
 !macro customInstall
-  ; 默认安装器始终安装 Controller；本机缺少独立 Host 时，再调用独立 Host 安装器。
-  !insertmacro resolveSeaShardHostDataRoot $R9
-  InitPluginsDir
-  File /oname=$PLUGINSDIR\SeaShardHostSetup.exe "${BUILD_RESOURCES_DIR}\host-installer\SeaShardHostSetup.exe"
-  ${ifNot} ${FileExists} "$R9\host-installation\standalone"
+  ; 随 Controller 的 Host 制品仅用于首次安装。已有 Host 由应用内独立更新流维护，
+  ; Controller 安装器不得覆盖、降级或改变其生命周期。
+  !insertmacro resolveSeaShardHostDataRoot $R1
+  ${ifNot} ${FileExists} "$R1\host-installation.json"
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\SeaShardHostSetup.exe "${BUILD_RESOURCES_DIR}\host-installer\SeaShardHostSetup.exe"
     ExecWait '"$PLUGINSDIR\SeaShardHostSetup.exe" /S' $R0
     ${if} $R0 != 0
       Abort "SeaShard Host installation failed."

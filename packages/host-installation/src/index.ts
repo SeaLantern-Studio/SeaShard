@@ -5,9 +5,13 @@ const schemaVersion = 1;
 const lockStaleMilliseconds = 10_000;
 const ownerPattern = /^[a-z0-9][a-z0-9._:-]{0,127}$/u;
 
+export type HostInstallationPackageType = "appimage" | "deb" | "nsis" | "pkg";
+
 export interface HostInstallationRecord {
   readonly schemaVersion: typeof schemaVersion;
   readonly kind: "standalone" | "bundled";
+  /** 旧版记录没有该字段；新 Host 启动时会按真实制品补齐。 */
+  readonly packageType?: HostInstallationPackageType;
   readonly owners: readonly string[];
 }
 
@@ -34,11 +38,17 @@ export async function readHostInstallation(
 }
 
 /** 独立安装拥有最高所有权；后续 Desktop 或 Server 复用时不能将其降级为捆绑安装。 */
-export function registerStandaloneHost(dataRoot: string): Promise<HostInstallationRecord> {
-  return mutateInstallation(dataRoot, () => ({
+export function registerStandaloneHost(
+  dataRoot: string,
+  packageType?: HostInstallationPackageType,
+): Promise<HostInstallationRecord> {
+  return mutateInstallation(dataRoot, (current) => ({
     schemaVersion,
     kind: "standalone",
     owners: [],
+    ...((packageType ?? current?.packageType)
+      ? { packageType: packageType ?? current?.packageType }
+      : {}),
   }));
 }
 
@@ -54,6 +64,7 @@ export function registerBundledHostOwner(
       schemaVersion,
       kind: "bundled",
       owners: [...new Set([...(current?.owners ?? []), owner])].sort(),
+      ...(current?.packageType ? { packageType: current.packageType } : {}),
     };
   });
 }
@@ -153,8 +164,7 @@ async function readMarkedInstallation(
   if (standalone && bundled) {
     throw new Error(`SeaShard Host installation markers conflict: ${root}`);
   }
-  if (standalone) return { schemaVersion, kind: "standalone", owners: [] };
-  if (!bundled) return undefined;
+  if (!standalone && !bundled) return undefined;
 
   const ownerRoot = join(root, "owners");
   const ownerEntries = await readdir(ownerRoot, { withFileTypes: true }).catch((error) => {
@@ -168,7 +178,28 @@ async function readMarkedInstallation(
       return name;
     })
     .sort();
-  return { schemaVersion, kind: "bundled", owners };
+  if (standalone && owners.length > 0) {
+    throw new TypeError("Standalone Host installation cannot have bundled owners");
+  }
+
+  const packageTypeEntries = await readdir(join(root, "package-types"), {
+    withFileTypes: true,
+  }).catch((error) => {
+    if (hasCode(error, "ENOENT")) return [];
+    throw error;
+  });
+  const packageTypes = packageTypeEntries
+    .filter((entry) => entry.isFile())
+    .map(({ name }) => requirePackageType(name));
+  if (packageTypes.length > 1) {
+    throw new TypeError(`SeaShard Host package type markers conflict: ${root}`);
+  }
+  return {
+    schemaVersion,
+    kind: standalone ? "standalone" : "bundled",
+    owners,
+    ...(packageTypes[0] ? { packageType: packageTypes[0] } : {}),
+  };
 }
 
 async function writeInstallationMarkers(
@@ -177,12 +208,19 @@ async function writeInstallationMarkers(
 ): Promise<void> {
   const root = installationMarkerRoot(dataRoot);
   const ownerRoot = join(root, "owners");
+  const packageTypeRoot = join(root, "package-types");
   await rm(root, { recursive: true, force: true });
-  await mkdir(ownerRoot, { recursive: true });
+  await Promise.all([
+    mkdir(ownerRoot, { recursive: true }),
+    mkdir(packageTypeRoot, { recursive: true }),
+  ]);
   await writeFile(join(root, installation.kind), "", { mode: 0o600 });
   for (const owner of installation.owners) {
     requireOwner(owner);
     await writeFile(join(ownerRoot, owner), "", { mode: 0o600 });
+  }
+  if (installation.packageType) {
+    await writeFile(join(packageTypeRoot, installation.packageType), "", { mode: 0o600 });
   }
 }
 
@@ -220,11 +258,23 @@ function parseInstallation(value: unknown): HostInstallationRecord {
   if (record.kind === "standalone" && owners.length > 0) {
     throw new TypeError("Standalone Host installation cannot have bundled owners");
   }
-  return { schemaVersion, kind: record.kind, owners: [...new Set(owners)].sort() };
+  const packageType =
+    record.packageType === undefined ? undefined : requirePackageType(record.packageType);
+  return {
+    schemaVersion,
+    kind: record.kind,
+    owners: [...new Set(owners)].sort(),
+    ...(packageType ? { packageType } : {}),
+  };
 }
 
 function requireOwner(owner: string): void {
   if (!ownerPattern.test(owner)) throw new TypeError(`invalid Host installation owner: ${owner}`);
+}
+
+function requirePackageType(value: unknown): HostInstallationPackageType {
+  if (value === "appimage" || value === "deb" || value === "nsis" || value === "pkg") return value;
+  throw new TypeError(`invalid Host installation package type: ${String(value)}`);
 }
 
 function delay(milliseconds: number): Promise<void> {

@@ -1,6 +1,8 @@
+import type { HostPackageType } from "@seashard/host-control";
+import { readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, posix, resolve, win32 } from "node:path";
+import { basename, dirname, join, posix, resolve, win32 } from "node:path";
 
 interface HostAutostartOptions {
   readonly dataRoot: string;
@@ -38,6 +40,37 @@ export function resolveDefaultHostDataRoot(
 }
 
 /**
+ * 安装类型由 Host 的真实启动制品判断。Controller 只能消费这个结果，不能用自己的
+ * 包格式代替 Host 做决定。
+ */
+export function resolveHostPackageType(
+  platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+  executablePath = process.execPath,
+  resourcesPath = process.resourcesPath,
+): HostPackageType | undefined {
+  const declared = environment.SEASHARD_HOST_PACKAGE_TYPE;
+  if (declared === "appimage" || declared === "deb" || declared === "nsis" || declared === "pkg") {
+    return declared;
+  }
+  if (platform === "win32") {
+    return basename(executablePath).toLowerCase() === "seashardhost.exe" ? "nsis" : undefined;
+  }
+  if (platform === "darwin") {
+    return basename(executablePath) === "SeaShardHost" ? "pkg" : undefined;
+  }
+  if (platform !== "linux") return undefined;
+  if (environment.APPIMAGE || environment.SEASHARD_HOST_INSTALLED_EXECUTABLE) return "appimage";
+  try {
+    return readFileSync(join(resourcesPath, "package-type"), "utf8").trim() === "deb"
+      ? "deb"
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * macOS PKG 和 Linux DEB 会在安装阶段登记启动项。直接运行 Host App 或 AppImage 时，
  * 这里补齐当前用户的启动登记；登记失败不应阻止 Host 接管已有服务器。
  */
@@ -62,8 +95,18 @@ export async function ensureStandaloneHostAutostart(options: HostAutostartOption
     return;
   }
 
+  if (platform !== "linux") return;
+
+  // Controller 首次安装和 AppImage 独立更新会把 AppImage 内容永久解包到稳定目录，
+  // 并通过此变量把真实入口交给 Host。后续 XDG 启动不需要 FUSE。
+  const managedExecutable = environment.SEASHARD_HOST_INSTALLED_EXECUTABLE;
+  if (managedExecutable) {
+    await writeLinuxAutostart(managedExecutable, options.dataRoot, environment, homeDirectory);
+    return;
+  }
+
   const appImagePath = environment.APPIMAGE;
-  if (platform !== "linux" || !appImagePath) return;
+  if (!appImagePath) return;
 
   // AppImage 可能从下载目录或临时挂载点启动；先复制到稳定位置，再登记 XDG 自动启动。
   const installationRoot = join(
@@ -81,13 +124,22 @@ export async function ensureStandaloneHostAutostart(options: HostAutostartOption
   }
   await chmod(installedExecutable, 0o755);
 
+  await writeLinuxAutostart(installedExecutable, options.dataRoot, environment, homeDirectory);
+}
+
+async function writeLinuxAutostart(
+  executablePath: string,
+  dataRoot: string,
+  environment: NodeJS.ProcessEnv,
+  homeDirectory: string,
+): Promise<void> {
   const autostartPath = join(
     environment.XDG_CONFIG_HOME ?? join(homeDirectory, ".config"),
     "autostart",
     "studio.sealantern.seashard.host.desktop",
   );
   await mkdir(dirname(autostartPath), { recursive: true });
-  await writeFile(autostartPath, createDesktopAutostart(installedExecutable, options.dataRoot), {
+  await writeFile(autostartPath, createDesktopAutostart(executablePath, dataRoot), {
     encoding: "utf8",
     mode: 0o600,
   });

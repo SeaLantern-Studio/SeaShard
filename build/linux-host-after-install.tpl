@@ -58,11 +58,25 @@ X-GNOME-Autostart-enabled=true
 EOF
 chmod 644 "$autostart_file"
 
+target_user=''
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-  user_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+  target_user="$SUDO_USER"
+else
+  case "${PKEXEC_UID:-}" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ "$PKEXEC_UID" -ne 0 ]; then
+        target_user="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
+      fi
+      ;;
+  esac
+fi
+
+if [ -n "$target_user" ]; then
+  user_home="$(getent passwd "$target_user" | cut -d: -f6)"
   if [ -n "$user_home" ]; then
     data_root="$user_home/.config/SeaShard/core"
-    install -d -o "$SUDO_USER" -g "$(id -gn "$SUDO_USER")" "$data_root"
+    install -d -o "$target_user" -g "$(id -gn "$target_user")" "$data_root"
     if [ -f "$data_root/host-control.json" ]; then
       : >"$data_root/host-shutdown.request"
       attempts=0
@@ -75,7 +89,7 @@ if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
         exit 1
       fi
     fi
-    runuser -u "$SUDO_USER" -- env HOME="$user_home" DISPLAY="${DISPLAY:-:0}" \
+    runuser -u "$target_user" -- env HOME="$user_home" DISPLAY="${DISPLAY:-:0}" \
       "$host_executable" "--data-root=$data_root" >/dev/null 2>&1 &
   fi
 fi

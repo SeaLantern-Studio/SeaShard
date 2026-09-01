@@ -26,9 +26,17 @@ const busy = computed(
     snapshot.value?.state === "downloading" ||
     snapshot.value?.state === "installing",
 );
+const availableComponents = computed(() => snapshot.value?.availableComponents ?? []);
+const controllerUpdateAvailable = computed(() => availableComponents.value.includes("controller"));
+const localHostUpdateAvailable = computed(() => availableComponents.value.includes("local-host"));
 const manualDownload = computed(
-  () => snapshot.value?.platform === "macos" && snapshot.value.packageType === "dmg",
+  () =>
+    controllerUpdateAvailable.value &&
+    snapshot.value?.platform === "macos" &&
+    snapshot.value.packageType === "dmg",
 );
+const manualDownloadOnly = computed(() => manualDownload.value && !localHostUpdateAvailable.value);
+const controllerRestartRequired = computed(() => snapshot.value?.state === "restart-required");
 const updateStatus = computed(() => {
   const value = snapshot.value;
   if (!value) return "正在读取";
@@ -40,15 +48,27 @@ const updateStatus = computed(() => {
     case "checking":
       return "正在检查";
     case "current":
-      return `v${value.currentVersion} 已是最新版本`;
-    case "available":
-      return `v${value.latestVersion} 可用`;
+      return value.localHost?.installed
+        ? `Controller v${value.currentVersion} · Host v${value.localHost.currentVersion ?? value.localHost.latestVersion ?? "—"} 均为最新`
+        : `Controller v${value.currentVersion} 已是最新版本`;
+    case "available": {
+      const labels: string[] = [];
+      if (value.availableComponents?.includes("controller")) {
+        labels.push(`Controller v${value.latestVersion}`);
+      }
+      if (value.availableComponents?.includes("local-host")) {
+        labels.push(`本机 Host v${value.localHost?.latestVersion ?? "—"}`);
+      }
+      return `${labels.join(" · ")} 可用`;
+    }
     case "downloading":
-      return `正在下载 ${Math.round(value.progress?.percent ?? 0)}%`;
+      return `正在下载${value.downloadComponent === "local-host" ? "本机 Host" : "Controller"} ${Math.round(value.progress?.percent ?? 0)}%`;
+    case "host-install-ready":
+      return "本机 Host 更新已下载";
     case "restart-required":
-      return "更新已下载，等待重启";
+      return "Controller 更新已下载，等待重启";
     case "installing":
-      return "正在安装并准备重启";
+      return "正在安装更新";
     case "error":
       return "等待重新检查";
   }
@@ -56,11 +76,13 @@ const updateStatus = computed(() => {
 const actionLabel = computed(() => {
   switch (snapshot.value?.state) {
     case "available":
-      return manualDownload.value ? "前往下载" : "一键更新";
+      return manualDownloadOnly.value ? "前往下载" : "一键更新";
     case "checking":
       return "检查中";
     case "downloading":
       return "下载中";
+    case "host-install-ready":
+      return "立即更新";
     case "restart-required":
       return "立即重启";
     case "installing":
@@ -78,7 +100,9 @@ const progressPercent = computed(() =>
 onMounted(async () => {
   disposeSnapshotListener = props.updates.onSnapshotChanged((value) => {
     snapshot.value = value;
-    if (value.state !== "restart-required") restartRequirement.value = undefined;
+    if (value.state !== "restart-required" && value.state !== "host-install-ready") {
+      restartRequirement.value = undefined;
+    }
   });
   try {
     snapshot.value = await props.updates.getSnapshot();
@@ -90,35 +114,44 @@ onMounted(async () => {
 onBeforeUnmount(() => disposeSnapshotListener?.());
 
 /**
- * 一个按钮遵循状态机前进：先检查并下载；安装包准备完成后由 Main 检查服务器，
- * 只有没有活动服务器，或用户明确选择安全关服时，才允许进入安装重启。
+ * 一个按钮推进两条独立更新流。Host-only 安装留在当前 Controller 进程并重连 Host；
+ * Controller 安装才进入退出重启。两者都必须先经过服务器安全停机闸门。
  */
 async function checkOrInstall(): Promise<void> {
   const current = snapshot.value;
   if (!current || busy.value || current.state === "unsupported") return;
   if (current.state === "available") {
+    const hostOnly = localHostUpdateAvailable.value && !controllerUpdateAvailable.value;
     try {
-      handleFinishResult(await props.updates.apply());
-      if (manualDownload.value) toast.info({ title: "已打开 macOS 下载页" });
+      const result = await props.updates.apply();
+      handleFinishResult(result);
+      if (manualDownload.value) {
+        toast.info({ title: "已打开 macOS 下载页" });
+      } else if (hostOnly && !result) {
+        notifyHostUpdateResult();
+      }
     } catch (error) {
       toast.error({
-        title: manualDownload.value ? "打开下载页失败" : "软件更新失败",
+        title: manualDownload.value ? "打开更新安装包失败" : "软件更新失败",
         description: errorMessage(error),
       });
     }
     return;
   }
-  if (current.state === "restart-required") {
-    await requestRestart(false);
+  if (current.state === "restart-required" || current.state === "host-install-ready") {
+    await finishUpdate(false);
     return;
   }
 
   try {
     const result = await props.updates.check();
     if (result.state === "available") {
+      const labels = (result.availableComponents ?? []).map((component) =>
+        component === "controller" ? "Controller" : "本机 Host",
+      );
       toast.info({
         title: "发现可用更新",
-        description: `SeaShard ${result.latestVersion} 已可以下载`,
+        description: `${labels.join("、")} 可以更新`,
       });
     } else if (result.state === "current") {
       toast.success({ title: "已是最新版本" });
@@ -128,21 +161,23 @@ async function checkOrInstall(): Promise<void> {
   }
 }
 
-/** “稍后重启”只关闭强制决策层；已下载状态保留，主按钮可再次发起重启检查。 */
-function deferRestart(): void {
+/** 稍后处理只关闭强制决策层；已下载状态保留，主按钮可再次发起安全停机检查。 */
+function deferUpdate(): void {
   restartRequirement.value = undefined;
 }
 
-async function requestRestart(stopRunningServers: boolean): Promise<void> {
+async function finishUpdate(stopRunningServers: boolean): Promise<void> {
   if (restartWorking.value) return;
+  const hostOnly =
+    snapshot.value?.state === "host-install-ready" && !controllerUpdateAvailable.value;
   restartWorking.value = true;
   try {
-    handleFinishResult(
-      await props.updates.finish({
-        stopRunningServers,
-        afterInstall: "restart",
-      }),
-    );
+    const result = await props.updates.finish({
+      stopRunningServers,
+      afterInstall: "restart",
+    });
+    handleFinishResult(result);
+    if (!result && hostOnly) notifyHostUpdateResult();
   } catch (error) {
     toast.error({
       title: "软件更新失败",
@@ -154,7 +189,7 @@ async function requestRestart(stopRunningServers: boolean): Promise<void> {
 }
 
 /**
- * 停机失败是可恢复的业务结果：关闭确认层、保留 restart-required，并按服务器逐项展示
+ * 停机失败是可恢复的业务结果：关闭确认层、保留已下载状态，并按服务器逐项展示
  * 原因。安装器异常仍走调用异常分支，避免把安装错误误报成服务器错误。
  */
 function handleFinishResult(result: DesktopUpdateFinishResult): void {
@@ -178,6 +213,16 @@ function runtimeStateLabel(
   if (state === "starting") return "启动中";
   if (state === "stopping") return "停止中";
   return "运行中";
+}
+
+function notifyHostUpdateResult(): void {
+  if (snapshot.value?.state === "current") {
+    toast.success({ title: "本机 Host 已更新" });
+    return;
+  }
+  if (snapshot.value?.platform === "macos") {
+    toast.info({ title: "已打开本机 Host 安装包" });
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -217,7 +262,7 @@ function errorMessage(error: unknown): string {
               @click="checkOrInstall"
             >
               <ExternalLink
-                v-if="snapshot?.state === 'available' && manualDownload"
+                v-if="snapshot?.state === 'available' && manualDownloadOnly"
                 :size="15"
                 :stroke-width="1.8"
               />
@@ -247,7 +292,7 @@ function errorMessage(error: unknown): string {
 
     <Cmz_Modal
       :visible="Boolean(restartRequirement)"
-      title="更新需要重启"
+      :title="controllerRestartRequired ? '更新需要重启' : '更新需要停止服务器'"
       width="520px"
       :close-on-overlay="false"
       :show-close-button="false"
@@ -263,11 +308,11 @@ function errorMessage(error: unknown): string {
       </div>
       <template #footer>
         <div class="update-restart-actions">
-          <Cmz_Button variant="outline" :disabled="restartWorking" @click="deferRestart">
-            稍后重启
+          <Cmz_Button variant="outline" :disabled="restartWorking" @click="deferUpdate">
+            {{ controllerRestartRequired ? "稍后重启" : "稍后更新" }}
           </Cmz_Button>
-          <Cmz_Button :loading="restartWorking" @click="requestRestart(true)">
-            关闭服务器并重启
+          <Cmz_Button :loading="restartWorking" @click="finishUpdate(true)">
+            {{ controllerRestartRequired ? "关闭服务器并重启" : "关闭服务器并更新" }}
           </Cmz_Button>
         </div>
       </template>

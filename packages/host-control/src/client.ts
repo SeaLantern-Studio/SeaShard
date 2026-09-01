@@ -91,6 +91,14 @@ export class HostControlClient {
     return this.controlSnapshotValue;
   }
 
+  get hostVersion(): string | undefined {
+    return this.descriptor.seaShardVersion;
+  }
+
+  get hostPackageType(): HostControlDescriptor["packageType"] {
+    return this.descriptor.packageType;
+  }
+
   get hasControl(): boolean {
     return this.controlSnapshotValue.holder?.sessionId === this.identity.sessionId;
   }

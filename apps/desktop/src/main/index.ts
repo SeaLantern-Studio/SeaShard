@@ -169,9 +169,9 @@ async function waitForApplicationReady(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   await waitForApplicationReady();
-  desktopUpdates = createElectronDesktopUpdateService(seaShardVersion);
   const userDataRoot = app.getPath("userData");
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
+  desktopUpdates = createElectronDesktopUpdateService(seaShardVersion, dataRoot);
   if (!app.isPackaged) {
     localHostProcess ??= new LocalHostProcessLauncher({
       hostEntry: resolveDevelopmentHostEntry(),
@@ -303,27 +303,39 @@ async function bootstrap(): Promise<void> {
 }
 
 /**
- * Linux Controller 随包携带的是独立 Host AppImage 安装器。调用后由 Host 安装器自行
- * 复制到用户目录并建立启动项；Controller 不包含 Host 运行入口。
+ * 缺少 Host 时保留安装入口。正式更新由 desktop-update 下载并执行独立 Host 安装包，
+ * 这里的随包制品只服务 Linux 首次安装，绝不会参与 Controller 更新。
  */
 async function openHostInstaller(): Promise<void> {
-  const bundledInstaller = resolveBundledHostInstallerPath();
+  const bundledInstaller = resolveBundledHostInstaller();
   if (!bundledInstaller) {
     await shell.openExternal(resolveHostInstallerDownloadUrl());
     return;
   }
 
-  await launchDetachedInstaller(bundledInstaller);
+  await launchDetachedInstaller("/bin/sh", [
+    bundledInstaller.installScript,
+    bundledInstaller.hostImage,
+  ]);
 }
 
-function resolveBundledHostInstallerPath(): string | undefined {
+interface BundledHostInstaller {
+  readonly hostImage: string;
+  readonly installScript: string;
+}
+
+function resolveBundledHostInstaller(): BundledHostInstaller | undefined {
   if (!app.isPackaged || process.platform !== "linux") return undefined;
-  return join(process.resourcesPath, "host-installer", "SeaShardHostSetup.AppImage");
+  const installerRoot = join(process.resourcesPath, "host-installer");
+  return {
+    hostImage: join(installerRoot, "SeaShardHostSetup.AppImage"),
+    installScript: join(installerRoot, "install.sh"),
+  };
 }
 
-function launchDetachedInstaller(executable: string): Promise<void> {
+function launchDetachedInstaller(executable: string, args: readonly string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, [], { detached: true, stdio: "ignore" });
+    const child = spawn(executable, args, { detached: true, stdio: "ignore" });
     child.once("error", reject);
     child.once("spawn", () => {
       child.unref();
@@ -472,7 +484,8 @@ async function finishGracefulQuit(installDownloadedUpdate: boolean): Promise<voi
   shutdownComplete = true;
   if (shutdownSucceeded && installDownloadedUpdate && desktopUpdates?.isRestartRequired()) {
     try {
-      if (desktopUpdates.install("close")) return;
+      const result = await desktopUpdates.install("close");
+      if (result.controllerInstallerStarted) return;
     } catch (error) {
       console.error("SeaShard update install on quit failed", error);
     }
