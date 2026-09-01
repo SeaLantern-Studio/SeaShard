@@ -44,3 +44,9 @@ linux:
       to: host-installer/SeaShardHostSetup.AppImage
 deb:
   afterInstall: build/linux-controller-after-install.tpl
+  # Controller DEB 会启动内嵌的独立 Host AppImage；通过包依赖确保 AppImage
+  # 在 Debian、Ubuntu 与 Kali 的新旧 FUSE2 包命名下都能直接运行。
+  # 使用 fpm 追加依赖，避免 deb.depends 覆盖 electron-builder 的默认依赖集。
+  fpm:
+    - --depends
+    - libfuse2t64 | libfuse2
