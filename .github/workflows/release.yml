@@ -211,7 +211,7 @@ jobs:
             build/linux-host-after-install.tpl \
             build/linux-host-before-remove.sh \
             build/linux-controller-after-install.tpl \
-            build/linux-host-after-remove.tpl \
+            build/linux-host-after-remove.tpl
           pnpm exec electron-builder \
             --config electron-builder.host.yml \
             --${{ matrix.platform }} ${{ matrix.targets }} \
