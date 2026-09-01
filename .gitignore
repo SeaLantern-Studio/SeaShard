@@ -5,12 +5,15 @@ AGENTS.md
 
 # Dependencies
 node_modules/
+/.pnpm-store/
 
 # Build output
 dist/
 out/
 release/
 /build/host-installer/
+/build/macos-controller-extra-pkgs/
+/build/linux-controller-host-installer/
 
 # Runtime data
 .data/

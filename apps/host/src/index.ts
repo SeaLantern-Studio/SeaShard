@@ -1,3 +1,4 @@
+import { ensureStandaloneHostAutostart, resolveDefaultHostDataRoot } from "./autostart";
 import { registerStandaloneHost } from "@seashard/host-installation";
 import { startSeaShardHost, type SeaShardHostRuntime } from "@seashard/host-runtime";
 import { existsSync } from "node:fs";
@@ -14,10 +15,16 @@ let activeDataRoot: string | undefined;
 let shutdownRequestWatcher: FSWatcher | undefined;
 
 async function main(): Promise<void> {
-  const dataRoot = readArgument("--data-root") ?? process.env.SEASHARD_HOST_DATA_DIR;
-  if (!dataRoot) throw new Error("SeaShard Host data directory was not provided");
+  const dataRoot =
+    readArgument("--data-root") ??
+    process.env.SEASHARD_HOST_DATA_DIR ??
+    resolveDefaultHostDataRoot();
   await registerStandaloneHost(dataRoot);
   activeDataRoot = dataRoot;
+  await ensureStandaloneHostAutostart({ dataRoot }).catch((error) => {
+    // 启动登记属于安装便利能力；失败时保留当前 Host 进程，交给 Controller 展示连接事实。
+    console.warn("SeaShard Host autostart registration failed", error);
+  });
 
   runtime = await startSeaShardHost({
     dataRoot,

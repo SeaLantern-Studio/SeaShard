@@ -20,6 +20,7 @@ asarUnpack:
   - apps/database-worker/dist/**/*
 npmRebuild: false
 extraMetadata:
+  name: seashard-host
   main: apps/host/dist/index.js
 win:
   executableName: SeaShardHost
@@ -33,3 +34,23 @@ nsis:
   createStartMenuShortcut: false
   runAfterFinish: false
   include: build/host-installer.nsh
+mac:
+  executableName: SeaShardHost
+  target:
+    - pkg
+  category: public.app-category.utilities
+  sign: null
+pkg:
+  scripts: build/macos-host-scripts
+linux:
+  executableName: seashard-host
+  target:
+    - AppImage
+    - deb
+  category: Utility
+deb:
+  afterInstall: build/linux-host-after-install.tpl
+  afterRemove: build/linux-host-after-remove.tpl
+  fpm:
+    - --before-remove
+    - build/linux-host-before-remove.sh

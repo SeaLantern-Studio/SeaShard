@@ -143,16 +143,18 @@ jobs:
           - label: macOS Intel x64
             runner: macos-latest
             platform: mac
-            targets: dmg
+            targets: pkg
             arch: x64
+            host_unpack_dir: mac
             asset_key: macos-x64
             update_channel: latest
             supports_update: false
           - label: macOS Apple Silicon
             runner: macos-latest
             platform: mac
-            targets: dmg
+            targets: pkg
             arch: arm64
+            host_unpack_dir: mac-arm64
             asset_key: macos-arm64
             update_channel: latest-arm64
             supports_update: false
@@ -201,18 +203,50 @@ jobs:
           name: compiled-application
           path: apps
 
-      - name: 构建独立 Windows Host 安装包
-        if: matrix.platform == 'win'
+      - name: 构建独立 Host 安装包
         shell: bash
         run: |
+          chmod +x \
+            build/macos-host-scripts/postinstall \
+            build/linux-host-after-install.tpl \
+            build/linux-host-before-remove.sh \
+            build/linux-controller-after-install.tpl \
+            build/linux-host-after-remove.tpl \
           pnpm exec electron-builder \
             --config electron-builder.host.yml \
-            --win nsis \
+            --${{ matrix.platform }} ${{ matrix.targets }} \
             --${{ matrix.arch }} \
             --publish never \
             --config.extraMetadata.version=${{ inputs.version }}
           mkdir -p release
-          cp build/host-installer/SeaShardHostSetup.exe "release/SeaShard-Host-${{ matrix.asset_key }}.exe"
+          case "${{ matrix.platform }}" in
+            win)
+              cp build/host-installer/SeaShardHostSetup.exe \
+                "release/SeaShard-Host-${{ matrix.asset_key }}.exe"
+              ;;
+            mac)
+              cp build/host-installer/SeaShardHostSetup.pkg \
+                "release/SeaShard-Host-${{ matrix.asset_key }}.pkg"
+              mkdir -p build/macos-controller-extra-pkgs
+              pkgbuild \
+                --component "build/host-installer/${{ matrix.host_unpack_dir }}/SeaShardHost.app" \
+                --install-location /Applications \
+                --identifier studio.sealantern.seashard.host \
+                --version "${{ inputs.version }}" \
+                --scripts build/macos-host-scripts \
+                build/macos-controller-extra-pkgs/SeaShardHostComponent.pkg
+              ;;
+            linux)
+              chmod +x build/host-installer/SeaShardHostSetup.AppImage
+              cp build/host-installer/SeaShardHostSetup.AppImage \
+                "release/SeaShard-Host-${{ matrix.asset_key }}.AppImage"
+              cp build/host-installer/SeaShardHostSetup.deb \
+                "release/SeaShard-Host-${{ matrix.asset_key }}.deb"
+              mkdir -p build/linux-controller-host-installer
+              cp build/host-installer/SeaShardHostSetup.AppImage \
+                build/linux-controller-host-installer/
+              ;;
+          esac
 
       - name: 构建平台安装包
         shell: bash
@@ -232,10 +266,13 @@ jobs:
           name: seashard-${{ matrix.asset_key }}
           path: |
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.exe
-            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.dmg
+            release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.pkg
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
             release/SeaShard-${{ inputs.version }}-${{ matrix.asset_key }}.deb
             release/SeaShard-Host-${{ matrix.asset_key }}.exe
+            release/SeaShard-Host-${{ matrix.asset_key }}.pkg
+            release/SeaShard-Host-${{ matrix.asset_key }}.AppImage
+            release/SeaShard-Host-${{ matrix.asset_key }}.deb
           if-no-files-found: error
           retention-days: 1
 

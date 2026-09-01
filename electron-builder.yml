@@ -29,11 +29,18 @@ nsis:
   allowToChangeInstallationDirectory: true
 mac:
   target:
-    - dmg
+    - pkg
   category: public.app-category.utilities
   sign: null
+pkg:
+  extraPkgsDir: macos-controller-extra-pkgs
 linux:
   target:
     - AppImage
     - deb
   category: Utility
+  extraResources:
+    - from: build/linux-controller-host-installer/SeaShardHostSetup.AppImage
+      to: host-installer/SeaShardHostSetup.AppImage
+deb:
+  afterInstall: build/linux-controller-after-install.tpl

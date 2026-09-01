@@ -21,12 +21,18 @@ await test("release bundle includes installers and supported updater metadata", 
     "SeaShard-1.2.3-windows-arm64.exe",
     "SeaShard-Host-windows-x64.exe",
     "SeaShard-Host-windows-arm64.exe",
-    "SeaShard-1.2.3-macos-x64.dmg",
-    "SeaShard-1.2.3-macos-arm64.dmg",
+    "SeaShard-1.2.3-macos-x64.pkg",
+    "SeaShard-1.2.3-macos-arm64.pkg",
+    "SeaShard-Host-macos-x64.pkg",
+    "SeaShard-Host-macos-arm64.pkg",
     "SeaShard-1.2.3-linux-x64.AppImage",
     "SeaShard-1.2.3-linux-x64.deb",
     "SeaShard-1.2.3-linux-arm64.AppImage",
     "SeaShard-1.2.3-linux-arm64.deb",
+    "SeaShard-Host-linux-x64.AppImage",
+    "SeaShard-Host-linux-x64.deb",
+    "SeaShard-Host-linux-arm64.AppImage",
+    "SeaShard-Host-linux-arm64.deb",
     "SeaShard-1.2.3-windows-x64.exe.blockmap",
     "SeaShard-1.2.3-windows-arm64.exe.blockmap",
     "latest.yml",
@@ -61,8 +67,8 @@ await test("release notes map every supported platform and include the complete 
   for (const file of [
     "SeaShard-1.2.3-windows-x64.exe",
     "SeaShard-1.2.3-windows-arm64.exe",
-    "SeaShard-1.2.3-macos-x64.dmg",
-    "SeaShard-1.2.3-macos-arm64.dmg",
+    "SeaShard-1.2.3-macos-x64.pkg",
+    "SeaShard-1.2.3-macos-arm64.pkg",
     "SeaShard-1.2.3-linux-x64.AppImage",
     "SeaShard-1.2.3-linux-x64.deb",
     "SeaShard-1.2.3-linux-arm64.AppImage",
@@ -70,7 +76,10 @@ await test("release notes map every supported platform and include the complete 
   ] as const) {
     assert.match(notes, new RegExp(file.replaceAll(".", "\\."), "u"));
   }
-  assert.doesNotMatch(notes, /SeaShard-Host-windows-(?:x64|arm64)\.exe/u);
+  assert.doesNotMatch(
+    notes,
+    /SeaShard-Host-(?:windows|macos|linux)-(?:x64|arm64)\.(?:exe|pkg|AppImage|deb)/u,
+  );
   assert.match(notes, /^## 下载指引/u);
   assert.doesNotMatch(notes, /^# SeaShard /u);
   assert.match(notes, /feat\(plugin\): 添加插件市场/u);

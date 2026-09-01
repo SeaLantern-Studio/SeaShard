@@ -21,6 +21,7 @@ import {
 } from "@seashard/plugin-system";
 import { Context } from "cordis";
 import { app, protocol, shell } from "electron";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -200,9 +201,7 @@ async function bootstrap(): Promise<void> {
     connectLocal: () => connectLocalHost(dataRoot),
     readLocalInstallation: async () =>
       (await readHostInstallation(dataRoot)) ? "installed" : "missing",
-    installLocal: async () => {
-      await shell.openExternal(resolveHostInstallerDownloadUrl());
-    },
+    installLocal: openHostInstaller,
   });
 
   // 每个 Desktop 都启动自己的完整 Controller Runtime；operation 模式只省略窗口。
@@ -303,12 +302,50 @@ async function bootstrap(): Promise<void> {
   if (developmentUrl) console.log(`SEASHARD_DEV_WINDOW_READY ${developmentUrl}`);
 }
 
-function resolveHostInstallerDownloadUrl(): string {
-  if (process.platform !== "win32") {
-    return "https://github.com/SeaLantern-Studio/SeaShard/releases/latest";
+/**
+ * Linux Controller 随包携带的是独立 Host AppImage 安装器。调用后由 Host 安装器自行
+ * 复制到用户目录并建立启动项；Controller 不包含 Host 运行入口。
+ */
+async function openHostInstaller(): Promise<void> {
+  const bundledInstaller = resolveBundledHostInstallerPath();
+  if (!bundledInstaller) {
+    await shell.openExternal(resolveHostInstallerDownloadUrl());
+    return;
   }
-  const architecture = process.arch === "arm64" ? "windows-arm64" : "windows-x64";
-  return `https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/SeaShard-Host-${architecture}.exe`;
+
+  await launchDetachedInstaller(bundledInstaller);
+}
+
+function resolveBundledHostInstallerPath(): string | undefined {
+  if (!app.isPackaged || process.platform !== "linux") return undefined;
+  return join(process.resourcesPath, "host-installer", "SeaShardHostSetup.AppImage");
+}
+
+function launchDetachedInstaller(executable: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, [], { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+function resolveHostInstallerDownloadUrl(): string {
+  const architecture = process.arch === "arm64" ? "arm64" : "x64";
+  const releaseRoot = "https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download";
+  if (process.platform === "win32") {
+    return `${releaseRoot}/SeaShard-Host-windows-${architecture}.exe`;
+  }
+  if (process.platform === "darwin") {
+    return `${releaseRoot}/SeaShard-Host-macos-${architecture}.pkg`;
+  }
+  if (process.platform === "linux") {
+    const extension = process.env.APPIMAGE ? "AppImage" : "deb";
+    return `${releaseRoot}/SeaShard-Host-linux-${architecture}.${extension}`;
+  }
+  return "https://github.com/SeaLantern-Studio/SeaShard/releases/latest";
 }
 
 function resolveDevelopmentHostEntry(): string {

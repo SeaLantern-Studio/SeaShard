@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+host_app="/Applications/SeaShardHost.app"
+host_executable="$host_app/Contents/MacOS/SeaShardHost"
+label="studio.sealantern.seashard.host"
+console_user="$(stat -f '%Su' /dev/console)"
+
+if [ -z "$console_user" ] || [ "$console_user" = "root" ] || [ "$console_user" = "loginwindow" ]; then
+  exit 0
+fi
+
+user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+user_id="$(id -u "$console_user")"
+user_group="$(id -gn "$console_user")"
+data_root="$user_home/Library/Application Support/SeaShard/core"
+agent_dir="$user_home/Library/LaunchAgents"
+agent_path="$agent_dir/$label.plist"
+
+install -d -o "$console_user" -g "$user_group" "$data_root" "$agent_dir"
+
+if [ -f "$data_root/host-control.json" ]; then
+  : > "$data_root/host-shutdown.request"
+  attempts=0
+  while [ -f "$data_root/host-control.json" ] && [ "$attempts" -lt 600 ]; do
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  if [ -f "$data_root/host-control.json" ]; then
+    echo "SeaShard Host did not stop safely; installation cancelled." >&2
+    exit 1
+  fi
+fi
+
+cat > "$agent_path" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$host_executable</string>
+    <string>--data-root=$data_root</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+EOF
+chown "$console_user:$user_group" "$agent_path"
+chmod 600 "$agent_path"
+
+launchctl bootout "gui/$user_id/$label" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$user_id" "$agent_path" >/dev/null 2>&1 || true
+launchctl enable "gui/$user_id/$label" >/dev/null 2>&1 || true
+launchctl kickstart "gui/$user_id/$label" >/dev/null 2>&1 || true
