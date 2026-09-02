@@ -9,7 +9,7 @@ import {
 } from "../apps/desktop/src/main/desktop-update-controller.ts";
 import {
   isLocalHostUpdateAvailable,
-  parseSeaShardRelease,
+  parseSeaShardReleaseCatalog,
   resolveLocalHostReleaseAsset,
   resolveHostUpdatePackageType,
 } from "../apps/desktop/src/main/local-host-update.ts";
@@ -408,24 +408,25 @@ await test("Controller and Host updates remain separate through one safe-stop ga
   assert.equal(controller.getSnapshot().state, "installing");
 });
 
-await test("Host Release selection verifies digest and never downgrades newer Host", () => {
+await test("static Release catalog selects verified Host assets and never downgrades", () => {
   const digest = "a".repeat(64);
-  const release = parseSeaShardRelease({
-    tag_name: "v1.3.0",
-    published_at: "2026-08-27T12:00:00.000Z",
+  const release = parseSeaShardReleaseCatalog({
+    schemaVersion: 1,
+    version: "1.3.0",
+    tag: "v1.3.0",
     assets: [
       {
         name: "SeaShard-Host-linux-x64.deb",
         size: 42,
-        digest: `sha256:${digest}`,
-        browser_download_url:
+        sha256: digest,
+        downloadUrl:
           "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v1.3.0/SeaShard-Host-linux-x64.deb",
       },
       {
         name: "SeaShard-Host-linux-x64.AppImage",
         size: 84,
-        digest: `sha256:${digest}`,
-        browser_download_url:
+        sha256: digest,
+        downloadUrl:
           "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v1.3.0/SeaShard-Host-linux-x64.AppImage",
       },
     ],
@@ -459,6 +460,27 @@ await test("Host Release selection verifies digest and never downgrades newer Ho
   assert.equal(isLocalHostUpdateAvailable(true, "1.3.0", "1.3.0"), false);
   assert.equal(isLocalHostUpdateAvailable(true, "1.4.0", "1.3.0"), false);
   assert.equal(isLocalHostUpdateAvailable(false, undefined, "1.3.0"), false);
+});
+
+await test("static Release catalog rejects assets outside its immutable tag", () => {
+  assert.throws(
+    () =>
+      parseSeaShardReleaseCatalog({
+        schemaVersion: 1,
+        version: "1.3.0",
+        tag: "v1.3.0",
+        assets: [
+          {
+            name: "SeaShard-Host-linux-x64.deb",
+            size: 42,
+            sha256: "a".repeat(64),
+            downloadUrl:
+              "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v1.2.0/SeaShard-Host-linux-x64.deb",
+          },
+        ],
+      }),
+    /资产地址无效/u,
+  );
 });
 
 await test("mixed Linux installs select the Host package type independently", () => {

@@ -36,7 +36,7 @@ import {
 } from "./desktop-update-controller";
 import {
   isLocalHostUpdateAvailable,
-  parseSeaShardRelease,
+  parseSeaShardReleaseCatalog,
   resolveLocalHostReleaseAsset,
   resolveHostUpdatePackageType,
   type LocalHostReleaseAsset,
@@ -44,8 +44,8 @@ import {
 } from "./local-host-update";
 
 const { autoUpdater } = electronUpdater;
-const githubLatestReleaseApi =
-  "https://api.github.com/repos/SeaLantern-Studio/SeaShard/releases/latest";
+const githubLatestReleaseCatalog =
+  "https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/latest-release.json";
 const githubLatestReleasePage = "https://github.com/SeaLantern-Studio/SeaShard/releases/latest";
 const localHostReadyTimeoutMs = 60_000;
 
@@ -115,7 +115,7 @@ export function createElectronDesktopUpdateService(
 
   const checkForUpdates = async (): Promise<DesktopUpdateCheckResult> => {
     try {
-      const releaseTask = fetchLatestSeaShardRelease();
+      const releaseTask = fetchLatestSeaShardReleaseCatalog();
       const controllerTask = manualMacDownload ? undefined : updater.checkForUpdates();
       const [release, controllerResult] = await Promise.all([releaseTask, controllerTask]);
       if (!manualMacDownload && !controllerResult) {
@@ -326,17 +326,16 @@ async function readLegacyLinuxHostProcess(
   };
 }
 
-async function fetchLatestSeaShardRelease(): Promise<SeaShardRelease> {
-  const response = await net.fetch(githubLatestReleaseApi, {
+async function fetchLatestSeaShardReleaseCatalog(): Promise<SeaShardRelease> {
+  const response = await net.fetch(githubLatestReleaseCatalog, {
     headers: {
-      Accept: "application/vnd.github+json",
+      Accept: "application/json",
       "User-Agent": "SeaShard-Desktop-Updater",
-      "X-GitHub-Api-Version": "2022-11-28",
     },
   });
-  if (response.status === 404) throw new Error("当前还没有可供下载的正式 Release");
-  if (!response.ok) throw new Error(`GitHub Release 检查失败（HTTP ${response.status}）`);
-  return parseSeaShardRelease(await response.json());
+  if (response.status === 404) throw new Error("当前还没有可供下载的正式 Release 清单");
+  if (!response.ok) throw new Error(`Release 清单检查失败（HTTP ${response.status}）`);
+  return parseSeaShardReleaseCatalog(await response.json());
 }
 
 async function downloadLocalHostInstaller(

@@ -300,6 +300,16 @@ jobs:
           name: release-metadata
           path: release-assets
 
+      - name: 生成全量 Release 清单
+        env:
+          VERSION: ${{ inputs.version }}
+        run: >-
+          node scripts/generate-release-notes.ts generate-catalog
+          "$VERSION"
+          "$GITHUB_REPOSITORY"
+          release-assets
+          release-assets/latest-release.json
+
       - name: 校验 Release 资产集合
         env:
           VERSION: ${{ inputs.version }}
@@ -315,6 +325,7 @@ jobs:
           gh release create "v${VERSION}" \
             release-assets/SeaShard-* \
             release-assets/latest*.yml \
+            release-assets/latest-release.json \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "SeaShard ${VERSION}" \

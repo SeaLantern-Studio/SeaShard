@@ -1,12 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readdir, stat, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
 
 const releaseVersionPattern = /^\d+\.\d+\.\d+$/u;
 const releaseTagPattern = /^v\d+\.\d+\.\d+$/u;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const commitPattern = /^[a-f0-9]{40}$/u;
+const releaseAssetDigestPattern = /^[a-f0-9]{64}$/u;
+export const releaseCatalogFileName = "latest-release.json";
 
 export interface ReleaseCommit {
   readonly sha: string;
@@ -29,10 +33,10 @@ export function assertReleaseVersion(version: string): void {
 }
 
 /**
- * 安装包、平台更新清单与 Windows 差分块必须同批进入 Release；缺少任一文件都会让
- * 对应平台在下载或安装阶段失败。release-notes.md 只供 gh release create 读取。
+ * 这些文件会真实发布给用户。统一清单另外生成，因此不能包含自身；release-notes.md
+ * 只供 gh release create 读取，也不属于公开下载资产。
  */
-export function expectedReleaseBundleNames(version: string): readonly string[] {
+export function expectedPublishedReleaseAssetNames(version: string): readonly string[] {
   assertReleaseVersion(version);
   return [
     `SeaShard-${version}-windows-x64.exe`,
@@ -57,25 +61,97 @@ export function expectedReleaseBundleNames(version: string): readonly string[] {
     "latest-arm64.yml",
     "latest-linux.yml",
     "latest-linux-arm64.yml",
+  ];
+}
+
+/**
+ * 安装包、平台更新清单、Windows 差分块与统一清单必须同批进入 Release。
+ * release-notes.md 只供 gh release create 读取。
+ */
+export function expectedReleaseBundleNames(version: string): readonly string[] {
+  return [
+    ...expectedPublishedReleaseAssetNames(version),
+    releaseCatalogFileName,
     "release-notes.md",
   ];
 }
 
 export function assertReleaseBundle(version: string, actualNames: readonly string[]): void {
-  const expected = new Set(expectedReleaseBundleNames(version));
+  assertExactReleaseNames(expectedReleaseBundleNames(version), actualNames);
+}
+
+export interface ReleaseCatalogAssetSource {
+  readonly name: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+/**
+ * Controller 和 Host 的全部公开产物共用一份静态目录。electron-updater 仍消费自己的
+ * latest*.yml；统一目录负责版本发现、Host 选择以及所有资产的大小和摘要校验。
+ */
+export function buildReleaseCatalog(
+  version: string,
+  repository: string,
+  sources: readonly ReleaseCatalogAssetSource[],
+): string {
+  assertReleaseVersion(version);
+  if (!repositoryPattern.test(repository)) {
+    throw new Error(`无效的 GitHub 仓库标识：${repository}`);
+  }
+  const expectedNames = expectedPublishedReleaseAssetNames(version);
+  assertExactReleaseNames(
+    expectedNames,
+    sources.map(({ name }) => name),
+  );
+  const sourcesByName = new Map(sources.map((source) => [source.name, source]));
+  const assets = expectedNames.map((name) => {
+    const source = sourcesByName.get(name)!;
+    if (!Number.isSafeInteger(source.size) || source.size < 0) {
+      throw new Error(`Release 资产大小无效：${name}`);
+    }
+    if (!releaseAssetDigestPattern.test(source.sha256)) {
+      throw new Error(`Release 资产 SHA-256 无效：${name}`);
+    }
+    return {
+      name,
+      size: source.size,
+      sha256: source.sha256,
+      downloadUrl: `https://github.com/${repository}/releases/download/v${version}/${name}`,
+    };
+  });
+  return `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      version,
+      tag: `v${version}`,
+      assets,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function assertExactReleaseNames(
+  expectedNames: readonly string[],
+  actualNames: readonly string[],
+): void {
+  const expected = new Set(expectedNames);
   const actual = new Set(actualNames);
+  if (actual.size !== actualNames.length) {
+    throw new Error("Release 资产名称不能重复");
+  }
   const missing = [...expected].filter((name) => !actual.has(name));
   const unexpected = [...actual].filter((name) => !expected.has(name));
-  if (missing.length || unexpected.length) {
-    throw new Error(
-      [
-        missing.length ? `缺少 Release 资产：${missing.join("、")}` : "",
-        unexpected.length ? `存在未声明 Release 资产：${unexpected.join("、")}` : "",
-      ]
-        .filter(Boolean)
-        .join("；"),
-    );
-  }
+  if (!missing.length && !unexpected.length) return;
+  throw new Error(
+    [
+      missing.length ? `缺少 Release 资产：${missing.join("、")}` : "",
+      unexpected.length ? `存在未声明 Release 资产：${unexpected.join("、")}` : "",
+    ]
+      .filter(Boolean)
+      .join("；"),
+  );
 }
 
 /**
@@ -171,6 +247,34 @@ function readCommits(currentSha: string, previousTag?: string): readonly Release
     });
 }
 
+export async function generateReleaseCatalog(
+  version: string,
+  repository: string,
+  directory: string,
+  outputPath: string,
+): Promise<void> {
+  const publishedNames = expectedPublishedReleaseAssetNames(version);
+  assertExactReleaseNames([...publishedNames, "release-notes.md"], await readdir(directory));
+  const sources: ReleaseCatalogAssetSource[] = [];
+  for (const name of publishedNames) {
+    const path = join(directory, name);
+    const metadata = await stat(path);
+    if (!metadata.isFile()) throw new Error(`Release 资产不是普通文件：${name}`);
+    sources.push({
+      name,
+      size: metadata.size,
+      sha256: await sha256File(path),
+    });
+  }
+  await writeFile(outputPath, buildReleaseCatalog(version, repository, sources), "utf8");
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
 async function runCommand(args: readonly string[]): Promise<void> {
   const [command, ...values] = args;
   if (command === "validate") {
@@ -187,9 +291,18 @@ async function runCommand(args: readonly string[]): Promise<void> {
     process.stdout.write(`Release asset bundle accepted: ${version}\n`);
     return;
   }
+  if (command === "generate-catalog") {
+    const [version, repository, directory, outputPath] = values;
+    if (!version || !repository || !directory || !outputPath) {
+      throw new Error("generate-catalog 缺少版本、仓库、资产目录或输出路径");
+    }
+    await generateReleaseCatalog(version, repository, directory, outputPath);
+    process.stdout.write(`Release catalog written: ${outputPath}\n`);
+    return;
+  }
   if (command !== "generate") {
     throw new Error(
-      "用法：generate-release-notes.ts validate <version> | validate-assets <version> <directory> | generate <version> <owner/repo> <commit> <output> [previous-tag]",
+      "用法：generate-release-notes.ts validate <version> | validate-assets <version> <directory> | generate-catalog <version> <owner/repo> <directory> <output> | generate <version> <owner/repo> <commit> <output> [previous-tag]",
     );
   }
 

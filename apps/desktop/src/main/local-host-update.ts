@@ -21,42 +21,57 @@ export interface LocalHostReleaseTarget {
   readonly packageType: HostPackageType;
 }
 
-/** GitHub Release 是 Host 安装包的唯一可信索引；下载前仍必须校验 API 返回的 SHA-256。 */
-export function parseSeaShardRelease(input: unknown): SeaShardRelease {
-  if (!isObject(input) || typeof input.tag_name !== "string" || !Array.isArray(input.assets)) {
-    throw new Error("GitHub Release 返回了无效的版本信息");
+/**
+ * Release 工作流生成的静态目录是全部公开产物的可信索引。它与安装包位于同一个
+ * 不可变 Tag 下，使客户端无需调用有低额度限制的 GitHub REST API。
+ */
+export function parseSeaShardReleaseCatalog(input: unknown): SeaShardRelease {
+  if (
+    !isObject(input) ||
+    input.schemaVersion !== 1 ||
+    typeof input.version !== "string" ||
+    input.tag !== `v${input.version}` ||
+    !Array.isArray(input.assets)
+  ) {
+    throw new Error("SeaShard Release 清单格式无效");
   }
-  const version = input.tag_name.startsWith("v") ? input.tag_name.slice(1) : input.tag_name;
+  const version = input.version;
   if (!/^\d+\.\d+\.\d+$/u.test(version)) {
-    throw new Error(`GitHub Release 版本号无效：${input.tag_name}`);
+    throw new Error(`SeaShard Release 清单版本号无效：${version}`);
   }
 
-  const assets = input.assets.flatMap((value): LocalHostReleaseAsset[] => {
+  const names = new Set<string>();
+  const assets = input.assets.map((value, index): LocalHostReleaseAsset => {
     if (
       !isObject(value) ||
       typeof value.name !== "string" ||
-      typeof value.size !== "number" ||
-      typeof value.digest !== "string" ||
-      typeof value.browser_download_url !== "string"
+      !Number.isSafeInteger(value.size) ||
+      (value.size as number) < 0 ||
+      typeof value.sha256 !== "string" ||
+      typeof value.downloadUrl !== "string"
     ) {
-      return [];
+      throw new Error(`SeaShard Release 清单资产 #${index + 1} 无效`);
     }
-    const digest = /^sha256:([a-f0-9]{64})$/u.exec(value.digest);
-    if (!digest) return [];
-    const downloadUrl = trustedReleaseAssetUrl(value.browser_download_url);
-    if (!downloadUrl) return [];
-    return [
-      {
-        name: value.name,
-        size: value.size,
-        sha256: digest[1]!,
-        downloadUrl,
-      },
-    ];
+    if (names.has(value.name)) {
+      throw new Error(`SeaShard Release 清单资产名称重复：${value.name}`);
+    }
+    names.add(value.name);
+    if (!/^[a-f0-9]{64}$/u.test(value.sha256)) {
+      throw new Error(`SeaShard Release 清单资产摘要无效：${value.name}`);
+    }
+    const downloadUrl = trustedReleaseAssetUrl(value.downloadUrl, version, value.name);
+    if (!downloadUrl) {
+      throw new Error(`SeaShard Release 清单资产地址无效：${value.name}`);
+    }
+    return {
+      name: value.name,
+      size: value.size as number,
+      sha256: value.sha256,
+      downloadUrl,
+    };
   });
   return {
     version,
-    ...(typeof input.published_at === "string" ? { publishedAt: input.published_at } : {}),
     assets: Object.freeze(assets),
   };
 }
@@ -146,13 +161,16 @@ export function isLocalHostUpdateAvailable(
   return isNewerDesktopVersion(currentVersion, latestVersion);
 }
 
-function trustedReleaseAssetUrl(value: string): string | undefined {
+function trustedReleaseAssetUrl(value: string, version: string, name: string): string | undefined {
   try {
     const url = new URL(value);
+    const expectedPath = `/SeaLantern-Studio/SeaShard/releases/download/v${version}/${name}`;
     if (
       url.protocol !== "https:" ||
       url.hostname !== "github.com" ||
-      !url.pathname.startsWith("/SeaLantern-Studio/SeaShard/releases/download/")
+      url.pathname !== expectedPath ||
+      url.search ||
+      url.hash
     ) {
       return undefined;
     }
