@@ -23,7 +23,8 @@ import { Context } from "cordis";
 import { app, protocol, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { hostname } from "node:os";
+import { chmod, copyFile, mkdtemp, rm, stat } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerClientFeatures } from "./client-features";
@@ -188,7 +189,6 @@ async function bootstrap(): Promise<void> {
     connectedHost = await connectLocalHost(dataRoot);
   } catch (error) {
     initialHostError = formatError(error);
-    console.error("Local SeaShard Host is unavailable", error);
   }
   assertBootstrapContinues();
 
@@ -201,8 +201,25 @@ async function bootstrap(): Promise<void> {
     connectLocal: () => connectLocalHost(dataRoot),
     readLocalInstallation: async () =>
       (await readHostInstallation(dataRoot)) ? "installed" : "missing",
-    installLocal: openHostInstaller,
+    installLocal: () => openHostInstaller(dataRoot),
   });
+
+  if (
+    app.isPackaged &&
+    process.platform === "linux" &&
+    !connectedHost &&
+    localInstallation === "missing"
+  ) {
+    try {
+      // Linux 的 DEB 与 AppImage 都只携带安装资源；首次运行已处于准确的用户环境，
+      // 因此可以直接创建该用户的 Host Runtime、数据目录和 XDG 自动启动项。
+      await hostConnections.install("local");
+    } catch (error) {
+      console.error("Bundled SeaShard Host could not be installed during first launch", error);
+    }
+  } else if (initialHostError) {
+    console.error("Local SeaShard Host is unavailable", initialHostError);
+  }
 
   // 每个 Desktop 都启动自己的完整 Controller Runtime；operation 模式只省略窗口。
   const controllerDataRoot = process.env.SEASHARD_DATA_DIR
@@ -303,20 +320,28 @@ async function bootstrap(): Promise<void> {
 }
 
 /**
- * 缺少 Host 时保留安装入口。正式更新由 desktop-update 下载并执行独立 Host 安装包，
- * 这里的随包制品只服务 Linux 首次安装，绝不会参与 Controller 更新。
+ * Linux Controller 随包安装器必须等待 Host 真正就绪并由调用方立即重连。其他平台
+ * 打开独立安装包下载地址，安装生命周期继续交给用户和系统安装器。
  */
-async function openHostInstaller(): Promise<void> {
+async function openHostInstaller(dataRoot: string): Promise<"installed" | "external"> {
   const bundledInstaller = resolveBundledHostInstaller();
   if (!bundledInstaller) {
     await shell.openExternal(resolveHostInstallerDownloadUrl());
-    return;
+    return "external";
   }
 
-  await launchDetachedInstaller("/bin/sh", [
-    bundledInstaller.installScript,
-    bundledInstaller.hostImage,
-  ]);
+  const hostImage = await prepareExecutableHostImage(bundledInstaller.hostImage);
+  try {
+    await launchInstallerAndWait("/bin/sh", [bundledInstaller.installScript, hostImage.path], {
+      ...process.env,
+      SEASHARD_HOST_DATA_DIR: dataRoot,
+    });
+  } finally {
+    await hostImage
+      .dispose()
+      .catch((error) => console.warn("Temporary SeaShard Host image could not be removed", error));
+  }
+  return "installed";
 }
 
 interface BundledHostInstaller {
@@ -333,13 +358,65 @@ function resolveBundledHostInstaller(): BundledHostInstaller | undefined {
   };
 }
 
-function launchDetachedInstaller(executable: string, args: readonly string[]): Promise<void> {
+interface PreparedHostImage {
+  readonly path: string;
+  dispose(): Promise<void>;
+}
+
+async function prepareExecutableHostImage(path: string): Promise<PreparedHostImage> {
+  const metadata = await stat(path);
+  // 官方 Release 会保留执行位，DEB 的 postinst 也会补齐，此时直接消费原制品且不复制。
+  if ((metadata.mode & 0o111) !== 0) {
+    return { path, dispose: async () => undefined };
+  }
+
+  // 外层 Controller AppImage 的 SquashFS 只读，无法原地 chmod。仅在执行位缺失时复制
+  // 一份临时 Host Image，安装完成后立即清理；用户级稳定 Runtime 由 install.sh 负责。
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "seashard-host-installer-"));
+  const temporaryImage = join(temporaryRoot, "SeaShardHostSetup.AppImage");
+  try {
+    await copyFile(path, temporaryImage);
+    await chmod(temporaryImage, 0o755);
+  } catch (error) {
+    await rm(temporaryRoot, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    path: temporaryImage,
+    dispose: () => rm(temporaryRoot, { recursive: true, force: true }),
+  };
+}
+
+function launchInstallerAndWait(
+  executable: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { detached: true, stdio: "ignore" });
+    const child = spawn(executable, args, {
+      env: environment,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let errorOutput = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      errorOutput = `${errorOutput}${chunk}`.slice(-16_384);
+    });
     child.once("error", reject);
-    child.once("spawn", () => {
-      child.unref();
-      resolve();
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const detail = errorOutput.trim();
+      reject(
+        new Error(
+          detail ||
+            (signal
+              ? `本机 Host 安装器被信号 ${signal} 中止`
+              : `本机 Host 安装器退出码为 ${code ?? "unknown"}`),
+        ),
+      );
     });
   });
 }

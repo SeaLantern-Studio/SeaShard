@@ -123,7 +123,8 @@ export async function registerDesktopShellBridge(
   const finishDesktopUpdate = (request: Parameters<typeof coordinateDesktopUpdateCompletion>[1]) =>
     coordinateDesktopUpdateCompletion(desktopUpdateCompletionContext, request);
 
-  const listFileDownloadTasks = () => downloads.listUserVisibleTasks();
+  const listFileDownloadTasks = () =>
+    kernel.hosts.client ? downloads.listUserVisibleTasks() : Promise.resolve([]);
   /**
    * Renderer 只能取消已投影到公共下载条的任务，不能借任务 ID 操作图标缓存等内部下载。
    */

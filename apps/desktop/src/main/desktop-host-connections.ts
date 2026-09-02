@@ -12,6 +12,7 @@ import type { JsonValue } from "@seashard/plugin-sdk";
 
 const localHostId = "local";
 type HostEventListener = (hostId: string, payload: JsonValue) => void;
+export type LocalHostInstallDisposition = "installed" | "external";
 
 export interface DesktopHostConnectionsOptions {
   readonly controllerSessionId: string;
@@ -20,7 +21,7 @@ export interface DesktopHostConnectionsOptions {
   readonly initialError?: string;
   connectLocal(): Promise<HostControlClient>;
   readLocalInstallation(): Promise<DesktopHostInstallationState>;
-  installLocal(): Promise<void>;
+  installLocal(): Promise<LocalHostInstallDisposition>;
 }
 
 /**
@@ -103,11 +104,22 @@ export class DesktopHostConnections {
 
   async install(hostId: string): Promise<DesktopHostConnectionsSnapshot> {
     this.assertLocalHost(hostId);
-    await this.options.installLocal();
-    // 外部安装器由用户接管后暂时关闭提示；安装完成后通过“重新连接”刷新安装事实。
-    this.conflictAcknowledged = true;
-    this.publish();
-    return this.getSnapshot();
+    try {
+      const disposition = await this.options.installLocal();
+      if (disposition === "installed") {
+        // 内置安装器等待 Host 发布控制端点；随后在同一次用户操作中刷新事实并建立连接。
+        return this.retry(hostId);
+      }
+      // 外部安装器由用户接管后暂时关闭提示；安装完成后通过“重新连接”刷新安装事实。
+      this.conflictAcknowledged = true;
+      this.publish();
+      return this.getSnapshot();
+    } catch (error) {
+      // 首次启动发生在 Renderer 建立前，必须把安装错误留在 Host 状态中供页面稍后展示。
+      this.error = formatError(error);
+      this.publish();
+      throw error;
+    }
   }
 
   async retry(hostId: string): Promise<DesktopHostConnectionsSnapshot> {

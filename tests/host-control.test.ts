@@ -124,7 +124,7 @@ await test("Desktop projects Host conflicts as read-only and hides normal local 
         identity: second.identity,
       }),
     readLocalInstallation: async () => "installed",
-    installLocal: async () => {},
+    installLocal: async () => "external",
   });
   try {
     const occupied = connections.getSnapshot();
@@ -176,6 +176,7 @@ await test("Desktop guides installation without starting a missing Host", async 
     readLocalInstallation: async () => "missing",
     installLocal: async () => {
       installGuides += 1;
+      return "external";
     },
   });
   try {
@@ -188,6 +189,66 @@ await test("Desktop guides installation without starting a missing Host", async 
     assert.equal(findHostPrompt(guided), undefined);
   } finally {
     connections.dispose();
+  }
+});
+
+await test("Desktop keeps a first-launch Host installer failure visible", async () => {
+  const connections = new DesktopHostConnections({
+    controllerSessionId: "desktop-install-failed",
+    initialInstallation: "missing",
+    initialError: "本机尚未安装 SeaShard Host",
+    connectLocal: async () => {
+      throw new Error("Host must remain stopped");
+    },
+    readLocalInstallation: async () => "missing",
+    installLocal: async () => {
+      throw new Error("Host Runtime 解包失败");
+    },
+  });
+  try {
+    await assert.rejects(connections.install("local"), /Host Runtime 解包失败/u);
+    const failed = connections.getSnapshot().hosts[0];
+    assert.equal(failed?.state, "error");
+    assert.equal(failed?.error, "Host Runtime 解包失败");
+  } finally {
+    connections.dispose();
+  }
+});
+
+await test("Desktop reconnects immediately after the bundled Host installer reports ready", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "seashard-desktop-host-install-"));
+  const server = await startHostControlServer({
+    dataRoot,
+    handlers: {
+      async callService() {
+        return undefined;
+      },
+      isMutation() {
+        return false;
+      },
+    },
+  });
+  const connections = new DesktopHostConnections({
+    controllerSessionId: "desktop-installed",
+    initialInstallation: "missing",
+    initialError: "本机尚未安装 SeaShard Host",
+    connectLocal: () =>
+      connectHostControlClient({
+        dataRoot,
+        identity: { sessionId: "desktop-installed", label: "Desktop Installed" },
+      }),
+    readLocalInstallation: async () => "installed",
+    installLocal: async () => "installed",
+  });
+  try {
+    const installed = await connections.install("local");
+    assert.equal(installed.hosts[0]?.installation, "installed");
+    assert.equal(installed.hosts[0]?.state, "control");
+    assert.equal(findHostPrompt(installed), undefined);
+  } finally {
+    connections.dispose();
+    await server.dispose();
+    await rm(dataRoot, { recursive: true, force: true });
   }
 });
 
