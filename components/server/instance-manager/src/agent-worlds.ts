@@ -26,8 +26,7 @@ const maximumWorldNameLength = 200;
 const maximumBackupFileNameLength = 512;
 const maximumPresentationTextCharacters = 10;
 const presentationTextSegmenter = new Intl.Segmenter("zh-CN", { granularity: "grapheme" });
-const instanceIdPattern =
-  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
+const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 const worldTargetInputProperties: Readonly<Record<string, true>> = {
   instanceId: true,
   worldId: true,

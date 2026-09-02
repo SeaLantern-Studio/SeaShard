@@ -22,8 +22,7 @@ const maximumNameLength = 200;
 const maximumVersionLength = 100;
 const maximumDescriptionLength = 1_000;
 const maximumSourceIdentityLength = 128;
-const instanceIdPattern =
-  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
+const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 
 const resourceInputProperties: Readonly<Record<string, true>> = {
   query: true,

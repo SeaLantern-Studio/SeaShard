@@ -86,7 +86,13 @@ async function closeWindow(): Promise<void> {
   <header class="app-header">
     <div class="header-workspace">
       <div v-if="props.settingsMode" class="settings-header-title">
-        {{ props.settingsMode === "agent" ? "Agent 设置" : props.settingsMode === "server" ? "服务器设置" : "设置" }}
+        {{
+          props.settingsMode === "agent"
+            ? "Agent 设置"
+            : props.settingsMode === "server"
+              ? "服务器设置"
+              : "设置"
+        }}
       </div>
       <div
         v-else

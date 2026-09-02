@@ -37,9 +37,7 @@ const lastWorkspacePath = ref("/");
 const settingsPages = computed(() =>
   runtime.pages.value.filter(
     (page) =>
-      page.navigation !== false &&
-      page.placement === "settings" &&
-      page.settingsGroup !== "server",
+      page.navigation !== false && page.placement === "settings" && page.settingsGroup !== "server",
   ),
 );
 const agentSettingsPages = computed(() =>
@@ -50,9 +48,7 @@ const agentSettingsPages = computed(() =>
 const serverSettingsPages = computed(() =>
   runtime.pages.value.filter(
     (page) =>
-      page.navigation !== false &&
-      page.placement === "settings" &&
-      page.settingsGroup === "server",
+      page.navigation !== false && page.placement === "settings" && page.settingsGroup === "server",
   ),
 );
 const serverNavigationPages = computed(() =>
@@ -178,7 +174,9 @@ function leaveSettings(): void {
     return;
   }
   if (props.settingsMode === "server") {
-    navigate(lastWorkspacePath.value.startsWith("/server/") ? lastWorkspacePath.value : "/server/launch");
+    navigate(
+      lastWorkspacePath.value.startsWith("/server/") ? lastWorkspacePath.value : "/server/launch",
+    );
     return;
   }
   navigate(lastWorkspacePath.value);
@@ -391,10 +389,7 @@ onUnmounted(() => {
               class="settings-section"
               :aria-labelledby="`${props.settingsMode}-settings-label`"
             >
-              <h3
-                :id="`${props.settingsMode}-settings-label`"
-                class="workspace-section-title"
-              >
+              <h3 :id="`${props.settingsMode}-settings-label`" class="workspace-section-title">
                 <span class="workspace-section-title-text">
                   {{ props.settingsMode === "agent" ? "Agent 设置" : "服务器设置" }}
                 </span>

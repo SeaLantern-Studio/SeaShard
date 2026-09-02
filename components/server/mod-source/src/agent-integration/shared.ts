@@ -28,8 +28,7 @@ const presentationTextSegmenter = new Intl.Segmenter("zh-CN", { granularity: "gr
 export const searchIndexes = ["relevance", "downloads", "follows", "newest", "updated"] as const;
 
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
-const instanceIdPattern =
-  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
+const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 
 /**
  * 目录标题、简介和正文由第三方作者维护。该提示随结果进入模型上下文，

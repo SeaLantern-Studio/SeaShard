@@ -135,8 +135,9 @@ export interface ServerRuntimeStoppedReceipt {
 }
 
 /** Controller Agent 调用 Host 时使用的运行事务回执；Renderer 不暴露这组内部方法。 */
-export const serverRuntimeAgentContract =
-  defineServiceContract<ServerRuntimeAgentService>("seashard.server-runtime-agent");
+export const serverRuntimeAgentContract = defineServiceContract<ServerRuntimeAgentService>(
+  "seashard.server-runtime-agent",
+);
 
 /** Host 提供给 Controller Agent 适配层的服务器运行事务能力。 */
 export interface ServerRuntimeAgentService {
@@ -161,10 +162,7 @@ export interface ServerRuntimeAgentService {
    * @param command 不带换行符的服务端命令。
    * @returns 已接受状态与命令日志序号。
    */
-  sendCommandWithReceipt(
-    instanceId: string,
-    command: string,
-  ): Promise<ServerRuntimeCommandReceipt>;
+  sendCommandWithReceipt(instanceId: string, command: string): Promise<ServerRuntimeCommandReceipt>;
   /**
    * 等待核心输出启动完成标志。
    *

@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "dependencies": {
-    "@seashard/host-installation": "workspace:*",
     "@seashard/host-control": "workspace:*",
+    "@seashard/host-installation": "workspace:*",
     "@seashard/host-runtime": "workspace:*"
   }
 }

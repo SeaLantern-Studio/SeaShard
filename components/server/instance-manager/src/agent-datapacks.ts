@@ -29,8 +29,7 @@ const maximumPresentationTextCharacters = 10;
 const presentationTextSegmenter = new Intl.Segmenter("zh-CN", { granularity: "grapheme" });
 const maximumDescriptionLength = 1_000;
 const maximumSourceIdentityLength = 128;
-const instanceIdPattern =
-  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
+const instanceIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u;
 
 const datapackResourceInputProperties: Readonly<Record<string, true>> = {
   query: true,
