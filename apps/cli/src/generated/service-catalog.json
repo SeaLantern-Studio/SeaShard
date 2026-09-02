@@ -2755,7 +2755,7 @@
       "contract": "seashard.server-runtime-agent",
       "owner": "seashard.server-runtime",
       "description": "Host 提供给 Controller Agent 适配层的服务器运行事务能力。",
-      "source": "packages/contracts/src/server/runtime.ts:139",
+      "source": "packages/contracts/src/server/runtime.ts:138",
       "methods": [
         {
           "name": "startWithReceipt",
