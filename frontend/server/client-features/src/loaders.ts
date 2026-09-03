@@ -23,9 +23,6 @@ export const serverClientModuleLoaders: Readonly<Record<string, ClientUiModuleLo
   "seashard.server-download-world-ui/server-download-world.client": {
     load: () => import("@seashard/server-download-world-ui/client"),
   },
-  "seashard.server-files-ui/server-files.client": {
-    load: () => import("@seashard/server-files-ui/client"),
-  },
   "seashard.server-configuration-ui/server-configuration.client": {
     load: () => import("@seashard/server-configuration-ui/client"),
   },
@@ -37,12 +34,6 @@ export const serverClientModuleLoaders: Readonly<Record<string, ClientUiModuleLo
   },
   "seashard.server-saves-ui/server-saves.client": {
     load: () => import("@seashard/server-saves-ui/client"),
-  },
-  "seashard.server-players-ui/server-players.client": {
-    load: () => import("@seashard/server-players-ui/client"),
-  },
-  "seashard.server-plugins-ui/server-plugins.client": {
-    load: () => import("@seashard/server-plugins-ui/client"),
   },
   "seashard.server-launch-ui/server-launch.client": {
     load: () => import("@seashard/server-launch-ui/client"),

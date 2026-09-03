@@ -8,13 +8,10 @@ import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
 import { serverDownloadModpackUiManifest } from "@seashard/server-download-modpack-ui";
 import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
 import { serverDownloadWorldUiManifest } from "@seashard/server-download-world-ui";
-import { serverFilesUiManifest } from "@seashard/server-files-ui";
 import { serverInstanceSettingsUiManifest } from "@seashard/server-instance-settings-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverModsUiManifest } from "@seashard/server-mods-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
-import { serverPlayersUiManifest } from "@seashard/server-players-ui";
-import { serverPluginsUiManifest } from "@seashard/server-plugins-ui";
 import { serverSavesUiManifest } from "@seashard/server-saves-ui";
 
 interface ServerClientFeatureRegistration {
@@ -68,21 +65,6 @@ const registrations: readonly ServerClientFeatureRegistration[] = [
     manifest: serverModsUiManifest,
     bindingId: "core.server-mods.ui",
     entryId: "server-mods.client",
-  },
-  {
-    manifest: serverPluginsUiManifest,
-    bindingId: "core.server-plugins.ui",
-    entryId: "server-plugins.client",
-  },
-  {
-    manifest: serverPlayersUiManifest,
-    bindingId: "core.server-players.ui",
-    entryId: "server-players.client",
-  },
-  {
-    manifest: serverFilesUiManifest,
-    bindingId: "core.server-files.ui",
-    entryId: "server-files.client",
   },
   {
     manifest: serverLaunchUiManifest,

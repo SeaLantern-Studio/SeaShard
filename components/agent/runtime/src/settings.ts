@@ -13,16 +13,14 @@ export interface AgentSettingsSource {
 
 /** Agent 设置与模型配置分离保存；模型目录重写不会覆盖产品行为偏好。 */
 export class AgentSettingsStore implements AgentSettingsSource {
-  private snapshotTask: Promise<AgentSettingsSnapshot>;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly storage: PluginStorage) {
-    this.snapshotTask = this.load();
-  }
+  constructor(private readonly storage: PluginStorage) {}
 
   async get(): Promise<AgentSettingsSnapshot> {
     await this.writeQueue;
-    return { ...(await this.snapshotTask) };
+    // 多个 Controller 共用 Plugin Storage；每次读取权威文档，避免返回当前进程的旧快照。
+    return this.load();
   }
 
   setAutomaticConversationSummary(enabled: boolean): Promise<AgentSettingsSnapshot> {
@@ -32,7 +30,6 @@ export class AgentSettingsStore implements AgentSettingsSource {
     const task = this.writeQueue.then(async () => {
       const next: AgentSettingsSnapshot = { automaticConversationSummary: enabled };
       await this.storage.put(agentSettingsStorageKey, next as unknown as JsonValue);
-      this.snapshotTask = Promise.resolve(next);
       return { ...next };
     });
     this.writeQueue = task.then(

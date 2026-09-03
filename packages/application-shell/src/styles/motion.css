@@ -1,0 +1,19 @@
+/* Global animation preferences and reduced-motion overrides */
+[data-animation="off"] *,
+[data-animation="off"] *::before,
+[data-animation="off"] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-mode-indicator {
+    transition: none;
+  }
+
+  .workspace-project-chevron,
+  .workspace-project-threads {
+    transition: none;
+  }
+}

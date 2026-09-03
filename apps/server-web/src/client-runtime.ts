@@ -1,6 +1,8 @@
 import {
+  agentModelConfigurationContract,
   javaRuntimeManagerContract,
   serverRuntimeContract,
+  type AgentModelConfigurationSnapshot,
   type ClientEntryDescriptor,
   type ClientServiceCallRequest,
   type ServerConsoleLine,
@@ -9,12 +11,39 @@ import type { JsonValue } from "@seashard/plugin-sdk";
 import type {
   ServerWebApiError,
   ServerWebClientBootstrap,
+  ServerWebBootstrapSnapshot,
   ServerWebClientServiceResponse,
   ServerWebEvent,
 } from "@seashard/server-web-api";
 import type { ClientUiPackageModuleLoader, ClientUiServiceAdapter } from "@seashard/ui-runtime";
 
 const sha256Pattern = /^[a-f0-9]{64}$/u;
+export interface ServerWebCredentials {
+  readonly username: string;
+  readonly password: string;
+}
+
+type AuthenticationRequiredListener = () => void;
+const authenticationRequiredListeners = new Set<AuthenticationRequiredListener>();
+
+export class ServerWebRequestError extends Error {
+  readonly name = "ServerWebRequestError";
+
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export function onServerWebAuthenticationRequired(
+  listener: AuthenticationRequiredListener,
+): () => void {
+  authenticationRequiredListeners.add(listener);
+  return () => authenticationRequiredListeners.delete(listener);
+}
 
 export const webClientPackageModuleLoader: ClientUiPackageModuleLoader = {
   load: async (moduleUrl, integrity) => {
@@ -33,7 +62,7 @@ export const webClientPackageModuleLoader: ClientUiPackageModuleLoader = {
 };
 /** 普通方法回到 Kernel 做 Entry 身份和 permissions 校验；浏览器专属能力在适配器中收口。 */
 export function createServerWebServiceAdapters(
-  events: ServerWebConsoleEvents,
+  events: ServerWebEvents,
 ): Readonly<Record<string, ClientUiServiceAdapter>> {
   return {
     [serverRuntimeContract]: (context) =>
@@ -44,7 +73,22 @@ export function createServerWebServiceAdapters(
             if (property === "then") return undefined;
             if (property === "onConsoleLine") {
               return (listener: (line: ServerConsoleLine) => void) =>
-                context.effect(() => events.subscribe(listener));
+                context.effect(() => events.subscribeConsole(listener));
+            }
+            if (typeof property !== "string") return undefined;
+            return (...args: JsonValue[]) => context.call(property, args);
+          },
+        },
+      ),
+    [agentModelConfigurationContract]: (context) =>
+      new Proxy(
+        {},
+        {
+          get: (_target, property) => {
+            if (property === "then") return undefined;
+            if (property === "onConfigurationChanged") {
+              return (listener: (configuration: AgentModelConfigurationSnapshot) => void) =>
+                context.effect(() => events.subscribeAgentModelConfiguration(listener));
             }
             if (typeof property !== "string") return undefined;
             return (...args: JsonValue[]) => context.call(property, args);
@@ -61,22 +105,42 @@ export function createServerWebServiceAdapters(
   };
 }
 
-export class ServerWebConsoleEvents {
-  private readonly listeners = new Set<(line: ServerConsoleLine) => void>();
+export class ServerWebEvents {
+  private readonly consoleListeners = new Set<(line: ServerConsoleLine) => void>();
+  private readonly agentModelConfigurationListeners = new Set<
+    (configuration: AgentModelConfigurationSnapshot) => void
+  >();
   private source?: EventSource;
 
-  subscribe(listener: (line: ServerConsoleLine) => void): () => void {
-    this.listeners.add(listener);
+  subscribeConsole(listener: (line: ServerConsoleLine) => void): () => void {
+    this.consoleListeners.add(listener);
     this.ensureConnected();
     return () => {
-      this.listeners.delete(listener);
-      if (this.listeners.size === 0) this.close();
+      this.consoleListeners.delete(listener);
+      this.closeWhenUnused();
+    };
+  }
+
+  subscribeAgentModelConfiguration(
+    listener: (configuration: AgentModelConfigurationSnapshot) => void,
+  ): () => void {
+    this.agentModelConfigurationListeners.add(listener);
+    this.ensureConnected();
+    return () => {
+      this.agentModelConfigurationListeners.delete(listener);
+      this.closeWhenUnused();
     };
   }
 
   close(): void {
     this.source?.close();
     this.source = undefined;
+  }
+
+  private closeWhenUnused(): void {
+    if (this.consoleListeners.size === 0 && this.agentModelConfigurationListeners.size === 0) {
+      this.close();
+    }
   }
 
   private ensureConnected(): void {
@@ -87,13 +151,41 @@ export class ServerWebConsoleEvents {
       if (!(message instanceof MessageEvent)) return;
       const event = parseServerWebEvent(message.data);
       if (event?.type !== "console-line") return;
-      for (const listener of this.listeners) listener(event.line);
+      for (const listener of this.consoleListeners) listener(event.line);
+    });
+    source.addEventListener("agent-model-configuration", (message) => {
+      if (!(message instanceof MessageEvent)) return;
+      const event = parseServerWebEvent(message.data);
+      if (event?.type !== "agent-model-configuration") return;
+      for (const listener of this.agentModelConfigurationListeners) {
+        listener(event.configuration);
+      }
     });
   }
 }
 
 export async function loadServerClientBootstrap(): Promise<ServerWebClientBootstrap> {
   return parseClientBootstrap(await requestJson("/api/client/bootstrap"));
+}
+
+export async function loadServerWebAuthentication(): Promise<ServerWebBootstrapSnapshot> {
+  return parseAuthenticationBootstrap(await requestJson("/api/bootstrap"));
+}
+
+export async function authenticateServerWeb(
+  credentials: ServerWebCredentials,
+  setupRequired: boolean,
+): Promise<ServerWebBootstrapSnapshot> {
+  return parseAuthenticationBootstrap(
+    await requestJson(setupRequired ? "/api/setup" : "/api/login", {
+      method: "POST",
+      body: JSON.stringify(credentials),
+    }),
+  );
+}
+
+export async function logoutServerWeb(): Promise<void> {
+  await requestJson("/api/logout", { method: "POST", body: "{}" });
 }
 
 export async function callServerClientService(
@@ -115,9 +207,34 @@ async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
   const value: unknown = await response.json();
   if (!response.ok) {
     const error = parseApiError(value);
-    throw new Error(error?.error.message ?? `Server Web 请求失败：HTTP ${response.status}`);
+    if (response.status === 401) {
+      for (const listener of authenticationRequiredListeners) listener();
+    }
+    throw new ServerWebRequestError(
+      response.status,
+      error?.error.code ?? "REQUEST_FAILED",
+      error?.error.message ?? `Server Web 请求失败：HTTP ${response.status}`,
+    );
   }
   return value;
+}
+
+function parseAuthenticationBootstrap(value: unknown): ServerWebBootstrapSnapshot {
+  const record = requireRecord(value, "Authentication bootstrap");
+  if (
+    record.apiVersion !== 1 ||
+    typeof record.setupRequired !== "boolean" ||
+    typeof record.authenticated !== "boolean" ||
+    (record.username !== undefined && typeof record.username !== "string")
+  ) {
+    throw new TypeError("Server Web authentication bootstrap is invalid");
+  }
+  return {
+    apiVersion: 1,
+    setupRequired: record.setupRequired,
+    authenticated: record.authenticated,
+    ...(typeof record.username === "string" ? { username: record.username } : {}),
+  };
 }
 
 function parseClientBootstrap(value: unknown): ServerWebClientBootstrap {
@@ -198,7 +315,14 @@ function parseServerWebEvent(source: string): ServerWebEvent | undefined {
   } catch {
     return undefined;
   }
-  if (!isRecord(value) || value.type !== "console-line") return undefined;
+  if (!isRecord(value)) return undefined;
+  if (value.type === "agent-model-configuration") {
+    return {
+      type: "agent-model-configuration",
+      configuration: parseAgentModelConfiguration(value.configuration),
+    };
+  }
+  if (value.type !== "console-line") return undefined;
   const line = value.line;
   if (
     !isRecord(line) ||
@@ -223,6 +347,21 @@ function parseServerWebEvent(source: string): ServerWebEvent | undefined {
       timestamp: line.timestamp,
     },
   };
+}
+
+function parseAgentModelConfiguration(value: unknown): AgentModelConfigurationSnapshot {
+  const configuration = requireRecord(parseJsonValue(value, 0), "Agent model configuration");
+  if (
+    typeof configuration.revision !== "string" ||
+    !Array.isArray(configuration.connections) ||
+    !Array.isArray(configuration.models) ||
+    !Array.isArray(configuration.providerTypes) ||
+    !Array.isArray(configuration.diagnostics) ||
+    !configuration.diagnostics.every((diagnostic) => typeof diagnostic === "string")
+  ) {
+    throw new TypeError("Agent model configuration event is invalid");
+  }
+  return configuration as unknown as AgentModelConfigurationSnapshot;
 }
 
 function parseJsonValue(value: unknown, depth: number): JsonValue {

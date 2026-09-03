@@ -1,0 +1,18 @@
+{
+  "name": "@seashard/agent-client-features",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./loaders": "./src/loaders.ts"
+  },
+  "dependencies": {
+    "@seashard/agent-conversation-ui": "workspace:*",
+    "@seashard/agent-settings-provider-ui": "workspace:*",
+    "@seashard/agent-settings-ui": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "@seashard/ui-runtime": "workspace:*"
+  }
+}

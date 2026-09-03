@@ -7,6 +7,8 @@
   },
   "type": "module",
   "dependencies": {
+    "@seashard/agent-client-features": "workspace:*",
+    "@seashard/agent-runtime": "workspace:*",
     "@seashard/contracts": "workspace:*",
     "@seashard/controller-runtime": "workspace:*",
     "@seashard/host-control": "workspace:*",

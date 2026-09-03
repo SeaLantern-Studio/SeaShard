@@ -3,9 +3,14 @@ import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import { PluginKernel, type PluginKernelOptions } from "@seashard/plugin-system";
 import { Context } from "cordis";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface StartSeaShardControllerOptions {
+  /** 所有 Controller 共同读写的权威数据目录。 */
   readonly dataRoot: string;
+  /** 当前 Controller 独占的运行目录，只承载进程租约等短期状态。 */
+  readonly runtimeDataRoot: string;
   readonly seaShardVersion: string;
   readonly databaseWorkerEntry: string;
   readonly pluginHostEntry: string;
@@ -61,6 +66,8 @@ export async function startSeaShardController(
   options: StartSeaShardControllerOptions,
 ): Promise<SeaShardControllerRuntime> {
   const host = resolveControllerPlatform(options.platform, options.architecture);
+  await mkdir(options.runtimeDataRoot, { recursive: true });
+  await mkdir(options.dataRoot, { recursive: true });
   const root = new Context();
   const bootstrapLoader = new BootstrapLoader(root);
   let kernel: PluginKernel | undefined;
@@ -68,7 +75,8 @@ export async function startSeaShardController(
   try {
     await bootstrapLoader.start([
       createSQLiteBootstrapDescriptor({
-        dataRoot: options.dataRoot,
+        dataRoot: options.runtimeDataRoot,
+        databasePath: join(options.dataRoot, "seashard.sqlite3"),
         workerEntry: options.databaseWorkerEntry,
       }),
       createPluginFoundationBootstrapDescriptor({

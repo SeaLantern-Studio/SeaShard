@@ -1,3 +1,4 @@
+import { agentClientModuleLoaders } from "@seashard/agent-client-features/loaders";
 import { serverClientModuleLoaders } from "@seashard/server-client-features/loaders";
 import { serverInstanceSelection } from "@seashard/server-ui-shared/server-selection";
 import { ClientUiRuntime, clientUiRuntimeKey } from "@seashard/ui-runtime";
@@ -7,19 +8,22 @@ import App from "./App.vue";
 import {
   callServerClientService,
   createServerWebServiceAdapters,
-  ServerWebConsoleEvents,
+  ServerWebEvents,
   webClientPackageModuleLoader,
 } from "./client-runtime";
 import { router } from "./router";
 import "./style.css";
 
-const consoleEvents = new ServerWebConsoleEvents();
+const events = new ServerWebEvents();
 const runtime = new ClientUiRuntime({
   router,
-  builtInLoaders: serverClientModuleLoaders,
+  builtInLoaders: {
+    ...agentClientModuleLoaders,
+    ...serverClientModuleLoaders,
+  },
   packageLoader: webClientPackageModuleLoader,
   hostServices: { call: callServerClientService },
-  serviceAdapters: createServerWebServiceAdapters(consoleEvents),
+  serviceAdapters: createServerWebServiceAdapters(events),
   serverSelection: {
     getCurrentInstanceId: () => serverInstanceSelection.instanceId,
     subscribe(listener) {
@@ -42,7 +46,7 @@ app.mount("#app");
 window.addEventListener(
   "beforeunload",
   () => {
-    consoleEvents.close();
+    events.close();
     void runtime.dispose();
   },
   { once: true },

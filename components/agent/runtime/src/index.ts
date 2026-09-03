@@ -407,6 +407,7 @@ export type {
   ResolvedAgentModel,
 } from "./model-config/types";
 export * from "./provider-types";
+export * from "./aes-credential-cipher";
 export * from "./credential-store";
 export * from "./help-resource";
 export * from "./local-resource";

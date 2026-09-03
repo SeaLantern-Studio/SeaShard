@@ -203,13 +203,15 @@ function registerCapsule(capsule: DataCapsule, digest: string): void {
   }
   assertRole("writer");
 
-  let namespace = database
-    .prepare("SELECT version FROM seashard_schema_namespaces WHERE namespace = ?")
-    .get(capsule.namespace) as NamespaceRow | undefined;
-  if (!namespace) {
-    const timestamp = now();
-    database.exec("BEGIN IMMEDIATE");
-    try {
+  // 多个 Controller 可以打开同一权威数据库。命名空间检查、建表和全部迁移必须共享一个
+  // BEGIN IMMEDIATE 临界区，否则两个进程会同时把“尚未注册”判断为真并重复写入。
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    let namespace = database
+      .prepare("SELECT version FROM seashard_schema_namespaces WHERE namespace = ?")
+      .get(capsule.namespace) as NamespaceRow | undefined;
+    if (!namespace) {
+      const timestamp = now();
       database
         .prepare(
           `INSERT INTO seashard_schema_namespaces (
@@ -217,40 +219,39 @@ function registerCapsule(capsule: DataCapsule, digest: string): void {
            ) VALUES (?, 0, ?, ?, ?)`,
         )
         .run(capsule.namespace, capsule.compatibilityFloor, digest, timestamp);
-      for (const table of capsule.tables) claimTable(capsule.namespace, table);
-      database.exec("COMMIT");
       namespace = { version: 0 };
-    } catch (error) {
-      database.exec("ROLLBACK");
-      throw error;
     }
-  } else {
     for (const table of capsule.tables) claimTable(capsule.namespace, table);
-  }
 
-  if (namespace.version > capsule.schemaVersion) {
-    throw new Error(
-      `database namespace ${capsule.namespace} schema ${namespace.version} is newer than this build (${capsule.schemaVersion})`,
-    );
+    if (namespace.version > capsule.schemaVersion) {
+      throw new Error(
+        `database namespace ${capsule.namespace} schema ${namespace.version} is newer than this build (${capsule.schemaVersion})`,
+      );
+    }
+    verifyAppliedMigrations(capsule, namespace.version);
+    for (const migration of capsule.migrations) {
+      if (migration.version <= namespace.version) continue;
+      applyMigration(capsule, migration);
+      namespace = { version: migration.version };
+    }
+    if (namespace.version < capsule.compatibilityFloor) {
+      throw new Error(
+        `database namespace ${capsule.namespace} schema ${namespace.version} is below compatibility floor ${capsule.compatibilityFloor}`,
+      );
+    }
+    database
+      .prepare(
+        `UPDATE seashard_schema_namespaces
+            SET compatibility_floor = ?, capsule_digest = ?, updated_at = ?
+          WHERE namespace = ?`,
+      )
+      .run(capsule.compatibilityFloor, digest, now(), capsule.namespace);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.setAuthorizer(null);
+    database.exec("ROLLBACK");
+    throw error;
   }
-  verifyAppliedMigrations(capsule, namespace.version);
-  for (const migration of capsule.migrations) {
-    if (migration.version <= namespace.version) continue;
-    applyMigration(capsule, migration);
-    namespace = { version: migration.version };
-  }
-  if (namespace.version < capsule.compatibilityFloor) {
-    throw new Error(
-      `database namespace ${capsule.namespace} schema ${namespace.version} is below compatibility floor ${capsule.compatibilityFloor}`,
-    );
-  }
-  database
-    .prepare(
-      `UPDATE seashard_schema_namespaces
-          SET compatibility_floor = ?, capsule_digest = ?, updated_at = ?
-        WHERE namespace = ?`,
-    )
-    .run(capsule.compatibilityFloor, digest, now(), capsule.namespace);
   capsules.set(digest, compileCapsule(capsule));
 }
 
@@ -288,7 +289,6 @@ function verifyAppliedMigrations(capsule: DataCapsule, currentVersion: number): 
 }
 
 function applyMigration(capsule: DataCapsule, migration: DataCapsule["migrations"][number]): void {
-  database.exec("BEGIN IMMEDIATE");
   try {
     withAuthorizer(capsule, "migration", () => {
       for (const [index, statement] of migration.statements.entries()) {
@@ -316,10 +316,8 @@ function applyMigration(capsule: DataCapsule, migration: DataCapsule["migrations
           WHERE namespace = ?`,
       )
       .run(migration.version, capsule.compatibilityFloor, now(), capsule.namespace);
-    database.exec("COMMIT");
   } catch (error) {
     database.setAuthorizer(null);
-    database.exec("ROLLBACK");
     throw new Error(
       `database migration failed: ${capsule.namespace}@${migration.version}: ${formatError(error)}`,
       { cause: error },

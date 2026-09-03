@@ -1,3 +1,4 @@
+import { registerAgentClientFeatures } from "@seashard/agent-client-features";
 import {
   ControllerHostWorkerDeployments,
   startSeaShardController,
@@ -8,6 +9,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerServerAgentFeatures } from "./agent-features";
 import { prepareServerLocalHost } from "./host-setup";
 import { ServerHostServiceGateway } from "./host-service-gateway";
 import { ServerLocalHostConnection } from "./local-host";
@@ -27,6 +29,7 @@ const developmentHostReadyTimeoutMilliseconds = 60_000;
 const developmentHostReadyPollMilliseconds = 100;
 
 interface RunOptions {
+  readonly sharedDataRoot?: string;
   readonly controllerDataRoot?: string;
   readonly hostDataRoot?: string;
   readonly hostInstallerRoot?: string;
@@ -64,6 +67,7 @@ async function main(): Promise<void> {
 
 async function runServerController(options: RunOptions): Promise<void> {
   const paths = resolveServerControllerPaths({
+    ...(options.sharedDataRoot ? { userDataRoot: options.sharedDataRoot } : {}),
     ...(options.controllerDataRoot ? { controllerDataRoot: options.controllerDataRoot } : {}),
     ...(options.hostDataRoot ? { hostDataRoot: options.hostDataRoot } : {}),
   });
@@ -108,13 +112,20 @@ async function runServerController(options: RunOptions): Promise<void> {
       );
     }
     runtime = await startSeaShardController({
-      dataRoot: paths.controllerDataRoot,
+      dataRoot: paths.sharedControllerDataRoot,
+      runtimeDataRoot: paths.controllerDataRoot,
       seaShardVersion,
       databaseWorkerEntry: resolveSiblingEntry("database-worker"),
       pluginHostEntry: resolveSiblingEntry("plugin-host"),
       hostProfile: "node",
       clientTarget: "web",
     });
+    await registerServerAgentFeatures({
+      kernel: runtime.kernel,
+      sharedDataRoot: paths.userDataRoot,
+      legacyCredentialDataRoot: paths.controllerDataRoot,
+    });
+    await registerAgentClientFeatures(runtime.kernel);
     await registerServerClientFeatures(runtime.kernel);
     if (localHost) {
       hostServices = await ServerHostServiceGateway.register(runtime.kernel, localHost);
@@ -215,6 +226,7 @@ async function runServiceCommand(action: string | undefined, options: RunOptions
   }
   const effectiveOptions = materializeServiceRunOptions(options);
   const paths = resolveServerControllerPaths({
+    userDataRoot: effectiveOptions.sharedDataRoot,
     controllerDataRoot: effectiveOptions.controllerDataRoot,
     hostDataRoot: effectiveOptions.hostDataRoot,
   });
@@ -308,10 +320,12 @@ function resolveServerLaunchCommand(
 
 function materializeServiceRunOptions(options: RunOptions): RunOptions {
   const paths = resolveServerControllerPaths({
+    ...(options.sharedDataRoot ? { userDataRoot: options.sharedDataRoot } : {}),
     ...(options.controllerDataRoot ? { controllerDataRoot: options.controllerDataRoot } : {}),
     ...(options.hostDataRoot ? { hostDataRoot: options.hostDataRoot } : {}),
   });
   return {
+    sharedDataRoot: paths.userDataRoot,
     controllerDataRoot: paths.controllerDataRoot,
     hostDataRoot: paths.hostDataRoot,
     ...((options.hostInstallerRoot ?? process.env.SEASHARD_SERVER_HOST_INSTALLER_ROOT)
@@ -335,6 +349,7 @@ function materializeServiceRunOptions(options: RunOptions): RunOptions {
 
 function serializeRunOptions(options: RunOptions): readonly string[] {
   return [
+    ...(options.sharedDataRoot ? [`--shared-data-root=${options.sharedDataRoot}`] : []),
     ...(options.controllerDataRoot ? [`--data-root=${options.controllerDataRoot}`] : []),
     ...(options.hostDataRoot ? [`--host-data-root=${options.hostDataRoot}`] : []),
     ...(options.hostInstallerRoot ? [`--host-installer-root=${options.hostInstallerRoot}`] : []),
@@ -398,6 +413,7 @@ function resolveSiblingEntry(application: "database-worker" | "plugin-host"): st
 }
 
 function parseRunOptions(arguments_: readonly string[]): RunOptions {
+  let sharedDataRoot: string | undefined;
   let controllerDataRoot: string | undefined;
   let hostDataRoot: string | undefined;
   let hostInstallerRoot: string | undefined;
@@ -406,6 +422,10 @@ function parseRunOptions(arguments_: readonly string[]): RunOptions {
   let tlsCertificatePath: string | undefined;
   let tlsKeyPath: string | undefined;
   for (const argument of arguments_) {
+    if (argument.startsWith("--shared-data-root=")) {
+      sharedDataRoot = readOptionValue(argument, "--shared-data-root");
+      continue;
+    }
     if (argument.startsWith("--data-root=")) {
       controllerDataRoot = readOptionValue(argument, "--data-root");
       continue;
@@ -437,6 +457,7 @@ function parseRunOptions(arguments_: readonly string[]): RunOptions {
     throw new Error(`未知 run 参数：${argument}`);
   }
   return {
+    ...(sharedDataRoot ? { sharedDataRoot } : {}),
     ...(controllerDataRoot ? { controllerDataRoot } : {}),
     ...(hostDataRoot ? { hostDataRoot } : {}),
     ...(hostInstallerRoot ? { hostInstallerRoot } : {}),
@@ -521,8 +542,9 @@ function printHelp(): void {
   console.log(`SeaShard Server Controller ${seaShardVersion}
 
 用法：
-  seashard-server run [--data-root=<目录>] [--host-data-root=<目录>] [--host-installer-root=<目录>]
-                       [--web-host=<地址>] [--web-port=<端口>] [--tls-cert=<文件>] [--tls-key=<文件>]
+  seashard-server run [--shared-data-root=<目录>] [--data-root=<目录>] [--host-data-root=<目录>]
+                       [--host-installer-root=<目录>] [--web-host=<地址>] [--web-port=<端口>]
+                       [--tls-cert=<文件>] [--tls-key=<文件>]
   seashard-server service <install|start|stop|restart|status|uninstall> [run 参数]
   seashard-server --version
   seashard-server --help`);

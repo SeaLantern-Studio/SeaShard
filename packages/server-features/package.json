@@ -13,10 +13,8 @@
     "@seashard/plugin-system": "workspace:*",
     "@seashard/server-configuration": "workspace:*",
     "@seashard/server-core-source": "workspace:*",
-    "@seashard/server-file-manager": "workspace:*",
     "@seashard/server-instance-manager": "workspace:*",
     "@seashard/server-mod-source": "workspace:*",
-    "@seashard/server-player-manager": "workspace:*",
     "@seashard/server-runtime": "workspace:*",
     "@seashard/server-settings": "workspace:*"
   }

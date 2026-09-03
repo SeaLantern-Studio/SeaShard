@@ -220,13 +220,19 @@ async function bootstrap(): Promise<void> {
     console.error("Local SeaShard Host is unavailable", initialHostError);
   }
 
-  // 每个 Desktop 都启动自己的完整 Controller Runtime；operation 模式只省略窗口。
-  const controllerDataRoot = process.env.SEASHARD_DATA_DIR
+  // 业务数据与 Agent 凭据由所有 Controller 共享；实例租约和未来外观设置留在 Desktop 专有目录。
+  const sharedControllerDataRoot = process.env.SEASHARD_DATA_DIR
     ? join(dataRoot, "controller")
     : join(userDataRoot, "controller");
+  const desktopControllerDataRoot =
+    process.env.SEASHARD_DESKTOP_DATA_DIR ??
+    (process.env.SEASHARD_DATA_DIR
+      ? join(dataRoot, "desktop-controller")
+      : join(userDataRoot, "desktop-controller"));
   const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
   const activeControllerRuntime = await startSeaShardController({
-    dataRoot: controllerDataRoot,
+    dataRoot: sharedControllerDataRoot,
+    runtimeDataRoot: desktopControllerDataRoot,
     seaShardVersion,
     databaseWorkerEntry,
     pluginHostEntry: join(moduleDirectory, "../../../plugin-host/dist/index.js"),
@@ -262,6 +268,7 @@ async function bootstrap(): Promise<void> {
   await registerControllerFeatures({
     kernel: applicationKernel,
     userDataRoot,
+    legacyCredentialDataRoot: desktopControllerDataRoot,
     startedAt,
     isStopping: () => stopping,
   });
@@ -270,7 +277,7 @@ async function bootstrap(): Promise<void> {
     client: hostConnections.clientFor("local"),
     controller: applicationKernel,
     targetStorage: controllerRoot["plugin-foundation"].storage,
-    targetId: createControllerDataId(controllerDataRoot),
+    targetId: createControllerDataId(sharedControllerDataRoot),
   });
   await registerSmokePlugin(applicationKernel);
   developmentPlugin = await registerDevelopmentPlugin(applicationKernel, developerControlLaunch);

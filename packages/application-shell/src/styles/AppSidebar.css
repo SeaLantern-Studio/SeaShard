@@ -1,0 +1,366 @@
+/* AppSidebar workspace and navigation styles */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sl-sidebar-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  background: transparent;
+  border-right: none;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--sl-space-sm);
+  padding: var(--sl-space-md) var(--sl-space-md) var(--sl-space-sm) var(--sl-space-md);
+  height: 64px;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.logo-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+
+.logo-text {
+  font-size: 1.125rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow: hidden;
+  padding: var(--sl-space-sm);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar-menu-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/*
+ * 根节点只负责让 Vue 正确等待整段波浪结束；真正可见的位移发生在菜单项上。
+ * 离场不声明动画，因此旧菜单会同步消失。
+ */
+.sidebar-menu-enter-active {
+  animation: sidebar-menu-enter-window 720ms linear;
+}
+
+.sidebar-menu-enter-active .sidebar-menu-enter-item {
+  animation: sidebar-menu-wave-in 430ms cubic-bezier(0.22, 0.78, 0.18, 1) both;
+  animation-delay: calc(var(--sidebar-enter-index, 0) * 27.2ms);
+  will-change: transform, opacity;
+}
+
+@keyframes sidebar-menu-enter-window {
+  from,
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sidebar-menu-wave-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(-20px, 0, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.nav-group {
+  margin-bottom: var(--sl-space-sm);
+}
+
+.lower-side {
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.instance-workspace-nav,
+.instance-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.instance-workspace-nav {
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.instance-nav-group {
+  gap: 2px;
+}
+
+.instance-nav-item {
+  margin-top: 0;
+}
+
+.instance-primary-item {
+  min-height: 42px;
+  font-weight: 600;
+}
+
+.instance-section-divider,
+.settings-section-divider {
+  height: 1px;
+  margin: 2px var(--sl-space-sm);
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-border);
+  opacity: 0.72;
+}
+
+.settings-mode-nav,
+.download-mode-nav,
+.settings-section,
+.download-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-mode-nav,
+.download-mode-nav {
+  gap: var(--sl-space-md);
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.settings-section,
+.download-section {
+  gap: 2px;
+}
+
+.mode-back {
+  min-height: 40px;
+  border: 1px solid var(--sl-border-light);
+  background: color-mix(in srgb, var(--sl-surface) 72%, transparent);
+  color: var(--sl-text-secondary);
+  font-weight: 600;
+}
+
+.mode-back svg {
+  color: var(--sl-text-secondary);
+}
+
+.settings-nav-item,
+.download-nav-item {
+  margin-top: 2px;
+}
+
+.nav-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.workspace-action,
+.workspace-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border-radius: var(--sl-radius-md);
+  text-align: left;
+  transition:
+    background-color var(--sl-transition-fast),
+    border-color var(--sl-transition-fast),
+    color var(--sl-transition-fast),
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.workspace-action {
+  min-height: 40px;
+  gap: var(--sl-space-sm);
+  padding: 9px 13px;
+  border: 1px solid color-mix(in srgb, var(--sl-primary) 16%, transparent);
+  background: var(--sl-primary-bg);
+  color: var(--sl-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.workspace-action:hover {
+  border-color: color-mix(in srgb, var(--sl-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--sl-primary) 12%, var(--sl-surface));
+}
+
+.workspace-row:hover {
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+}
+
+.workspace-action:active,
+.workspace-row:active {
+  transform: scale(0.98);
+}
+
+.workspace-row:active {
+  background: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+}
+
+.workspace-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-section-title {
+  position: relative;
+  margin-bottom: var(--sl-space-xs);
+  padding: var(--sl-space-xs) var(--sl-space-sm) 9px;
+  color: var(--sl-text-tertiary);
+  line-height: 1.2;
+}
+
+/*
+ * 左栏分组标题使用 16px 字号栅格化后再缩小，避免小字号中文直接渲染时的锯齿感。
+ * 变换放在文字内层，分隔线仍由外层按正常尺寸绘制。
+ */
+.workspace-section-title-text {
+  display: block;
+  width: 125%;
+  font-family: var(--sl-font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transform: scale(0.8);
+  transform-origin: left top;
+}
+
+.workspace-section-title::after {
+  content: "";
+  position: absolute;
+  right: var(--sl-space-sm);
+  bottom: 0;
+  left: var(--sl-space-sm);
+  height: 1px;
+  border-radius: var(--sl-radius-full);
+  background: var(--sl-border);
+  opacity: 0.72;
+}
+
+.workspace-row {
+  min-height: 36px;
+  gap: var(--sl-space-sm);
+  overflow: hidden;
+  padding: 8px 11px;
+  color: var(--sl-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.workspace-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-row svg {
+  flex-shrink: 0;
+  color: var(--sl-text-tertiary);
+}
+
+.nav-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--sl-space-sm);
+  padding: 10px 14px;
+  border-radius: var(--sl-radius-md);
+  cursor: pointer;
+  color: var(--sl-text-secondary);
+  transition:
+    background-color var(--sl-transition-fast),
+    color var(--sl-transition-fast);
+  position: relative;
+  white-space: nowrap;
+  margin-top: 4px;
+  min-height: 40px;
+  user-select: none;
+  -webkit-user-select: none;
+  font-weight: 500;
+}
+
+.nav-item:hover {
+  background-color: var(--sl-bg-tertiary);
+  color: var(--sl-text-primary);
+}
+
+.nav-item.active {
+  background-color: var(--sl-primary-bg);
+  color: var(--sl-primary);
+  font-weight: 600;
+}
+
+.nav-active-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  background-color: var(--sl-primary);
+  border-radius: 0 var(--sl-radius-full) var(--sl-radius-full) 0;
+  transition:
+    top 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity var(--sl-transition-fast);
+  z-index: 10;
+  will-change: top;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  box-shadow: 0 0 8px var(--sl-primary);
+}
+
+.nav-icon {
+  flex-shrink: 0;
+  transition: transform var(--sl-transition-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.nav-label {
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-menu-enter-active,
+  .sidebar-menu-enter-active .sidebar-menu-enter-item {
+    animation: none;
+  }
+}

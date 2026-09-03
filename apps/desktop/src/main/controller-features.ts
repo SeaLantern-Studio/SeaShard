@@ -1,6 +1,8 @@
 import {
   AgentCredentialVault,
+  type AgentCredentialCipher,
   agentRuntimeManifest,
+  createAesAgentCredentialCipher,
   createAgentRuntimeModule,
 } from "@seashard/agent-runtime";
 import {
@@ -24,13 +26,16 @@ import { safeStorage, shell } from "electron";
 interface ControllerFeatureOptions {
   readonly kernel: PluginKernel;
   readonly userDataRoot: string;
+  readonly legacyCredentialDataRoot: string;
   readonly startedAt: string;
   readonly isStopping: () => boolean;
 }
 
 /** 注册 Controller 持有的完整应用 Runtime、插件生命周期和唯一 Agent Runtime。 */
 export async function registerControllerFeatures(options: ControllerFeatureOptions): Promise<void> {
-  const { kernel, userDataRoot, startedAt, isStopping } = options;
+  const { kernel, userDataRoot, legacyCredentialDataRoot, startedAt, isStopping } = options;
+  const credentialCipher = await createAesAgentCredentialCipher(userDataRoot);
+  await migrateDesktopAgentCredentials(userDataRoot, legacyCredentialDataRoot, credentialCipher);
 
   // 插件启停影响 Controller 的完整 Runtime 图，只允许固定的内置设置页面调用。
   kernel.restrictServiceCalls(
@@ -77,20 +82,8 @@ export async function registerControllerFeatures(options: ControllerFeatureOptio
             providerTypeSource: kernel.agentProviderTypes,
             credentialSource: new AgentCredentialVault({
               userDataRoot,
-              cipher: {
-                encrypt(value) {
-                  if (!safeStorage.isEncryptionAvailable()) {
-                    throw new Error("当前系统无法安全保存 Agent 凭据");
-                  }
-                  return safeStorage.encryptString(value);
-                },
-                decrypt(value) {
-                  if (!safeStorage.isEncryptionAvailable()) {
-                    throw new Error("当前系统无法解密 Agent 凭据");
-                  }
-                  return safeStorage.decryptString(Buffer.from(value));
-                },
-              },
+              cipher: credentialCipher,
+              reportError: (error) => console.error("Desktop Agent credential vault failed", error),
             }),
             toolSource: kernel.agentTools,
             resourceSource: kernel.agentResources,
@@ -119,6 +112,43 @@ export async function registerControllerFeatures(options: ControllerFeatureOptio
     },
     bindings: [controllerBinding("core.runtime-diagnostics", "runtime-diagnostics.host")],
   });
+}
+
+/**
+ * 已发布 Desktop 的 credentials.json 使用 safeStorage；短暂打开共享 AES Vault，
+ * 合并共享旧位置与早期开发版本的 Desktop 专有位置，成功后由 Vault 移除旧密文文件。
+ */
+async function migrateDesktopAgentCredentials(
+  sharedDataRoot: string,
+  legacyCredentialDataRoot: string,
+  targetCipher: AgentCredentialCipher,
+): Promise<void> {
+  const vault = new AgentCredentialVault({
+    userDataRoot: sharedDataRoot,
+    cipher: targetCipher,
+    reportError: (error) => console.error("Desktop Agent credential migration failed", error),
+  });
+  const legacyCipher: Pick<AgentCredentialCipher, "decrypt"> = {
+    decrypt(value) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error("当前系统无法解密旧版 Agent 凭据");
+      }
+      return safeStorage.decryptString(Buffer.from(value));
+    },
+  };
+  await vault.initialize();
+  try {
+    await vault.migrateLegacyCredentials({
+      userDataRoot: sharedDataRoot,
+      cipher: legacyCipher,
+    });
+    await vault.migrateLegacyCredentials({
+      userDataRoot: legacyCredentialDataRoot,
+      cipher: legacyCipher,
+    });
+  } finally {
+    await vault.dispose();
+  }
 }
 
 function controllerBinding(id: string, entryId: string) {

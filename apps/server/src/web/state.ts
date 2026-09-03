@@ -1,4 +1,5 @@
 import type {
+  AgentModelConfigurationSnapshot,
   ServerConsoleLine,
   ServerInstanceSnapshot,
   ServerRuntimeSnapshot,
@@ -114,6 +115,11 @@ export class ServerWebStateCoordinator {
 
   async publishState(): Promise<ServerWebEventEnvelope> {
     return this.publish({ type: "state", state: await this.snapshot() });
+  }
+  publishAgentModelConfiguration(
+    configuration: AgentModelConfigurationSnapshot,
+  ): ServerWebEventEnvelope {
+    return this.publish({ type: "agent-model-configuration", configuration });
   }
 
   startTask(kind: ServerWebTaskKind, instanceId: string): ServerWebTaskSnapshot {

@@ -129,10 +129,12 @@ export class PluginInstaller {
         );
         try {
           await mkdir(dirname(finalRoot), { recursive: true });
-          if (await directoryExists(finalRoot)) {
-            await rm(staging, { recursive: true, force: true });
-          } else {
+          try {
+            // rename 是跨 Controller 的提交点；同摘要并发安装时只有一个暂存目录会获胜。
             await rename(staging, finalRoot);
+          } catch (error) {
+            if (!(await directoryExists(finalRoot))) throw error;
+            await rm(staging, { recursive: true, force: true });
           }
           const record: PluginPackageRecord = {
             manifest: candidate.manifest,

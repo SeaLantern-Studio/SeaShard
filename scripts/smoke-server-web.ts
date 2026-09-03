@@ -10,8 +10,9 @@ import { queryServerRuntime, stopServerRuntime } from "../apps/server/src/runtim
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixtureRoot = await mkdtemp(join(tmpdir(), "seashard-server-web-smoke-"));
+const sharedDataRoot = join(fixtureRoot, "shared");
 const hostDataRoot = join(fixtureRoot, "host");
-const controllerDataRoot = join(fixtureRoot, "controller");
+const controllerDataRoot = join(fixtureRoot, "server-controller");
 const databaseWorkerEntry = join(root, "apps/database-worker/dist/index.js");
 const pluginHostEntry = join(root, "apps/plugin-host/dist/index.js");
 let host: SeaShardHostRuntime | undefined;
@@ -32,6 +33,7 @@ try {
     [
       join(root, "apps/server/dist/index.js"),
       "run",
+      `--shared-data-root=${sharedDataRoot}`,
       `--data-root=${controllerDataRoot}`,
       `--host-data-root=${hostDataRoot}`,
       "--web-port=0",
@@ -77,14 +79,14 @@ try {
   assert.ok(isRecord(clientBootstrap));
   assert.ok(Array.isArray(clientBootstrap.entries));
   const requiredClientPlugins = [
+    "seashard.agent-conversation-ui",
+    "seashard.agent-settings-ui",
+    "seashard.agent-settings-provider-ui",
     "seashard.game-settings-ui",
     "seashard.server-download-servercore-ui",
     "seashard.server-overview-ui",
     "seashard.server-saves-ui",
     "seashard.server-mods-ui",
-    "seashard.server-plugins-ui",
-    "seashard.server-players-ui",
-    "seashard.server-files-ui",
     "seashard.server-instance-settings-ui",
     "seashard.server-console-ui",
     "seashard.server-configuration-ui",
@@ -96,6 +98,52 @@ try {
       `缺少 Client Entry：${pluginId}`,
     );
   }
+  for (const pluginId of [
+    "seashard.server-plugins-ui",
+    "seashard.server-players-ui",
+    "seashard.server-files-ui",
+  ]) {
+    assert.ok(
+      entries.every((entry) => entry.pluginId !== pluginId),
+      `不应发布 Client Entry：${pluginId}`,
+    );
+  }
+  const agentConversation = requireClientEntry(entries, "seashard.agent-conversation-ui");
+  const agentModelConfiguration = await callClientService(
+    ready.url,
+    cookie,
+    agentConversation,
+    "seashard.agent-model-configuration",
+    "getConfiguration",
+  );
+  assert.ok(isRecord(agentModelConfiguration));
+  assert.ok(Array.isArray(agentModelConfiguration.models));
+  assert.deepEqual(
+    await callClientService(
+      ready.url,
+      cookie,
+      agentConversation,
+      "seashard.agent-session",
+      "listSessions",
+    ),
+    [],
+  );
+  const agentProviderSettings = requireClientEntry(entries, "seashard.agent-settings-provider-ui");
+  const providerConfiguration = await callClientService(
+    ready.url,
+    cookie,
+    agentProviderSettings,
+    "seashard.agent-model-configuration",
+    "getConfiguration",
+  );
+  assert.ok(isRecord(providerConfiguration));
+  assert.ok(Array.isArray(providerConfiguration.providerTypes));
+  const agentSettings = requireClientEntry(entries, "seashard.agent-settings-ui");
+  assert.ok(
+    isRecord(
+      await callClientService(ready.url, cookie, agentSettings, "seashard.agent-settings", "get"),
+    ),
+  );
   const overview = requireClientEntry(entries, "seashard.server-overview-ui");
   assert.deepEqual(
     await callClientService(

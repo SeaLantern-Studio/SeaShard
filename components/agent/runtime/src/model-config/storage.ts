@@ -48,6 +48,7 @@ export async function writeFileAtomically(path: string, bytes: Uint8Array): Prom
 export async function withWriterLock<T>(
   configPath: string,
   operation: () => Promise<T>,
+  busyMessage = "模型供应商配置正在被另一个 SeaShard 进程写入",
 ): Promise<T> {
   const lockPath = `${configPath}.lock`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -66,7 +67,7 @@ export async function withWriterLock<T>(
       await delay(25);
     }
   }
-  if (!handle) throw new Error("模型供应商配置正在被另一个 SeaShard 进程写入");
+  if (!handle) throw new Error(busyMessage);
   try {
     return await operation();
   } finally {

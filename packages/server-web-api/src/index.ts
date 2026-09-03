@@ -1,4 +1,5 @@
 import type {
+  AgentModelConfigurationSnapshot,
   ClientEntryPublication,
   ClientServiceCallRequest,
   ServerConsoleLine,
@@ -64,6 +65,10 @@ export interface ServerWebStateSnapshot {
 export type ServerWebEvent =
   | { readonly type: "state"; readonly state: ServerWebStateSnapshot }
   | { readonly type: "console-line"; readonly line: ServerConsoleLine }
+  | {
+      readonly type: "agent-model-configuration";
+      readonly configuration: AgentModelConfigurationSnapshot;
+    }
   | { readonly type: "task"; readonly task: ServerWebTaskSnapshot };
 
 export interface ServerWebEventEnvelope {

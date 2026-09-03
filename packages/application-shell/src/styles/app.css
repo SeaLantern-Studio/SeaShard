@@ -1,0 +1,15 @@
+/* Renderer-level utility states */
+.entry-failure {
+  display: flex;
+  min-height: 220px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--sl-space-md);
+  color: var(--sl-error);
+}
+
+.entry-failure code {
+  color: var(--sl-text-secondary);
+  white-space: pre-wrap;
+}

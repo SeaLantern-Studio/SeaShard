@@ -10,7 +10,7 @@ export const agentSettingsUiManifest: PluginManifest = {
       id: "agent-settings.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
         [agentSettingsContract]: ["get", "setAutomaticConversationSummary"],

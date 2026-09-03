@@ -19,8 +19,7 @@ import AppHeader from "./AppHeader.vue";
 import AppSidebar from "./AppSidebar.vue";
 import HostConnectionSidebar from "./HostConnectionSidebar.vue";
 import logoSvg from "./assets/logo.svg";
-import PageExtensionRoot from "./PageExtensionRoot.vue";
-import UiEntryBoundary from "./UiEntryBoundary.vue";
+import { PageExtensionRoot, UiEntryBoundary } from "@seashard/application-shell";
 import { findHostPrompt, shouldShowHostChrome, type DesktopHostPrompt } from "./host-connections";
 import {
   createWorkspaceRouteHistory,

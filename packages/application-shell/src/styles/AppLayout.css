@@ -1,0 +1,91 @@
+/* App shell and workspace layout */
+.app-layout {
+  position: relative;
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--sl-bg-secondary);
+  overflow: hidden;
+}
+
+.app-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  background-image: var(--sl-background-image, none);
+  background-size: var(--sl-background-size, cover);
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--sl-background-opacity, 0);
+  filter: blur(var(--sl-background-blur, 0px)) brightness(var(--sl-background-brightness, 1));
+}
+
+.app-main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-left: var(--sl-sidebar-width);
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+  background: transparent;
+  padding: 0 12px 12px;
+  gap: 8px;
+}
+
+.workspace-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sl-space-lg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--sl-surface);
+  border-radius: var(--sl-radius-lg);
+  border: 1px solid var(--sl-border);
+  box-shadow: none;
+}
+
+.right-sidebar {
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    flex-basis var(--sl-transition-normal) cubic-bezier(0.4, 0, 0.2, 1),
+    width var(--sl-transition-normal) cubic-bezier(0.4, 0, 0.2, 1),
+    opacity var(--sl-transition-fast);
+}
+
+.right-sidebar.open {
+  width: var(--sl-sidebar-width);
+  flex-basis: var(--sl-sidebar-width);
+  opacity: 1;
+  pointer-events: auto;
+}
+[data-acrylic="on"] .app-layout,
+[data-acrylic]:not([data-acrylic="off"]) .app-layout {
+  background-color: transparent;
+}
+
+[data-acrylic="on"] .app-content,
+[data-acrylic]:not([data-acrylic="off"]) .app-content {
+  background: var(--sl-surface);
+  backdrop-filter: blur(var(--sl-acrylic-blur, 16px)) saturate(var(--sl-saturate-normal, 180%));
+  -webkit-backdrop-filter: blur(var(--sl-acrylic-blur, 16px))
+    saturate(var(--sl-saturate-normal, 180%));
+  border-color: var(--sl-border-light);
+}

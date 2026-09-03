@@ -8,7 +8,11 @@ import {
   type ServerWebEventEnvelope,
   type ServerWebTaskKind,
 } from "@seashard/server-web-api";
-import { clientPluginAssetScheme } from "@seashard/contracts";
+import {
+  agentModelConfigurationChangedEvent,
+  clientPluginAssetScheme,
+  type AgentModelConfigurationSnapshot,
+} from "@seashard/contracts";
 import type { JsonValue } from "@seashard/plugin-sdk";
 import {
   projectClientEntryPublication,
@@ -74,12 +78,14 @@ export class ServerWebRuntime {
     private readonly eventResponses: Set<ServerResponse>,
     private readonly stateTimer: ReturnType<typeof setInterval>,
     private readonly heartbeatTimer: ReturnType<typeof setInterval>,
+    private readonly stopAgentModelConfiguration: (() => void) | undefined,
   ) {}
 
   dispose(): Promise<void> {
     this.disposeTask ??= (async () => {
       clearInterval(this.stateTimer);
       clearInterval(this.heartbeatTimer);
+      this.stopAgentModelConfiguration?.();
       this.state.dispose();
       for (const response of this.eventResponses) response.end();
       this.eventResponses.clear();
@@ -112,6 +118,16 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
   }
 
   const state = new ServerWebStateCoordinator(options.localHost);
+  const stopAgentModelConfiguration = options.controller?.events.on(
+    agentModelConfigurationChangedEvent,
+    "seashard.server-web",
+    { type: "global", id: "global" },
+    (configuration) => {
+      state.publishAgentModelConfiguration(
+        configuration as unknown as AgentModelConfigurationSnapshot,
+      );
+    },
+  );
   const eventResponses = new Set<ServerResponse>();
   const failedLogins = new Map<string, number[]>();
   const requestHandler = (request: IncomingMessage, response: ServerResponse) => {
@@ -136,6 +152,7 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
     await listen(server, requestedPort, host);
   } catch (error) {
     state.dispose();
+    stopAgentModelConfiguration?.();
     throw error;
   }
   const address = server.address();
@@ -164,6 +181,7 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
     eventResponses,
     stateTimer,
     heartbeatTimer,
+    stopAgentModelConfiguration,
   );
 }
 

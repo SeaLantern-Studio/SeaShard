@@ -1,8 +1,1 @@
-/* Ordered global stylesheet manifest */
-@import "./styles/variables.css";
-@import "./styles/reset.css";
-@import "./styles/components/layout/AppLayout.css";
-@import "./styles/components/layout/AppSidebar.css";
-@import "./styles/components/layout/AppHeader.css";
-@import "./styles/app.css";
-@import "./styles/motion.css";
+@import "@seashard/application-shell/style.css";

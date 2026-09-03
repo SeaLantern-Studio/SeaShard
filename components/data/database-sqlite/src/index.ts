@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { SQLiteDatabaseBroker } from "./broker";
 import { DataRootLease } from "./data-root-lease";
 
-/** 核心权威 SQLite 数据库的受保护启动参数。 */
+/** 核心权威 SQLite 数据库的受保护启动参数；dataRoot 仅用于当前进程的互斥租约。 */
 export interface SQLiteBootstrapOptions {
   readonly dataRoot: string;
   readonly workerEntry: string | URL;
@@ -64,8 +64,8 @@ declare module "cordis" {
 /**
  * 创建核心权威数据库的 Bootstrap Descriptor。
  *
- * 该组件拥有 DataRoot Lease，因此必须最先启动、最后停止；其他持久化 Foundation
- * 通过 inject 依赖它，但各自拥有独立的领域 Repository。
+ * dataRoot 保护一个 Controller 实例的数据库 Worker 生命周期；databasePath 可以指向
+ * 多个 Controller 共同使用的 WAL 数据库。调用方必须为每个实例提供不同的 dataRoot。
  */
 export function createSQLiteBootstrapDescriptor(
   options: SQLiteBootstrapOptions,
@@ -76,7 +76,7 @@ export function createSQLiteBootstrapDescriptor(
     inject: [],
     provides: ["database"],
     async load(ctx) {
-      // Lease 覆盖数据库、托管存储和 Foundation 的完整生命周期。
+      // 租约避免同一 Controller 实例目录被重复启动，不限制其他 Controller 打开共享数据库。
       const lease = await DataRootLease.acquire(options.dataRoot);
       let broker: SQLiteDatabaseBroker | undefined;
       try {
@@ -88,7 +88,7 @@ export function createSQLiteBootstrapDescriptor(
         // 连接成功后才发布 Database Service，避免依赖者观察到不可用 Broker。
         new SQLiteDatabaseService(ctx, broker);
         const activeBroker = broker;
-        // 先关闭 Worker/连接，再释放 DataRoot Lease，防止另一个进程提前接管目录。
+        // 先关闭 Worker/连接，再释放实例租约，防止相同 Controller 被提前重复启动。
         return async () => {
           try {
             await activeBroker.close();

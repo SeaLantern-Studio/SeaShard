@@ -10,7 +10,7 @@ import {
 import { resolveServerControllerPaths } from "../apps/server/src/paths.ts";
 import { registerStandaloneHost } from "../packages/host-installation/src/index.ts";
 
-await test("Server and Desktop resolve the same Windows Host data root", () => {
+await test("Server and Desktop resolve the same Windows shared data roots", () => {
   assert.deepEqual(
     resolveServerControllerPaths({
       environment: { APPDATA: "C:\\Users\\sea\\AppData\\Roaming" },
@@ -19,6 +19,7 @@ await test("Server and Desktop resolve the same Windows Host data root", () => {
     }),
     {
       userDataRoot: "C:\\Users\\sea\\AppData\\Roaming\\SeaShard",
+      sharedControllerDataRoot: "C:\\Users\\sea\\AppData\\Roaming\\SeaShard\\controller",
       hostDataRoot: "C:\\Users\\sea\\AppData\\Roaming\\SeaShard\\core",
       controllerDataRoot: "C:\\Users\\sea\\AppData\\Roaming\\SeaShard\\server-controller",
       logFile:
@@ -27,7 +28,7 @@ await test("Server and Desktop resolve the same Windows Host data root", () => {
   );
 });
 
-await test("Server follows XDG paths without sharing Desktop Controller data", () => {
+await test("Server follows XDG paths and only isolates instance data", () => {
   assert.deepEqual(
     resolveServerControllerPaths({
       environment: { XDG_CONFIG_HOME: "/home/sea/.config" },
@@ -36,6 +37,7 @@ await test("Server follows XDG paths without sharing Desktop Controller data", (
     }),
     {
       userDataRoot: "/home/sea/.config/SeaShard",
+      sharedControllerDataRoot: "/home/sea/.config/SeaShard/controller",
       hostDataRoot: "/home/sea/.config/SeaShard/core",
       controllerDataRoot: "/home/sea/.config/SeaShard/server-controller",
       logFile: "/home/sea/.config/SeaShard/server-controller/server-controller.log",
@@ -43,7 +45,7 @@ await test("Server follows XDG paths without sharing Desktop Controller data", (
   );
 });
 
-await test("Server data and existing Host data can be isolated independently", () => {
+await test("Shared, Server-private, and Host roots can be configured independently", () => {
   const paths = resolveServerControllerPaths({
     environment: {
       SEASHARD_DATA_DIR: "/tmp/seashard-host",
@@ -53,6 +55,7 @@ await test("Server data and existing Host data can be isolated independently", (
     homeDirectory: "/home/sea",
   });
   assert.equal(paths.hostDataRoot, "/tmp/seashard-host");
+  assert.equal(paths.sharedControllerDataRoot, "/tmp/seashard-host/controller");
   assert.equal(paths.controllerDataRoot, "/tmp/seashard-server");
 });
 
