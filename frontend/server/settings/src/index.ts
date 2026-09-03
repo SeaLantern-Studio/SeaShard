@@ -17,7 +17,7 @@ export const serverInstanceSettingsUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list", "setStartupSettings"],
+        [serverInstanceManagerContract]: ["listForClient", "setStartupSettings"],
         [serverRuntimeContract]: ["preview"],
         [serverSettingsContract]: ["get"],
       },

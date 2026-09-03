@@ -1,6 +1,11 @@
 import {
   agentModelConfigurationContract,
   javaRuntimeManagerContract,
+  serverCoreIconHost,
+  serverCoreIconScheme,
+  serverCoreSourceContract,
+  serverInstanceIconHost,
+  serverInstanceManagerContract,
   serverRuntimeContract,
   type AgentModelConfigurationSnapshot,
   type ClientEntryDescriptor,
@@ -15,7 +20,11 @@ import type {
   ServerWebClientServiceResponse,
   ServerWebEvent,
 } from "@seashard/server-web-api";
-import type { ClientUiPackageModuleLoader, ClientUiServiceAdapter } from "@seashard/ui-runtime";
+import type {
+  ClientUiPackageModuleLoader,
+  ClientUiServiceAdapter,
+  ClientUiServiceAdapterContext,
+} from "@seashard/ui-runtime";
 
 const sha256Pattern = /^[a-f0-9]{64}$/u;
 export interface ServerWebCredentials {
@@ -65,6 +74,9 @@ export function createServerWebServiceAdapters(
   events: ServerWebEvents,
 ): Readonly<Record<string, ClientUiServiceAdapter>> {
   return {
+    [serverCoreSourceContract]: (context) => createWebAssetServiceProxy(context),
+    [serverInstanceManagerContract]: (context) =>
+      createWebAssetServiceProxy(context, { list: "listForClient" }),
     [serverRuntimeContract]: (context) =>
       new Proxy(
         {},
@@ -103,6 +115,76 @@ export function createServerWebServiceAdapters(
         context.call("setDisabled", [installationId, disabled]),
     }),
   };
+}
+
+/**
+ * Web 端把 Host 的受限本地图片协议换成本源 HTTP 端点；其他字符串保持原值。
+ * 仅在子节点发生变化时复制容器，避免普通 Service 响应产生无意义的深拷贝。
+ */
+function projectServerWebAssetUrls(value: JsonValue | void): JsonValue | void {
+  if (typeof value === "string") return serverWebAssetUrl(value);
+  if (Array.isArray(value)) {
+    let projected: JsonValue[] | undefined;
+    value.forEach((item, index) => {
+      const next = projectServerWebAssetUrls(item) as JsonValue;
+      if (next === item) return;
+      projected ??= [...value];
+      projected[index] = next;
+    });
+    return projected ?? value;
+  }
+  if (!value || typeof value !== "object") return value;
+
+  let projected: Record<string, JsonValue> | undefined;
+  for (const [key, item] of Object.entries(value)) {
+    const next = projectServerWebAssetUrls(item) as JsonValue;
+    if (next === item) continue;
+    projected ??= { ...value };
+    projected[key] = next;
+  }
+  return projected ?? value;
+}
+
+function createWebAssetServiceProxy(
+  context: ClientUiServiceAdapterContext,
+  methodAliases: Readonly<Record<string, string>> = {},
+): object {
+  return new Proxy(
+    {},
+    {
+      get: (_target, property) => {
+        if (property === "then") return undefined;
+        if (typeof property !== "string") return undefined;
+        return async (...args: JsonValue[]) =>
+          projectServerWebAssetUrls(await context.call(methodAliases[property] ?? property, args));
+      },
+    },
+  );
+}
+
+function serverWebAssetUrl(value: string): string {
+  if (!value.startsWith(`${serverCoreIconScheme}://`)) return value;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.protocol !== `${serverCoreIconScheme}:` || url.search || url.hash) return value;
+  if (url.hostname === serverCoreIconHost) {
+    const sha256 = /^\/([a-f0-9]{64})$/u.exec(url.pathname)?.[1];
+    return sha256 ? `/api/server-assets/core-icons/${sha256}` : value;
+  }
+  if (url.hostname !== serverInstanceIconHost) return value;
+  let instanceId: string;
+  try {
+    instanceId = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return value;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u.test(instanceId)
+    ? `/api/server-assets/instance-icons/${encodeURIComponent(instanceId)}`
+    : value;
 }
 
 export class ServerWebEvents {

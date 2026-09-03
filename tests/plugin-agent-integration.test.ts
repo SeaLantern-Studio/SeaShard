@@ -343,7 +343,8 @@ await test("plugin Agent resources project installed state and trusted market me
     uninstall: async () => {},
   });
   await assert.rejects(
-    installedResource.implementation.read(createReadRequest("installed", { unknown: true }), {}),
+    async () =>
+      installedResource.implementation.read(createReadRequest("installed", { unknown: true }), {}),
     /不支持参数/u,
   );
   const marketResource = createPluginMarketResource({
@@ -352,7 +353,8 @@ await test("plugin Agent resources project installed state and trusted market me
     install: async () => currentInstallation,
   });
   await assert.rejects(
-    marketResource.implementation.read(createReadRequest("market", { unknown: true }), {}),
+    async () =>
+      marketResource.implementation.read(createReadRequest("market", { unknown: true }), {}),
     /不支持参数/u,
   );
 
@@ -564,9 +566,10 @@ await test("plugin Agent integrations propagate domain failures and Invocation c
     uninstall: async () => {},
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest("installed", {}), {
-      signal: preAborted.signal,
-    }),
+    async () =>
+      resource.implementation.read(createReadRequest("installed", {}), {
+        signal: preAborted.signal,
+      }),
     { name: "AbortError" },
   );
   assert.equal(preAbortedLists, 0);
@@ -581,9 +584,10 @@ await test("plugin Agent integrations propagate domain failures and Invocation c
     install: async () => currentInstallation,
   });
   await assert.rejects(
-    canceledMarket.implementation.read(createReadRequest("market", {}), {
-      signal: duringMarketRead.signal,
-    }),
+    async () =>
+      canceledMarket.implementation.read(createReadRequest("market", {}), {
+        signal: duringMarketRead.signal,
+      }),
     { name: "AbortError" },
   );
 

@@ -13,7 +13,7 @@ export const serverConsoleUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
         [serverRuntimeContract]: ["onConsoleLine", "get", "getLogs", "start", "sendCommand"],
       },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],

@@ -23,7 +23,4 @@ export const builtInClientModuleLoaders: Readonly<Record<string, ClientUiModuleL
     load: () => import("@seashard/plugin-market-ui/client"),
   },
   ...serverClientModuleLoaders,
-  "seashard.server-settings-ui/server-settings.client": {
-    load: () => import("@seashard/server-settings-ui/client"),
-  },
 };

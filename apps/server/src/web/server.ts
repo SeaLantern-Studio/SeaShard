@@ -11,6 +11,8 @@ import {
 import {
   agentModelConfigurationChangedEvent,
   clientPluginAssetScheme,
+  serverCoreSourceContract,
+  serverInstanceManagerContract,
   type AgentModelConfigurationSnapshot,
 } from "@seashard/contracts";
 import type { JsonValue } from "@seashard/plugin-sdk";
@@ -280,6 +282,15 @@ async function routeRequest(context: RequestContext): Promise<void> {
     throw new HttpError(401, "AUTH_REQUIRED", "请先登录 Server Controller");
   }
 
+  if (url.pathname.startsWith("/api/server-assets/") && (method === "GET" || method === "HEAD")) {
+    return serveServerImageAsset(
+      requireController(context),
+      url.pathname,
+      response,
+      method === "HEAD",
+    );
+  }
+
   if (url.pathname === "/api/client/bootstrap" && method === "GET") {
     return writeJson(response, 200, createClientBootstrap(requireController(context)));
   }
@@ -395,6 +406,46 @@ async function serveClientAsset(
   );
   if (!target) throw new HttpError(404, "CLIENT_ASSET_NOT_FOUND", "Client Entry 资源不存在");
   await serveFile(target, response, false, true);
+}
+
+interface ServerImagePathResolver {
+  resolveIconPath(identity: string): Promise<string | null>;
+}
+
+/** 浏览器只提交受限图标身份；真实文件路径始终由 Host 领域 Service 解析。 */
+async function serveServerImageAsset(
+  controller: PluginKernel,
+  pathname: string,
+  response: ServerResponse,
+  headOnly: boolean,
+): Promise<void> {
+  const match = /^\/api\/server-assets\/(core|instance)-icons\/([^/]+)$/u.exec(pathname);
+  if (!match) throw new HttpError(404, "SERVER_ASSET_NOT_FOUND", "服务器图片资源不存在");
+
+  const kind = match[1]!;
+  let identity: string;
+  try {
+    identity = decodeURIComponent(match[2]!);
+  } catch {
+    throw new HttpError(400, "INVALID_PATH", "服务器图片资源路径编码无效");
+  }
+  const coreIcon = kind === "core";
+  if (
+    (coreIcon && !/^[a-f0-9]{64}$/u.test(identity)) ||
+    (!coreIcon &&
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?$/u.test(identity))
+  ) {
+    throw new HttpError(404, "SERVER_ASSET_NOT_FOUND", "服务器图片资源不存在");
+  }
+  const resolver = controller.service<ServerImagePathResolver>(
+    coreIcon ? serverCoreSourceContract : serverInstanceManagerContract,
+  );
+  const target = await resolver.resolveIconPath(identity);
+  const metadata = target ? await stat(target).catch(() => undefined) : undefined;
+  if (!target || !metadata?.isFile()) {
+    throw new HttpError(404, "SERVER_ASSET_NOT_FOUND", "服务器图片资源不存在");
+  }
+  await serveFile(target, response, headOnly, coreIcon, metadata.size);
 }
 
 function parseClientServiceRequest(value: Record<string, unknown>): ServerWebClientServiceRequest {

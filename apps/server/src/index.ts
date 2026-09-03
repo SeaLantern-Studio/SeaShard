@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServerAgentFeatures } from "./agent-features";
 import { prepareServerLocalHost } from "./host-setup";
+import { ServerHostAgentExtensionGateway } from "./host-agent-extension-gateway";
 import { ServerHostServiceGateway } from "./host-service-gateway";
 import { ServerLocalHostConnection } from "./local-host";
 import { ServerControllerLogger } from "./logger";
@@ -76,6 +77,7 @@ async function runServerController(options: RunOptions): Promise<void> {
   let runtime: SeaShardControllerRuntime | undefined;
   let localHost: ServerLocalHostConnection | undefined;
   let hostServices: ServerHostServiceGateway | undefined;
+  let hostAgentExtensions: ServerHostAgentExtensionGateway | undefined;
   let hostWorkers: ControllerHostWorkerDeployments | undefined;
   let stopHostWorkerReconciliation: (() => void) | undefined;
   let web: ServerWebRuntime | undefined;
@@ -132,14 +134,24 @@ async function runServerController(options: RunOptions): Promise<void> {
       hostWorkers = new ControllerHostWorkerDeployments(runtime.kernel, () =>
         localHost?.workerDeploymentClient(),
       );
+      await hostWorkers.synchronize();
+      hostAgentExtensions = await ServerHostAgentExtensionGateway.register(
+        runtime.kernel,
+        localHost,
+      );
+      if (!hostAgentExtensions) {
+        await logger.info(
+          "SEASHARD_SERVER_HOST_AGENT_EXTENSIONS unavailable; update Host to expose domain Agent tools",
+        );
+      }
       stopHostWorkerReconciliation = runtime.kernel.onReconciled(async () => {
         try {
           await hostWorkers?.synchronize();
+          await hostAgentExtensions?.synchronize();
         } catch (error) {
-          await logger.error(`Host Worker 同步失败：${formatError(error)}`);
+          await logger.error(`Host Worker 或 Agent 扩展同步失败：${formatError(error)}`);
         }
       });
-      await hostWorkers.synchronize();
     }
     await runtime.kernel.start();
     const tlsCertificatePath = options.tlsCertificatePath ?? process.env.SEASHARD_SERVER_TLS_CERT;
@@ -179,6 +191,7 @@ async function runServerController(options: RunOptions): Promise<void> {
     } finally {
       try {
         stopHostWorkerReconciliation?.();
+        hostAgentExtensions?.dispose();
         hostWorkers?.dispose();
         hostServices?.dispose();
         await runtime?.dispose();

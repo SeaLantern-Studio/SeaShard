@@ -6,7 +6,7 @@ import type {
   AgentModelConnectionMutation,
   AgentModelSelection,
 } from "@seashard/contracts";
-import type { AgentProviderCatalogModel, JsonObject } from "@seashard/plugin-sdk";
+import type { JsonObject } from "@seashard/plugin-sdk";
 import {
   projectAgentPiModelSettings,
   resolveAgentPiModel,

@@ -33,10 +33,12 @@ await test("Controller gateway exposes only Host machine capabilities", async ()
 
 await test("machine capability gateway reports an unavailable default Host", async () => {
   const services = registerGateway(undefined);
-  await assert.rejects(services.get(javaRuntimeManagerContract)!.scan!(), (error: unknown) =>
-    Boolean(
-      error && typeof error === "object" && Reflect.get(error, "code") === "HOST_UNAVAILABLE",
-    ),
+  await assert.rejects(
+    async () => services.get(javaRuntimeManagerContract)!.scan!(),
+    (error: unknown) =>
+      Boolean(
+        error && typeof error === "object" && Reflect.get(error, "code") === "HOST_UNAVAILABLE",
+      ),
   );
 });
 

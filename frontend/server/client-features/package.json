@@ -18,11 +18,15 @@
     "@seashard/server-download-modpack-ui": "workspace:*",
     "@seashard/server-download-servercore-ui": "workspace:*",
     "@seashard/server-download-world-ui": "workspace:*",
+    "@seashard/server-files-ui": "workspace:*",
     "@seashard/server-instance-settings-ui": "workspace:*",
     "@seashard/server-launch-ui": "workspace:*",
     "@seashard/server-mods-ui": "workspace:*",
     "@seashard/server-overview-ui": "workspace:*",
+    "@seashard/server-players-ui": "workspace:*",
+    "@seashard/server-plugins-ui": "workspace:*",
     "@seashard/server-saves-ui": "workspace:*",
+    "@seashard/server-settings-ui": "workspace:*",
     "@seashard/ui-runtime": "workspace:*"
   }
 }

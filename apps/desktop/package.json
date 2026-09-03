@@ -40,7 +40,6 @@
     "@seashard/server-mod-source": "workspace:*",
     "@seashard/server-runtime": "workspace:*",
     "@seashard/server-settings": "workspace:*",
-    "@seashard/server-settings-ui": "workspace:*",
     "@seashard/server-ui-shared": "workspace:*",
     "@seashard/ui-runtime": "workspace:*",
     "@seashard/ui-sdk": "workspace:*",

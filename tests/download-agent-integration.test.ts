@@ -252,10 +252,13 @@ await test("download Agent resource is visible-only, bounded, projected, and lif
     cancel: async () => true,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({ unknown: true }), {}),
+    async () => resource.implementation.read(createReadRequest({ unknown: true }), {}),
     /不支持参数/u,
   );
-  await assert.rejects(resource.implementation.read(createReadRequest(null), {}), /必须是对象/u);
+  await assert.rejects(
+    async () => resource.implementation.read(createReadRequest(null), {}),
+    /必须是对象/u,
+  );
 
   const stalePrepared = snapshot.prepare("download://tasks", {});
   const staleTool = requireTool(harness.tools, "download_cancel");
@@ -363,7 +366,7 @@ await test("download Agent integration propagates failures and cancellation", as
     cancel: async () => true,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
+    async () => resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
     { name: "AbortError" },
   );
   assert.equal(preAbortedListCalls, 0);

@@ -1,4 +1,10 @@
-import type { JsonValue } from "@seashard/plugin-sdk";
+import type {
+  AgentActivityPresentationField,
+  AgentResourceDefinition,
+  AgentResourceReadResult,
+  AgentToolDefinition,
+  JsonValue,
+} from "@seashard/plugin-sdk";
 
 export const hostControlProtocolVersion = 1;
 
@@ -68,6 +74,31 @@ export interface HostServiceDescriptor {
   readonly methods: readonly string[];
 }
 
+/** Host 中实际启用的 Agent 工具与资源目录；函数实现始终留在 Host 进程。 */
+export interface HostAgentExtensionDirectory {
+  readonly tools: readonly HostAgentToolDescriptor[];
+  readonly resources: readonly AgentResourceDefinition[];
+}
+
+export interface HostAgentToolDescriptor {
+  readonly name: string;
+  readonly definition: AgentToolDefinition;
+}
+
+export interface HostAgentToolCall {
+  readonly name: string;
+  readonly input: JsonValue;
+}
+
+export interface HostAgentResourceCall {
+  readonly path: string;
+  readonly input: JsonValue;
+}
+
+export interface HostAgentResourceResultPresentationCall extends HostAgentResourceCall {
+  readonly result: AgentResourceReadResult;
+}
+
 export type HostControlEventName = "control-snapshot" | "control-requested" | "server-console";
 
 export interface HostControlEventFrame {
@@ -83,7 +114,12 @@ export type HostControlAction =
   | "reject-control"
   | "release-control"
   | "describe-services"
-  | "service-call";
+  | "service-call"
+  | "describe-agent-extensions"
+  | "execute-agent-tool"
+  | "read-agent-resource"
+  | "present-agent-resource-request"
+  | "present-agent-resource-result";
 
 export interface HostControlRequestFrame {
   readonly type: "request";
@@ -125,4 +161,16 @@ export interface HostControlHandlers {
   callService(call: HostServiceCall): Promise<JsonValue | void>;
   /** Host 端最终裁决调用是否需要写控制权，Controller 的 UI 状态不属于安全边界。 */
   isMutation(call: Pick<HostServiceCall, "contract" | "method">): boolean;
+  /** 可选能力保证新版 Controller 仍能连接旧版 Host；缺失时返回明确的不支持错误。 */
+  describeAgentExtensions?(): HostAgentExtensionDirectory;
+  executeAgentTool?(call: HostAgentToolCall): Promise<JsonValue>;
+  /** 工具定义中的确认级别同时作为 Host 写控制门槛；未知工具按写操作拒绝。 */
+  isAgentToolMutation?(name: string): boolean;
+  readAgentResource?(call: HostAgentResourceCall): Promise<AgentResourceReadResult>;
+  presentAgentResourceRequest?(
+    call: HostAgentResourceCall,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined>;
+  presentAgentResourceResult?(
+    call: HostAgentResourceResultPresentationCall,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined>;
 }

@@ -189,9 +189,6 @@ importers:
       '@seashard/server-settings':
         specifier: workspace:*
         version: link:../../components/server/settings
-      '@seashard/server-settings-ui':
-        specifier: workspace:*
-        version: link:../../frontend/settings/server
       '@seashard/server-ui-shared':
         specifier: workspace:*
         version: link:../../frontend/server/shared
@@ -664,6 +661,30 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  frontend/server/[Deleted]-web-dashboard:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-web-api':
+        specifier: workspace:*
+        version: link:../../../packages/server-web-api
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
   frontend/server/client-features:
     dependencies:
       '@seashard/game-settings-ui':
@@ -696,6 +717,9 @@ importers:
       '@seashard/server-download-world-ui':
         specifier: workspace:*
         version: link:../download-world
+      '@seashard/server-files-ui':
+        specifier: workspace:*
+        version: link:../files
       '@seashard/server-instance-settings-ui':
         specifier: workspace:*
         version: link:../settings
@@ -708,9 +732,18 @@ importers:
       '@seashard/server-overview-ui':
         specifier: workspace:*
         version: link:../overview
+      '@seashard/server-players-ui':
+        specifier: workspace:*
+        version: link:../players
+      '@seashard/server-plugins-ui':
+        specifier: workspace:*
+        version: link:../plugins
       '@seashard/server-saves-ui':
         specifier: workspace:*
         version: link:../saves
+      '@seashard/server-settings-ui':
+        specifier: workspace:*
+        version: link:../../settings/server
       '@seashard/ui-runtime':
         specifier: workspace:*
         version: link:../../../packages/ui-runtime
@@ -1439,12 +1472,18 @@ importers:
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../../components/server/core-source
+      '@seashard/server-file-manager':
+        specifier: workspace:*
+        version: link:../../components/server/file-manager
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../../components/server/instance-manager
       '@seashard/server-mod-source':
         specifier: workspace:*
         version: link:../../components/server/mod-source
+      '@seashard/server-player-manager':
+        specifier: workspace:*
+        version: link:../../components/server/player-manager
       '@seashard/server-runtime':
         specifier: workspace:*
         version: link:../../components/server/runtime

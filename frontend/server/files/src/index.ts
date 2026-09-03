@@ -13,7 +13,7 @@ export const serverFilesUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
         [serverFileManagerContract]: ["list", "readText", "writeText", "createDirectory", "delete"],
       },
       permissions: [serverInstanceManagerContract, serverFileManagerContract],

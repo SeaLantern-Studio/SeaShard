@@ -13,7 +13,7 @@ export const serverOverviewUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list", "contentCounts", "openFolder"],
+        [serverInstanceManagerContract]: ["listForClient", "contentCounts", "openFolder"],
         [serverRuntimeContract]: ["get"],
       },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],

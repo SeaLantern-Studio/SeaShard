@@ -42,6 +42,31 @@ export function startHostRuntimeControlServer(
         kernel.services.snapshot().map(({ contract, methods }) => ({ contract, methods })),
       callService: ({ contract, method, args }) => kernel.callService(contract, method, [...args]),
       isMutation: isHostMutation,
+      describeAgentExtensions: () => {
+        const resources = kernel.agentResources.snapshot();
+        return {
+          tools: kernel.agentTools.snapshot().map(({ name, definition }) => ({
+            name,
+            definition,
+          })),
+          resources: resources.definitions,
+        };
+      },
+      isAgentToolMutation: (name) => {
+        const tool = kernel.agentTools.snapshot().find((candidate) => candidate.name === name);
+        return !tool || (tool.definition.confirmationLevel ?? 0) > 0;
+      },
+      executeAgentTool: async ({ name, input }) => {
+        const tool = kernel.agentTools.snapshot().find((candidate) => candidate.name === name);
+        if (!tool) throw new Error(`Host Agent 工具不存在：${name}`);
+        return tool.execute(input, {});
+      },
+      readAgentResource: ({ path, input }) =>
+        kernel.agentResources.snapshot().read(path, input, {}),
+      presentAgentResourceRequest: async ({ path, input }) =>
+        kernel.agentResources.snapshot().prepare(path, input).presentRequest(),
+      presentAgentResourceResult: async ({ path, input, result }) =>
+        kernel.agentResources.snapshot().prepare(path, input).presentResult(result),
     },
   });
 }

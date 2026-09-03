@@ -7,11 +7,17 @@ import {
 } from "@seashard/contracts";
 import {
   connectHostControlClient,
+  type HostAgentExtensionDirectory,
   type HostControlClient,
   type HostControllerIdentity,
   type HostServiceDescriptor,
 } from "@seashard/host-control";
-import type { JsonValue, ServiceProvider } from "@seashard/plugin-sdk";
+import type {
+  AgentActivityPresentationField,
+  AgentResourceReadResult,
+  JsonValue,
+  ServiceProvider,
+} from "@seashard/plugin-sdk";
 import {
   serverInstanceManagerContract,
   type ServerInstanceManagerService,
@@ -76,6 +82,37 @@ export class ServerLocalHostConnection {
   describeServices(): Promise<readonly HostServiceDescriptor[]> {
     this.assertConnected();
     return this.client.describeServices();
+  }
+  describeAgentExtensions(): Promise<HostAgentExtensionDirectory> {
+    this.assertConnected();
+    return this.client.describeAgentExtensions();
+  }
+
+  executeAgentTool(name: string, input: JsonValue): Promise<JsonValue> {
+    this.assertConnected();
+    return this.client.executeAgentTool(name, input);
+  }
+
+  readAgentResource(path: string, input: JsonValue): Promise<AgentResourceReadResult> {
+    this.assertConnected();
+    return this.client.readAgentResource(path, input);
+  }
+
+  presentAgentResourceRequest(
+    path: string,
+    input: JsonValue,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined> {
+    this.assertConnected();
+    return this.client.presentAgentResourceRequest(path, input);
+  }
+
+  presentAgentResourceResult(
+    path: string,
+    input: JsonValue,
+    result: AgentResourceReadResult,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined> {
+    this.assertConnected();
+    return this.client.presentAgentResourceResult(path, input, result);
   }
 
   async callService(

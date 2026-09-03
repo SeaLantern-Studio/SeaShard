@@ -14,6 +14,10 @@ import {
   serverConfigurationManifest,
 } from "@seashard/server-configuration";
 import {
+  createServerFileManagerModule,
+  serverFileManagerManifest,
+} from "@seashard/server-file-manager";
+import {
   createServerCoreSourceModule,
   serverCoreSourceContract,
   serverCoreSourceManifest,
@@ -32,6 +36,10 @@ import {
   defaultMcimModrinthFileBaseUrl,
   serverModSourceManifest,
 } from "@seashard/server-mod-source";
+import {
+  createServerPlayerManagerModule,
+  serverPlayerManagerManifest,
+} from "@seashard/server-player-manager";
 import { createServerRuntimeModule, serverRuntimeManifest } from "@seashard/server-runtime";
 import { createServerSettingsModule, serverSettingsManifest } from "@seashard/server-settings";
 import { join } from "node:path";
@@ -143,6 +151,26 @@ export async function registerServerFeatures(
       },
     },
     bindings: [featureBinding("core.server-runtime", "server-runtime.host")],
+  });
+
+  await kernel.registerBuiltIn({
+    manifest: forExecution(serverFileManagerManifest, executionLocation),
+    loaders: {
+      "server-file-manager.host": {
+        load: async () => createServerFileManagerModule(),
+      },
+    },
+    bindings: [featureBinding("core.server-file-manager", "server-file-manager.host")],
+  });
+
+  await kernel.registerBuiltIn({
+    manifest: forExecution(serverPlayerManagerManifest, executionLocation),
+    loaders: {
+      "server-player-manager.host": {
+        load: async () => createServerPlayerManagerModule(),
+      },
+    },
+    bindings: [featureBinding("core.server-player-manager", "server-player-manager.host")],
   });
 
   if (executionLocation === "host") registerServerCoreDownloadAdapter(kernel);

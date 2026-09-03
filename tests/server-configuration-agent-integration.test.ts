@@ -279,10 +279,13 @@ await test("server configuration Agent resource lists safe paths and reads bound
     write: async () => document,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({ unknown: true }), {}),
+    async () => resource.implementation.read(createReadRequest({ unknown: true }), {}),
     /不支持参数/u,
   );
-  await assert.rejects(resource.implementation.read(createReadRequest(null), {}), /必须是对象/u);
+  await assert.rejects(
+    async () => resource.implementation.read(createReadRequest(null), {}),
+    /必须是对象/u,
+  );
 
   const stalePrepared = snapshot.prepare(`server://instances/${instanceId}/config`, {});
   const staleTool = requireTool(harness.tools, "server_write-config");
@@ -393,7 +396,7 @@ await test("server configuration Agent integration honors cancellation around do
     write: async () => document,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
+    async () => resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
     { name: "AbortError" },
   );
   assert.equal(preAbortedListCalls, 0);
@@ -408,9 +411,10 @@ await test("server configuration Agent integration honors cancellation around do
     write: async () => document,
   });
   await assert.rejects(
-    cancelingResource.implementation.read(createReadRequest({ path: "server.properties" }), {
-      signal: duringRead.signal,
-    }),
+    async () =>
+      cancelingResource.implementation.read(createReadRequest({ path: "server.properties" }), {
+        signal: duringRead.signal,
+      }),
     { name: "AbortError" },
   );
 

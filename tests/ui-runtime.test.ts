@@ -357,12 +357,12 @@ await test("client UI service adapter keeps entry authorization and owns local e
       },
     },
     serviceAdapters: {
-      "example.adapter": ({ entry, call, effect }) => {
-        assert.equal(entry.runtimeId, "adapter.runtime");
+      "example.adapter": (context) => {
+        assert.equal(context.entry.runtimeId, "adapter.runtime");
         return {
-          echo: (value: string) => call("echo", [value]),
+          echo: (value: string) => context.call("echo", [value]),
           subscribe: () =>
-            effect(() => {
+            context.effect(() => {
               activeSubscriptions += 1;
               return () => {
                 activeSubscriptions -= 1;

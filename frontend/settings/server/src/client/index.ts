@@ -11,7 +11,7 @@ import ServerStartupSettingsPage from "./ServerStartupSettingsPage.vue";
 
 export default defineClientUiModule({
   apply(context) {
-    const desktopApi = (window as Window & { seashard: SeaShardDesktopApi }).seashard;
+    const desktopApi = (window as Window & { seashard?: SeaShardDesktopApi }).seashard;
     const settings = context.service<ServerSettingsClientService>(serverSettingsContract);
     const startupPage = defineComponent({
       name: "ServerStartupSettingsFeaturePage",
@@ -21,7 +21,7 @@ export default defineClientUiModule({
       name: "ServerDownloadSettingsFeaturePage",
       setup: () => () =>
         h(ServerDownloadSettingsPage, {
-          selectDirectory: () => desktopApi.dialog.selectDirectory(),
+          ...(desktopApi ? { selectDirectory: () => desktopApi.dialog.selectDirectory() } : {}),
           settings,
         }),
     });

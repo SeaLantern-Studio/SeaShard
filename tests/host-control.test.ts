@@ -11,6 +11,17 @@ import {
   resolveHostControlLocation,
   startHostControlServer,
 } from "../packages/host-control/src/index.ts";
+import {
+  AgentResourceRegistry,
+  AgentToolRegistry,
+  type PluginKernel,
+} from "../packages/plugin-system/src/index.ts";
+import { ServerHostAgentExtensionGateway } from "../apps/server/src/host-agent-extension-gateway.ts";
+import type { ServerLocalHostConnection } from "../apps/server/src/local-host.ts";
+import type {
+  AgentResourceDefinition,
+  AgentToolDefinition,
+} from "../packages/plugin-sdk/src/index.ts";
 import { DesktopHostConnections } from "../apps/desktop/src/main/desktop-host-connections.ts";
 import {
   findHostPrompt,
@@ -95,6 +106,143 @@ await test("Host allows concurrent readers and transfers one write controller", 
   } finally {
     first.dispose();
     second.dispose();
+    await server.dispose();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+await test("Host Agent extensions preserve write control and project into Server Agent", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "seashard-host-agent-control-"));
+  const toolDefinition: AgentToolDefinition = {
+    namespace: "server",
+    name: "start",
+    title: "启动服务器",
+    description: "启动一个已登记的服务器。",
+    confirmationLevel: 1,
+    inputSchema: {
+      type: "object",
+      properties: { instanceId: { type: "string" } },
+      required: ["instanceId"],
+      additionalProperties: false,
+    },
+  };
+  const resourceDefinition: AgentResourceDefinition = {
+    pattern: "server://instances",
+    description: "读取服务器列表。",
+    inputSchema: { type: "object", additionalProperties: false },
+    outputDescription: "返回服务器列表。",
+    presentation: { title: "读取服务器" },
+  };
+  const executions: unknown[] = [];
+  const server = await startHostControlServer({
+    dataRoot,
+    handlers: {
+      describeServices: () => [],
+      async callService() {
+        return undefined;
+      },
+      isMutation: () => false,
+      describeAgentExtensions: () => ({
+        tools: [{ name: "server_start", definition: toolDefinition }],
+        resources: [resourceDefinition],
+      }),
+      isAgentToolMutation: (name) => name === "server_start",
+      executeAgentTool: async ({ name, input }) => {
+        executions.push(input);
+        return { name, input };
+      },
+      readAgentResource: async ({ path, input }) => ({
+        mimeType: "application/json",
+        content: { path, input, instances: [] },
+      }),
+      presentAgentResourceRequest: async () => [{ label: "范围", value: "全部服务器" }],
+      presentAgentResourceResult: async () => [{ value: "0", unit: "个服务器" }],
+    },
+  });
+  const holder = await connectHostControlClient({
+    dataRoot,
+    identity: { sessionId: "agent-holder", label: "Agent Holder" },
+  });
+  const reader = await connectHostControlClient({
+    dataRoot,
+    identity: { sessionId: "agent-reader", label: "Agent Reader" },
+  });
+
+  try {
+    const directory = await reader.describeAgentExtensions();
+    assert.deepEqual(
+      directory.tools.map(({ name }) => name),
+      ["server_start"],
+    );
+    assert.deepEqual(
+      directory.resources.map(({ pattern }) => pattern),
+      ["server://instances"],
+    );
+    assert.deepEqual(await reader.readAgentResource("server://instances", {}), {
+      mimeType: "application/json",
+      content: { path: "server://instances", input: {}, instances: [] },
+    });
+    await assert.rejects(
+      reader.executeAgentTool("server_start", { instanceId: "example" }),
+      (error: unknown) => error instanceof HostControlRpcError && error.code === "CONTROL_REQUIRED",
+    );
+    assert.deepEqual(await holder.executeAgentTool("server_start", { instanceId: "example" }), {
+      name: "server_start",
+      input: { instanceId: "example" },
+    });
+
+    const agentTools = new AgentToolRegistry();
+    const agentResources = new AgentResourceRegistry();
+    const gatewayHost = {
+      describeAgentExtensions: () => Promise.resolve(directory),
+      executeAgentTool: (name: string, input: unknown) => Promise.resolve({ name, input }),
+      readAgentResource: (path: string, input: unknown) =>
+        Promise.resolve({
+          mimeType: "application/json",
+          content: { path, input, instances: [] },
+        }),
+      presentAgentResourceRequest: () => Promise.resolve([{ label: "范围", value: "全部服务器" }]),
+      presentAgentResourceResult: () => Promise.resolve([{ value: "0", unit: "个服务器" }]),
+    } as unknown as ServerLocalHostConnection;
+    const gateway = await ServerHostAgentExtensionGateway.register(
+      { agentTools, agentResources } as unknown as PluginKernel,
+      gatewayHost,
+    );
+    assert.ok(gateway);
+    assert.deepEqual(
+      agentTools.snapshot().map(({ name }) => name),
+      ["server_start"],
+    );
+    assert.deepEqual(await agentTools.snapshot()[0]!.execute({ instanceId: "gateway" }, {}), {
+      name: "server_start",
+      input: { instanceId: "gateway" },
+    });
+    assert.deepEqual(await agentResources.snapshot().read("server://instances", {}), {
+      mimeType: "application/json",
+      content: { path: "server://instances", input: {}, instances: [] },
+    });
+    gateway.dispose();
+    assert.equal(agentTools.countRuntime(), 0);
+    assert.equal(agentResources.countRuntime(), 0);
+    const oldHost = {
+      describeAgentExtensions: () =>
+        Promise.reject(
+          new HostControlRpcError("UNSUPPORTED_ACTION", "installed Host does not expose Agent"),
+        ),
+    } as unknown as ServerLocalHostConnection;
+    assert.equal(
+      await ServerHostAgentExtensionGateway.register(
+        { agentTools, agentResources } as unknown as PluginKernel,
+        oldHost,
+      ),
+      undefined,
+    );
+    assert.equal(agentTools.countRuntime(), 0);
+    assert.equal(agentResources.countRuntime(), 0);
+    assert.deepEqual(executions, [{ instanceId: "example" }]);
+  } finally {
+    holder.dispose();
+    reader.dispose();
     await server.dispose();
     await rm(dataRoot, { recursive: true, force: true });
   }

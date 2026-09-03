@@ -22,5 +22,6 @@
     "components/**/*.ts",
     "frontend/**/*.ts",
     "frontend/**/*.vue"
-  ]
+  ],
+  "exclude": ["**/[Deleted]-*/**"]
 }

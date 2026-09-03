@@ -6,6 +6,9 @@ import { dirname } from "node:path";
 import { resolveHostControlLocation } from "./location";
 import {
   hostControlProtocolVersion,
+  type HostAgentResourceCall,
+  type HostAgentResourceResultPresentationCall,
+  type HostAgentToolCall,
   type HostControlDescriptor,
   type HostControlEventName,
   type HostControlFrame,
@@ -295,6 +298,46 @@ export async function startHostControlServer(
         if (options.handlers.isMutation(call)) requireHolder(connection);
         return options.handlers.callService(call);
       }
+      case "describe-agent-extensions":
+        if (!options.handlers.describeAgentExtensions) {
+          throw rpcError("UNSUPPORTED_ACTION", "Host does not publish Agent extensions");
+        }
+        return options.handlers.describeAgentExtensions() as unknown as JsonValue;
+      case "execute-agent-tool": {
+        if (!options.handlers.executeAgentTool || !options.handlers.isAgentToolMutation) {
+          throw rpcError("UNSUPPORTED_ACTION", "Host does not execute Agent tools");
+        }
+        const call = parseAgentToolCall(request.payload);
+        if (options.handlers.isAgentToolMutation(call.name)) requireHolder(connection);
+        return options.handlers.executeAgentTool(call);
+      }
+      case "read-agent-resource": {
+        if (!options.handlers.readAgentResource) {
+          throw rpcError("UNSUPPORTED_ACTION", "Host does not publish Agent resources");
+        }
+        const result = await options.handlers.readAgentResource(
+          parseAgentResourceCall(request.payload),
+        );
+        return result as unknown as JsonValue;
+      }
+      case "present-agent-resource-request": {
+        if (!options.handlers.presentAgentResourceRequest) {
+          throw rpcError("UNSUPPORTED_ACTION", "Host does not publish Agent resource presentation");
+        }
+        const fields = await options.handlers.presentAgentResourceRequest(
+          parseAgentResourceCall(request.payload),
+        );
+        return fields as unknown as JsonValue | undefined;
+      }
+      case "present-agent-resource-result": {
+        if (!options.handlers.presentAgentResourceResult) {
+          throw rpcError("UNSUPPORTED_ACTION", "Host does not publish Agent resource presentation");
+        }
+        const fields = await options.handlers.presentAgentResourceResult(
+          parseAgentResourceResultPresentationCall(request.payload),
+        );
+        return fields as unknown as JsonValue | undefined;
+      }
     }
   }
 
@@ -363,6 +406,11 @@ function parseRequest(line: string): HostControlRequestFrame {
     "release-control",
     "describe-services",
     "service-call",
+    "describe-agent-extensions",
+    "execute-agent-tool",
+    "read-agent-resource",
+    "present-agent-resource-request",
+    "present-agent-resource-result",
   ]);
   if (!actions.has(action))
     throw rpcError("INVALID_ACTION", `unknown Host control action: ${action}`);
@@ -382,6 +430,47 @@ function parseServiceCall(value: JsonValue): HostServiceCall {
     contract: readString(record, "contract"),
     method: readString(record, "method"),
     args: record.args as JsonValue[],
+  };
+}
+
+function parseAgentToolCall(value: JsonValue): HostAgentToolCall {
+  const record = readRecord(value, "Agent tool call");
+  if (!Object.hasOwn(record, "input")) {
+    throw rpcError("INVALID_REQUEST", "Agent tool call input is required");
+  }
+  return {
+    name: readString(record, "name"),
+    input: record.input as JsonValue,
+  };
+}
+
+function parseAgentResourceCall(value: JsonValue): HostAgentResourceCall {
+  const record = readRecord(value, "Agent resource call");
+  if (!Object.hasOwn(record, "input")) {
+    throw rpcError("INVALID_REQUEST", "Agent resource call input is required");
+  }
+  return {
+    path: readString(record, "path"),
+    input: record.input as JsonValue,
+  };
+}
+
+function parseAgentResourceResultPresentationCall(
+  value: JsonValue,
+): HostAgentResourceResultPresentationCall {
+  const record = readRecord(value, "Agent resource result presentation call");
+  const call = parseAgentResourceCall(value);
+  const result = readRecord(record.result, "Agent resource result");
+  if (
+    typeof result.mimeType !== "string" ||
+    !result.mimeType ||
+    !Object.hasOwn(result, "content")
+  ) {
+    throw rpcError("INVALID_REQUEST", "Agent resource result is invalid");
+  }
+  return {
+    ...call,
+    result: result as unknown as HostAgentResourceResultPresentationCall["result"],
   };
 }
 

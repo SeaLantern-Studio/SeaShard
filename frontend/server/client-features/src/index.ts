@@ -8,11 +8,15 @@ import { serverDownloadModUiManifest } from "@seashard/server-download-mod-ui";
 import { serverDownloadModpackUiManifest } from "@seashard/server-download-modpack-ui";
 import { serverDownloadServerCoreUiManifest } from "@seashard/server-download-servercore-ui";
 import { serverDownloadWorldUiManifest } from "@seashard/server-download-world-ui";
+import { serverFilesUiManifest } from "@seashard/server-files-ui";
 import { serverInstanceSettingsUiManifest } from "@seashard/server-instance-settings-ui";
 import { serverLaunchUiManifest } from "@seashard/server-launch-ui";
 import { serverModsUiManifest } from "@seashard/server-mods-ui";
+import { serverPlayersUiManifest } from "@seashard/server-players-ui";
+import { serverPluginsUiManifest } from "@seashard/server-plugins-ui";
 import { serverOverviewUiManifest } from "@seashard/server-overview-ui";
 import { serverSavesUiManifest } from "@seashard/server-saves-ui";
+import { serverSettingsUiManifest } from "@seashard/server-settings-ui";
 
 interface ServerClientFeatureRegistration {
   readonly manifest: PluginManifest;
@@ -52,6 +56,11 @@ const registrations: readonly ServerClientFeatureRegistration[] = [
     entryId: "server-download-world.client",
   },
   {
+    manifest: serverFilesUiManifest,
+    bindingId: "core.server-files.ui",
+    entryId: "server-files.client",
+  },
+  {
     manifest: serverOverviewUiManifest,
     bindingId: "core.server-overview.ui",
     entryId: "server-overview.client",
@@ -67,6 +76,16 @@ const registrations: readonly ServerClientFeatureRegistration[] = [
     entryId: "server-mods.client",
   },
   {
+    manifest: serverPlayersUiManifest,
+    bindingId: "core.server-players.ui",
+    entryId: "server-players.client",
+  },
+  {
+    manifest: serverPluginsUiManifest,
+    bindingId: "core.server-plugins.ui",
+    entryId: "server-plugins.client",
+  },
+  {
     manifest: serverLaunchUiManifest,
     bindingId: "core.server-launch.ui",
     entryId: "server-launch.client",
@@ -75,6 +94,11 @@ const registrations: readonly ServerClientFeatureRegistration[] = [
     manifest: serverInstanceSettingsUiManifest,
     bindingId: "core.server-instance-settings.ui",
     entryId: "server-instance-settings.client",
+  },
+  {
+    manifest: serverSettingsUiManifest,
+    bindingId: "core.server-settings.ui",
+    entryId: "server-settings.client",
   },
   {
     manifest: serverConsoleUiManifest,

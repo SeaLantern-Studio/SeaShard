@@ -13,7 +13,12 @@ export const serverModsUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list", "listMods", "setModDisabled", "deleteMod"],
+        [serverInstanceManagerContract]: [
+          "listForClient",
+          "listMods",
+          "setModDisabled",
+          "deleteMod",
+        ],
         [serverRuntimeContract]: ["get"],
       },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],

@@ -13,7 +13,7 @@ export const serverLaunchUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list", "delete", "setIcon"],
+        [serverInstanceManagerContract]: ["listForClient", "delete", "setIcon"],
         [serverRuntimeContract]: ["get", "start", "stop"],
       },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],

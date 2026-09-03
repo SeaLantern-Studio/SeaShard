@@ -20,7 +20,7 @@ export const serverDownloadWorldUiManifest: PluginManifest = {
           "installToInstance",
           "saveAs",
         ],
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
       },
       permissions: [serverModSourceContract, serverInstanceManagerContract],
     },

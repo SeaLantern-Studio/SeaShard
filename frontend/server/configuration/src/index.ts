@@ -13,7 +13,7 @@ export const serverConfigurationUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
         [serverConfigurationContract]: ["list", "read", "write"],
       },
       permissions: [serverInstanceManagerContract, serverConfigurationContract],

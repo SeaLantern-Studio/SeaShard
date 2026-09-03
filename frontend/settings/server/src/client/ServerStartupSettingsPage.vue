@@ -7,12 +7,13 @@ import {
   type ServerSettingsSnapshot,
   type ServerStartupDefaultsUpdate,
 } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Card, Cmz_Input, Cmz_Switch } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Card, Cmz_Input, Cmz_Switch, useToast } from "cmzya-modern-ui";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{
   settings: ServerSettingsClientService;
 }>();
+const toast = useToast();
 
 const minimumMemoryMiB = ref(String(serverStartupDefaults.minimumMemoryMiB));
 const maximumMemoryMiB = ref(String(serverStartupDefaults.maximumMemoryMiB));
@@ -22,8 +23,6 @@ const jvmArguments = ref<string>(serverStartupDefaults.jvmArguments);
 const baseline = ref<ServerStartupDefaultsUpdate>();
 const loading = ref(true);
 const saving = ref(false);
-const settingsError = ref<string>();
-const saveSucceeded = ref(false);
 let disposed = false;
 
 const dirty = computed(() => {
@@ -42,7 +41,9 @@ onMounted(async () => {
   try {
     applySnapshot(await props.settings.get());
   } catch (error) {
-    if (!disposed) settingsError.value = errorMessage(error);
+    if (!disposed) {
+      toast.error({ title: "读取启动设置失败", description: errorMessage(error) });
+    }
   } finally {
     if (!disposed) loading.value = false;
   }
@@ -74,7 +75,6 @@ function updateText(target: "minimum" | "maximum" | "port" | "jvm", value: strin
   if (target === "maximum") maximumMemoryMiB.value = text;
   if (target === "port") serverPort.value = text;
   if (target === "jvm") jvmArguments.value = text;
-  clearFeedback();
 }
 
 function updateJvmArguments(event: Event): void {
@@ -85,12 +85,6 @@ function updateJvmArguments(event: Event): void {
 
 function updateAutoAcceptEula(value: boolean): void {
   autoAcceptEula.value = value;
-  clearFeedback();
-}
-
-function clearFeedback(): void {
-  settingsError.value = undefined;
-  saveSucceeded.value = false;
 }
 
 /** 内存上下限必须作为一个整体校验并保存，避免后端持久化非法的中间组合。 */
@@ -128,22 +122,21 @@ function parsePositiveInteger(value: string, label: string): number {
 
 async function save(): Promise<void> {
   if (loading.value || saving.value || !baseline.value || !dirty.value) return;
-  clearFeedback();
 
   let update: ServerStartupDefaultsUpdate;
   try {
     update = createUpdate();
   } catch (error) {
-    settingsError.value = errorMessage(error);
+    toast.error({ title: "启动设置校验失败", description: errorMessage(error) });
     return;
   }
 
   saving.value = true;
   try {
     applySnapshot(await props.settings.setStartupDefaults(update));
-    if (!disposed) saveSucceeded.value = true;
+    if (!disposed) toast.success({ title: "启动设置已保存" });
   } catch (error) {
-    if (!disposed) settingsError.value = errorMessage(error);
+    if (!disposed) toast.error({ title: "保存启动设置失败", description: errorMessage(error) });
   } finally {
     if (!disposed) saving.value = false;
   }
@@ -253,9 +246,7 @@ function errorMessage(error: unknown): string {
       </div>
 
       <div class="settings-actions">
-        <p v-if="settingsError" class="settings-error" role="alert">{{ settingsError }}</p>
-        <p v-else-if="saveSucceeded" class="settings-success" role="status">启动设置已保存</p>
-        <span v-else class="settings-status" aria-hidden="true"></span>
+        <span class="settings-status" aria-hidden="true"></span>
         <Cmz_Button
           size="sm"
           :loading="saving"
@@ -377,19 +368,8 @@ function errorMessage(error: unknown): string {
   margin-top: var(--sl-space-md);
 }
 
-.settings-error,
-.settings-success,
 .settings-status {
   margin: 0;
-  font-size: 0.8125rem;
-}
-
-.settings-error {
-  color: var(--sl-error);
-}
-
-.settings-success {
-  color: var(--sl-success);
 }
 
 @media (max-width: 760px) {

@@ -20,7 +20,7 @@ export const serverDownloadDatapackUiManifest: PluginManifest = {
           "installToInstance",
           "saveAs",
         ],
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
       },
       permissions: [serverModSourceContract, serverInstanceManagerContract],
     },

@@ -225,10 +225,13 @@ await test("Java Agent resource is bounded, filterable, projected, and lifecycle
     remove: async () => true,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({ unknown: true }), {}),
+    async () => resource.implementation.read(createReadRequest({ unknown: true }), {}),
     /未知字段/u,
   );
-  await assert.rejects(resource.implementation.read(createReadRequest(null), {}), /必须是对象/u);
+  await assert.rejects(
+    async () => resource.implementation.read(createReadRequest(null), {}),
+    /必须是对象/u,
+  );
 
   const stalePrepared = snapshot.prepare("java://installations", {});
   const staleTool = requireTool(harness.tools, "java_set-disabled");
@@ -363,7 +366,7 @@ await test("Java Agent integration propagates domain failures and cancellation",
     remove: async () => true,
   });
   await assert.rejects(
-    resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
+    async () => resource.implementation.read(createReadRequest({}), { signal: preAborted.signal }),
     { name: "AbortError" },
   );
   assert.equal(preAbortedScanCalls, 0);
@@ -421,7 +424,7 @@ await test("Java Agent integration propagates domain failures and cancellation",
     remove: async () => true,
   });
   await assert.rejects(
-    failingResource.implementation.read(createReadRequest({}), {}),
+    async () => failingResource.implementation.read(createReadRequest({}), {}),
     (error: unknown) => error === scanError,
   );
 });

@@ -13,7 +13,7 @@ export const serverPlayersUiManifest: PluginManifest = {
       targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
-        [serverInstanceManagerContract]: ["list"],
+        [serverInstanceManagerContract]: ["listForClient"],
         [serverPlayerManagerContract]: [
           "list",
           "setWhitelistEnabled",

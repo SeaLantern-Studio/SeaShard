@@ -89,7 +89,7 @@ export async function startSeaShardHost(
       store: root["plugin-foundation"].store,
       pluginStorage: root["plugin-foundation"].storage,
       executionLocation: "host",
-      agentExtensions: false,
+      agentExtensions: true,
     });
     await registerHostFeatures({
       kernel,

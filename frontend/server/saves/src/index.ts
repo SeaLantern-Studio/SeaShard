@@ -14,7 +14,7 @@ export const serverSavesUiManifest: PluginManifest = {
       activationScopes: ["global"],
       uses: {
         [serverInstanceManagerContract]: [
-          "list",
+          "listForClient",
           "listWorldStorage",
           "switchWorld",
           "listWorldBackups",

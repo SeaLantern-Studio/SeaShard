@@ -28,6 +28,25 @@ try {
     databaseWorkerEntry,
     pluginHostEntry,
   });
+  assert.ok(host.kernel.agentTools.snapshot().some(({ name }) => name === "server_start"));
+  assert.ok(
+    host.kernel.agentResources
+      .snapshot()
+      .definitions.some(({ pattern }) => pattern === "server://instances"),
+  );
+  assert.deepEqual(
+    (await host.kernel.agentResources.snapshot().read("server://instances", {})).content,
+    {
+      items: [],
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 0,
+        totalPages: 0,
+        hasMore: false,
+      },
+    },
+  );
   server = spawn(
     process.execPath,
     [
@@ -87,7 +106,11 @@ try {
     "seashard.server-overview-ui",
     "seashard.server-saves-ui",
     "seashard.server-mods-ui",
+    "seashard.server-files-ui",
+    "seashard.server-players-ui",
+    "seashard.server-plugins-ui",
     "seashard.server-instance-settings-ui",
+    "seashard.server-settings-ui",
     "seashard.server-console-ui",
     "seashard.server-configuration-ui",
   ];
@@ -96,16 +119,6 @@ try {
     assert.ok(
       entries.some((entry) => entry.pluginId === pluginId),
       `缺少 Client Entry：${pluginId}`,
-    );
-  }
-  for (const pluginId of [
-    "seashard.server-plugins-ui",
-    "seashard.server-players-ui",
-    "seashard.server-files-ui",
-  ]) {
-    assert.ok(
-      entries.every((entry) => entry.pluginId !== pluginId),
-      `不应发布 Client Entry：${pluginId}`,
     );
   }
   const agentConversation = requireClientEntry(entries, "seashard.agent-conversation-ui");
@@ -151,7 +164,7 @@ try {
       cookie,
       overview,
       "seashard.server-instance-manager",
-      "list",
+      "listForClient",
     ),
     [],
   );
@@ -177,6 +190,12 @@ try {
         "seashard.server-settings",
         "get",
       ),
+    ),
+  );
+  const serverSettings = requireClientEntry(entries, "seashard.server-settings-ui");
+  assert.ok(
+    isRecord(
+      await callClientService(ready.url, cookie, serverSettings, "seashard.server-settings", "get"),
     ),
   );
 

@@ -14,7 +14,7 @@ export const serverPluginsUiManifest: PluginManifest = {
       activationScopes: ["global"],
       uses: {
         [serverInstanceManagerContract]: [
-          "list",
+          "listForClient",
           "listPlugins",
           "setPluginDisabled",
           "deletePlugin",

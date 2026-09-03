@@ -45,17 +45,15 @@ export function resolveConnectionModels(
   const byId = new Map(catalogModels.map((model) => [model.id, model]));
   return connection.models.map((configured) => {
     const base = byId.get(configured.id);
+    const providerOptions = configured.providerOptions ?? base?.providerOptions;
+    const settings = configured.settings ?? base?.settings;
     return {
       id: configured.id,
       ...((configured.displayName ?? base?.displayName)
         ? { displayName: configured.displayName ?? base?.displayName }
         : {}),
-      ...((configured.providerOptions ?? base?.providerOptions)
-        ? { providerOptions: structuredClone(configured.providerOptions ?? base?.providerOptions!) }
-        : {}),
-      ...((configured.settings ?? base?.settings)
-        ? { settings: structuredClone(configured.settings ?? base?.settings!) }
-        : {}),
+      ...(providerOptions ? { providerOptions: structuredClone(providerOptions) } : {}),
+      ...(settings ? { settings: structuredClone(settings) } : {}),
     };
   });
 }

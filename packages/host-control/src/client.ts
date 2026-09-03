@@ -1,8 +1,14 @@
-import type { JsonValue, ServiceContract } from "@seashard/plugin-sdk";
+import type {
+  AgentActivityPresentationField,
+  AgentResourceReadResult,
+  JsonValue,
+  ServiceContract,
+} from "@seashard/plugin-sdk";
 import { randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { readHostControlDescriptor } from "./location";
 import type {
+  HostAgentExtensionDirectory,
   HostControlDescriptor,
   HostControlEventFrame,
   HostControlEventName,
@@ -138,6 +144,49 @@ export class HostControlClient {
   }
   async describeServices(): Promise<readonly HostServiceDescriptor[]> {
     return parseServiceDescriptors(await this.request("describe-services", null));
+  }
+
+  async describeAgentExtensions(): Promise<HostAgentExtensionDirectory> {
+    return parseAgentExtensionDirectory(await this.request("describe-agent-extensions", null));
+  }
+
+  async executeAgentTool(name: string, input: JsonValue): Promise<JsonValue> {
+    const result = await this.request("execute-agent-tool", { name, input });
+    if (result === undefined) {
+      throw new HostControlRpcError(
+        "INVALID_AGENT_TOOL_RESULT",
+        "Host Agent tool result is missing",
+      );
+    }
+    return result;
+  }
+
+  async readAgentResource(path: string, input: JsonValue): Promise<AgentResourceReadResult> {
+    const result = await this.request("read-agent-resource", { path, input });
+    return parseAgentResourceReadResult(result);
+  }
+
+  async presentAgentResourceRequest(
+    path: string,
+    input: JsonValue,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined> {
+    return parseAgentPresentationFields(
+      await this.request("present-agent-resource-request", { path, input }),
+    );
+  }
+
+  async presentAgentResourceResult(
+    path: string,
+    input: JsonValue,
+    result: AgentResourceReadResult,
+  ): Promise<readonly AgentActivityPresentationField[] | undefined> {
+    return parseAgentPresentationFields(
+      await this.request("present-agent-resource-result", {
+        path,
+        input,
+        result: result as unknown as JsonValue,
+      }),
+    );
   }
 
   async requestControl(): Promise<HostControlSnapshot> {
@@ -281,6 +330,104 @@ function parseServiceDescriptors(value: JsonValue | undefined): readonly HostSer
       methods: [...new Set(methods)].sort((left, right) => left.localeCompare(right)),
     };
   });
+}
+
+function parseAgentExtensionDirectory(value: JsonValue | undefined): HostAgentExtensionDirectory {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HostControlRpcError(
+      "INVALID_AGENT_EXTENSION_DIRECTORY",
+      "Host Agent extension directory is invalid",
+    );
+  }
+  if (!Array.isArray(value.tools) || !Array.isArray(value.resources)) {
+    throw new HostControlRpcError(
+      "INVALID_AGENT_EXTENSION_DIRECTORY",
+      "Host Agent extension directory is invalid",
+    );
+  }
+  const tools = value.tools.map((item) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      Array.isArray(item) ||
+      typeof item.name !== "string" ||
+      !item.name ||
+      !item.definition ||
+      typeof item.definition !== "object" ||
+      Array.isArray(item.definition)
+    ) {
+      throw new HostControlRpcError(
+        "INVALID_AGENT_EXTENSION_DIRECTORY",
+        "Host Agent tool descriptor is invalid",
+      );
+    }
+    return {
+      name: item.name,
+      definition: item.definition,
+    };
+  });
+  const resources = value.resources.map((item) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      Array.isArray(item) ||
+      typeof item.pattern !== "string" ||
+      !item.pattern
+    ) {
+      throw new HostControlRpcError(
+        "INVALID_AGENT_EXTENSION_DIRECTORY",
+        "Host Agent resource descriptor is invalid",
+      );
+    }
+    return item;
+  });
+  return {
+    tools: tools as unknown as HostAgentExtensionDirectory["tools"],
+    resources: resources as unknown as HostAgentExtensionDirectory["resources"],
+  };
+}
+
+function parseAgentResourceReadResult(value: JsonValue | undefined): AgentResourceReadResult {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.mimeType !== "string" ||
+    !value.mimeType ||
+    !Object.hasOwn(value, "content")
+  ) {
+    throw new HostControlRpcError(
+      "INVALID_AGENT_RESOURCE_RESULT",
+      "Host Agent resource result is invalid",
+    );
+  }
+  return value as unknown as AgentResourceReadResult;
+}
+
+function parseAgentPresentationFields(
+  value: JsonValue | undefined,
+): readonly AgentActivityPresentationField[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new HostControlRpcError(
+      "INVALID_AGENT_PRESENTATION",
+      "Host Agent resource presentation is invalid",
+    );
+  }
+  for (const item of value) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      Array.isArray(item) ||
+      typeof item.value !== "string"
+    ) {
+      throw new HostControlRpcError(
+        "INVALID_AGENT_PRESENTATION",
+        "Host Agent resource presentation is invalid",
+      );
+    }
+  }
+  return value as unknown as readonly AgentActivityPresentationField[];
 }
 
 function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {

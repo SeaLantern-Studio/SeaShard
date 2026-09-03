@@ -3,15 +3,26 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type {
-  ServerConsoleLine,
-  ServerInstanceSnapshot,
-  ServerRuntimeSnapshot,
+import {
+  serverCoreIconHost,
+  serverCoreIconScheme,
+  serverCoreSourceContract,
+  serverInstanceIconHost,
+  serverInstanceManagerContract,
+  type ServerConsoleLine,
+  type ServerInstanceSnapshot,
+  type ServerRuntimeSnapshot,
 } from "../packages/contracts/src/index.ts";
 import type {
   ServerWebBootstrapSnapshot,
   ServerWebStateSnapshot,
 } from "../packages/server-web-api/src/index.ts";
+import type { PluginKernel } from "../packages/plugin-system/src/index.ts";
+import type { ClientUiServiceAdapterContext } from "../packages/ui-runtime/src/index.ts";
+import {
+  createServerWebServiceAdapters,
+  ServerWebEvents,
+} from "../apps/server-web/src/client-runtime.ts";
 import { ServerAdministratorAuth } from "../apps/server/src/web/auth.ts";
 import { startServerWeb } from "../apps/server/src/web/server.ts";
 import type { ServerWebHostSource } from "../apps/server/src/web/state.ts";
@@ -200,6 +211,114 @@ await test("Server Web publishes Host state, operations, logs, and reconnect sna
     await web.dispose();
     await fixture.dispose();
   }
+});
+
+await test("Server Web projects and serves authenticated Host image assets", async () => {
+  const fixture = await createFixture();
+  const imagePath = join(fixture.dataRoot, "icon.png");
+  const image = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  await mkdir(fixture.dataRoot, { recursive: true });
+  await writeFile(imagePath, image);
+  const sha256 = "b".repeat(64);
+  const controller = {
+    events: { on: () => () => undefined },
+    service: (contract: string) => ({
+      resolveIconPath: async (identity: string) => {
+        if (contract === serverCoreSourceContract && identity === sha256) return imagePath;
+        if (contract === serverInstanceManagerContract && identity === "server:one")
+          return imagePath;
+        return null;
+      },
+    }),
+  } as unknown as PluginKernel;
+  const web = await startServerWeb({
+    dataRoot: fixture.dataRoot,
+    publicRoot: fixture.publicRoot,
+    controller,
+    port: 0,
+  });
+  try {
+    const unauthenticated = await fetch(
+      `${web.address.url}/api/server-assets/core-icons/${sha256}`,
+    );
+    assert.equal(unauthenticated.status, 401);
+    const setup = await fetchJson(web.address.url, "/api/setup", {
+      method: "POST",
+      headers: { Origin: web.address.url },
+      body: JSON.stringify({ username: "operator", password }),
+    });
+    const cookie = requireSessionCookie(setup.response);
+
+    const core = await fetch(`${web.address.url}/api/server-assets/core-icons/${sha256}`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(core.status, 200);
+    assert.equal(core.headers.get("content-type"), "image/png");
+    assert.equal(core.headers.get("cache-control"), "public, max-age=31536000, immutable");
+    assert.deepEqual(new Uint8Array(await core.arrayBuffer()), image);
+
+    const instance = await fetch(
+      `${web.address.url}/api/server-assets/instance-icons/server%3Aone`,
+      { method: "HEAD", headers: { Cookie: cookie } },
+    );
+    assert.equal(instance.status, 200);
+    assert.equal(instance.headers.get("cache-control"), "no-cache");
+    assert.equal(instance.headers.get("content-length"), String(image.byteLength));
+
+    const invalid = await fetch(`${web.address.url}/api/server-assets/core-icons/not-a-digest`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(invalid.status, 404);
+  } finally {
+    await web.dispose();
+    await fixture.dispose();
+  }
+});
+
+await test("Server Web client adapters translate Host icon URLs and the public instance list", async () => {
+  const sha256 = "c".repeat(64);
+  const calls: Array<{ readonly method: string; readonly args: readonly unknown[] }> = [];
+  const context = {
+    entry: {},
+    call: async (method: string, args: readonly unknown[]) => {
+      calls.push({ method, args });
+      if (method === "listTypes") {
+        return [
+          {
+            id: "paper",
+            logoUrl: `${serverCoreIconScheme}://${serverCoreIconHost}/${sha256}`,
+          },
+        ];
+      }
+      return [
+        {
+          id: "server:one",
+          iconUrl: `${serverCoreIconScheme}://${serverInstanceIconHost}/server%3Aone`,
+        },
+      ];
+    },
+    effect: () => () => undefined,
+  } as unknown as ClientUiServiceAdapterContext;
+  const adapters = createServerWebServiceAdapters(new ServerWebEvents());
+  const coreSource = adapters[serverCoreSourceContract]!(context) as {
+    listTypes(): Promise<Array<{ logoUrl: string }>>;
+  };
+  const instanceManager = adapters[serverInstanceManagerContract]!(context) as {
+    list(): Promise<Array<{ iconUrl: string }>>;
+  };
+
+  assert.equal(
+    (await coreSource.listTypes())[0]!.logoUrl,
+    `/api/server-assets/core-icons/${sha256}`,
+  );
+  assert.equal(
+    (await instanceManager.list())[0]!.iconUrl,
+    "/api/server-assets/instance-icons/server%3Aone",
+  );
+  assert.deepEqual(
+    calls.map(({ method }) => method),
+    ["listTypes", "listForClient"],
+  );
 });
 
 await test("Server Web rejects remote listening before TLS and administrator setup", async () => {

@@ -3,7 +3,7 @@ import type { ServerSettingsClientService } from "@seashard/contracts";
 import DownloadSettingsCard from "./DownloadSettingsCard.vue";
 
 const props = defineProps<{
-  selectDirectory: () => Promise<string | undefined>;
+  selectDirectory?: () => Promise<string | undefined>;
   settings: ServerSettingsClientService;
 }>();
 </script>

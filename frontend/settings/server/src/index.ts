@@ -10,8 +10,16 @@ export const serverSettingsUiManifest: PluginManifest = {
       id: "server-settings.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverSettingsContract]: [
+          "get",
+          "setResourceDownloadDirectory",
+          "setDefaultDownloadConnections",
+          "setStartupDefaults",
+        ],
+      },
       permissions: [serverSettingsContract],
     },
   ],

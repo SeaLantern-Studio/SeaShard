@@ -3,20 +3,20 @@ import {
   serverDownloadConnectionLimits,
   type ServerSettingsClientService,
 } from "@seashard/contracts";
-import { Cmz_Button, Cmz_Card, Cmz_Input, Cmz_Select } from "cmzya-modern-ui";
+import { Cmz_Button, Cmz_Card, Cmz_Input, Cmz_Select, useToast } from "cmzya-modern-ui";
 import { FolderOpen } from "lucide-vue-next";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{
-  selectDirectory: () => Promise<string | undefined>;
+  selectDirectory?: () => Promise<string | undefined>;
   settings: ServerSettingsClientService;
 }>();
+const toast = useToast();
 
 const resourceDirectory = ref("");
 const defaultConnections = ref<number>(serverDownloadConnectionLimits.defaultValue);
 const loading = ref(true);
 const selecting = ref(false);
-const settingsError = ref<string>();
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingDirectory: string | undefined;
 let saveQueue: Promise<void> = Promise.resolve();
@@ -38,7 +38,9 @@ onMounted(async () => {
       defaultConnections.value = snapshot.defaultDownloadConnections;
     }
   } catch (error) {
-    if (!disposed) settingsError.value = errorMessage(error);
+    if (!disposed) {
+      toast.error({ title: "读取下载设置失败", description: errorMessage(error) });
+    }
   } finally {
     if (!disposed) loading.value = false;
   }
@@ -52,7 +54,6 @@ onBeforeUnmount(() => {
 
 function updateResourceDirectory(value: string): void {
   resourceDirectory.value = value;
-  settingsError.value = undefined;
   pendingDirectory = value;
   if (saveTimer !== undefined) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -63,9 +64,8 @@ function updateResourceDirectory(value: string): void {
 }
 
 async function browseDirectory(): Promise<void> {
-  if (loading.value || selecting.value) return;
+  if (loading.value || selecting.value || !props.selectDirectory) return;
   selecting.value = true;
-  settingsError.value = undefined;
   try {
     const selectedDirectory = await props.selectDirectory();
     if (!selectedDirectory) return;
@@ -75,7 +75,7 @@ async function browseDirectory(): Promise<void> {
     resourceDirectory.value = selectedDirectory;
     await persistDirectory(selectedDirectory);
   } catch (error) {
-    if (!disposed) settingsError.value = errorMessage(error);
+    if (!disposed) toast.error({ title: "选择下载目录失败", description: errorMessage(error) });
   } finally {
     if (!disposed) selecting.value = false;
   }
@@ -86,7 +86,6 @@ function updateDefaultConnections(value: string | number): void {
     return;
   }
   defaultConnections.value = value;
-  settingsError.value = undefined;
   void persistUpdate(() => props.settings.setDefaultDownloadConnections(value));
 }
 
@@ -104,11 +103,11 @@ function persistUpdate(
     () => undefined,
   );
   return task.then(
-    () => {
-      if (!disposed && revision === saveRevision) settingsError.value = undefined;
-    },
+    () => undefined,
     (error: unknown) => {
-      if (!disposed && revision === saveRevision) settingsError.value = errorMessage(error);
+      if (!disposed && revision === saveRevision) {
+        toast.error({ title: "保存下载设置失败", description: errorMessage(error) });
+      }
     },
   );
 }
@@ -119,7 +118,7 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
-  <Cmz_Card title="下载设置" subtitle="配置服务器资源的默认保存位置和并发线程数">
+  <Cmz_Card title="下载设置">
     <div class="settings-entry">
       <div class="settings-entry-info">
         <span class="settings-entry-title">资源默认下载地址</span>
@@ -138,6 +137,7 @@ function errorMessage(error: unknown): string {
           @update:model-value="updateResourceDirectory"
         />
         <Cmz_Button
+          v-if="props.selectDirectory"
           class="browse-button"
           variant="outline"
           size="sm"
@@ -169,10 +169,6 @@ function errorMessage(error: unknown): string {
         />
       </div>
     </div>
-
-    <p v-if="settingsError" class="settings-error" role="alert">
-      {{ settingsError }}
-    </p>
   </Cmz_Card>
 </template>
 
@@ -239,12 +235,6 @@ function errorMessage(error: unknown): string {
 
 .browse-button:active {
   transform: scale(0.97);
-}
-
-.settings-error {
-  margin: var(--sl-space-sm) 0 0;
-  color: var(--sl-error);
-  font-size: 0.8125rem;
 }
 
 @media (max-width: 760px) {

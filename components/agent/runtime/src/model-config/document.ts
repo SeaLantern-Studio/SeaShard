@@ -36,8 +36,6 @@ providers: {}
 
 const connectionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const revisionPattern = /^[a-f0-9]{64}$/u;
-const maximumConfigBytes = 1024 * 1024;
-const writerLockStaleMs = 30_000;
 const maximumReasoningLevelLength = 64;
 
 export function parseModelsFile(
