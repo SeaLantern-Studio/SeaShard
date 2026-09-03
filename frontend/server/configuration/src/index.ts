@@ -10,8 +10,12 @@ export const serverConfigurationUiManifest: PluginManifest = {
       id: "server-configuration.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverInstanceManagerContract]: ["list"],
+        [serverConfigurationContract]: ["list", "read", "write"],
+      },
       permissions: [serverInstanceManagerContract, serverConfigurationContract],
     },
   ],

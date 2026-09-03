@@ -1,3 +1,4 @@
+import type { SeaShardControllerRuntime } from "@seashard/controller-runtime";
 import type {
   ClientEntryPublication,
   ClientServiceCallRequest,
@@ -8,7 +9,6 @@ import {
   projectClientEntryPublication,
   resolveClientPluginAssetPath,
   type BuiltInPackageRegistration,
-  type PluginKernel,
 } from "@seashard/plugin-system";
 import type { DesktopHostConnections } from "./desktop-host-connections";
 
@@ -41,10 +41,14 @@ export class DesktopControllerKernel {
   private disposed = false;
 
   constructor(
-    readonly application: PluginKernel,
+    private readonly runtime: SeaShardControllerRuntime,
     readonly hosts: DesktopHostConnections,
     private readonly serverEvents: ControllerServerEventBus,
   ) {}
+
+  get application() {
+    return this.runtime.kernel;
+  }
 
   get agentTools() {
     return this.application.agentTools;
@@ -107,6 +111,6 @@ export class DesktopControllerKernel {
     this.disposed = true;
     for (const dispose of this.disposers.splice(0).reverse()) dispose();
     this.serverEvents.dispose();
-    await this.application.dispose();
+    await this.runtime.disposeKernel();
   }
 }

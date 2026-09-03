@@ -318,6 +318,85 @@ await test("client UI runtime loads an activated package module through its dige
   await runtime.dispose();
 });
 
+await test("client UI service adapter keeps entry authorization and owns local effects", async () => {
+  const router = memoryRouter();
+  const integrity = "d".repeat(64);
+  const calls: Array<{
+    runtimeId: string;
+    integrity: string;
+    contract: string;
+    method: string;
+    args: readonly unknown[];
+  }> = [];
+  let activeSubscriptions = 0;
+  let service:
+    | {
+        echo(value: string): Promise<unknown>;
+        subscribe(): () => void;
+      }
+    | undefined;
+  const module: ClientUiModule = {
+    apply(ctx) {
+      service = ctx.service("example.adapter");
+      service.subscribe();
+    },
+  };
+  const runtime = new ClientUiRuntime({
+    router,
+    serverSelection: emptyServerSelection,
+    builtInLoaders: { adapter: { load: async () => module } },
+    packageLoader: {
+      load: async () => {
+        throw new Error("package loader should not run");
+      },
+    },
+    hostServices: {
+      call: async (request) => {
+        calls.push(request);
+        return request.args[0];
+      },
+    },
+    serviceAdapters: {
+      "example.adapter": ({ entry, call, effect }) => {
+        assert.equal(entry.runtimeId, "adapter.runtime");
+        return {
+          echo: (value: string) => call("echo", [value]),
+          subscribe: () =>
+            effect(() => {
+              activeSubscriptions += 1;
+              return () => {
+                activeSubscriptions -= 1;
+              };
+            }),
+        };
+      },
+    },
+    services: {},
+  });
+
+  await runtime.reconcile({
+    revision: 1,
+    entries: [descriptor("adapter.runtime", "adapter", integrity)],
+  });
+  assert.ok(service);
+  assert.equal(activeSubscriptions, 1);
+  assert.equal(await service.echo("authorized"), "authorized");
+  assert.deepEqual(calls, [
+    {
+      runtimeId: "adapter.runtime",
+      integrity,
+      contract: "example.adapter",
+      method: "echo",
+      args: ["authorized"],
+    },
+  ]);
+
+  await runtime.reconcile({ revision: 2, entries: [] });
+  assert.equal(activeSubscriptions, 0);
+  await assert.rejects(service.echo("stale"), /client runtime is no longer active/u);
+  await runtime.dispose();
+});
+
 await test("client UI runtime isolates an unavailable feature entry", async () => {
   const router = memoryRouter();
   const goodModule: ClientUiModule = {

@@ -1,0 +1,13 @@
+{
+  "name": "@seashard/local-host-installer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/host-control": "workspace:*",
+    "@seashard/host-installation": "workspace:*"
+  }
+}

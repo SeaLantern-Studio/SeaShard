@@ -10,8 +10,12 @@ export const serverConsoleUiManifest: PluginManifest = {
       id: "server-console.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverInstanceManagerContract]: ["list"],
+        [serverRuntimeContract]: ["onConsoleLine", "get", "getLogs", "start", "sendCommand"],
+      },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],
     },
   ],

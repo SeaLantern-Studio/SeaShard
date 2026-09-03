@@ -7,7 +7,7 @@ import {
   type ServerRuntimeClientService,
   type ServerRuntimeSnapshot,
 } from "@seashard/contracts";
-import { Cmz_Button } from "cmzya-modern-ui";
+import { Cmz_Button, useToast } from "cmzya-modern-ui";
 import {
   Activity,
   CalendarDays,
@@ -30,6 +30,7 @@ const props = defineProps<{
   runtime: ServerRuntimeClientService;
   selection: ServerInstanceSelection;
 }>();
+const toast = useToast();
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
   month: "2-digit",
@@ -46,7 +47,6 @@ const loading = ref(true);
 const instancesError = ref<string>();
 const runtimeError = ref<string>();
 const openingFolder = ref(false);
-const folderOpenError = ref<string>();
 const currentTime = ref(Date.now());
 let instanceRequestId = 0;
 let runtimeRequestId = 0;
@@ -103,7 +103,6 @@ watch(
     if (instanceId === previousInstanceId || loading.value) return;
     runtimeSnapshot.value = undefined;
     runtimeError.value = undefined;
-    folderOpenError.value = undefined;
     contentCounts.value = undefined;
     instanceProjectionRefreshNeeded = false;
     if (!registeredInstances.value.some((instance) => instance.id === instanceId)) {
@@ -189,13 +188,12 @@ async function refreshContentCounts(): Promise<void> {
 /** Renderer 只提交实例 ID；Host 会重新查询登记目录后再调用系统文件管理器。 */
 async function openSelectedInstanceFolder(): Promise<void> {
   const instance = selectedInstance.value;
-  if (!instance || openingFolder.value) return;
+  if (!instance || openingFolder.value || !("openFolder" in props.instances)) return;
   openingFolder.value = true;
-  folderOpenError.value = undefined;
   try {
     await props.instances.openFolder(instance.id);
   } catch (error) {
-    folderOpenError.value = errorMessage(error);
+    toast.error({ title: "打开文件夹失败", description: errorMessage(error) });
   } finally {
     openingFolder.value = false;
   }
@@ -362,19 +360,18 @@ function errorMessage(error: unknown): string {
               <dt><Folder :size="16" />本地文件夹</dt>
               <dd class="folder-path-value">
                 <span>{{ selectedInstance.rootPath }}</span>
-                <Cmz_Button
-                  variant="outline"
-                  size="sm"
-                  :loading="openingFolder"
-                  @click="openSelectedInstanceFolder"
-                >
-                  <FolderOpen :size="14" />
-                  打开
-                </Cmz_Button>
+                <template v-if="'openFolder' in instances">
+                  <Cmz_Button
+                    variant="outline"
+                    size="sm"
+                    :loading="openingFolder"
+                    @click="openSelectedInstanceFolder"
+                  >
+                    <FolderOpen :size="14" />
+                    打开
+                  </Cmz_Button>
+                </template>
               </dd>
-              <span v-if="folderOpenError" class="folder-open-error" role="alert">
-                {{ folderOpenError }}
-              </span>
             </div>
           </dl>
         </section>

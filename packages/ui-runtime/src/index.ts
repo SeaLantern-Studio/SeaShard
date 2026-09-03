@@ -50,6 +50,14 @@ export interface ClientUiHostServiceBridge {
   call(request: ClientServiceCallRequest): Promise<JsonValue | void>;
 }
 
+export interface ClientUiServiceAdapterContext {
+  readonly entry: ClientEntryDescriptor;
+  call(method: string, args: readonly JsonValue[]): Promise<JsonValue | void>;
+  effect(setup: () => Disposable): Disposable;
+}
+
+export type ClientUiServiceAdapter = (context: ClientUiServiceAdapterContext) => object;
+
 /** 浏览器端只接受 Main 发布的摘要协议 URL，禁止把普通网络地址送入动态 import。 */
 export const browserClientPackageModuleLoader: ClientUiPackageModuleLoader = {
   load: async (moduleUrl, integrity) => {
@@ -71,6 +79,7 @@ export interface ClientUiRuntimeOptions {
   builtInLoaders: Readonly<Record<string, ClientUiModuleLoader>>;
   packageLoader: ClientUiPackageModuleLoader;
   hostServices: ClientUiHostServiceBridge;
+  serviceAdapters?: Readonly<Record<string, ClientUiServiceAdapter>>;
   serverSelection: ClientServerSelection;
   services: Readonly<Record<string, object>>;
 }
@@ -287,6 +296,24 @@ export class ClientUiRuntime {
         this.ownEffect(record, () =>
           this.registerClientSlot(descriptor.runtimeId, options, component),
         );
+      const callClientService = (
+        contract: string,
+        method: string,
+        args: readonly JsonValue[],
+      ): Promise<JsonValue | void> => {
+        if (!record.callable) {
+          return Promise.reject(
+            new Error(`client runtime is no longer active: ${descriptor.runtimeId}`),
+          );
+        }
+        return this.options.hostServices.call({
+          runtimeId: descriptor.runtimeId,
+          integrity: descriptor.integrity,
+          contract,
+          method,
+          args,
+        });
+      };
       const context: ClientUiContext = {
         entry: descriptor,
         slots: {
@@ -318,26 +345,21 @@ export class ClientUiRuntime {
         service: <T extends object>(contract: string): T => {
           const local = this.options.services[contract];
           if (local) return local as T;
+          const adapter = this.options.serviceAdapters?.[contract];
+          if (adapter) {
+            return adapter({
+              entry: descriptor,
+              call: (method, args) => callClientService(contract, method, args),
+              effect: (setup) => this.ownEffect(record, setup),
+            }) as T;
+          }
           return new Proxy(
             {},
             {
               get: (_target, property) => {
                 if (property === "then") return undefined;
                 if (typeof property !== "string") return undefined;
-                return (...args: JsonValue[]) => {
-                  if (!record.callable) {
-                    return Promise.reject(
-                      new Error(`client runtime is no longer active: ${descriptor.runtimeId}`),
-                    );
-                  }
-                  return this.options.hostServices.call({
-                    runtimeId: descriptor.runtimeId,
-                    integrity: descriptor.integrity,
-                    contract,
-                    method: property,
-                    args,
-                  });
-                };
+                return (...args: JsonValue[]) => callClientService(contract, property, args);
               },
             },
           ) as T;

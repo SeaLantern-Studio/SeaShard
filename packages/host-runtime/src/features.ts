@@ -1,14 +1,19 @@
-import { serverDownloadConnectionLimits } from "@seashard/contracts";
+import { serverDownloadConnectionLimits, type ServerConsoleLine } from "@seashard/contracts";
 import { createDownloadModule, downloadManifest } from "@seashard/download";
 import {
   createJavaRuntimeManagerModule,
   javaRuntimeManagerManifest,
 } from "@seashard/java-runtime-manager";
+import type { DatabaseService } from "@seashard/database";
 import type { PluginKernel } from "@seashard/plugin-system";
+import { registerServerFeatures } from "@seashard/server-features";
 
 export interface HostFeatureOptions {
   readonly kernel: PluginKernel;
+  readonly database: DatabaseService;
+  readonly dataRoot: string;
   readonly seaShardVersion: string;
+  readonly publishConsoleLine: (line: ServerConsoleLine) => void;
 }
 
 /**
@@ -46,6 +51,17 @@ export async function registerHostFeatures(options: HostFeatureOptions): Promise
       },
     },
     bindings: [hostBinding("core.java-runtime-manager", "java-runtime-manager.host")],
+  });
+
+  // 独立 Server 的实例、文件和进程能力实际驻留于 Host。Host 断开某个 Controller
+  // 连接时不会释放这些组件，因此正在运行的服务器不会随 Controller 退出。
+  await registerServerFeatures({
+    kernel,
+    database: options.database,
+    dataRoot: options.dataRoot,
+    seaShardVersion,
+    executionLocation: "host",
+    publishConsoleLine: options.publishConsoleLine,
   });
 }
 

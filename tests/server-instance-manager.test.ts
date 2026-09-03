@@ -544,6 +544,14 @@ await test("managed downloads persist unique instances and split portable manife
         manager.deleteMod(managedInstance.id, "mods/missing.jar"),
         /服务器正在运行，无法删除 MOD/u,
       ),
+      assert.rejects(
+        manager.setPluginDisabled(managedInstance.id, "plugins/missing.jar", true),
+        /服务器正在运行，无法切换插件状态/u,
+      ),
+      assert.rejects(
+        manager.deletePlugin(managedInstance.id, "plugins/missing.jar"),
+        /服务器正在运行，无法删除插件/u,
+      ),
       assert.rejects(manager.delete(managedInstance.id), /服务器正在运行，无法删除服务器实例/u),
     ]);
     await assert.rejects(
@@ -611,6 +619,25 @@ await test("managed downloads persist unique instances and split portable manife
     assert.deepEqual(await manager.contentCounts(countedInstance.id), {
       mods: 2,
       plugins: 1,
+    });
+    const installedPlugin = (await manager.listPlugins(countedInstance.id))[0];
+    assert.equal(installedPlugin?.name, "luckperms");
+    const disabledPlugin = await manager.setPluginDisabled(
+      countedInstance.id,
+      "plugins/luckperms.jar",
+      true,
+    );
+    assert.equal(disabledPlugin.relativePath, "plugins/luckperms.jar.disabled");
+    assert.equal(disabledPlugin.disabled, true);
+    const enabledPlugin = await manager.setPluginDisabled(
+      countedInstance.id,
+      disabledPlugin.relativePath,
+      false,
+    );
+    assert.equal(enabledPlugin.relativePath, "plugins/luckperms.jar");
+    await manager.deletePlugin(countedInstance.id, enabledPlugin.relativePath);
+    await assert.rejects(access(join(countedInstance.rootPath, "plugins", "luckperms.jar")), {
+      code: "ENOENT",
     });
     await assert.rejects(manager.contentCounts("missing-instance"), /was not found/u);
     const firstStartupDefaults: ServerInstanceStartupSettings = {

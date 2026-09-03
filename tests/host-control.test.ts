@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   connectHostControlClient,
   HostControlRpcError,
+  hostControlProtocolVersion,
+  readHostControlDescriptor,
+  resolveHostControlLocation,
   startHostControlServer,
 } from "../packages/host-control/src/index.ts";
 import { DesktopHostConnections } from "../apps/desktop/src/main/desktop-host-connections.ts";
@@ -22,6 +25,7 @@ await test("Host allows concurrent readers and transfers one write controller", 
     seaShardVersion: "1.3.0",
     packageType: "deb",
     handlers: {
+      describeServices: () => [{ contract: "test.control", methods: ["getValue", "writeValue"] }],
       async callService(call) {
         if (call.method === "writeValue") {
           const value = call.args[0];
@@ -58,6 +62,9 @@ await test("Host allows concurrent readers and transfers one write controller", 
     assert.equal(first.hostVersion, "1.3.0");
     assert.equal(first.hostPackageType, "deb");
     assert.equal(second.hasControl, false);
+    assert.deepEqual(await first.describeServices(), [
+      { contract: "test.control", methods: ["getValue", "writeValue"] },
+    ]);
     assert.equal(await secondService.getValue(), "visible");
     await assert.rejects(
       secondService.writeValue("blocked"),
@@ -93,11 +100,43 @@ await test("Host allows concurrent readers and transfers one write controller", 
   }
 });
 
+await test("current Controller accepts old Host descriptors within protocol version one", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "seashard-host-old-descriptor-"));
+  try {
+    const location = await resolveHostControlLocation(dataRoot);
+    await writeFile(
+      location.descriptorPath,
+      `${JSON.stringify({
+        protocolVersion: hostControlProtocolVersion,
+        socketPath: location.socketPath,
+        descriptorPath: location.descriptorPath,
+        token: "a".repeat(64),
+        pid: 42,
+        startedAt: "2026-09-01T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+    const descriptor = await readHostControlDescriptor(dataRoot);
+    assert.equal(descriptor?.seaShardVersion, undefined);
+    assert.equal(descriptor?.packageType, undefined);
+
+    await writeFile(
+      location.descriptorPath,
+      `${JSON.stringify({ ...descriptor, protocolVersion: hostControlProtocolVersion + 1 })}\n`,
+      "utf8",
+    );
+    await assert.rejects(readHostControlDescriptor(dataRoot), /invalid SeaShard Host descriptor/u);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 await test("Desktop projects Host conflicts as read-only and hides normal local control", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "seashard-desktop-host-"));
   const server = await startHostControlServer({
     dataRoot,
     handlers: {
+      describeServices: () => [],
       async callService() {
         return undefined;
       },
@@ -220,6 +259,7 @@ await test("Desktop reconnects immediately after the bundled Host installer repo
   const server = await startHostControlServer({
     dataRoot,
     handlers: {
+      describeServices: () => [],
       async callService() {
         return undefined;
       },

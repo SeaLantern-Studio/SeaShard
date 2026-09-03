@@ -103,6 +103,9 @@ function instanceService(
     createManaged: async () => {
       throw new Error("not implemented in fixture");
     },
+    rename: async () => {
+      throw new Error("not implemented in fixture");
+    },
     list: async () => instances,
     listForClient: async () => instances,
     contentCounts: async () => ({ mods: 0, plugins: 0 }),
@@ -111,6 +114,13 @@ function instanceService(
       throw new Error("not implemented in fixture");
     },
     deleteMod: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    listPlugins: async () => [],
+    setPluginDisabled: async () => {
+      throw new Error("not implemented in fixture");
+    },
+    deletePlugin: async () => {
       throw new Error("not implemented in fixture");
     },
     listWorldStorage: async () => {

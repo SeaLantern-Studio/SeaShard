@@ -1,0 +1,14 @@
+{
+  "name": "@seashard/server-player-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/server-instance-manager": "workspace:*"
+  }
+}

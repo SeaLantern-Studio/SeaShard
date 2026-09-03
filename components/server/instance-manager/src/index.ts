@@ -117,6 +117,17 @@ export function createServerInstanceManagerModule(
           await manager.deleteMod(instanceId, relativePath);
           return null;
         },
+        listPlugins: async (instanceId) => asJsonValue(await manager.listPlugins(instanceId)),
+        setPluginDisabled: async (instanceId, relativePath, disabled) => {
+          if (typeof disabled !== "boolean") {
+            throw new TypeError("插件禁用状态必须是布尔值。");
+          }
+          return asJsonValue(await manager.setPluginDisabled(instanceId, relativePath, disabled));
+        },
+        deletePlugin: async (instanceId, relativePath) => {
+          await manager.deletePlugin(instanceId, relativePath);
+          return null;
+        },
         ensureWorldStorageDirectory: async (instanceId) =>
           asJsonValue(await manager.ensureWorldStorageDirectory(instanceId)),
         listWorldStorage: async (instanceId) =>

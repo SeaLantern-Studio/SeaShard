@@ -161,6 +161,17 @@ const api: SeaShardDesktopApi = Object.freeze({
       ),
     deleteMod: (instanceId: string, relativePath: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesDeleteMod, instanceId, relativePath),
+    listPlugins: (instanceId: string) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesPlugins, instanceId),
+    setPluginDisabled: (instanceId: string, relativePath: string, disabled: boolean) =>
+      ipcRenderer.invoke(
+        desktopChannels.serverInstancesSetPluginDisabled,
+        instanceId,
+        relativePath,
+        disabled,
+      ),
+    deletePlugin: (instanceId: string, relativePath: string) =>
+      ipcRenderer.invoke(desktopChannels.serverInstancesDeletePlugin, instanceId, relativePath),
     listWorldStorage: (instanceId: string) =>
       ipcRenderer.invoke(desktopChannels.serverInstancesWorlds, instanceId),
     listWorldBackups: (instanceId: string, worldId: string) =>

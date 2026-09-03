@@ -1605,10 +1605,149 @@
       ]
     },
     {
+      "contract": "seashard.server-file-manager",
+      "owner": "seashard.server-file-manager",
+      "description": "通用文件能力只处理已登记实例内的小型 UTF-8 文本和目录。",
+      "source": "packages/contracts/src/server/file.ts:3",
+      "methods": [
+        {
+          "name": "list",
+          "signature": "list(instanceId: string, directory: string): Promise<readonly ServerFileEntry[]>",
+          "description": "列出实例根目录下一个受约束目录中的直接子项。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "directory",
+              "type": "string",
+              "description": "实例根目录下的 POSIX 相对目录；空字符串表示实例根目录。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerFileEntry[]>",
+            "description": "按目录优先、名称稳定排序的文件条目。"
+          },
+          "throws": []
+        },
+        {
+          "name": "readText",
+          "signature": "readText(instanceId: string, path: string): Promise<ServerTextFileDocument>",
+          "description": "读取实例内的小型 UTF-8 文本文件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "path",
+              "type": "string",
+              "description": "实例根目录下的 POSIX 相对文件路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerTextFileDocument>",
+            "description": "文本内容及用于乐观写入的内容摘要。"
+          },
+          "throws": []
+        },
+        {
+          "name": "writeText",
+          "signature": "writeText(request: ServerTextFileWriteRequest): Promise<ServerTextFileDocument>",
+          "description": "在摘要仍匹配时原子写入 UTF-8 文本文件。",
+          "parameters": [
+            {
+              "name": "request",
+              "type": "ServerTextFileWriteRequest",
+              "description": "实例、相对路径、内容和可选的期望摘要。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerTextFileDocument>",
+            "description": "落盘后的最新文本投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "createDirectory",
+          "signature": "createDirectory(instanceId: string, path: string): Promise<void>",
+          "description": "在实例内创建目录及其缺失的父目录。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "path",
+              "type": "string",
+              "description": "实例根目录下的 POSIX 相对目录。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "delete",
+          "signature": "delete(instanceId: string, path: string): Promise<void>",
+          "description": "删除实例内的文件或空目录。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "path",
+              "type": "string",
+              "description": "实例根目录下的 POSIX 相对路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerFileEntry",
+          "description": "Host 只发布实例内相对路径；绝对路径和符号链接始终留在安全边界内。",
+          "declaration": "/** Host 只发布实例内相对路径；绝对路径和符号链接始终留在安全边界内。 */\nexport interface ServerFileEntry {\n  readonly path: string;\n  readonly name: string;\n  readonly kind: ServerFileEntryKind;\n  readonly size: number;\n  readonly modifiedAt: string;\n}",
+          "source": "packages/contracts/src/server/file.ts:10"
+        },
+        {
+          "name": "ServerFileEntryKind",
+          "description": "",
+          "declaration": "export type ServerFileEntryKind = \"directory\" | \"file\";",
+          "source": "packages/contracts/src/server/file.ts:7"
+        },
+        {
+          "name": "ServerTextFileDocument",
+          "description": "",
+          "declaration": "export interface ServerTextFileDocument {\n  readonly instanceId: string;\n  readonly path: string;\n  readonly content: string;\n  readonly revision: string;\n  readonly modifiedAt: string;\n}",
+          "source": "packages/contracts/src/server/file.ts:18"
+        },
+        {
+          "name": "ServerTextFileWriteRequest",
+          "description": "",
+          "declaration": "export interface ServerTextFileWriteRequest {\n  readonly instanceId: string;\n  readonly path: string;\n  readonly content: string;\n  readonly expectedRevision?: string;\n}",
+          "source": "packages/contracts/src/server/file.ts:26"
+        }
+      ]
+    },
+    {
       "contract": "seashard.server-instance-manager",
       "owner": "seashard.server-instance-manager",
       "description": "实例组件供 Desktop Shell 和后续进程管理组件使用的宿主能力。",
-      "source": "components/server/instance-manager/src/types.ts:265",
+      "source": "components/server/instance-manager/src/types.ts:294",
       "methods": [
         {
           "name": "createManaged",
@@ -1851,6 +1990,72 @@
               "name": "relativePath",
               "type": "string",
               "description": "listMods 返回的实例内相对路径。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<void>",
+            "description": ""
+          },
+          "throws": []
+        },
+        {
+          "name": "listPlugins",
+          "signature": "listPlugins(instanceId: string): Promise<readonly ServerInstalledPluginSnapshot[]>",
+          "description": "列出实例 plugins 目录中的 Minecraft 服务端插件。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<readonly ServerInstalledPluginSnapshot[]>",
+            "description": "已安装插件的安全投影。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setPluginDisabled",
+          "signature": "setPluginDisabled(instanceId: string, relativePath: string, disabled: boolean): Promise<ServerInstalledPluginSnapshot>",
+          "description": "通过 .disabled 文件后缀切换插件状态；运行中会直接失败。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "relativePath",
+              "type": "string",
+              "description": "listPlugins 返回的实例内相对路径。"
+            },
+            {
+              "name": "disabled",
+              "type": "boolean",
+              "description": "是否禁用目标插件。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerInstalledPluginSnapshot>",
+            "description": "更新后的插件快照。"
+          },
+          "throws": []
+        },
+        {
+          "name": "deletePlugin",
+          "signature": "deletePlugin(instanceId: string, relativePath: string): Promise<void>",
+          "description": "删除 plugins 目录中的单个插件 JAR；运行中会直接失败。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "relativePath",
+              "type": "string",
+              "description": "listPlugins 返回的实例内相对路径。"
             }
           ],
           "returns": {
@@ -2166,7 +2371,7 @@
           "name": "CreateManagedServerInstanceRequest",
           "description": "Host 侧创建托管实例时补入设置组件保存的下载并发数。",
           "declaration": "/** Host 侧创建托管实例时补入设置组件保存的下载并发数。 */\nexport interface CreateManagedServerInstanceRequest extends ServerCoreManagedDownloadRequest {\n  connections: number;\n}",
-          "source": "components/server/instance-manager/src/types.ts:27"
+          "source": "components/server/instance-manager/src/types.ts:29"
         },
         {
           "name": "FileDownloadTaskSnapshot",
@@ -2217,16 +2422,22 @@
           "source": "packages/contracts/src/server/instance.ts:99"
         },
         {
+          "name": "ServerInstalledPluginSnapshot",
+          "description": "服务端 plugins 目录中的 Minecraft 插件投影。",
+          "declaration": "/** 服务端 plugins 目录中的 Minecraft 插件投影。 */\nexport interface ServerInstalledPluginSnapshot {\n  readonly instanceId: string;\n  readonly relativePath: string;\n  readonly fileName: string;\n  readonly name: string;\n  readonly addedAt: string;\n  readonly disabled: boolean;\n}",
+          "source": "packages/contracts/src/server/instance.ts:116"
+        },
+        {
           "name": "ServerInstanceClientProjection",
           "description": "",
           "declaration": "export type ServerInstanceClientProjection = Omit<\n  ServerInstanceSnapshot,\n  \"iconPath\" | \"resourceSources\"\n>;",
-          "source": "components/server/instance-manager/src/types.ts:31"
+          "source": "components/server/instance-manager/src/types.ts:33"
         },
         {
           "name": "ServerInstanceContentCounts",
           "description": "Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。",
           "declaration": "/** Renderer 只读取已登记实例及其世界存档，不接触宿主文件系统。 */\nexport interface ServerInstanceContentCounts {\n  mods: number;\n  plugins: number;\n}",
-          "source": "packages/contracts/src/server/instance.ts:173"
+          "source": "packages/contracts/src/server/instance.ts:214"
         },
         {
           "name": "ServerInstanceSnapshot",
@@ -2316,7 +2527,7 @@
           "name": "ServerWorldDimensionGroup",
           "description": "",
           "declaration": "export interface ServerWorldDimensionGroup {\n  /** 可直接提交给世界、数据包和备份能力的末级逻辑世界 ID。 */\n  id: string;\n  name: string;\n  current: boolean;\n  saves: readonly ServerWorldSave[];\n}",
-          "source": "packages/contracts/src/server/instance.ts:115"
+          "source": "packages/contracts/src/server/instance.ts:125"
         },
         {
           "name": "ServerWorldSave",
@@ -2334,7 +2545,7 @@
           "name": "ServerWorldStorageSnapshot",
           "description": "Host 扫描实例目录后发布的存档稳定投影，不暴露绝对路径或外层存储容器。",
           "declaration": "/** Host 扫描实例目录后发布的存档稳定投影，不暴露绝对路径或外层存储容器。 */\nexport interface ServerWorldStorageSnapshot {\n  instanceId: string;\n  mode: ServerWorldStorageMode;\n  /** 当前世界的末级逻辑 ID；server.properties 可在 Host 内继续保存完整相对路径。 */\n  currentId?: string;\n  saves: readonly ServerWorldSave[];\n  dimensions: readonly ServerWorldDimensionGroup[];\n}",
-          "source": "packages/contracts/src/server/instance.ts:124"
+          "source": "packages/contracts/src/server/instance.ts:134"
         }
       ]
     },
@@ -2541,6 +2752,133 @@
           "description": "详情页中的单个可下载版本；Host 只投影列表展示所需字段。",
           "declaration": "/** 详情页中的单个可下载版本；Host 只投影列表展示所需字段。 */\nexport interface ServerModVersion {\n  id: string;\n  /** 来源显示给用户的版本号或版本名称；安装时仍使用稳定的 id。 */\n  version?: string;\n  gameVersions: readonly string[];\n  loaders: readonly string[];\n  fileName: string;\n  downloads: number;\n  datePublished: string;\n}",
           "source": "packages/contracts/src/server/resource.ts:102"
+        }
+      ]
+    },
+    {
+      "contract": "seashard.server-player-manager",
+      "owner": "seashard.server-player-manager",
+      "description": "玩家名单从 Minecraft 自己的 JSON 文件读取；写操作仅在实例停止时执行。",
+      "source": "packages/contracts/src/server/player.ts:3",
+      "methods": [
+        {
+          "name": "list",
+          "signature": "list(instanceId: string): Promise<ServerPlayerCatalog>",
+          "description": "读取 Minecraft 玩家名单与白名单开关。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerPlayerCatalog>",
+            "description": "合并白名单、封禁和管理员文件后的玩家目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setWhitelistEnabled",
+          "signature": "setWhitelistEnabled(instanceId: string, enabled: boolean): Promise<ServerPlayerCatalog>",
+          "description": "修改 server.properties 中的白名单开关。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "description": "是否启用白名单。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerPlayerCatalog>",
+            "description": "写入后的完整玩家目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setWhitelisted",
+          "signature": "setWhitelisted(instanceId: string, player: ServerPlayerIdentity, whitelisted: boolean): Promise<ServerPlayerCatalog>",
+          "description": "添加或移除一条白名单记录。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "player",
+              "type": "ServerPlayerIdentity",
+              "description": "玩家 UUID 与名称。"
+            },
+            {
+              "name": "whitelisted",
+              "type": "boolean",
+              "description": "true 表示加入，false 表示移除。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerPlayerCatalog>",
+            "description": "写入后的完整玩家目录。"
+          },
+          "throws": []
+        },
+        {
+          "name": "setBanned",
+          "signature": "setBanned(instanceId: string, player: ServerPlayerBanRequest, banned: boolean): Promise<ServerPlayerCatalog>",
+          "description": "添加或移除一条玩家封禁记录。",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "type": "string",
+              "description": "已登记实例 ID。"
+            },
+            {
+              "name": "player",
+              "type": "ServerPlayerBanRequest",
+              "description": "玩家身份以及可选的封禁原因和期限。"
+            },
+            {
+              "name": "banned",
+              "type": "boolean",
+              "description": "true 表示封禁，false 表示解封。"
+            }
+          ],
+          "returns": {
+            "type": "Promise<ServerPlayerCatalog>",
+            "description": "写入后的完整玩家目录。"
+          },
+          "throws": []
+        }
+      ],
+      "types": [
+        {
+          "name": "ServerPlayerBanRequest",
+          "description": "",
+          "declaration": "export interface ServerPlayerBanRequest extends ServerPlayerIdentity {\n  readonly reason?: string;\n  readonly expiresAt?: string;\n}",
+          "source": "packages/contracts/src/server/player.ts:27"
+        },
+        {
+          "name": "ServerPlayerCatalog",
+          "description": "",
+          "declaration": "export interface ServerPlayerCatalog {\n  readonly instanceId: string;\n  readonly whitelistEnabled: boolean;\n  readonly players: readonly ServerPlayerSnapshot[];\n}",
+          "source": "packages/contracts/src/server/player.ts:21"
+        },
+        {
+          "name": "ServerPlayerIdentity",
+          "description": "",
+          "declaration": "export interface ServerPlayerIdentity {\n  readonly uuid: string;\n  readonly name: string;\n}",
+          "source": "packages/contracts/src/server/player.ts:7"
+        },
+        {
+          "name": "ServerPlayerSnapshot",
+          "description": "",
+          "declaration": "export interface ServerPlayerSnapshot extends ServerPlayerIdentity {\n  readonly whitelisted: boolean;\n  readonly banned: boolean;\n  readonly operator: boolean;\n  readonly lastSeenAt?: string;\n  readonly banReason?: string;\n  readonly banExpiresAt?: string;\n}",
+          "source": "packages/contracts/src/server/player.ts:12"
         }
       ]
     },

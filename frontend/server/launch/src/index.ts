@@ -10,8 +10,12 @@ export const serverLaunchUiManifest: PluginManifest = {
       id: "server-launch.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverInstanceManagerContract]: ["list", "delete", "setIcon"],
+        [serverRuntimeContract]: ["get", "start", "stop"],
+      },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],
     },
   ],

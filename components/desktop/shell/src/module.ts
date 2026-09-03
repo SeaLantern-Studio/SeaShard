@@ -462,6 +462,34 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
             );
           },
         );
+        config.runtime.handle(desktopChannels.serverInstancesPlugins, (event, instanceId) => {
+          ownedWindow(event.sender.id);
+          return config.listServerPlugins(expectNonEmptyString(instanceId, "server instance id"));
+        });
+        config.runtime.handle(
+          desktopChannels.serverInstancesSetPluginDisabled,
+          (event, instanceId, relativePath, disabled) => {
+            ownedWindow(event.sender.id);
+            if (typeof disabled !== "boolean") {
+              throw new TypeError("server plugin disabled must be a boolean");
+            }
+            return config.setServerPluginDisabled(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(relativePath, "server plugin relative path"),
+              disabled,
+            );
+          },
+        );
+        config.runtime.handle(
+          desktopChannels.serverInstancesDeletePlugin,
+          (event, instanceId, relativePath) => {
+            ownedWindow(event.sender.id);
+            return config.deleteServerPlugin(
+              expectNonEmptyString(instanceId, "server instance id"),
+              expectNonEmptyString(relativePath, "server plugin relative path"),
+            );
+          },
+        );
         config.runtime.handle(desktopChannels.serverInstancesWorlds, (event, instanceId) => {
           ownedWindow(event.sender.id);
           return config.readServerWorldStorage(
@@ -962,6 +990,12 @@ export function createDesktopShellModule(config: DesktopShellConfig): PluginModu
           config.runtime.removeHandler(desktopChannels.serverCoreDownloadStartManaged);
           config.runtime.removeHandler(desktopChannels.serverInstancesList);
           config.runtime.removeHandler(desktopChannels.serverInstancesContentCounts);
+          config.runtime.removeHandler(desktopChannels.serverInstancesMods);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSetModDisabled);
+          config.runtime.removeHandler(desktopChannels.serverInstancesDeleteMod);
+          config.runtime.removeHandler(desktopChannels.serverInstancesPlugins);
+          config.runtime.removeHandler(desktopChannels.serverInstancesSetPluginDisabled);
+          config.runtime.removeHandler(desktopChannels.serverInstancesDeletePlugin);
           config.runtime.removeHandler(desktopChannels.serverInstancesWorlds);
           config.runtime.removeHandler(desktopChannels.serverInstancesSwitchWorld);
           config.runtime.removeHandler(desktopChannels.serverInstancesSetStartupSettings);

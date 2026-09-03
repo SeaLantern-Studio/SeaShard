@@ -9,10 +9,12 @@ import {
 } from "../apps/desktop/src/main/desktop-update-controller.ts";
 import {
   isLocalHostUpdateAvailable,
-  parseSeaShardReleaseCatalog,
-  resolveLocalHostReleaseAsset,
   resolveHostUpdatePackageType,
 } from "../apps/desktop/src/main/local-host-update.ts";
+import {
+  parseSeaShardReleaseCatalog,
+  resolveHostReleaseAsset as resolveLocalHostReleaseAsset,
+} from "../packages/release-catalog/src/index.ts";
 import type {
   ServerInstanceSnapshot,
   ServerRuntimeSnapshot,

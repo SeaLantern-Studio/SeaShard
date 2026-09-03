@@ -5,4 +5,6 @@ export * from "./instance.js";
 export * from "./runtime.js";
 export * from "./configuration.js";
 export * from "./java.js";
+export * from "./file.js";
+export * from "./player.js";
 export * from "./settings.js";

@@ -112,6 +112,16 @@ export interface ServerInstalledModSnapshot {
   resourceSource?: ServerResourceSourceMetadata;
 }
 
+/** 服务端 plugins 目录中的 Minecraft 插件投影。 */
+export interface ServerInstalledPluginSnapshot {
+  readonly instanceId: string;
+  readonly relativePath: string;
+  readonly fileName: string;
+  readonly name: string;
+  readonly addedAt: string;
+  readonly disabled: boolean;
+}
+
 export interface ServerWorldDimensionGroup {
   /** 可直接提交给世界、数据包和备份能力的末级逻辑世界 ID。 */
   id: string;
@@ -139,6 +149,37 @@ export interface ServerInstanceModService {
     disabled: boolean,
   ): Promise<ServerInstalledModSnapshot>;
   deleteMod(instanceId: string, relativePath: string): Promise<void>;
+}
+
+/** Renderer 读取指定实例的已安装服务端插件，并通过重命名切换启用状态。 */
+export interface ServerInstancePluginService {
+  /**
+   * 扫描实例 plugins 目录中的插件 JAR。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 插件清单投影。
+   */
+  listPlugins(instanceId: string): Promise<readonly ServerInstalledPluginSnapshot[]>;
+  /**
+   * 通过 .disabled 后缀切换一个插件的启用状态。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param relativePath plugins 目录下的相对 JAR 路径。
+   * @param disabled 是否禁用插件。
+   * @returns 重命名后的插件投影。
+   */
+  setPluginDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): Promise<ServerInstalledPluginSnapshot>;
+  /**
+   * 删除一个已停止实例中的插件 JAR。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param relativePath plugins 目录下的相对 JAR 路径。
+   */
+  deletePlugin(instanceId: string, relativePath: string): Promise<void>;
 }
 
 /** 当前实例中可发现的世界存档及其维度布局。 */
@@ -177,7 +218,7 @@ export interface ServerInstanceContentCounts {
 
 /** Renderer 只读取已经完成注册的实例，不接触 JSON 文件、SQLite 或临时下载状态。 */
 export interface ServerInstanceClientService
-  extends ServerInstanceWorldService, ServerInstanceModService {
+  extends ServerInstanceWorldService, ServerInstanceModService, ServerInstancePluginService {
   list(): Promise<readonly ServerInstanceSnapshot[]>;
   /** 统计已登记实例内的 Mod 与插件 JAR，不向 Renderer 暴露目录扫描能力。 */
   contentCounts(instanceId: string): Promise<ServerInstanceContentCounts>;

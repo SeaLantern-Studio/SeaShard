@@ -239,6 +239,11 @@ export async function registerDesktopShellBridge(
               serverInstances.setModDisabled(instanceId, relativePath, disabled),
             deleteServerMod: (instanceId, relativePath) =>
               serverInstances.deleteMod(instanceId, relativePath),
+            listServerPlugins: async (instanceId) => await serverInstances.listPlugins(instanceId),
+            setServerPluginDisabled: (instanceId, relativePath, disabled) =>
+              serverInstances.setPluginDisabled(instanceId, relativePath, disabled),
+            deleteServerPlugin: (instanceId, relativePath) =>
+              serverInstances.deletePlugin(instanceId, relativePath),
             readServerWorldStorage: async (instanceId) =>
               await serverInstances.listWorldStorage(instanceId),
             listServerWorldBackups: async (instanceId, worldId) =>

@@ -6,6 +6,7 @@ import {
   type ServerInstanceContentCounts,
   type ServerInstanceStartupSettings,
   type ServerInstalledModSnapshot,
+  type ServerInstalledPluginSnapshot,
   type ServerModLoader,
   type ServerResourceSourceIndex,
   type ServerResourceSourceRecord,
@@ -18,6 +19,7 @@ export {
   type ServerInstanceSnapshot,
   type ServerInstanceSource,
   type ServerInstanceStorageMode,
+  type ServerInstalledPluginSnapshot,
   type ServerInstalledModSnapshot,
   type ServerWorldBackupSnapshot,
   type ServerWorldDatapackSnapshot,
@@ -142,6 +144,33 @@ export interface ServerInstanceManagerService {
    * @param relativePath listMods 返回的实例内相对路径。
    */
   deleteMod(instanceId: string, relativePath: string): Promise<void>;
+  /**
+   * 列出实例 plugins 目录中的 Minecraft 服务端插件。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @returns 已安装插件的安全投影。
+   */
+  listPlugins(instanceId: string): Promise<readonly ServerInstalledPluginSnapshot[]>;
+  /**
+   * 通过 .disabled 文件后缀切换插件状态；运行中会直接失败。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param relativePath listPlugins 返回的实例内相对路径。
+   * @param disabled 是否禁用目标插件。
+   * @returns 更新后的插件快照。
+   */
+  setPluginDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): Promise<ServerInstalledPluginSnapshot>;
+  /**
+   * 删除 plugins 目录中的单个插件 JAR；运行中会直接失败。
+   *
+   * @param instanceId 已登记实例 ID。
+   * @param relativePath listPlugins 返回的实例内相对路径。
+   */
+  deletePlugin(instanceId: string, relativePath: string): Promise<void>;
   /**
    * 切换 server.properties 中的 level-name，并返回最新存档投影；运行中会直接失败。
    *

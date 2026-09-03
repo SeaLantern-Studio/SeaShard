@@ -10,8 +10,11 @@ export const gameSettingsUiManifest: PluginManifest = {
       id: "game-settings.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [javaRuntimeManagerContract]: ["scan", "remove", "setDisabled"],
+      },
       permissions: [javaRuntimeManagerContract],
     },
   ],

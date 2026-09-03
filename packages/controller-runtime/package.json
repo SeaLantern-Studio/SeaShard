@@ -1,0 +1,18 @@
+{
+  "name": "@seashard/controller-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@seashard/bootstrap-runtime": "workspace:*",
+    "@seashard/database-sqlite": "workspace:*",
+    "@seashard/host-control": "workspace:*",
+    "@seashard/plugin-foundation": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "cordis": "4.0.0-rc.8"
+  }
+}

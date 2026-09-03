@@ -1,0 +1,131 @@
+.server-plugins-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--sl-space-lg);
+  padding: var(--sl-space-xl);
+}
+
+.page-heading h1 {
+  margin: 0;
+  color: var(--sl-text-primary);
+  font-size: 1.55rem;
+}
+
+.plugins-toolbar,
+.plugin-row,
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sl-space-sm);
+}
+
+.plugins-toolbar select {
+  min-width: 220px;
+  min-height: 36px;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface);
+  color: var(--sl-text-primary);
+  padding: 0 10px;
+}
+
+.plugin-list {
+  overflow: hidden;
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  background: var(--sl-surface);
+}
+
+.plugin-row {
+  min-height: 66px;
+  padding: 10px 14px;
+}
+
+.plugin-row + .plugin-row {
+  border-top: 1px solid var(--sl-border);
+}
+
+.plugin-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: var(--sl-radius-md);
+  background: var(--sl-surface-subtle);
+  color: var(--sl-text-secondary);
+}
+
+.plugin-identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.plugin-identity code {
+  overflow: hidden;
+  color: var(--sl-text-tertiary);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #16a34a;
+  font-size: 0.78rem;
+}
+
+.plugin-state.disabled {
+  color: var(--sl-text-tertiary);
+}
+
+.delete-button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--sl-radius-sm);
+  background: transparent;
+  color: var(--sl-text-secondary);
+  cursor: pointer;
+}
+
+.delete-button:hover {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  color: #ef4444;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 280px;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed var(--sl-border);
+  border-radius: var(--sl-radius-lg);
+  color: var(--sl-text-tertiary);
+}
+
+.modal-actions {
+  justify-content: flex-end;
+}
+
+:global(body:has(.server-plugins-page) .cmz-modal-overlay) {
+  top: calc(var(--sl-header-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  left: calc(var(--sl-sidebar-width) + 12px);
+  border-radius: var(--sl-radius-lg);
+}
+
+:global(body:has(.server-plugins-page) .cmz-modal) {
+  box-shadow: none;
+  backdrop-filter: none;
+}

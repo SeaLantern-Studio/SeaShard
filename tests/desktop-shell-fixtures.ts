@@ -27,6 +27,7 @@ import {
   type ServerInstanceStartupSettings,
   type ServerInstanceSnapshot,
   type ServerInstalledModSnapshot,
+  type ServerInstalledPluginSnapshot,
   type ServerLaunchCommandPreview,
   type ServerCoreType,
   type ServerRuntimeSnapshot,
@@ -903,6 +904,17 @@ export async function createDesktopShellHarness(
           disabled,
         }) satisfies ServerInstalledModSnapshot,
       deleteServerMod: async () => {},
+      listServerPlugins: async () => [],
+      setServerPluginDisabled: async (instanceId, relativePath, disabled) =>
+        ({
+          instanceId,
+          relativePath,
+          fileName: relativePath.split("/").at(-1) ?? "fixture.jar",
+          name: "Fixture Plugin",
+          addedAt: "2026-08-17T12:00:00.000Z",
+          disabled,
+        }) satisfies ServerInstalledPluginSnapshot,
+      deleteServerPlugin: async () => {},
       readServerInstanceContentCounts: async () => serverInstanceContentCounts,
       readServerWorldStorage: async (instanceId) =>
         ({

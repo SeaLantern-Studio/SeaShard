@@ -1,0 +1,22 @@
+{
+  "name": "@seashard/server",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "seashard-server": "dist/index.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "@seashard/contracts": "workspace:*",
+    "@seashard/controller-runtime": "workspace:*",
+    "@seashard/host-control": "workspace:*",
+    "@seashard/host-installation": "workspace:*",
+    "@seashard/local-host-installer": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "@seashard/release-catalog": "workspace:*",
+    "@seashard/server-client-features": "workspace:*",
+    "@seashard/server-instance-manager": "workspace:*",
+    "@seashard/server-web-api": "workspace:*"
+  }
+}

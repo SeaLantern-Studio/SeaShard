@@ -55,6 +55,17 @@ export function expectedPublishedReleaseAssetNames(version: string): readonly st
     "SeaShard-Host-linux-x64.deb",
     "SeaShard-Host-linux-arm64.AppImage",
     "SeaShard-Host-linux-arm64.deb",
+    `SeaShard-Server-${version}-windows-x64.zip`,
+    `SeaShard-Server-${version}-windows-arm64.zip`,
+    `SeaShard-Server-${version}-linux-x64.tar.gz`,
+    `SeaShard-Server-${version}-linux-x64.AppImage`,
+    `SeaShard-Server-${version}-linux-x64.deb`,
+    `SeaShard-Server-${version}-linux-arm64.tar.gz`,
+    `SeaShard-Server-${version}-linux-arm64.AppImage`,
+    `SeaShard-Server-${version}-linux-arm64.deb`,
+    `seashard-server-${version}.tgz`,
+    "install-server.sh",
+    "seashard-server.rb",
     `SeaShard-${version}-windows-x64.exe.blockmap`,
     `SeaShard-${version}-windows-arm64.exe.blockmap`,
     "latest.yml",
@@ -225,7 +236,25 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     ? `以下内容包含 ${input.previousTag} 发布后到当前版本的全部提交。`
     : "这是首个公开 Release，以下内容包含当前仓库历史中的全部提交。";
 
-  return `## 下载指引\n\n${table}\n\n> 当前构建未进行商业代码签名。Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认后继续。\n\n## 更新内容\n\n${rangeDescription}\n\n${changelog}\n\n## 完整变更\n\n${comparison}\n`;
+  const serverDownloads = [
+    "### 命令安装",
+    "",
+    "```sh",
+    "curl -fsSL https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/install-server.sh | sh",
+    "npm install --global @seashard/server",
+    "brew tap sealantern-studio/seashard https://github.com/SeaLantern-Studio/SeaShard.git",
+    "brew install seashard-server",
+    "```",
+    "",
+    "### 手动安装文件",
+    "",
+    `- Windows x64：${asset(`SeaShard-Server-${input.version}-windows-x64.zip`)}`,
+    `- Windows ARM64：${asset(`SeaShard-Server-${input.version}-windows-arm64.zip`)}`,
+    `- Linux x64：${asset(`SeaShard-Server-${input.version}-linux-x64.AppImage`)} / ${asset(`SeaShard-Server-${input.version}-linux-x64.deb`)}`,
+    `- Linux ARM64：${asset(`SeaShard-Server-${input.version}-linux-arm64.AppImage`)} / ${asset(`SeaShard-Server-${input.version}-linux-arm64.deb`)}`,
+  ].join("\n");
+
+  return `## Desktop Controller 下载指引\n\n${table}\n\n> 当前构建未进行商业代码签名。Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认后继续。\n\n## Server Controller\n\n${serverDownloads}\n\n## 更新内容\n\n${rangeDescription}\n\n${changelog}\n\n## 完整变更\n\n${comparison}\n`;
 }
 
 function escapeMarkdown(value: string): string {

@@ -26,6 +26,7 @@ import type {
   ServerInstanceSnapshot,
   ServerInstanceStartupSettings,
   ServerInstalledModSnapshot,
+  ServerInstalledPluginSnapshot,
   ServerModDownloadResult,
   ServerModInstallRequest,
   ServerModSaveAsRequest,
@@ -224,6 +225,16 @@ export interface DesktopShellConfig {
     instanceId: string,
     relativePath: string,
   ): ReturnType<ServerInstanceClientService["deleteMod"]>;
+  listServerPlugins(instanceId: string): Promise<readonly ServerInstalledPluginSnapshot[]>;
+  setServerPluginDisabled(
+    instanceId: string,
+    relativePath: string,
+    disabled: boolean,
+  ): ReturnType<ServerInstanceClientService["setPluginDisabled"]>;
+  deleteServerPlugin(
+    instanceId: string,
+    relativePath: string,
+  ): ReturnType<ServerInstanceClientService["deletePlugin"]>;
   readServerWorldStorage(instanceId: string): Promise<ServerWorldStorageSnapshot>;
   listServerWorldDatapacks(
     instanceId: string,

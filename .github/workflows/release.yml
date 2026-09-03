@@ -103,6 +103,15 @@ jobs:
       - name: 编译 SeaShard
         run: pnpm run build
 
+      - name: 生成 Server npm 发布包
+        shell: bash
+        run: |
+          mkdir -p release-server-npm
+          node scripts/package-server-npm.mjs \
+            --version=${{ inputs.version }}
+          npm pack ./build/server-npm \
+            --pack-destination release-server-npm
+
       - name: 保存平台无关应用产物
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +121,15 @@ jobs:
             apps/plugin-host/dist
             apps/database-worker/dist
             apps/host/dist
+            apps/server/dist
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: 保存 Server npm 发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: seashard-server-npm
+          path: release-server-npm/seashard-server-${{ inputs.version }}.tgz
           if-no-files-found: error
           retention-days: 1
 
@@ -166,8 +184,7 @@ jobs:
             update_metadata: latest-linux.yml
             supports_update: true
           - label: Linux ARM64
-            runner: ubuntu-latest
-            platform: linux
+            runner: ubuntu-24.04-arm
             targets: AppImage deb
             arch: arm64
             asset_key: linux-arm64
@@ -238,6 +255,48 @@ jobs:
               ;;
           esac
 
+      - name: 获取 Server Node.js Runtime
+        if: matrix.platform != 'mac'
+        id: server-node
+        shell: bash
+        run: >-
+          node scripts/download-node-runtime.mjs
+          --node-version=24.11.0
+          --platform=${{ matrix.platform == 'win' && 'windows' || 'linux' }}
+          --arch=${{ matrix.arch }}
+          --github-output="$GITHUB_OUTPUT"
+
+      - name: 获取 AppImage 打包工具
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          tool_arch="${{ matrix.arch == 'x64' && 'x86_64' || 'aarch64' }}"
+          curl --fail --location --silent --show-error \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${tool_arch}.AppImage" \
+            --output build/appimagetool.AppImage
+          chmod +x build/appimagetool.AppImage
+
+      - name: 构建 Server Controller 安装文件
+        if: matrix.platform != 'mac'
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = win ]; then
+            node scripts/stage-server-host-installer.mjs --platform=win32
+            node scripts/package-server.mjs \
+              --version=${{ inputs.version }} \
+              --platform=windows \
+              --arch=${{ matrix.arch }} \
+              --node-executable="${{ steps.server-node.outputs.node_executable }}"
+          else
+            node scripts/stage-server-host-installer.mjs --platform=linux
+            node scripts/package-server.mjs \
+              --version=${{ inputs.version }} \
+              --platform=linux \
+              --arch=${{ matrix.arch }} \
+              --node-executable="${{ steps.server-node.outputs.node_executable }}" \
+              --appimage-tool=build/appimagetool.AppImage
+          fi
+
       - name: 构建平台安装包
         shell: bash
         run: >-
@@ -263,6 +322,10 @@ jobs:
             release/SeaShard-Host-${{ matrix.asset_key }}.pkg
             release/SeaShard-Host-${{ matrix.asset_key }}.AppImage
             release/SeaShard-Host-${{ matrix.asset_key }}.deb
+            release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.zip
+            release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.tar.gz
+            release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
+            release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.deb
           if-no-files-found: error
           retention-days: 1
 
@@ -300,6 +363,18 @@ jobs:
           name: release-metadata
           path: release-assets
 
+      - name: 生成 Server 安装入口
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cp scripts/install-server.sh release-assets/install-server.sh
+          chmod +x release-assets/install-server.sh
+          node scripts/generate-homebrew-formula.mjs \
+            --version="$VERSION" \
+            --repository="$GITHUB_REPOSITORY" \
+            --assets=release-assets \
+            --output=release-assets/seashard-server.rb
+
       - name: 生成全量 Release 清单
         env:
           VERSION: ${{ inputs.version }}
@@ -324,6 +399,8 @@ jobs:
           set -euo pipefail
           gh release create "v${VERSION}" \
             release-assets/SeaShard-* \
+            release-assets/seashard-* \
+            release-assets/install-server.sh \
             release-assets/latest*.yml \
             release-assets/latest-release.json \
             --repo "$GITHUB_REPOSITORY" \
@@ -332,3 +409,59 @@ jobs:
             --notes-file release-assets/release-notes.md
           release_url="$(gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
           printf '## Release 已发布\n\n%s\n' "$release_url" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-server-npm:
+    name: 发布 Server npm 包
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: 获取 Server npm 包
+        uses: actions/download-artifact@v4
+        with:
+          name: seashard-server-npm
+          path: npm-package
+
+      - name: 通过 npm Trusted Publishing 发布
+        run: npm publish "npm-package/seashard-server-${{ inputs.version }}.tgz" --access public --provenance
+
+  sync-homebrew:
+    name: 同步仓库内 Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检出 main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 更新 seashard-server Formula
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p Formula formula-download
+          gh release download "v${{ inputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern seashard-server.rb \
+            --dir formula-download
+          cp formula-download/seashard-server.rb Formula/seashard-server.rb
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Formula/seashard-server.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(server): 更新 Homebrew 到 ${{ inputs.version }}"
+            git push origin main
+          fi

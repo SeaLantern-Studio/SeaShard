@@ -2,6 +2,7 @@ import { BootstrapLoader } from "@seashard/bootstrap-runtime";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { type HostControlServer, type HostPackageType } from "@seashard/host-control";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
+import type { JsonValue } from "@seashard/plugin-sdk";
 import { PluginKernel, type PluginKernelOptions } from "@seashard/plugin-system";
 import { Context } from "cordis";
 import { startHostRuntimeControlServer } from "./control";
@@ -90,7 +91,14 @@ export async function startSeaShardHost(
       executionLocation: "host",
       agentExtensions: false,
     });
-    await registerHostFeatures({ kernel, seaShardVersion: options.seaShardVersion });
+    await registerHostFeatures({
+      kernel,
+      database: root.database,
+      dataRoot: options.dataRoot,
+      seaShardVersion: options.seaShardVersion,
+      publishConsoleLine: (line) =>
+        controlServer?.broadcast("server-console", line as unknown as JsonValue),
+    });
     registerHostWorkerDeploymentService(kernel);
     registerLegacyHostMigrationService(kernel, root["plugin-foundation"].storage);
     registerHostLifecycleService(kernel, options.requestShutdown);

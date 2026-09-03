@@ -108,6 +108,9 @@ importers:
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts/dist
+      '@seashard/controller-runtime':
+        specifier: workspace:*
+        version: link:../../packages/controller-runtime
       '@seashard/database-sqlite':
         specifier: workspace:*
         version: link:../../components/data/database-sqlite
@@ -117,9 +120,6 @@ importers:
       '@seashard/download':
         specifier: workspace:*
         version: link:../../components/network/download
-      '@seashard/game-settings-ui':
-        specifier: workspace:*
-        version: link:../../frontend/settings/game
       '@seashard/host-connections-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/host-connections
@@ -132,6 +132,9 @@ importers:
       '@seashard/java-runtime-manager':
         specifier: workspace:*
         version: link:../../components/game/java-runtime-manager
+      '@seashard/local-host-installer':
+        specifier: workspace:*
+        version: link:../../packages/local-host-installer
       '@seashard/personalization-ui':
         specifier: workspace:*
         version: link:../../frontend/settings/personalization
@@ -156,63 +159,36 @@ importers:
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
+      '@seashard/release-catalog':
+        specifier: workspace:*
+        version: link:../../packages/release-catalog
       '@seashard/runtime-diagnostics':
         specifier: workspace:*
         version: link:../../components/diagnostics/runtime
       '@seashard/runtime-diagnostics-ui':
         specifier: workspace:*
         version: link:../../frontend/diagnostics/runtime
+      '@seashard/server-client-features':
+        specifier: workspace:*
+        version: link:../../frontend/server/client-features
       '@seashard/server-configuration':
         specifier: workspace:*
         version: link:../../components/server/configuration
-      '@seashard/server-configuration-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/configuration
-      '@seashard/server-console-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/console
       '@seashard/server-core-source':
         specifier: workspace:*
         version: link:../../components/server/core-source
-      '@seashard/server-download-datapack-ui':
+      '@seashard/server-features':
         specifier: workspace:*
-        version: link:../../frontend/server/download-datapack
-      '@seashard/server-download-mod-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/download-mod
-      '@seashard/server-download-modpack-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/download-modpack
-      '@seashard/server-download-servercore-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/download-servercore
-      '@seashard/server-download-world-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/download-world
+        version: link:../../packages/server-features
       '@seashard/server-instance-manager':
         specifier: workspace:*
         version: link:../../components/server/instance-manager
-      '@seashard/server-instance-settings-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/settings
-      '@seashard/server-launch-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/launch
       '@seashard/server-mod-source':
         specifier: workspace:*
         version: link:../../components/server/mod-source
-      '@seashard/server-mods-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/mods
-      '@seashard/server-overview-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/overview
       '@seashard/server-runtime':
         specifier: workspace:*
         version: link:../../components/server/runtime
-      '@seashard/server-saves-ui':
-        specifier: workspace:*
-        version: link:../../frontend/server/saves
       '@seashard/server-settings':
         specifier: workspace:*
         version: link:../../components/server/settings
@@ -270,6 +246,78 @@ importers:
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
+
+  apps/server:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts/dist
+      '@seashard/controller-runtime':
+        specifier: workspace:*
+        version: link:../../packages/controller-runtime
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../../packages/host-control
+      '@seashard/host-installation':
+        specifier: workspace:*
+        version: link:../../packages/host-installation
+      '@seashard/local-host-installer':
+        specifier: workspace:*
+        version: link:../../packages/local-host-installer
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../../packages/plugin-system
+      '@seashard/release-catalog':
+        specifier: workspace:*
+        version: link:../../packages/release-catalog
+      '@seashard/server-client-features':
+        specifier: workspace:*
+        version: link:../../frontend/server/client-features
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../../components/server/instance-manager
+      '@seashard/server-web-api':
+        specifier: workspace:*
+        version: link:../../packages/server-web-api
+
+  apps/server-web:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk/dist
+      '@seashard/server-client-features':
+        specifier: workspace:*
+        version: link:../../frontend/server/client-features
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../../frontend/server/shared
+      '@seashard/server-web-api':
+        specifier: workspace:*
+        version: link:../../packages/server-web-api
+      '@seashard/server-web-dashboard-ui':
+        specifier: workspace:*
+        version: link:../../frontend/server/web-dashboard
+      '@seashard/ui-runtime':
+        specifier: workspace:*
+        version: link:../../packages/ui-runtime
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+      vue-router:
+        specifier: 5.0.3
+        version: 5.0.3(@vue/compiler-sfc@3.5.41)(esbuild@0.28.2)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))(vue@3.5.41(typescript@5.9.3))
 
   components/agent/runtime:
     dependencies:
@@ -409,6 +457,18 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk/dist
 
+  components/server/file-manager:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../instance-manager
+
   components/server/instance-manager:
     dependencies:
       '@seashard/contracts':
@@ -444,6 +504,18 @@ importers:
       fflate:
         specifier: 0.8.3
         version: 0.8.3
+
+  components/server/player-manager:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../instance-manager
 
   components/server/runtime:
     dependencies:
@@ -561,6 +633,66 @@ importers:
       vue:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/client-features:
+    dependencies:
+      '@seashard/game-settings-ui':
+        specifier: workspace:*
+        version: link:../../settings/game
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-system
+      '@seashard/server-configuration-ui':
+        specifier: workspace:*
+        version: link:../configuration
+      '@seashard/server-console-ui':
+        specifier: workspace:*
+        version: link:../console
+      '@seashard/server-download-datapack-ui':
+        specifier: workspace:*
+        version: link:../download-datapack
+      '@seashard/server-download-mod-ui':
+        specifier: workspace:*
+        version: link:../download-mod
+      '@seashard/server-download-modpack-ui':
+        specifier: workspace:*
+        version: link:../download-modpack
+      '@seashard/server-download-servercore-ui':
+        specifier: workspace:*
+        version: link:../download-servercore
+      '@seashard/server-download-world-ui':
+        specifier: workspace:*
+        version: link:../download-world
+      '@seashard/server-files-ui':
+        specifier: workspace:*
+        version: link:../files
+      '@seashard/server-instance-settings-ui':
+        specifier: workspace:*
+        version: link:../settings
+      '@seashard/server-launch-ui':
+        specifier: workspace:*
+        version: link:../launch
+      '@seashard/server-mods-ui':
+        specifier: workspace:*
+        version: link:../mods
+      '@seashard/server-overview-ui':
+        specifier: workspace:*
+        version: link:../overview
+      '@seashard/server-players-ui':
+        specifier: workspace:*
+        version: link:../players
+      '@seashard/server-plugins-ui':
+        specifier: workspace:*
+        version: link:../plugins
+      '@seashard/server-saves-ui':
+        specifier: workspace:*
+        version: link:../saves
+      '@seashard/ui-runtime':
+        specifier: workspace:*
+        version: link:../../../packages/ui-runtime
 
   frontend/server/configuration:
     dependencies:
@@ -751,6 +883,30 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  frontend/server/files:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
   frontend/server/launch:
     dependencies:
       '@seashard/contracts':
@@ -826,6 +982,54 @@ importers:
         specifier: 3.5.41
         version: 3.5.41(typescript@5.9.3)
 
+  frontend/server/players:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/plugins:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-ui-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
   frontend/server/saves:
     dependencies:
       '@seashard/contracts':
@@ -876,6 +1080,30 @@ importers:
 
   frontend/server/shared:
     dependencies:
+      cmzya-modern-ui:
+        specifier: 0.7.1
+        version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
+      lucide-vue-next:
+        specifier: 0.400.0
+        version: 0.400.0(vue@3.5.41(typescript@5.9.3))
+      vue:
+        specifier: 3.5.41
+        version: 3.5.41(typescript@5.9.3)
+
+  frontend/server/web-dashboard:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk/dist
+      '@seashard/server-web-api':
+        specifier: workspace:*
+        version: link:../../../packages/server-web-api
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -1043,6 +1271,30 @@ importers:
         version: link:../plugin-sdk/dist
     publishDirectory: dist
 
+  packages/controller-runtime:
+    dependencies:
+      '@seashard/bootstrap-runtime':
+        specifier: workspace:*
+        version: link:../bootstrap-runtime
+      '@seashard/database-sqlite':
+        specifier: workspace:*
+        version: link:../../components/data/database-sqlite
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../host-control
+      '@seashard/plugin-foundation':
+        specifier: workspace:*
+        version: link:../../components/plugin/foundation
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../plugin-system
+      cordis:
+        specifier: 4.0.0-rc.8
+        version: 4.0.0-rc.8
+
   packages/database: {}
 
   packages/host-control:
@@ -1061,6 +1313,9 @@ importers:
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../contracts/dist
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../database
       '@seashard/database-sqlite':
         specifier: workspace:*
         version: link:../../components/data/database-sqlite
@@ -1082,9 +1337,21 @@ importers:
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../plugin-system
+      '@seashard/server-features':
+        specifier: workspace:*
+        version: link:../server-features
       cordis:
         specifier: 4.0.0-rc.8
         version: 4.0.0-rc.8
+
+  packages/local-host-installer:
+    dependencies:
+      '@seashard/host-control':
+        specifier: workspace:*
+        version: link:../host-control
+      '@seashard/host-installation':
+        specifier: workspace:*
+        version: link:../host-installation
 
   packages/plugin-sdk:
     publishDirectory: dist
@@ -1113,6 +1380,56 @@ importers:
       '@types/semver':
         specifier: 7.8.0
         version: 7.8.0
+
+  packages/release-catalog: {}
+
+  packages/server-features:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../contracts/dist
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../database
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk/dist
+      '@seashard/plugin-system':
+        specifier: workspace:*
+        version: link:../plugin-system
+      '@seashard/server-configuration':
+        specifier: workspace:*
+        version: link:../../components/server/configuration
+      '@seashard/server-core-source':
+        specifier: workspace:*
+        version: link:../../components/server/core-source
+      '@seashard/server-file-manager':
+        specifier: workspace:*
+        version: link:../../components/server/file-manager
+      '@seashard/server-instance-manager':
+        specifier: workspace:*
+        version: link:../../components/server/instance-manager
+      '@seashard/server-mod-source':
+        specifier: workspace:*
+        version: link:../../components/server/mod-source
+      '@seashard/server-player-manager':
+        specifier: workspace:*
+        version: link:../../components/server/player-manager
+      '@seashard/server-runtime':
+        specifier: workspace:*
+        version: link:../../components/server/runtime
+      '@seashard/server-settings':
+        specifier: workspace:*
+        version: link:../../components/server/settings
+
+  packages/server-web-api:
+    dependencies:
+      '@seashard/contracts':
+        specifier: workspace:*
+        version: link:../contracts/dist
+      '@seashard/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk/dist
 
   packages/ui-runtime:
     dependencies:

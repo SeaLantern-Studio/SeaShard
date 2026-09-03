@@ -100,15 +100,37 @@ SeaShard 插件安装到应用本身，可以同时服务多个服务器实例�
 
 - Node.js `>= 24.11.0`；
 - pnpm `10.13.1`；
-- Windows、macOS 或 Linux 桌面环境。
+- Desktop 开发需要 Windows、macOS 或 Linux 桌面环境；
+- Server Controller 可以在无桌面环境中开发和运行。
 
 ### 启动开发环境
 
 ```bash
 corepack enable
 pnpm install
-pnpm run dev
 ```
+
+启动 Desktop：
+
+```bash
+pnpm run dev:desktop
+```
+
+启动 Server Controller：
+
+```bash
+pnpm run dev:server
+```
+
+Server Web 默认只监听 `http://127.0.0.1:18127`。首次打开时需在本机设置管理员，密码长度为 12～128 个字符。浏览器刷新或事件流重连后会重新读取 Host、实例、运行任务和控制台状态。
+
+需要从其他设备访问时，先通过本机监听完成管理员设置，再同时配置 TLS 和非本机监听地址：
+
+```bash
+pnpm run start:server -- --web-host=0.0.0.0 --tls-cert=/path/fullchain.pem --tls-key=/path/private-key.pem
+```
+
+Server Controller 会拒绝未配置 TLS 或尚未设置管理员的非本机监听。
 
 ### 代码检查
 
@@ -116,9 +138,11 @@ pnpm run dev
 pnpm run check
 pnpm test
 pnpm run smoke
+pnpm run smoke:server-host
+pnpm run smoke:server-web
 ```
 
-`pnpm run dev` 会启动 SeaShard Desktop 的本地开发环境。首次安装依赖后无需单独安装各 Workspace Package。
+`dev:desktop` 保留原有 Electron 开发流程；`dev:server` 会监听 Server 后端、Server Web、Host、Plugin Host 和 Database Worker，并始终启动当前工作区刚构建的源码 Host。开发 Host 与正式安装的 Host 使用不同数据目录，二者可以同时运行；只重建 Server 时保留开发 Host 进程并重新连接。
 
 ## 许可证与版权
 

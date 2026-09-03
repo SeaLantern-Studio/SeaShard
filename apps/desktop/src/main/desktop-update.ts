@@ -29,19 +29,18 @@ import {
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  parseSeaShardReleaseCatalog,
+  resolveHostReleaseAsset as resolveLocalHostReleaseAsset,
+  type SeaShardRelease,
+  type SeaShardReleaseAsset as LocalHostReleaseAsset,
+} from "@seashard/release-catalog";
+import {
   DesktopUpdateController,
   isNewerDesktopVersion,
   type DesktopUpdateCheckResult,
   type DesktopUpdateEnvironment,
 } from "./desktop-update-controller";
-import {
-  isLocalHostUpdateAvailable,
-  parseSeaShardReleaseCatalog,
-  resolveLocalHostReleaseAsset,
-  resolveHostUpdatePackageType,
-  type LocalHostReleaseAsset,
-  type SeaShardRelease,
-} from "./local-host-update";
+import { isLocalHostUpdateAvailable, resolveHostUpdatePackageType } from "./local-host-update";
 
 const { autoUpdater } = electronUpdater;
 const githubLatestReleaseCatalog =

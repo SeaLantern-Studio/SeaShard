@@ -10,8 +10,12 @@ export const serverModsUiManifest: PluginManifest = {
       id: "server-mods.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverInstanceManagerContract]: ["list", "listMods", "setModDisabled", "deleteMod"],
+        [serverRuntimeContract]: ["get"],
+      },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],
     },
   ],

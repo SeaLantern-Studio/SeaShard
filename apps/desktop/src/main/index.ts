@@ -1,4 +1,7 @@
-import { BootstrapLoader } from "@seashard/bootstrap-runtime";
+import {
+  startSeaShardController,
+  type SeaShardControllerRuntime,
+} from "@seashard/controller-runtime";
 import {
   clientPluginAssetScheme,
   desktopShellContract,
@@ -10,21 +13,17 @@ import {
   HostControlRpcError,
   type HostControlClient,
 } from "@seashard/host-control";
-import { createSQLiteBootstrapDescriptor, SQLiteDatabaseBroker } from "@seashard/database-sqlite";
-import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
+import { installBundledLinuxHost } from "@seashard/local-host-installer";
+import { SQLiteDatabaseBroker } from "@seashard/database-sqlite";
 import {
   PluginKernel,
   pluginDeveloperControlProtocolVersion,
   type PluginDeveloperControlLaunch,
-  type PluginKernelOptions,
   type PluginPackageRecord,
 } from "@seashard/plugin-system";
-import { Context } from "cordis";
 import { app, protocol, shell } from "electron";
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, copyFile, mkdtemp, rm, stat } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerClientFeatures } from "./client-features";
@@ -83,7 +82,7 @@ if (smokeMode) {
 
 if (developmentUrl) installDevelopmentControl();
 
-let controllerBootstrapLoader: BootstrapLoader | undefined;
+let controllerRuntime: SeaShardControllerRuntime | undefined;
 let controllerServerDatabase: SQLiteDatabaseBroker | undefined;
 let desktopUpdates: ElectronDesktopUpdateService | undefined;
 let hostConnections: DesktopHostConnections | undefined;
@@ -226,37 +225,21 @@ async function bootstrap(): Promise<void> {
     ? join(dataRoot, "controller")
     : join(userDataRoot, "controller");
   const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
-  const controllerRoot = new Context();
-  controllerBootstrapLoader = new BootstrapLoader(controllerRoot);
-  await controllerBootstrapLoader.start([
-    createSQLiteBootstrapDescriptor({
-      dataRoot: controllerDataRoot,
-      workerEntry: databaseWorkerEntry,
-    }),
-    createPluginFoundationBootstrapDescriptor({
-      dataRoot: controllerDataRoot,
-      workerEntry: databaseWorkerEntry,
-      seaShardVersion,
-    }),
-  ]);
+  const activeControllerRuntime = await startSeaShardController({
+    dataRoot: controllerDataRoot,
+    seaShardVersion,
+    databaseWorkerEntry,
+    pluginHostEntry: join(moduleDirectory, "../../../plugin-host/dist/index.js"),
+    hostProfile: "electron",
+    clientTarget: "desktop",
+  });
+  controllerRuntime = activeControllerRuntime;
+  const controllerRoot = activeControllerRuntime.root;
+  const applicationKernel = activeControllerRuntime.kernel;
   controllerServerDatabase = await SQLiteDatabaseBroker.create({
     databasePath: join(dataRoot, "seashard.sqlite3"),
     workerEntry: databaseWorkerEntry,
     readWorkers: 1,
-  });
-  const host = resolveHost();
-  const applicationKernel = await PluginKernel.create({
-    dataRoot: controllerDataRoot,
-    seaShardVersion,
-    pluginHostEntry: join(moduleDirectory, "../../../plugin-host/dist/index.js"),
-    hostProfile: "electron",
-    clientTarget: "desktop",
-    platform: host.platform,
-    architecture: host.architecture,
-    root: controllerRoot,
-    store: controllerRoot["plugin-foundation"].store,
-    pluginStorage: controllerRoot["plugin-foundation"].storage,
-    executionLocation: "controller",
   });
   const hostServices = new ControllerHostServiceGateway(hostConnections);
   hostServices.register(applicationKernel);
@@ -294,7 +277,11 @@ async function bootstrap(): Promise<void> {
 
   hostWorkerDeployments = new HostWorkerDeploymentCoordinator(applicationKernel, hostConnections);
   hostWorkerDeployments.start();
-  controllerKernel = new DesktopControllerKernel(applicationKernel, hostConnections, serverEvents);
+  controllerKernel = new DesktopControllerKernel(
+    activeControllerRuntime,
+    hostConnections,
+    serverEvents,
+  );
   if (developerControlLaunch?.mode !== "operation") {
     await registerDesktopShellBridge({
       kernel: controllerKernel,
@@ -330,17 +317,11 @@ async function openHostInstaller(dataRoot: string): Promise<"installed" | "exter
     return "external";
   }
 
-  const hostImage = await prepareExecutableHostImage(bundledInstaller.hostImage);
-  try {
-    await launchInstallerAndWait("/bin/sh", [bundledInstaller.installScript, hostImage.path], {
-      ...process.env,
-      SEASHARD_HOST_DATA_DIR: dataRoot,
-    });
-  } finally {
-    await hostImage
-      .dispose()
-      .catch((error) => console.warn("Temporary SeaShard Host image could not be removed", error));
-  }
+  await installBundledLinuxHost({
+    dataRoot,
+    hostImage: bundledInstaller.hostImage,
+    installScript: bundledInstaller.installScript,
+  });
   return "installed";
 }
 
@@ -356,69 +337,6 @@ function resolveBundledHostInstaller(): BundledHostInstaller | undefined {
     hostImage: join(installerRoot, "SeaShardHostSetup.AppImage"),
     installScript: join(installerRoot, "install.sh"),
   };
-}
-
-interface PreparedHostImage {
-  readonly path: string;
-  dispose(): Promise<void>;
-}
-
-async function prepareExecutableHostImage(path: string): Promise<PreparedHostImage> {
-  const metadata = await stat(path);
-  // 官方 Release 会保留执行位，DEB 的 postinst 也会补齐，此时直接消费原制品且不复制。
-  if ((metadata.mode & 0o111) !== 0) {
-    return { path, dispose: async () => undefined };
-  }
-
-  // 外层 Controller AppImage 的 SquashFS 只读，无法原地 chmod。仅在执行位缺失时复制
-  // 一份临时 Host Image，安装完成后立即清理；用户级稳定 Runtime 由 install.sh 负责。
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "seashard-host-installer-"));
-  const temporaryImage = join(temporaryRoot, "SeaShardHostSetup.AppImage");
-  try {
-    await copyFile(path, temporaryImage);
-    await chmod(temporaryImage, 0o755);
-  } catch (error) {
-    await rm(temporaryRoot, { recursive: true, force: true });
-    throw error;
-  }
-  return {
-    path: temporaryImage,
-    dispose: () => rm(temporaryRoot, { recursive: true, force: true }),
-  };
-}
-
-function launchInstallerAndWait(
-  executable: string,
-  args: readonly string[],
-  environment: NodeJS.ProcessEnv,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      env: environment,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let errorOutput = "";
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      errorOutput = `${errorOutput}${chunk}`.slice(-16_384);
-    });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      const detail = errorOutput.trim();
-      reject(
-        new Error(
-          detail ||
-            (signal
-              ? `本机 Host 安装器被信号 ${signal} 中止`
-              : `本机 Host 安装器退出码为 ${code ?? "unknown"}`),
-        ),
-      );
-    });
-  });
 }
 
 function resolveHostInstallerDownloadUrl(): string {
@@ -506,8 +424,8 @@ async function closeControllerWindow(): Promise<void> {
   controllerCloseTask ??= (async () => {
     await controllerKernel?.dispose();
     controllerKernel = undefined;
-    await controllerBootstrapLoader?.dispose();
-    controllerBootstrapLoader = undefined;
+    await controllerRuntime?.dispose();
+    controllerRuntime = undefined;
     hostConnections?.dispose();
     hostConnections = undefined;
     app.quit();
@@ -535,8 +453,8 @@ async function shutdown(): Promise<void> {
       if (smokeMode && hadController) console.log("SEASHARD_SMOKE_CONTROLLER_DISPOSED");
       if (developmentUrl && hadController) console.log("SEASHARD_DEV_CONTROLLER_DISPOSED");
     } finally {
-      await controllerBootstrapLoader?.dispose();
-      controllerBootstrapLoader = undefined;
+      await controllerRuntime?.dispose();
+      controllerRuntime = undefined;
       await controllerServerDatabase?.close();
       controllerServerDatabase = undefined;
       await localHostProcess?.dispose();
@@ -659,35 +577,4 @@ async function startControllerDeveloperControl(
 
 function createControllerDataId(dataRoot: string): string {
   return createHash("sha256").update(dataRoot).digest("hex");
-}
-
-function resolveHost(): Pick<PluginKernelOptions, "platform" | "architecture"> {
-  const platforms: PluginKernelOptions["platform"][] = [
-    "win32",
-    "darwin",
-    "linux",
-    "aix",
-    "freebsd",
-    "openbsd",
-    "sunos",
-  ];
-  const architectures: PluginKernelOptions["architecture"][] = [
-    "x64",
-    "arm64",
-    "ia32",
-    "arm",
-    "riscv64",
-    "ppc64",
-    "s390x",
-  ];
-  if (!platforms.includes(process.platform as PluginKernelOptions["platform"])) {
-    throw new Error(`unsupported host platform: ${process.platform}`);
-  }
-  if (!architectures.includes(process.arch as PluginKernelOptions["architecture"])) {
-    throw new Error(`unsupported host architecture: ${process.arch}`);
-  }
-  return {
-    platform: process.platform as PluginKernelOptions["platform"],
-    architecture: process.arch as PluginKernelOptions["architecture"],
-  };
 }

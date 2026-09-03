@@ -9,6 +9,7 @@ import type {
   HostControlFrame,
   HostControllerIdentity,
   HostControlRequestFrame,
+  HostServiceDescriptor,
   HostControlSnapshot,
 } from "./protocol";
 
@@ -135,6 +136,9 @@ export class HostControlClient {
       },
     ) as TService;
   }
+  async describeServices(): Promise<readonly HostServiceDescriptor[]> {
+    return parseServiceDescriptors(await this.request("describe-services", null));
+  }
 
   async requestControl(): Promise<HostControlSnapshot> {
     const result = (await this.request("request-control", null)) as unknown as HostControlSnapshot;
@@ -239,6 +243,44 @@ export async function connectHostControlClient(
   options: ConnectHostControlClientOptions,
 ): Promise<HostControlClient> {
   return HostControlClient.connect(options);
+}
+
+function parseServiceDescriptors(value: JsonValue | undefined): readonly HostServiceDescriptor[] {
+  if (!Array.isArray(value)) {
+    throw new HostControlRpcError("INVALID_SERVICE_DIRECTORY", "Host service directory is invalid");
+  }
+  return value.map((descriptorValue) => {
+    if (!descriptorValue || typeof descriptorValue !== "object" || Array.isArray(descriptorValue)) {
+      throw new HostControlRpcError(
+        "INVALID_SERVICE_DIRECTORY",
+        "Host service descriptor is invalid",
+      );
+    }
+    const descriptor = descriptorValue as Record<string, JsonValue>;
+    if (
+      typeof descriptor.contract !== "string" ||
+      !descriptor.contract ||
+      !Array.isArray(descriptor.methods)
+    ) {
+      throw new HostControlRpcError(
+        "INVALID_SERVICE_DIRECTORY",
+        "Host service descriptor is invalid",
+      );
+    }
+    const methods = descriptor.methods.map((method) => {
+      if (typeof method !== "string" || !method) {
+        throw new HostControlRpcError(
+          "INVALID_SERVICE_DIRECTORY",
+          "Host service descriptor is invalid",
+        );
+      }
+      return method;
+    });
+    return {
+      contract: descriptor.contract,
+      methods: [...new Set(methods)].sort((left, right) => left.localeCompare(right)),
+    };
+  });
 }
 
 function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {

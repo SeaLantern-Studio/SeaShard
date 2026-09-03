@@ -339,10 +339,18 @@ function expectInstanceId(value: JsonValue | undefined): string {
 function expectInstanceName(value: JsonValue | undefined): string {
   if (typeof value !== "string") throw new TypeError("服务器实例名称必须是字符串");
   const name = value.trim();
-  if (!name || name.length > maximumInstanceNameLength || /[\u0000-\u001F\u007F]/u.test(name)) {
+  if (!name || name.length > maximumInstanceNameLength || containsControlCharacter(name)) {
     throw new TypeError(`服务器实例名称必须为 1～${maximumInstanceNameLength} 个可见字符`);
   }
   return name;
+}
+
+function containsControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
 }
 
 /** Invocation 取消只停止 Agent 等待；已经启动的下载或领域事务继续安全结算。 */

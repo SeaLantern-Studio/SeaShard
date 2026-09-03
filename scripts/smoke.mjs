@@ -75,7 +75,7 @@ async function runElectron(label, extraEnvironment) {
     "SEASHARD_PLUGIN_SMOKE_RELOADED",
     "SEASHARD_PLUGIN_SMOKE_STORAGE",
     "SEASHARD_PLUGIN_SMOKE_RESOURCE before=core-smoke:probe:detail after=core-smoke:reload:plain",
-    "SEASHARD_SMOKE_READY components=12",
+    "SEASHARD_SMOKE_READY components=14",
     "SEASHARD_SMOKE_SERVER_INSTANCES count=0",
     "SEASHARD_SMOKE_AGENT_SERVER_RESOURCE count=0",
     "SEASHARD_PLUGIN_HOST_ACTIVE runtime=smoke.external-plugin",
@@ -107,8 +107,8 @@ function verifyPersistedState(databasePath) {
     const bindings = database.prepare("SELECT COUNT(*) AS count FROM plugin_bindings").get();
     const packageCount = Number(packages.count);
     const bindingCount = Number(bindings.count);
-    // Host 只持久化下载与 Java 两个设备能力；服务器领域组件和 Desktop Shell 均在 Controller。
-    if (packageCount !== 2 || bindingCount !== 2) {
+    // Host 持久化下载、Java 与八个服务器领域组件；Controller 断开后服务器进程能力仍在。
+    if (packageCount !== 10 || bindingCount !== 10) {
       throw new Error(
         `unexpected persisted state: packages=${packageCount}, bindings=${bindingCount}`,
       );

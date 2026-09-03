@@ -62,7 +62,13 @@ export interface HostControlSnapshot {
   readonly pending?: HostControlRequestSnapshot;
 }
 
-export type HostControlEventName = "control-snapshot" | "control-requested";
+/** Host 当前公开的服务目录；Controller 据此建立保持权限校验的透明代理。 */
+export interface HostServiceDescriptor {
+  readonly contract: string;
+  readonly methods: readonly string[];
+}
+
+export type HostControlEventName = "control-snapshot" | "control-requested" | "server-console";
 
 export interface HostControlEventFrame {
   readonly type: "event";
@@ -76,6 +82,7 @@ export type HostControlAction =
   | "confirm-control"
   | "reject-control"
   | "release-control"
+  | "describe-services"
   | "service-call";
 
 export interface HostControlRequestFrame {
@@ -114,6 +121,7 @@ export interface HostServiceCall {
 }
 
 export interface HostControlHandlers {
+  describeServices(): readonly HostServiceDescriptor[];
   callService(call: HostServiceCall): Promise<JsonValue | void>;
   /** Host 端最终裁决调用是否需要写控制权，Controller 的 UI 状态不属于安全边界。 */
   isMutation(call: Pick<HostServiceCall, "contract" | "method">): boolean;

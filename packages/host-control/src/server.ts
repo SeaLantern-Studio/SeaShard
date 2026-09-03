@@ -288,6 +288,8 @@ export async function startHostControlServer(
         assignOldestController(connection.identity.sessionId);
         advanceControlState();
         return snapshot() as unknown as JsonValue;
+      case "describe-services":
+        return options.handlers.describeServices() as unknown as JsonValue;
       case "service-call": {
         const call = parseServiceCall(request.payload);
         if (options.handlers.isMutation(call)) requireHolder(connection);
@@ -359,6 +361,7 @@ function parseRequest(line: string): HostControlRequestFrame {
     "confirm-control",
     "reject-control",
     "release-control",
+    "describe-services",
     "service-call",
   ]);
   if (!actions.has(action))

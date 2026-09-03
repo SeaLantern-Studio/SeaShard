@@ -13,8 +13,12 @@ import {
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
+type JavaSettingsService = Omit<JavaRuntimeClientService, "add"> & {
+  add?: JavaRuntimeClientService["add"];
+};
+
 const props = defineProps<{
-  javaRuntime: JavaRuntimeClientService;
+  javaRuntime: JavaSettingsService;
 }>();
 
 type OperationTone = "neutral" | "success" | "error";
@@ -97,7 +101,7 @@ async function addJavaInstallation(): Promise<void> {
   adding.value = true;
   reportOperation("请选择 Java 安装目录中的 bin/java.exe", "neutral");
   try {
-    const installation = await props.javaRuntime.add();
+    const installation = await props.javaRuntime.add?.();
     if (!installation) {
       reportOperation("已取消添加 Java", "neutral");
       return;
@@ -282,6 +286,7 @@ onBeforeUnmount(() => {
             扫描
           </Cmz_Button>
           <Cmz_Button
+            v-if="javaRuntime.add"
             variant="outline"
             size="sm"
             :loading="adding"

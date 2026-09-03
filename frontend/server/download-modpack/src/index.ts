@@ -10,8 +10,17 @@ export const serverDownloadModpackUiManifest: PluginManifest = {
       id: "server-download-modpack.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverModSourceContract]: [
+          "getFilters",
+          "search",
+          "getProjectDetails",
+          "installToInstance",
+          "saveAs",
+        ],
+      },
       permissions: [serverModSourceContract],
     },
   ],

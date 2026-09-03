@@ -38,6 +38,8 @@ export function startHostRuntimeControlServer(
     seaShardVersion,
     packageType,
     handlers: {
+      describeServices: () =>
+        kernel.services.snapshot().map(({ contract, methods }) => ({ contract, methods })),
       callService: ({ contract, method, args }) => kernel.callService(contract, method, [...args]),
       isMutation: isHostMutation,
     },

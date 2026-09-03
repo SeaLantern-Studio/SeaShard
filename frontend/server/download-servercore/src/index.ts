@@ -10,8 +10,12 @@ export const serverDownloadServerCoreUiManifest: PluginManifest = {
       id: "server-download-servercore.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverCoreSourceContract]: ["listTypes", "listVersions", "listArtifacts"],
+        [serverCoreDownloadContract]: ["startManaged", "listTasks", "saveAs"],
+      },
       permissions: [serverCoreSourceContract, serverCoreDownloadContract],
     },
   ],

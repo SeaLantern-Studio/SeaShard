@@ -1,0 +1,31 @@
+{
+  "name": "@seashard/server-client-features",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./loaders": "./src/loaders.ts"
+  },
+  "dependencies": {
+    "@seashard/game-settings-ui": "workspace:*",
+    "@seashard/plugin-sdk": "workspace:*",
+    "@seashard/plugin-system": "workspace:*",
+    "@seashard/server-configuration-ui": "workspace:*",
+    "@seashard/server-console-ui": "workspace:*",
+    "@seashard/server-download-datapack-ui": "workspace:*",
+    "@seashard/server-download-mod-ui": "workspace:*",
+    "@seashard/server-download-modpack-ui": "workspace:*",
+    "@seashard/server-download-servercore-ui": "workspace:*",
+    "@seashard/server-download-world-ui": "workspace:*",
+    "@seashard/server-files-ui": "workspace:*",
+    "@seashard/server-instance-settings-ui": "workspace:*",
+    "@seashard/server-launch-ui": "workspace:*",
+    "@seashard/server-mods-ui": "workspace:*",
+    "@seashard/server-overview-ui": "workspace:*",
+    "@seashard/server-players-ui": "workspace:*",
+    "@seashard/server-plugins-ui": "workspace:*",
+    "@seashard/server-saves-ui": "workspace:*",
+    "@seashard/ui-runtime": "workspace:*"
+  }
+}

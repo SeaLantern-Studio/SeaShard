@@ -30,6 +30,11 @@ import {
   setWorldDatapackDisabled,
 } from "./world-datapacks";
 import { deleteInstalledMod, listInstalledMods, setInstalledModDisabled } from "./mod-files";
+import {
+  deleteInstalledPlugin,
+  listInstalledPlugins,
+  setInstalledPluginDisabled,
+} from "./plugin-files";
 import { listWorldStorage, resolveWorldStorageRoot, switchWorldStorage } from "./world-storage";
 import { instanceNameKey, type SQLiteServerInstanceRegistry } from "./registry";
 import type {
@@ -552,6 +557,34 @@ export class ServerInstanceManager {
       });
     });
   }
+
+  /** Minecraft 插件沿用实例操作队列；变更和删除必须与服务器生命周期互斥。 */
+  async listPlugins(value: unknown) {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(value, "instance id");
+    return this.runInstanceOperation(instanceId, async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return listInstalledPlugins(instance);
+    });
+  }
+
+  async setPluginDisabled(instanceValue: unknown, relativePathValue: unknown, disabled: boolean) {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    return this.runStoppedInstanceOperation(instanceId, "切换插件状态", async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      return (await setInstalledPluginDisabled(instance, relativePathValue, disabled)).plugin;
+    });
+  }
+
+  async deletePlugin(instanceValue: unknown, relativePathValue: unknown): Promise<void> {
+    if (this.disposed) throw new Error("server instance manager is stopped");
+    const instanceId = expectDirectoryName(instanceValue, "instance id");
+    await this.runStoppedInstanceOperation(instanceId, "删除插件", async () => {
+      const { instance } = await this.findIndexedInstance(instanceId);
+      await deleteInstalledPlugin(instance, relativePathValue);
+    });
+  }
   /** 读取实例目录下的普通存档或分维度存档投影。 */
   async listWorldStorage(value: unknown): Promise<ServerWorldStorageSnapshot> {
     const instanceId = expectDirectoryName(value, "instance id");
@@ -1039,10 +1072,18 @@ function expectInstanceDisplayName(value: unknown): string {
     throw new TypeError("服务器实例名称必须是字符串");
   }
   const name = value.trim();
-  if (!name || name.length > maximumInstanceNameLength || /[\u0000-\u001F\u007F]/u.test(name)) {
+  if (!name || name.length > maximumInstanceNameLength || containsControlCharacter(name)) {
     throw new TypeError(`服务器实例名称必须为 1～${maximumInstanceNameLength} 个可见字符`);
   }
   return name;
+}
+
+function containsControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
 }
 
 const maximumInstanceIconBytes = 512 * 1024;

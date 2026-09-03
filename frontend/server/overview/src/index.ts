@@ -10,8 +10,12 @@ export const serverOverviewUiManifest: PluginManifest = {
       id: "server-overview.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
+      uses: {
+        [serverInstanceManagerContract]: ["list", "contentCounts", "openFolder"],
+        [serverRuntimeContract]: ["get"],
+      },
       permissions: [serverInstanceManagerContract, serverRuntimeContract],
     },
   ],

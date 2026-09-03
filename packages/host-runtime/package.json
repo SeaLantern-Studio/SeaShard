@@ -9,6 +9,7 @@
   "dependencies": {
     "@seashard/bootstrap-runtime": "workspace:*",
     "@seashard/contracts": "workspace:*",
+    "@seashard/database": "workspace:*",
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/download": "workspace:*",
     "@seashard/host-control": "workspace:*",
@@ -16,6 +17,7 @@
     "@seashard/plugin-foundation": "workspace:*",
     "@seashard/plugin-sdk": "workspace:*",
     "@seashard/plugin-system": "workspace:*",
+    "@seashard/server-features": "workspace:*",
     "cordis": "4.0.0-rc.8"
   }
 }
