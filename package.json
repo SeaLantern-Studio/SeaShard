@@ -18,7 +18,7 @@
     "package:server:npm": "pnpm run build && node scripts/package-server-npm.mjs --version=0.0.0",
     "package:win": "pnpm run build && electron-builder --config electron-builder.host.yml --win nsis --publish never && electron-builder --win nsis --publish never",
     "dev:desktop": "node scripts/dev.mjs",
-    "dev:server": "node scripts/dev-server.mjs",
+    "dev:server": "tsx scripts/dev-server.mjs",
     "check": "pnpm run verify:service-catalog && vp check && vue-tsc --noEmit",
     "generate:service-catalog": "node scripts/generate-service-catalog.mjs",
     "start:desktop": "electron apps/desktop/dist/main/index.js",

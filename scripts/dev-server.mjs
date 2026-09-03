@@ -1,7 +1,8 @@
+import { connectHostControlClient } from "../packages/host-control/src/index.ts";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 import { build } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -13,10 +14,28 @@ const serverWebConfig = join(root, "apps/server-web/vite.config.ts");
 const serverWebPublicRoot = join(root, "apps/server-web/dist");
 const pluginHostConfig = join(root, "apps/plugin-host/vite.config.ts");
 const databaseWorkerConfig = join(root, "apps/database-worker/vite.config.ts");
-const developmentRoot = join(tmpdir(), "seashard-development", "server");
-const developmentHostDataRoot = process.env.SEASHARD_HOST_DATA_DIR ?? join(developmentRoot, "host");
+const developmentUserDataRoot = resolveDesktopDevelopmentUserDataRoot();
+const developmentHostDataRoot =
+  process.env.SEASHARD_HOST_DATA_DIR ??
+  process.env.SEASHARD_DATA_DIR ??
+  join(developmentUserDataRoot, "core");
 const developmentControllerDataRoot =
-  process.env.SEASHARD_SERVER_DATA_DIR ?? join(developmentRoot, "controller");
+  process.env.SEASHARD_SERVER_DATA_DIR ?? join(developmentUserDataRoot, "server-controller");
+
+/**
+ * Electron 开发入口的应用名为 Electron。Server 开发入口必须复用同一持久用户目录，
+ * 才能连接 Desktop 已启动的 Host，并读取完全相同的服务器实例。
+ */
+function resolveDesktopDevelopmentUserDataRoot() {
+  const homeDirectory = homedir();
+  if (process.platform === "win32") {
+    return join(process.env.APPDATA ?? join(homeDirectory, "AppData", "Roaming"), "Electron");
+  }
+  if (process.platform === "darwin") {
+    return join(homeDirectory, "Library", "Application Support", "Electron");
+  }
+  return join(process.env.XDG_CONFIG_HOME ?? join(homeDirectory, ".config"), "Electron");
+}
 
 const bundleWatchers = [];
 const pendingRestartSources = new Set();
@@ -94,6 +113,7 @@ function launchServer() {
       SEASHARD_SERVER_DEVELOPMENT: "1",
       SEASHARD_SERVER_WEB_PUBLIC_ROOT: serverWebPublicRoot,
       SEASHARD_HOST_DATA_DIR: developmentHostDataRoot,
+      SEASHARD_SHARED_DATA_DIR: developmentUserDataRoot,
       SEASHARD_SERVER_DATA_DIR: developmentControllerDataRoot,
       SEASHARD_SERVER_MANAGED_DEVELOPMENT_HOST: "1",
     },
@@ -115,7 +135,7 @@ function launchServer() {
   });
 }
 
-function ensureDevelopmentHost(dataRoot) {
+async function ensureDevelopmentHost(dataRoot) {
   if (hostProcess && hostProcess.exitCode === null && hostProcess.signalCode === null) {
     if (hostDataRoot !== dataRoot) {
       return Promise.reject(
@@ -131,6 +151,10 @@ function ensureDevelopmentHost(dataRoot) {
       );
     }
     return hostLaunchTask;
+  }
+  if (await canReuseDevelopmentHost(dataRoot)) {
+    console.log(`SEASHARD_SERVER_DEV_HOST_REUSED dataRoot=${dataRoot}`);
+    return;
   }
 
   hostDataRoot = dataRoot;
@@ -173,6 +197,21 @@ function waitForChildSpawn(child) {
     child.once("spawn", onSpawn);
     child.once("error", onError);
   });
+}
+async function canReuseDevelopmentHost(dataRoot) {
+  try {
+    const client = await connectHostControlClient({
+      dataRoot,
+      identity: {
+        sessionId: `server-dev-host-probe-${process.pid}`,
+        label: "Server development runner",
+      },
+    });
+    client.dispose();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function scheduleServerRestart(source, restartHost = false) {
