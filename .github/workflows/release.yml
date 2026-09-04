@@ -311,7 +311,7 @@ jobs:
           node scripts/package-server-npm.mjs \
             --version=${{ inputs.version }} \
             --output=build/server-npm
-          npm pack build/server-npm --pack-destination release
+          npm pack ./build/server-npm --pack-destination release
 
       - name: 构建平台安装包
         shell: bash

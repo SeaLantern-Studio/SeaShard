@@ -28,7 +28,7 @@ await test("release workflow builds the Server npm archive once and uploads it",
 
   assert.match(
     workflow,
-    /if: matrix\.platform == 'linux' && matrix\.arch == 'x64'[\s\S]*node scripts\/package-server-npm\.mjs[\s\S]*--version=\$\{\{ inputs\.version \}\}[\s\S]*npm pack build\/server-npm --pack-destination release/u,
+    /if: matrix\.platform == 'linux' && matrix\.arch == 'x64'[\s\S]*node scripts\/package-server-npm\.mjs[\s\S]*--version=\$\{\{ inputs\.version \}\}[\s\S]*npm pack \.\/build\/server-npm --pack-destination release/u,
   );
   assert.match(workflow, /release\/seashard-server-\$\{\{ inputs\.version \}\}\.tgz/u);
 });
