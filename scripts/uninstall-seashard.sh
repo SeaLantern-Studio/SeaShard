@@ -349,6 +349,33 @@ host_has_other_bundled_owners() {
   return 1
 }
 
+read_host_descriptor_pid() {
+  descriptor_file="$1"
+  [ -f "$descriptor_file" ] || return 1
+  descriptor_pid="$(
+    sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+      "$descriptor_file" | sed -n '1p'
+  )"
+  case "$descriptor_pid" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+  [ "$descriptor_pid" -gt 1 ] || return 1
+  printf '%s\n' "$descriptor_pid"
+}
+
+# Host 异常退出或系统断电后可能留下控制描述文件。只有描述文件含有效 PID 且该 PID
+# 已不存在时才清理；无法证明失效的描述文件继续走保守的 60 秒停止流程。
+discard_stale_host_control() {
+  descriptor_pid="$(read_host_descriptor_pid "$control_file" 2>/dev/null || true)"
+  [ -n "$descriptor_pid" ] || return 1
+  if kill -0 "$descriptor_pid" 2>/dev/null; then
+    return 1
+  fi
+  echo "检测到已退出的 Host（PID $descriptor_pid），正在清理遗留控制文件。"
+  rm -f -- "$control_file" "$shutdown_file"
+  return 0
+}
+
 stop_host() {
   [ -d "$host_data_root" ] || return 0
   require_exact_directory "Host 数据目录" "$host_data_root"
@@ -365,9 +392,15 @@ stop_host() {
   fi
 
   if [ -f "$control_file" ]; then
+    if discard_stale_host_control; then
+      return 0
+    fi
     : >"$shutdown_file"
     attempts=0
     while [ -f "$control_file" ] && [ "$attempts" -lt 600 ]; do
+      if discard_stale_host_control; then
+        break
+      fi
       sleep 0.1
       attempts=$((attempts + 1))
     done
@@ -587,7 +620,7 @@ APPLESCRIPT
   fi
 fi
 if [ "$platform" = "linux" ] && [ "$host_result" = "已卸载" ] &&
-  [ "$controller_result" != "已卸载" ]; then
+  [ "$controller_installed" = true ] && [ "$controller_result" != "已卸载" ]; then
   mark_host_auto_install_disabled
 fi
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -77,11 +77,12 @@ async function createFixture(context: TestContext): Promise<Fixture> {
   };
 }
 
-function runUninstaller(fixture: Fixture, arguments_: readonly string[]) {
+function runUninstaller(fixture: Fixture, arguments_: readonly string[], timeout?: number) {
   return spawnSync("sh", [uninstallScript, ...arguments_], {
     cwd: fixture.root,
     env: fixture.environment,
     encoding: "utf8",
+    timeout,
   });
 }
 
@@ -150,6 +151,78 @@ await test(
     assert.equal(await exists(fixture.controllerAppImage), false);
     assert.equal(await exists(join(fixture.dataHome, "SeaShard", "uninstaller")), false);
     assert.equal(await exists(join(fixture.binHome, "seashard-uninstall")), false);
+  },
+);
+
+await test(
+  "Linux Host removal discards a control descriptor whose process has exited",
+  { skip: platformSkip },
+  async (t) => {
+    const fixture = await createFixture(t);
+    const registration = runUninstaller(fixture, [
+      "--register-controller",
+      "appimage",
+      fixture.controllerAppImage,
+      fixture.controllerDataRoot,
+    ]);
+    assert.equal(registration.status, 0, registration.stderr);
+    await writeFile(
+      join(fixture.hostDataRoot, "host-control.json"),
+      `${JSON.stringify({ pid: 2_147_483_647 })}\n`,
+    );
+
+    const result = runUninstaller(fixture, ["--host"], 5_000);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /正在清理遗留控制文件/u);
+    assert.match(result.stdout, /Host：已卸载/u);
+    assert.equal(await exists(fixture.hostInstallationRoot), false);
+    assert.equal(await exists(join(fixture.hostDataRoot, "host-control.json")), false);
+  },
+);
+await test(
+  "Linux Host removal never treats a live descriptor process as stale",
+  { skip: platformSkip },
+  async (t) => {
+    const fixture = await createFixture(t);
+    const liveProcess = spawn(process.execPath, ["-e", "setInterval(() => {}, 1_000)"], {
+      stdio: "ignore",
+    });
+    await new Promise<void>((resolve, reject) => {
+      liveProcess.once("spawn", resolve);
+      liveProcess.once("error", reject);
+    });
+    t.after(() => liveProcess.kill("SIGKILL"));
+    await writeFile(
+      join(fixture.hostDataRoot, "host-control.json"),
+      `${JSON.stringify({ pid: liveProcess.pid }, null, 2)}\n`,
+    );
+
+    const result = runUninstaller(fixture, ["--host"], 500);
+    assert.equal(result.status, null);
+    assert.equal((result.error as NodeJS.ErrnoException | undefined)?.code, "ETIMEDOUT");
+    assert.doesNotMatch(result.stdout, /正在清理遗留控制文件/u);
+    assert.equal(await exists(fixture.hostInstallationRoot), true);
+  },
+);
+
+await test(
+  "Linux Host-only removal does not create a reinstall marker without Controller",
+  { skip: platformSkip },
+  async (t) => {
+    const fixture = await createFixture(t);
+    const seaShardConfigRoot = join(fixture.configHome, "SeaShard");
+    await rm(fixture.controllerDataRoot, { recursive: true, force: true });
+    await chmod(seaShardConfigRoot, 0o555);
+    const result = runUninstaller(fixture, ["--host"]);
+    await chmod(seaShardConfigRoot, 0o755);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Host：已卸载/u);
+    assert.equal(await exists(fixture.hostInstallationRoot), false);
+    assert.equal(
+      await exists(join(fixture.controllerDataRoot, "local-host-auto-install.disabled")),
+      false,
+    );
   },
 );
 
