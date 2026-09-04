@@ -73,15 +73,7 @@ curl -fsSL https://github.com/SeaLantern-Studio/SeaShard/releases/latest/downloa
 卸载：
 
 ```sh
-server_command="${XDG_BIN_HOME:-$HOME/.local/bin}/seashard-server"
-case "$(uname -s)" in
-  Linux) installation_root="${XDG_DATA_HOME:-$HOME/.local/share}/SeaShard/server" ;;
-  Darwin) installation_root="$HOME/Library/Application Support/SeaShard/server" ;;
-  *) echo "Unsupported operating system: $(uname -s)" >&2; exit 1 ;;
-esac
-"$server_command" service uninstall
-rm -f "$server_command"
-rm -rf "$installation_root"
+curl -fsSL https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/uninstall-server.sh | sh
 ```
 
 #### npm

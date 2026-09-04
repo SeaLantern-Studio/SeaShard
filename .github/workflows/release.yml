@@ -368,12 +368,13 @@ jobs:
           name: release-metadata
           path: release-assets
 
-      - name: 生成 Server 安装入口
+      - name: 生成 Server 安装与卸载入口
         env:
           VERSION: ${{ inputs.version }}
         run: |
           cp scripts/install-server.sh release-assets/install-server.sh
-          chmod +x release-assets/install-server.sh
+          cp scripts/uninstall-server.sh release-assets/uninstall-server.sh
+          chmod +x release-assets/install-server.sh release-assets/uninstall-server.sh
           node scripts/generate-homebrew-formula.mjs \
             --version="$VERSION" \
             --repository="$GITHUB_REPOSITORY" \
@@ -406,6 +407,7 @@ jobs:
             release-assets/SeaShard-* \
             release-assets/seashard-* \
             release-assets/install-server.sh \
+            release-assets/uninstall-server.sh \
             release-assets/latest*.yml \
             release-assets/latest-release.json \
             --repo "$GITHUB_REPOSITORY" \
