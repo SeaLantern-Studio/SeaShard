@@ -10,13 +10,15 @@ const platform = requireArgument("--platform");
 const architecture = requireArgument("--arch");
 const githubOutput = readArgument("--github-output");
 if (!/^\d+\.\d+\.\d+$/u.test(nodeVersion)) throw new Error(`无效 Node.js 版本：${nodeVersion}`);
-if (platform !== "windows" && platform !== "linux")
+if (platform !== "windows" && platform !== "macos" && platform !== "linux") {
   throw new Error(`不支持 Node.js 平台：${platform}`);
+}
 if (architecture !== "x64" && architecture !== "arm64") {
   throw new Error(`不支持 Node.js 架构：${architecture}`);
 }
 
-const distributionPlatform = platform === "windows" ? "win" : "linux";
+const distributionPlatform =
+  platform === "windows" ? "win" : platform === "macos" ? "darwin" : "linux";
 const suffix = platform === "windows" ? "zip" : "tar.xz";
 const directoryName = `node-v${nodeVersion}-${distributionPlatform}-${architecture}`;
 const archiveName = `${directoryName}.${suffix}`;

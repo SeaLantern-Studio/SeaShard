@@ -2,8 +2,8 @@ import { readHostControlDescriptor } from "@seashard/host-control";
 import { readHostInstallation, type HostInstallationRecord } from "@seashard/host-installation";
 import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const defaultReadyTimeoutMilliseconds = 60_000;
 const defaultReadyPollMilliseconds = 100;
@@ -31,6 +31,14 @@ export interface InstallBundledWindowsHostOptions {
   readonly dataRoot: string;
   readonly installerPath: string;
   readonly environment?: NodeJS.ProcessEnv;
+}
+
+export interface InstallBundledMacHostOptions {
+  readonly dataRoot: string;
+  readonly installerPath: string;
+  readonly installerType: "application" | "package";
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly homeDirectory?: string;
 }
 
 /**
@@ -75,6 +83,47 @@ export function installBundledWindowsHost(
     ...(options.environment ?? process.env),
     SEASHARD_HOST_INSTALL_DATA_ROOT: options.dataRoot,
   });
+}
+
+/**
+ * macOS 便携包携带 Host.app，可以在授权后直接放入 /Applications；npm 包则下载正式
+ * Host PKG。两条路径最终都运行同一个 Host，并由 Host 自己登记 PKG 类型和 LaunchAgent。
+ */
+export async function installBundledMacHost(options: InstallBundledMacHostOptions): Promise<void> {
+  const environment = options.environment ?? process.env;
+  if (options.installerType === "package") {
+    const defaultDataRoot = join(
+      options.homeDirectory ?? homedir(),
+      "Library",
+      "Application Support",
+      "SeaShard",
+      "core",
+    );
+    if (resolve(options.dataRoot) !== resolve(defaultDataRoot)) {
+      throw new Error("macOS Host PKG 只支持默认数据目录；自定义目录请使用随 Server 携带的 Host");
+    }
+    await runPrivilegedMacShellCommand(
+      ["/usr/sbin/installer", "-pkg", options.installerPath, "-target", "/"]
+        .map(quotePosixShellArgument)
+        .join(" "),
+      environment,
+    );
+    return;
+  }
+
+  const installedApplication = "/Applications/SeaShardHost.app";
+  await runPrivilegedMacShellCommand(
+    [
+      `/bin/rm -rf -- ${quotePosixShellArgument(installedApplication)}`,
+      `/usr/bin/ditto ${quotePosixShellArgument(options.installerPath)} ${quotePosixShellArgument(installedApplication)}`,
+    ].join(" && "),
+    environment,
+  );
+  await launchDetached(
+    join(installedApplication, "Contents", "MacOS", "SeaShardHost"),
+    [`--data-root=${options.dataRoot}`],
+    environment,
+  );
 }
 
 async function waitForInstalledHost(
@@ -152,6 +201,48 @@ function launchInstallerAndWait(
       );
     });
   });
+}
+
+async function runPrivilegedMacShellCommand(
+  command: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (process.getuid?.() === 0) {
+    await launchInstallerAndWait("/bin/sh", ["-c", command], environment);
+    return;
+  }
+  await launchInstallerAndWait(
+    "/usr/bin/osascript",
+    ["-e", `do shell script ${quoteAppleScriptString(command)} with administrator privileges`],
+    environment,
+  );
+}
+
+function launchDetached(
+  executable: string,
+  arguments_: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, arguments_, {
+      detached: true,
+      env: environment,
+      stdio: "ignore",
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolvePromise();
+    });
+  });
+}
+
+function quotePosixShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function quoteAppleScriptString(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function delay(milliseconds: number): Promise<void> {

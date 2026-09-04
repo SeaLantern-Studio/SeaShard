@@ -3,8 +3,22 @@ set -eu
 
 repository="SeaLantern-Studio/SeaShard"
 catalog_url="${SEASHARD_RELEASE_CATALOG_URL:-https://github.com/$repository/releases/latest/download/latest-release.json}"
-config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+case "$(uname -s)" in
+  Linux)
+    platform=linux
+    config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+    data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+    ;;
+  Darwin)
+    platform=macos
+    config_home="$HOME/Library/Application Support"
+    data_home="$HOME/Library/Application Support"
+    ;;
+  *)
+    echo "Unsupported operating system: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
 bin_home="${XDG_BIN_HOME:-$HOME/.local/bin}"
 installation_root="$data_home/SeaShard/server"
 runtime_root="$installation_root/runtime"
@@ -17,7 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-for command in curl python3 sha256sum tar; do
+for command in curl python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "SeaShard Server installation requires $command." >&2
     exit 1
@@ -32,19 +46,19 @@ esac
 
 catalog="$temporary_root/latest-release.json"
 curl --fail --silent --show-error --location "$catalog_url" --output "$catalog"
-asset_record="$(python3 - "$catalog" "$repository" "$architecture" <<'PY'
+asset_record="$(python3 - "$catalog" "$repository" "$platform" "$architecture" <<'PY'
 import json
 import re
 import sys
 from urllib.parse import urlparse
 
-catalog_path, repository, architecture = sys.argv[1:]
+catalog_path, repository, platform, architecture = sys.argv[1:]
 with open(catalog_path, "r", encoding="utf-8") as source:
     catalog = json.load(source)
 version = catalog.get("version")
 if catalog.get("schemaVersion") != 1 or catalog.get("tag") != f"v{version}" or not re.fullmatch(r"\d+\.\d+\.\d+", str(version)):
     raise SystemExit("Invalid SeaShard Release catalog")
-name = f"SeaShard-Server-{version}-linux-{architecture}.tar.gz"
+name = f"SeaShard-Server-{version}-{platform}-{architecture}.tar.gz"
 assets = [item for item in catalog.get("assets", []) if item.get("name") == name]
 if len(assets) != 1:
     raise SystemExit(f"Release catalog does not contain exactly one {name}")
@@ -66,8 +80,22 @@ EOF
 
 archive="$temporary_root/$asset_name"
 curl --fail --silent --show-error --location "$asset_url" --output "$archive"
-actual_size="$(wc -c < "$archive" | tr -d ' ')"
-actual_sha256="$(sha256sum "$archive" | cut -d ' ' -f1)"
+actual_record="$(python3 - "$archive" <<'PY'
+import hashlib
+import os
+import sys
+
+path = sys.argv[1]
+digest = hashlib.sha256()
+with open(path, "rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(f"{os.path.getsize(path)}\t{digest.hexdigest()}")
+PY
+)"
+IFS="	" read -r actual_size actual_sha256 <<EOF
+$actual_record
+EOF
 if [ "$actual_size" != "$expected_size" ] || [ "$actual_sha256" != "$expected_sha256" ]; then
   echo "SeaShard Server package integrity verification failed." >&2
   exit 1

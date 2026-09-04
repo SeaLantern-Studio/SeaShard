@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -41,6 +41,24 @@ await test("Server follows XDG paths and only isolates instance data", () => {
       hostDataRoot: "/home/sea/.config/SeaShard/core",
       controllerDataRoot: "/home/sea/.config/SeaShard/server-controller",
       logFile: "/home/sea/.config/SeaShard/server-controller/server-controller.log",
+    },
+  );
+});
+
+await test("Server follows macOS Application Support paths", () => {
+  assert.deepEqual(
+    resolveServerControllerPaths({
+      environment: {},
+      platform: "darwin",
+      homeDirectory: "/Users/sea",
+    }),
+    {
+      userDataRoot: "/Users/sea/Library/Application Support/SeaShard",
+      sharedControllerDataRoot: "/Users/sea/Library/Application Support/SeaShard/controller",
+      hostDataRoot: "/Users/sea/Library/Application Support/SeaShard/core",
+      controllerDataRoot: "/Users/sea/Library/Application Support/SeaShard/server-controller",
+      logFile:
+        "/Users/sea/Library/Application Support/SeaShard/server-controller/server-controller.log",
     },
   );
 });
@@ -101,6 +119,21 @@ await test("Server recognizes the staged Windows Host installer", async () => {
     assert.deepEqual(resolveServerBundledHostInstaller(installerRoot, "win32"), {
       platform: "win32",
       installerPath,
+    });
+  } finally {
+    await rm(installerRoot, { recursive: true, force: true });
+  }
+});
+
+await test("Server recognizes the staged macOS Host application", async () => {
+  const installerRoot = await mkdtemp(join(tmpdir(), "seashard-server-macos-installer-"));
+  try {
+    const installerPath = join(installerRoot, "SeaShardHost.app");
+    await mkdir(installerPath);
+    assert.deepEqual(resolveServerBundledHostInstaller(installerRoot, "darwin"), {
+      platform: "darwin",
+      installerPath,
+      installerType: "application",
     });
   } finally {
     await rm(installerRoot, { recursive: true, force: true });

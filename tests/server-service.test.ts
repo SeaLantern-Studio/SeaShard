@@ -6,6 +6,7 @@ import test from "node:test";
 import { ServerControllerLogger, redactDiagnostic } from "../apps/server/src/logger.ts";
 import { ServerControllerProcessLease } from "../apps/server/src/runtime-control.ts";
 import {
+  createLaunchdUserAgent,
   createSystemdUserUnit,
   createWindowsLauncher,
   createWindowsTaskXml,
@@ -25,6 +26,23 @@ await test("systemd user unit runs the Controller with failure restart", () => {
   assert.match(unit, /Restart=on-failure/u);
   assert.match(unit, /RestartSec=5s/u);
   assert.match(unit, /WantedBy=default.target/u);
+});
+
+await test("macOS LaunchAgent runs in the user session and restarts failures", () => {
+  const agent = createLaunchdUserAgent({
+    executable: "/usr/local/lib/seashard-server/runtime/node",
+    arguments: [
+      "/usr/local/lib/seashard-server/apps/server/dist/index.js",
+      "run",
+      "--data-root=/Users/sea/Library/Application Support/SeaShard",
+    ],
+    workingDirectory: "/usr/local/lib/seashard-server",
+  });
+  assert.match(agent, /studio\.sealantern\.seashard\.server/u);
+  assert.match(agent, /<key>RunAtLoad<\/key>\n  <true\/>/u);
+  assert.match(agent, /<key>SuccessfulExit<\/key>\n    <false\/>/u);
+  assert.match(agent, /<key>ThrottleInterval<\/key>\n  <integer>5<\/integer>/u);
+  assert.match(agent, /Application Support/u);
 });
 
 await test("Windows current-user task logs on with least privilege and restart", () => {
@@ -96,6 +114,61 @@ await test("Windows service uninstall removes registration files and preserves u
     await import("node:fs/promises").then(({ rm }) =>
       rm(dataRoot, { recursive: true, force: true }),
     );
+  }
+});
+
+await test("macOS service lifecycle owns only its per-user LaunchAgent", async () => {
+  const home = await mkdtemp(join(tmpdir(), "seashard-server-macos-service-"));
+  const dataRoot = join(home, "Library", "Application Support", "SeaShard", "server-controller");
+  const calls: Array<{ executable: string; arguments: readonly string[] }> = [];
+  let printCalls = 0;
+  const manager = new ServerControllerServiceManager({
+    dataRoot,
+    platform: "darwin",
+    environment: {},
+    homeDirectory: home,
+    username: "sea",
+    userId: 501,
+    launch: {
+      executable: "/usr/local/lib/seashard-server/runtime/node",
+      arguments: ["/usr/local/lib/seashard-server/apps/server/dist/index.js", "run"],
+      workingDirectory: "/usr/local/lib/seashard-server",
+    },
+    runCommand: async (executable, arguments_) => {
+      calls.push({ executable, arguments: arguments_ });
+      const code = arguments_[0] === "print" && printCalls++ === 0 ? 1 : 0;
+      return { code, stdout: "", stderr: "" };
+    },
+  });
+  try {
+    await manager.install();
+    const agentPath = join(
+      home,
+      "Library",
+      "LaunchAgents",
+      "studio.sealantern.seashard.server.plist",
+    );
+    assert.match(await readFile(agentPath, "utf8"), /ProcessType/u);
+    assert.equal(
+      ((await readServiceMetadata(dataRoot)) as { platform: string }).platform,
+      "darwin",
+    );
+    assert.deepEqual(
+      calls.map(({ arguments: arguments_ }) => arguments_[0]),
+      ["print", "bootstrap", "enable", "kickstart"],
+    );
+
+    await manager.stop();
+    assert.equal((await manager.status()).installed, true);
+    await manager.uninstall();
+    await assert.rejects(stat(agentPath), /ENOENT/u);
+    await assert.rejects(stat(join(dataRoot, "service")), /ENOENT/u);
+    assert.deepEqual(
+      calls.slice(4).map(({ arguments: arguments_ }) => arguments_[0]),
+      ["bootout", "bootout"],
+    );
+  } finally {
+    await import("node:fs/promises").then(({ rm }) => rm(home, { recursive: true, force: true }));
   }
 });
 

@@ -56,7 +56,7 @@ await writeFile(
       description: "SeaShard headless Minecraft Server Controller",
       license: "UNLICENSED",
       type: "module",
-      os: ["win32", "linux"],
+      os: ["win32", "darwin", "linux"],
       engines: { node: ">=24.11.0" },
       bin: { "seashard-server": "apps/server/dist/index.js" },
       scripts: {

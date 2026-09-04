@@ -256,15 +256,19 @@ jobs:
           esac
 
       - name: 获取 Server Node.js Runtime
-        if: matrix.platform != 'mac'
         id: server-node
         shell: bash
-        run: >-
-          node scripts/download-node-runtime.mjs
-          --node-version=24.11.0
-          --platform=${{ matrix.platform == 'win' && 'windows' || 'linux' }}
-          --arch=${{ matrix.arch }}
-          --github-output="$GITHUB_OUTPUT"
+        run: |
+          case "${{ matrix.platform }}" in
+            win) server_platform=windows ;;
+            mac) server_platform=macos ;;
+            linux) server_platform=linux ;;
+          esac
+          node scripts/download-node-runtime.mjs \
+            --node-version=24.11.0 \
+            --platform="$server_platform" \
+            --arch=${{ matrix.arch }} \
+            --github-output="$GITHUB_OUTPUT"
 
       - name: 获取 AppImage 打包工具
         if: matrix.platform == 'linux'
@@ -277,25 +281,41 @@ jobs:
           chmod +x build/appimagetool.AppImage
 
       - name: 构建 Server Controller 安装文件
-        if: matrix.platform != 'mac'
         shell: bash
         run: |
-          if [ "${{ matrix.platform }}" = win ]; then
-            node scripts/stage-server-host-installer.mjs --platform=win32
-            node scripts/package-server.mjs \
-              --version=${{ inputs.version }} \
-              --platform=windows \
-              --arch=${{ matrix.arch }} \
-              --node-executable="${{ steps.server-node.outputs.node_executable }}"
-          else
-            node scripts/stage-server-host-installer.mjs --platform=linux
-            node scripts/package-server.mjs \
-              --version=${{ inputs.version }} \
-              --platform=linux \
-              --arch=${{ matrix.arch }} \
-              --node-executable="${{ steps.server-node.outputs.node_executable }}" \
-              --appimage-tool=build/appimagetool.AppImage
-          fi
+          case "${{ matrix.platform }}" in
+            win)
+              node scripts/stage-server-host-installer.mjs --platform=win32
+              node scripts/package-server.mjs \
+                --version=${{ inputs.version }} \
+                --platform=windows \
+                --arch=${{ matrix.arch }} \
+                --node-executable="${{ steps.server-node.outputs.node_executable }}"
+              ;;
+            mac)
+              host_app_root=build/host-installer/mac
+              if [ "${{ matrix.arch }}" = arm64 ]; then
+                host_app_root=build/host-installer/mac-arm64
+              fi
+              node scripts/stage-server-host-installer.mjs \
+                --platform=darwin \
+                --source-app="$host_app_root/SeaShardHost.app"
+              node scripts/package-server.mjs \
+                --version=${{ inputs.version }} \
+                --platform=macos \
+                --arch=${{ matrix.arch }} \
+                --node-executable="${{ steps.server-node.outputs.node_executable }}"
+              ;;
+            linux)
+              node scripts/stage-server-host-installer.mjs --platform=linux
+              node scripts/package-server.mjs \
+                --version=${{ inputs.version }} \
+                --platform=linux \
+                --arch=${{ matrix.arch }} \
+                --node-executable="${{ steps.server-node.outputs.node_executable }}" \
+                --appimage-tool=build/appimagetool.AppImage
+              ;;
+          esac
 
       - name: 构建平台安装包
         shell: bash
@@ -324,6 +344,7 @@ jobs:
             release/SeaShard-Host-${{ matrix.asset_key }}.deb
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.zip
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.tar.gz
+            release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.pkg
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.deb
           if-no-files-found: error

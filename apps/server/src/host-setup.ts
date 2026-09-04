@@ -2,6 +2,7 @@ import { readHostInstallation } from "@seashard/host-installation";
 import {
   ensureLocalHostInstallation,
   installBundledLinuxHost,
+  installBundledMacHost,
   installBundledWindowsHost,
 } from "@seashard/local-host-installer";
 import {
@@ -17,6 +18,11 @@ export type ServerHostPreparationDisposition = "existing" | "installed" | "devel
 
 export type ServerBundledHostInstaller =
   | { readonly platform: "win32"; readonly installerPath: string }
+  | {
+      readonly platform: "darwin";
+      readonly installerPath: string;
+      readonly installerType: "application" | "package";
+    }
   | {
       readonly platform: "linux";
       readonly hostImage: string;
@@ -57,28 +63,45 @@ export async function prepareServerLocalHost(
   const environment = options.environment ?? process.env;
   const result = await ensureLocalHostInstallation({
     dataRoot: options.dataRoot,
-    install: () =>
-      installer.platform === "win32"
-        ? installBundledWindowsHost({
-            dataRoot: options.dataRoot,
-            installerPath: installer.installerPath,
-            environment,
-          })
-        : installBundledLinuxHost({
-            dataRoot: options.dataRoot,
-            hostImage: installer.hostImage,
-            installScript: installer.installScript,
-            environment,
-          }),
+    install: () => installServerHost(installer, options.dataRoot, environment),
   });
   return result.disposition;
+}
+
+/** 平台安装差异到此为止；上层始终只等待同一份 Host 安装记录和控制端点。 */
+function installServerHost(
+  installer: ServerBundledHostInstaller,
+  dataRoot: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (installer.platform === "win32") {
+    return installBundledWindowsHost({
+      dataRoot,
+      installerPath: installer.installerPath,
+      environment,
+    });
+  }
+  if (installer.platform === "darwin") {
+    return installBundledMacHost({
+      dataRoot,
+      installerPath: installer.installerPath,
+      installerType: installer.installerType,
+      environment,
+    });
+  }
+  return installBundledLinuxHost({
+    dataRoot,
+    hostImage: installer.hostImage,
+    installScript: installer.installScript,
+    environment,
+  });
 }
 
 async function downloadReleasedHostInstaller(
   options: PrepareServerLocalHostOptions,
   platform: NodeJS.Platform,
 ): Promise<ServerBundledHostInstaller | undefined> {
-  if (platform !== "win32" && platform !== "linux") return undefined;
+  if (platform !== "win32" && platform !== "darwin" && platform !== "linux") return undefined;
   const version = options.releaseVersion!;
   const response = await (options.fetcher ?? fetch)(releaseCatalogUrl(version), {
     headers: { Accept: "application/json", "User-Agent": "SeaShard-Server-Controller" },
@@ -91,10 +114,13 @@ async function downloadReleasedHostInstaller(
   if (release.version !== version) {
     throw new Error(`Host Release 清单版本不匹配：期望 ${version}，收到 ${release.version}`);
   }
+  const releasePlatform =
+    platform === "win32" ? "windows" : platform === "darwin" ? "macos" : "linux";
+  const packageType = platform === "win32" ? "nsis" : platform === "darwin" ? "pkg" : "appimage";
   const asset = resolveHostReleaseAsset(release, {
-    platform: platform === "win32" ? "windows" : "linux",
+    platform: releasePlatform,
     architecture: options.architecture ?? process.arch,
-    packageType: platform === "win32" ? "nsis" : "appimage",
+    packageType,
   });
   const downloadRoot = options.downloadRoot ?? join(options.dataRoot, "downloads", "host");
   const downloaded = await downloadVerifiedReleaseAsset(
@@ -103,6 +129,9 @@ async function downloadReleasedHostInstaller(
     options.fetcher,
   );
   if (platform === "win32") return { platform, installerPath: downloaded };
+  if (platform === "darwin") {
+    return { platform, installerPath: downloaded, installerType: "package" };
+  }
   const installScript = join(options.installerRoot, "install.sh");
   if (!existsSync(installScript)) {
     throw new Error(`Server Controller 缺少 Linux Host 安装脚本：${installScript}`);
@@ -116,6 +145,12 @@ export function resolveServerBundledHostInstaller(
   if (platform === "win32") {
     const installerPath = join(installerRoot, "SeaShardHostSetup.exe");
     return existsSync(installerPath) ? { platform, installerPath } : undefined;
+  }
+  if (platform === "darwin") {
+    const installerPath = join(installerRoot, "SeaShardHost.app");
+    return existsSync(installerPath)
+      ? { platform, installerPath, installerType: "application" }
+      : undefined;
   }
   if (platform === "linux") {
     const hostImage = join(installerRoot, "SeaShardHostSetup.AppImage");

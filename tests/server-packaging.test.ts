@@ -6,15 +6,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-await test("Homebrew Formula pins both Linux Server archives by SHA-256", async (t) => {
+await test("Homebrew Formula pins macOS and Linux Server archives by SHA-256", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "seashard-homebrew-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const x64 = Buffer.from("linux-x64-server");
-  const arm64 = Buffer.from("linux-arm64-server");
-  await Promise.all([
-    writeFile(join(root, "SeaShard-Server-1.2.3-linux-x64.tar.gz"), x64),
-    writeFile(join(root, "SeaShard-Server-1.2.3-linux-arm64.tar.gz"), arm64),
+  const fixtures = new Map([
+    ["SeaShard-Server-1.2.3-macos-x64.tar.gz", Buffer.from("macos-x64-server")],
+    ["SeaShard-Server-1.2.3-macos-arm64.tar.gz", Buffer.from("macos-arm64-server")],
+    ["SeaShard-Server-1.2.3-linux-x64.tar.gz", Buffer.from("linux-x64-server")],
+    ["SeaShard-Server-1.2.3-linux-arm64.tar.gz", Buffer.from("linux-arm64-server")],
   ]);
+  await Promise.all([...fixtures].map(([name, contents]) => writeFile(join(root, name), contents)));
   const output = join(root, "seashard-server.rb");
   await runNode([
     "scripts/generate-homebrew-formula.mjs",
@@ -25,10 +26,13 @@ await test("Homebrew Formula pins both Linux Server archives by SHA-256", async 
   ]);
   const formula = await readFile(output, "utf8");
   assert.match(formula, /class SeashardServer < Formula/u);
+  assert.match(formula, /on_macos do/u);
+  assert.match(formula, /on_linux do/u);
   assert.match(formula, /on_intel do/u);
   assert.match(formula, /on_arm do/u);
-  assert.match(formula, new RegExp(createHash("sha256").update(x64).digest("hex"), "u"));
-  assert.match(formula, new RegExp(createHash("sha256").update(arm64).digest("hex"), "u"));
+  for (const contents of fixtures.values()) {
+    assert.match(formula, new RegExp(createHash("sha256").update(contents).digest("hex"), "u"));
+  }
   assert.match(formula, /service do/u);
 });
 

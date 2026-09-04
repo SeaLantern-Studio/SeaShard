@@ -12,8 +12,8 @@ const appImageTool = readArgument("--appimage-tool");
 const outputRoot = resolve(readArgument("--output") ?? join(root, "release"));
 
 if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error(`无效 Server 版本：${version}`);
-if (platform !== "windows" && platform !== "linux") {
-  throw new Error(`Server 发布平台必须是 windows 或 linux：${platform}`);
+if (platform !== "windows" && platform !== "macos" && platform !== "linux") {
+  throw new Error(`Server 发布平台必须是 windows、macos 或 linux：${platform}`);
 }
 if (architecture !== "x64" && architecture !== "arm64") {
   throw new Error(`Server 发布架构必须是 x64 或 arm64：${architecture}`);
@@ -47,10 +47,13 @@ if (platform === "windows") {
   const archive = join(outputRoot, `SeaShard-Server-${version}-windows-${architecture}.zip`);
   await run("tar", ["-a", "-cf", archive, "-C", buildRoot, portableName]);
 } else {
-  const archive = join(outputRoot, `SeaShard-Server-${version}-linux-${architecture}.tar.gz`);
+  const archive = join(outputRoot, `SeaShard-Server-${version}-${platform}-${architecture}.tar.gz`);
   await run("tar", ["-czf", archive, "-C", buildRoot, portableName]);
-  await createDebPackage();
-  await createAppImage();
+  if (platform === "macos") await createMacPackage();
+  else {
+    await createDebPackage();
+    await createAppImage();
+  }
 }
 
 console.log(
@@ -62,7 +65,7 @@ async function copyServerRuntime(destination) {
   const nodeTarget = join(runtimeRoot, platform === "windows" ? "node.exe" : "node");
   await mkdir(runtimeRoot, { recursive: true });
   await cp(nodeExecutable, nodeTarget);
-  if (platform === "linux") await chmod(nodeTarget, 0o755);
+  if (platform !== "windows") await chmod(nodeTarget, 0o755);
   await Promise.all([
     copyDirectory(
       join(root, "apps", "server", "dist"),
@@ -103,6 +106,129 @@ async function writePortableLauncher(destination) {
     "utf8",
   );
   await chmod(launcher, 0o755);
+}
+
+/**
+ * Server 是纯后台进程，因此 macOS PKG 使用稳定的 /usr/local 入口，不额外制造一个
+ * 无界面的 App。安装脚本仅在当前用户没有 Host 时复制随包 Host，并让两个 LaunchAgent
+ * 都归当前图形会话管理；升级 Server 不会覆盖已有的独立 Host。
+ */
+async function createMacPackage() {
+  const packageRoot = join(buildRoot, "pkg-root");
+  const installationRoot = join(packageRoot, "usr", "local", "lib", "seashard-server");
+  await copyDirectory(portableRoot, installationRoot);
+  await mkdir(join(packageRoot, "usr", "local", "bin"), { recursive: true });
+  const systemLauncher = join(packageRoot, "usr", "local", "bin", "seashard-server");
+  await writeFile(
+    systemLauncher,
+    '#!/bin/sh\nexec /usr/local/lib/seashard-server/runtime/node /usr/local/lib/seashard-server/apps/server/dist/index.js "$@"\n',
+    "utf8",
+  );
+  await chmod(systemLauncher, 0o755);
+
+  const scriptsRoot = join(buildRoot, "pkg-scripts");
+  await mkdir(scriptsRoot, { recursive: true });
+  await Promise.all([
+    writeMaintainerScript(scriptsRoot, "preinstall", createMacPreinstallScript()),
+    writeMaintainerScript(scriptsRoot, "postinstall", createMacPostinstallScript()),
+  ]);
+  await run("pkgbuild", [
+    "--root",
+    packageRoot,
+    "--scripts",
+    scriptsRoot,
+    "--identifier",
+    "studio.sealantern.seashard.server",
+    "--version",
+    version,
+    "--install-location",
+    "/",
+    join(outputRoot, `SeaShard-Server-${version}-macos-${architecture}.pkg`),
+  ]);
+}
+
+function createMacPreinstallScript() {
+  return `${[
+    "#!/bin/sh",
+    "set -eu",
+    'command="/usr/local/bin/seashard-server"',
+    'if [ ! -x "$command" ]; then exit 0; fi',
+    `console_user="$(stat -f '%Su' /dev/console)"`,
+    'if [ -z "$console_user" ] || [ "$console_user" = root ] || [ "$console_user" = loginwindow ]; then exit 0; fi',
+    `user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"`,
+    'user_id="$(id -u "$console_user")"',
+    '/bin/launchctl asuser "$user_id" /usr/bin/sudo -u "$console_user" /usr/bin/env HOME="$user_home" USER="$console_user" LOGNAME="$console_user" "$command" service stop || true',
+    "exit 0",
+  ].join("\n")}\n`;
+}
+
+function createMacPostinstallScript() {
+  return `${[
+    "#!/bin/sh",
+    "set -eu",
+    'command="/usr/local/bin/seashard-server"',
+    'bundled_host="/usr/local/lib/seashard-server/apps/server/dist/host-installer/SeaShardHost.app"',
+    'installed_host="/Applications/SeaShardHost.app"',
+    'host_label="studio.sealantern.seashard.host"',
+    `console_user="$(stat -f '%Su' /dev/console)"`,
+    'if [ -z "$console_user" ] || [ "$console_user" = root ] || [ "$console_user" = loginwindow ]; then',
+    '  echo "SeaShard Server requires an active macOS user session." >&2',
+    "  exit 1",
+    "fi",
+    `user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"`,
+    'user_id="$(id -u "$console_user")"',
+    'user_group="$(id -gn "$console_user")"',
+    'host_root="$user_home/Library/Application Support/SeaShard/core"',
+    'host_marker_root="$host_root/host-installation"',
+    'host_agent_dir="$user_home/Library/LaunchAgents"',
+    'host_agent_path="$host_agent_dir/$host_label.plist"',
+    'if [ ! -f "$host_marker_root/standalone" ] && [ ! -f "$host_marker_root/bundled" ] && [ ! -f "$host_root/host-installation.json" ]; then',
+    '  if [ ! -d "$bundled_host" ]; then',
+    '    echo "SeaShard Server package does not contain the macOS Host." >&2',
+    "    exit 1",
+    "  fi",
+    '  rm -rf -- "$installed_host"',
+    '  /usr/bin/ditto "$bundled_host" "$installed_host"',
+    '  /usr/sbin/chown -R root:wheel "$installed_host"',
+    '  /usr/bin/install -d -o "$console_user" -g "$user_group" "$host_root" "$host_agent_dir"',
+    '  cat > "$host_agent_path" <<EOF',
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>Label</key>",
+    "  <string>$host_label</string>",
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    "    <string>$installed_host/Contents/MacOS/SeaShardHost</string>",
+    "    <string>--data-root=$host_root</string>",
+    "  </array>",
+    "  <key>RunAtLoad</key>",
+    "  <true/>",
+    "  <key>KeepAlive</key>",
+    "  <true/>",
+    "</dict>",
+    "</plist>",
+    "EOF",
+    '  /usr/sbin/chown "$console_user:$user_group" "$host_agent_path"',
+    '  /bin/chmod 600 "$host_agent_path"',
+    '  /bin/launchctl bootout "gui/$user_id/$host_label" >/dev/null 2>&1 || true',
+    '  /bin/launchctl bootstrap "gui/$user_id" "$host_agent_path"',
+    '  /bin/launchctl enable "gui/$user_id/$host_label"',
+    '  /bin/launchctl kickstart -k "gui/$user_id/$host_label"',
+    "  attempts=0",
+    '  while { [ ! -f "$host_root/host-control.json" ] || { [ ! -f "$host_marker_root/standalone" ] && [ ! -f "$host_root/host-installation.json" ]; }; } && [ "$attempts" -lt 600 ]; do',
+    "    sleep 0.1",
+    "    attempts=$((attempts + 1))",
+    "  done",
+    '  if [ ! -f "$host_root/host-control.json" ]; then',
+    '    echo "SeaShard Host did not start after installation." >&2',
+    "    exit 1",
+    "  fi",
+    "fi",
+    '/bin/launchctl asuser "$user_id" /usr/bin/sudo -u "$console_user" /usr/bin/env HOME="$user_home" USER="$console_user" LOGNAME="$console_user" "$command" service install',
+    "exit 0",
+  ].join("\n")}\n`;
 }
 
 async function createDebPackage() {

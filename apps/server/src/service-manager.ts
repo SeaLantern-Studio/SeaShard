@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, posix, win32 } from "node:path";
 import { queryServerRuntime, stopServerRuntime, type ServerRuntimeHealth } from "./runtime-control";
 
 const windowsTaskName = "SeaShard Server Controller";
 const linuxUnitName = "seashard-server.service";
+const macLaunchAgentLabel = "studio.sealantern.seashard.server";
 const serviceMetadataVersion = 1;
 
 export interface ServerLaunchCommand {
@@ -35,6 +36,7 @@ export interface ServerServiceManagerOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly homeDirectory?: string;
   readonly username?: string;
+  readonly userId?: number;
   readonly runCommand?: CommandRunner;
 }
 
@@ -47,25 +49,29 @@ export class ServerControllerServiceManager {
   private readonly environment: NodeJS.ProcessEnv;
   private readonly homeDirectory: string;
   private readonly username: string;
+  private readonly userId: number;
   private readonly runCommand: CommandRunner;
 
   constructor(private readonly options: ServerServiceManagerOptions) {
     this.platform = options.platform ?? process.platform;
     this.environment = options.environment ?? process.env;
     this.homeDirectory = options.homeDirectory ?? homedir();
-    this.username = options.username ?? userInfo().username;
+    const currentUser = userInfo();
+    this.username = options.username ?? currentUser.username;
+    this.userId = options.userId ?? currentUser.uid;
     this.runCommand = options.runCommand ?? runCommand;
-    if (this.platform !== "win32" && this.platform !== "linux") {
-      throw new Error("Server Controller 后台服务当前只支持 Windows 和 Linux");
+    if (this.platform !== "win32" && this.platform !== "darwin" && this.platform !== "linux") {
+      throw new Error("Server Controller 后台服务当前只支持 Windows、macOS 和 Linux");
     }
   }
 
   async install(): Promise<void> {
     await mkdir(this.serviceRoot(), { recursive: true });
     if (this.platform === "win32") await this.installWindowsTask();
+    else if (this.platform === "darwin") await this.installMacAgent();
     else await this.installLinuxUnit();
     await this.writeMetadata();
-    if (this.platform === "win32") await this.start();
+    if (this.platform === "win32" || this.platform === "darwin") await this.start();
   }
 
   async start(): Promise<void> {
@@ -73,6 +79,29 @@ export class ServerControllerServiceManager {
       await requireSuccess(
         this.runCommand("schtasks.exe", ["/Run", "/TN", windowsTaskName]),
         "启动 Windows 后台任务失败",
+      );
+      return;
+    }
+    if (this.platform === "darwin") {
+      const target = this.macLaunchTarget();
+      const loaded = await this.runCommand("/bin/launchctl", ["print", target]);
+      if (loaded.code !== 0) {
+        await requireSuccess(
+          this.runCommand("/bin/launchctl", [
+            "bootstrap",
+            this.macLaunchDomain(),
+            this.macLaunchAgentPath(),
+          ]),
+          "载入 macOS LaunchAgent 失败",
+        );
+      }
+      await requireSuccess(
+        this.runCommand("/bin/launchctl", ["enable", target]),
+        "启用 macOS LaunchAgent 失败",
+      );
+      await requireSuccess(
+        this.runCommand("/bin/launchctl", ["kickstart", "-k", target]),
+        "启动 macOS LaunchAgent 失败",
       );
       return;
     }
@@ -88,11 +117,15 @@ export class ServerControllerServiceManager {
       await this.runCommand("schtasks.exe", ["/End", "/TN", windowsTaskName]);
       return;
     }
+    if (this.platform === "darwin") {
+      await this.runCommand("/bin/launchctl", ["bootout", this.macLaunchTarget()]);
+      return;
+    }
     await this.runCommand("systemctl", ["--user", "stop", linuxUnitName]);
   }
 
   async restart(): Promise<void> {
-    if (this.platform === "win32") {
+    if (this.platform === "win32" || this.platform === "darwin") {
       await this.stop();
       await this.start();
       return;
@@ -105,12 +138,18 @@ export class ServerControllerServiceManager {
 
   async status(): Promise<ServerServiceStatus> {
     const health = await queryServerRuntime(this.options.dataRoot);
-    const installed =
-      this.platform === "win32"
-        ? (await this.runCommand("schtasks.exe", ["/Query", "/TN", windowsTaskName, "/FO", "CSV"]))
-            .code === 0
-        : (await this.runCommand("systemctl", ["--user", "is-enabled", "--quiet", linuxUnitName]))
-            .code === 0;
+    let installed: boolean;
+    if (this.platform === "win32") {
+      installed =
+        (await this.runCommand("schtasks.exe", ["/Query", "/TN", windowsTaskName, "/FO", "CSV"]))
+          .code === 0;
+    } else if (this.platform === "darwin") {
+      installed = await pathExists(this.macLaunchAgentPath());
+    } else {
+      installed =
+        (await this.runCommand("systemctl", ["--user", "is-enabled", "--quiet", linuxUnitName]))
+          .code === 0;
+    }
     return {
       installed,
       running: Boolean(health),
@@ -122,6 +161,8 @@ export class ServerControllerServiceManager {
     await this.stop();
     if (this.platform === "win32") {
       await this.runCommand("schtasks.exe", ["/Delete", "/F", "/TN", windowsTaskName]);
+    } else if (this.platform === "darwin") {
+      await rm(this.macLaunchAgentPath(), { force: true });
     } else {
       await this.runCommand("systemctl", ["--user", "disable", "--now", linuxUnitName]);
       await rm(this.linuxUnitPath(), { force: true });
@@ -154,6 +195,15 @@ export class ServerControllerServiceManager {
     );
   }
 
+  private async installMacAgent(): Promise<void> {
+    const agentPath = this.macLaunchAgentPath();
+    await mkdir(dirname(agentPath), { recursive: true });
+    await writeFile(agentPath, createLaunchdUserAgent(this.options.launch), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
+
   private async installLinuxUnit(): Promise<void> {
     const unitPath = this.linuxUnitPath();
     await mkdir(dirname(unitPath), { recursive: true });
@@ -178,6 +228,18 @@ export class ServerControllerServiceManager {
       "user",
       linuxUnitName,
     );
+  }
+
+  private macLaunchAgentPath(): string {
+    return join(this.homeDirectory, "Library", "LaunchAgents", `${macLaunchAgentLabel}.plist`);
+  }
+
+  private macLaunchDomain(): string {
+    return `gui/${this.userId}`;
+  }
+
+  private macLaunchTarget(): string {
+    return `${this.macLaunchDomain()}/${macLaunchAgentLabel}`;
   }
 
   private serviceRoot(): string {
@@ -217,6 +279,13 @@ export class ServerControllerServiceManager {
 export function createSystemdUserUnit(launch: ServerLaunchCommand): string {
   const command = [launch.executable, ...launch.arguments].map(quoteSystemdArgument).join(" ");
   return `[Unit]\nDescription=SeaShard Server Controller\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nWorkingDirectory=${quoteSystemdArgument(launch.workingDirectory)}\nExecStart=${command}\nRestart=on-failure\nRestartSec=5s\nTimeoutStopSec=20s\nKillSignal=SIGTERM\n\n[Install]\nWantedBy=default.target\n`;
+}
+
+export function createLaunchdUserAgent(launch: ServerLaunchCommand): string {
+  const argumentsXml = [launch.executable, ...launch.arguments]
+    .map((argument) => `    <string>${escapeXml(argument)}</string>`)
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>Label</key>\n  <string>${macLaunchAgentLabel}</string>\n  <key>ProgramArguments</key>\n  <array>\n${argumentsXml}\n  </array>\n  <key>WorkingDirectory</key>\n  <string>${escapeXml(launch.workingDirectory)}</string>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>\n  <key>ThrottleInterval</key>\n  <integer>5</integer>\n  <key>ProcessType</key>\n  <string>Background</string>\n</dict>\n</plist>\n`;
 }
 
 export function createWindowsLauncher(launch: ServerLaunchCommand): string {
@@ -259,6 +328,17 @@ async function requireSuccess(result: Promise<CommandResult>, message: string): 
   if (completed.code === 0) return;
   const detail = completed.stderr.trim() || completed.stdout.trim();
   throw new Error(detail ? `${message}：${detail}` : message);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && String(error.code) === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function quoteSystemdArgument(value: string): string {

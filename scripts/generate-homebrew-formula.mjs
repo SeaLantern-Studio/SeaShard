@@ -12,33 +12,54 @@ if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
 }
 
 const targets = await Promise.all(
-  ["x64", "arm64"].map(async (architecture) => {
-    const name = `SeaShard-Server-${version}-linux-${architecture}.tar.gz`;
-    const bytes = await readFile(join(assetsRoot, name));
-    return {
-      architecture,
-      url: `https://github.com/${repository}/releases/download/v${version}/${name}`,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-    };
-  }),
+  ["macos", "linux"].flatMap((platform) =>
+    ["x64", "arm64"].map(async (architecture) => {
+      const name = `SeaShard-Server-${version}-${platform}-${architecture}.tar.gz`;
+      const bytes = await readFile(join(assetsRoot, name));
+      return {
+        platform,
+        architecture,
+        url: `https://github.com/${repository}/releases/download/v${version}/${name}`,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      };
+    }),
+  ),
 );
-const intel = targets.find(({ architecture }) => architecture === "x64");
-const arm = targets.find(({ architecture }) => architecture === "arm64");
-if (!intel || !arm) throw new Error("Homebrew Formula 缺少 Linux 架构产物");
+const target = (platform, architecture) =>
+  targets.find(
+    (candidate) => candidate.platform === platform && candidate.architecture === architecture,
+  );
+const macIntel = target("macos", "x64");
+const macArm = target("macos", "arm64");
+const linuxIntel = target("linux", "x64");
+const linuxArm = target("linux", "arm64");
+if (!macIntel || !macArm || !linuxIntel || !linuxArm) {
+  throw new Error("Homebrew Formula 缺少 macOS 或 Linux 架构产物");
+}
 
 const formula = `class SeashardServer < Formula
   desc "Headless Minecraft Server Controller for SeaShard"
   homepage "https://github.com/${repository}"
   version "${version}"
   license :cannot_represent
-  on_linux do
+  on_macos do
     on_intel do
-      url "${intel.url}"
-      sha256 "${intel.sha256}"
+      url "${macIntel.url}"
+      sha256 "${macIntel.sha256}"
     end
     on_arm do
-      url "${arm.url}"
-      sha256 "${arm.sha256}"
+      url "${macArm.url}"
+      sha256 "${macArm.sha256}"
+    end
+  end
+  on_linux do
+    on_intel do
+      url "${linuxIntel.url}"
+      sha256 "${linuxIntel.sha256}"
+    end
+    on_arm do
+      url "${linuxArm.url}"
+      sha256 "${linuxArm.sha256}"
     end
   end
 
