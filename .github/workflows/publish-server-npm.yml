@@ -1,0 +1,80 @@
+name: 发布 npm · @seashard/server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 包版本号，不带 v，例如 0.8.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-server
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 发布 @seashard/server
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PACKAGE_NAME: "@seashard/server"
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 配置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+          run_install: false
+
+      - name: 配置 Node.js 与 npm Registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: 校验版本尚未发布
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/generate-release-notes.ts validate "$VERSION"
+          if npm view "${PACKAGE_NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${PACKAGE_NAME}@${VERSION} 已存在，npm 版本不可覆盖" >&2
+            exit 1
+          fi
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 编译 SeaShard
+        run: pnpm run build
+
+      - name: 生成 Server npm 发布包
+        run: node scripts/package-server-npm.mjs --version="$VERSION" --output=build/server-npm-publish
+
+      - name: 发布 npm 包
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo "Repository Actions secret NPM_TOKEN 未配置" >&2
+            exit 1
+          fi
+          npm publish ./build/server-npm-publish --access public
+
+      - name: 核对 Registry 版本
+        shell: bash
+        run: |
+          set -euo pipefail
+          published="$(npm view "${PACKAGE_NAME}@${VERSION}" version)"
+          [[ "$published" == "$VERSION" ]]
+          printf '## npm 包已发布\n\n`%s@%s`\n' "$PACKAGE_NAME" "$VERSION" >> "$GITHUB_STEP_SUMMARY"

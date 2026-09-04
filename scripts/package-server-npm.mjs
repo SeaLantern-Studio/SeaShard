@@ -63,7 +63,7 @@ await writeFile(
         postinstall: "node scripts/lifecycle.mjs install",
         preuninstall: "node scripts/lifecycle.mjs uninstall",
       },
-      publishConfig: { access: "public", provenance: true },
+      publishConfig: { access: "public" },
       repository: {
         type: "git",
         url: "git+https://github.com/SeaLantern-Studio/SeaShard.git",

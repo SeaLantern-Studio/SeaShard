@@ -7,11 +7,6 @@ on:
         description: 版本号，不带 v，例如 1.0.0
         required: true
         type: string
-      server_npm_only:
-        description: 仅补发已存在 Release 的 Server npm 包
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
@@ -42,32 +37,19 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
-          SERVER_NPM_ONLY: ${{ inputs.server_npm_only }}
         run: |
           set -euo pipefail
           node scripts/generate-release-notes.ts validate "$VERSION"
-          if [[ "$SERVER_NPM_ONLY" == "true" ]]; then
-            if ! git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
-              echo "补发 npm 包需要已存在的 Tag v${VERSION}" >&2
-              exit 1
-            fi
-            if ! gh release view "v${VERSION}" >/dev/null 2>&1; then
-              echo "补发 npm 包需要已存在的 Release v${VERSION}" >&2
-              exit 1
-            fi
-          else
-            if git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
-              echo "Tag v${VERSION} 已存在" >&2
-              exit 1
-            fi
-            if gh release view "v${VERSION}" >/dev/null 2>&1; then
-              echo "Release v${VERSION} 已存在" >&2
-              exit 1
-            fi
+          if git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
+            echo "Tag v${VERSION} 已存在" >&2
+            exit 1
+          fi
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} 已存在" >&2
+            exit 1
           fi
 
       - name: 生成完整 Changelog 和下载指引
-        if: ${{ !inputs.server_npm_only }}
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
@@ -87,7 +69,6 @@ jobs:
             "$previous_tag"
 
       - name: 保存 Release 说明
-        if: ${{ !inputs.server_npm_only }}
         uses: actions/upload-artifact@v4
         with:
           name: release-metadata
@@ -103,8 +84,6 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.server_npm_only && format('refs/tags/v{0}', inputs.version) || github.sha }}
 
       - name: 配置 pnpm
         uses: pnpm/action-setup@v4
@@ -124,15 +103,6 @@ jobs:
       - name: 编译 SeaShard
         run: pnpm run build
 
-      - name: 生成 Server npm 发布包
-        shell: bash
-        run: |
-          mkdir -p release-server-npm
-          node scripts/package-server-npm.mjs \
-            --version=${{ inputs.version }}
-          npm pack ./build/server-npm \
-            --pack-destination release-server-npm
-
       - name: 保存平台无关应用产物
         uses: actions/upload-artifact@v4
         with:
@@ -146,16 +116,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: 保存 Server npm 发布包
-        uses: actions/upload-artifact@v4
-        with:
-          name: seashard-server-npm
-          path: release-server-npm/seashard-server-${{ inputs.version }}.tgz
-          if-no-files-found: error
-          retention-days: 1
-
   build:
-    if: ${{ !inputs.server_npm_only }}
     name: 构建 ${{ matrix.label }}
     needs: compile
     strategy:
@@ -385,7 +346,6 @@ jobs:
           retention-days: 1
 
   release:
-    if: ${{ !inputs.server_npm_only }}
     name: 创建 Tag 和 Release
     needs:
       - validate
@@ -455,39 +415,7 @@ jobs:
           release_url="$(gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
           printf '## Release 已发布\n\n%s\n' "$release_url" >> "$GITHUB_STEP_SUMMARY"
 
-  publish-server-npm:
-    name: 发布 Server npm 包
-    needs:
-      - compile
-      - release
-    if: >-
-      ${{
-        always() &&
-        needs.compile.result == 'success' &&
-        (inputs.server_npm_only || needs.release.result == 'success')
-      }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: 配置 Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      - name: 获取 Server npm 包
-        uses: actions/download-artifact@v4
-        with:
-          name: seashard-server-npm
-          path: npm-package
-
-      - name: 通过 npm Trusted Publishing 发布
-        run: npm publish "./npm-package/seashard-server-${{ inputs.version }}.tgz" --access public --provenance
-
   sync-homebrew:
-    if: ${{ !inputs.server_npm_only }}
     name: 同步仓库内 Homebrew Tap
     needs: release
     runs-on: ubuntu-latest
