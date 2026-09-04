@@ -185,6 +185,7 @@ jobs:
             supports_update: true
           - label: Linux ARM64
             runner: ubuntu-24.04-arm
+            platform: linux
             targets: AppImage deb
             arch: arm64
             asset_key: linux-arm64

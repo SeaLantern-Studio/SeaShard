@@ -41,7 +41,7 @@ const archive = await downloadBytes(`${baseUrl}/${archiveName}`);
 const actual = createHash("sha256").update(archive).digest("hex");
 if (actual !== expected) throw new Error(`Node.js Runtime 摘要校验失败：${archiveName}`);
 await writeFile(archivePath, archive);
-await run("tar", ["-xf", archivePath, "-C", distributionRoot]);
+await run("tar", ["-xf", archiveName, "-C", "."], distributionRoot);
 const executable = resolve(
   distributionRoot,
   directoryName,
@@ -60,9 +60,12 @@ async function downloadBytes(url) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-function run(executable, arguments_) {
+function run(executable, arguments_, workingDirectory) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, arguments_, { stdio: "inherit" });
+    const child = spawn(executable, arguments_, {
+      cwd: workingDirectory,
+      stdio: "inherit",
+    });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (code === 0) resolvePromise();
