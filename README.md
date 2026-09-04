@@ -56,6 +56,16 @@ SeaShard 希望把常见的服务端管理流程集中到一套桌面界面中�
 
 安装完成后，可在 **设置 → 关于** 中手动检查新版本。Windows 与 Linux 安装包可以直接下载、安装和重启；macOS 会打开对应的 GitHub Release 下载页。
 
+#### Linux 与 macOS 卸载
+
+Linux 安装并启动一次 Desktop 或 Host 后，可以从应用菜单打开 **卸载 SeaShard**，也可以运行：
+
+```sh
+seashard-uninstall
+```
+
+macOS 安装包会在 `/Applications` 中放置 **SeaShard Uninstaller.app**。统一卸载器可以只卸载 Desktop Controller、只卸载 Host，或同时卸载两者；服务器实例、世界存档、插件、数据库和用户配置默认保留。直接执行 `apt purge seashard` 只卸载 Linux Desktop Controller。
+
 ### Server Controller
 
 Server Controller 提供以下三种命令行安装方式，请根据运行环境选择其中一种。卸载默认保留 Host、服务器实例和 Controller 用户数据。

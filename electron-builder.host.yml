@@ -40,6 +40,11 @@ mac:
     - pkg
   category: public.app-category.utilities
   sign: null
+  extraResources:
+    - from: scripts/uninstall-seashard.sh
+      to: uninstaller/uninstall-seashard.sh
+    - from: scripts/install-macos-uninstaller-app.sh
+      to: uninstaller/install-macos-uninstaller-app.sh
 pkg:
   scripts: build/macos-host-scripts
 linux:
@@ -48,6 +53,11 @@ linux:
     - AppImage
     - deb
   category: Utility
+  extraResources:
+    - from: scripts/uninstall-seashard.sh
+      to: uninstaller/uninstall-seashard.sh
+    - from: scripts/install-macos-uninstaller-app.sh
+      to: uninstaller/install-macos-uninstaller-app.sh
 deb:
   afterInstall: build/linux-host-after-install.tpl
   afterRemove: build/linux-host-after-remove.tpl

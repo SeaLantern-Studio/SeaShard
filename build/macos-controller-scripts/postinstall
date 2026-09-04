@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+resource_root="/Applications/SeaShard.app/Contents/Resources/uninstaller"
+installer="$resource_root/install-macos-uninstaller-app.sh"
+uninstaller="$resource_root/uninstall-seashard.sh"
+
+[ -x "$installer" ] || {
+  echo "SeaShard Uninstaller installer is missing: $installer" >&2
+  exit 1
+}
+[ -f "$uninstaller" ] || {
+  echo "SeaShard Uninstaller payload is missing: $uninstaller" >&2
+  exit 1
+}
+
+"$installer" "$uninstaller"

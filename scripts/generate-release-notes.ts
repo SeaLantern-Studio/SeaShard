@@ -70,6 +70,7 @@ export function expectedPublishedReleaseAssetNames(version: string): readonly st
     `seashard-server-${version}.tgz`,
     "install-server.sh",
     "uninstall-server.sh",
+    "uninstall-seashard.sh",
     "seashard-server.rb",
     `SeaShard-${version}-windows-x64.exe.blockmap`,
     `SeaShard-${version}-windows-arm64.exe.blockmap`,

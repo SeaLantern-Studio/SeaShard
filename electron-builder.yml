@@ -32,12 +32,23 @@ mac:
     - pkg
   category: public.app-category.utilities
   sign: null
+  extraResources:
+    - from: scripts/uninstall-seashard.sh
+      to: uninstaller/uninstall-seashard.sh
+    - from: scripts/install-macos-uninstaller-app.sh
+      to: uninstaller/install-macos-uninstaller-app.sh
+pkg:
+  scripts: build/macos-controller-scripts
 linux:
   target:
     - AppImage
     - deb
   category: Utility
   extraResources:
+    - from: scripts/uninstall-seashard.sh
+      to: uninstaller/uninstall-seashard.sh
+    - from: scripts/install-macos-uninstaller-app.sh
+      to: uninstaller/install-macos-uninstaller-app.sh
     - from: build/linux-controller-host-installer/SeaShardHostSetup.AppImage
       to: host-installer/SeaShardHostSetup.AppImage
     - from: build/linux-host-appimage-install.sh

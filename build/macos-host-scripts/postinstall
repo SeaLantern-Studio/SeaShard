@@ -3,6 +3,15 @@ set -eu
 
 host_app="/Applications/SeaShardHost.app"
 host_executable="$host_app/Contents/MacOS/SeaShardHost"
+uninstaller_resource_root="$host_app/Contents/Resources/uninstaller"
+uninstaller_installer="$uninstaller_resource_root/install-macos-uninstaller-app.sh"
+uninstaller_program="$uninstaller_resource_root/uninstall-seashard.sh"
+if [ ! -x "$uninstaller_installer" ] || [ ! -f "$uninstaller_program" ]; then
+  echo "SeaShard Uninstaller payload is incomplete." >&2
+  exit 1
+fi
+"$uninstaller_installer" "$uninstaller_program"
+
 label="studio.sealantern.seashard.host"
 console_user="$(stat -f '%Su' /dev/console)"
 
@@ -16,7 +25,6 @@ user_group="$(id -gn "$console_user")"
 data_root="$user_home/Library/Application Support/SeaShard/core"
 agent_dir="$user_home/Library/LaunchAgents"
 agent_path="$agent_dir/$label.plist"
-
 install -d -o "$console_user" -g "$user_group" "$data_root" "$agent_dir"
 
 if [ -f "$data_root/host-control.json" ]; then

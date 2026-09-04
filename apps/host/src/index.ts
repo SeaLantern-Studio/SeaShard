@@ -5,6 +5,7 @@ import {
 } from "./autostart";
 import { registerStandaloneHost } from "@seashard/host-installation";
 import { startSeaShardHost, type SeaShardHostRuntime } from "@seashard/host-runtime";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -25,6 +26,10 @@ async function main(): Promise<void> {
     process.env.SEASHARD_HOST_DATA_DIR ??
     resolveDefaultHostDataRoot();
   await registerStandaloneHost(dataRoot, hostPackageType);
+  await registerLinuxComponentUninstaller().catch((error) => {
+    // Host 的运行优先于卸载入口登记；登记失败仍保留可用的 Host，并把原因写入日志。
+    console.warn("SeaShard component uninstaller registration failed", error);
+  });
   activeDataRoot = dataRoot;
   await ensureStandaloneHostAutostart({ dataRoot }).catch((error) => {
     // 启动登记属于安装便利能力；失败时保留当前 Host 进程，交给 Controller 展示连接事实。
@@ -45,6 +50,38 @@ async function main(): Promise<void> {
   installShutdownSignals();
   console.log(`SEASHARD_HOST_READY pid=${process.pid} dataRoot=${runtime.dataRoot}`);
   process.send?.({ type: "seashard:host-ready", pid: process.pid });
+}
+async function registerLinuxComponentUninstaller(): Promise<void> {
+  if (process.platform !== "linux") return;
+  const script = join(process.resourcesPath, "uninstaller", "uninstall-seashard.sh");
+  if (!existsSync(script)) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("/bin/sh", [script, "--register-host"], {
+      env: process.env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let errorOutput = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      errorOutput = `${errorOutput}${chunk}`.slice(-16_384);
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          errorOutput.trim() ||
+            (signal
+              ? `SeaShard 卸载器登记进程被信号 ${signal} 中止`
+              : `SeaShard 卸载器登记进程退出码为 ${code ?? "unknown"}`),
+        ),
+      );
+    });
+  });
 }
 
 function resolveHostSiblingEntry(application: "database-worker" | "plugin-host"): string {

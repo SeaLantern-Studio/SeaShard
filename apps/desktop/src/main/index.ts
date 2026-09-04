@@ -23,11 +23,14 @@ import {
 } from "@seashard/plugin-system";
 import { app, protocol, shell } from "electron";
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerClientFeatures } from "./client-features";
 import { registerControllerFeatures } from "./controller-features";
+import { registerLinuxComponentUninstaller } from "./component-uninstaller";
 import { registerControllerServerFeatures } from "./controller-server-features";
 import { ControllerHostServiceGateway } from "./controller-host-services";
 import { registerDesktopShellBridge } from "./desktop-shell-bridge";
@@ -171,6 +174,27 @@ async function bootstrap(): Promise<void> {
   await waitForApplicationReady();
   const userDataRoot = app.getPath("userData");
   const dataRoot = process.env.SEASHARD_DATA_DIR ?? join(userDataRoot, "core");
+  const sharedControllerDataRoot = process.env.SEASHARD_DATA_DIR
+    ? join(dataRoot, "controller")
+    : join(userDataRoot, "controller");
+  const desktopControllerDataRoot =
+    process.env.SEASHARD_DESKTOP_DATA_DIR ??
+    (process.env.SEASHARD_DATA_DIR
+      ? join(dataRoot, "desktop-controller")
+      : join(userDataRoot, "desktop-controller"));
+  const localHostAutoInstallMarker = join(
+    desktopControllerDataRoot,
+    "local-host-auto-install.disabled",
+  );
+  if (app.isPackaged && process.platform === "linux") {
+    await registerLinuxComponentUninstaller({
+      resourcesPath: process.resourcesPath,
+      controllerDataRoot: desktopControllerDataRoot,
+    }).catch((error) => {
+      // 卸载入口登记失败不影响 Controller 与 Host 启动；用户仍可使用系统包管理器。
+      console.warn("SeaShard component uninstaller registration failed", error);
+    });
+  }
   desktopUpdates = createElectronDesktopUpdateService(seaShardVersion, dataRoot);
   if (!app.isPackaged) {
     localHostProcess ??= new LocalHostProcessLauncher({
@@ -200,14 +224,21 @@ async function bootstrap(): Promise<void> {
     connectLocal: () => connectLocalHost(dataRoot),
     readLocalInstallation: async () =>
       (await readHostInstallation(dataRoot)) ? "installed" : "missing",
-    installLocal: () => openHostInstaller(dataRoot),
+    installLocal: async () => {
+      const result = await openHostInstaller(dataRoot);
+      if (result === "installed") {
+        await rm(localHostAutoInstallMarker, { force: true });
+      }
+      return result;
+    },
   });
 
   if (
     app.isPackaged &&
     process.platform === "linux" &&
     !connectedHost &&
-    localInstallation === "missing"
+    localInstallation === "missing" &&
+    !existsSync(localHostAutoInstallMarker)
   ) {
     try {
       // Linux 的 DEB 与 AppImage 都只携带安装资源；首次运行已处于准确的用户环境，
@@ -220,15 +251,6 @@ async function bootstrap(): Promise<void> {
     console.error("Local SeaShard Host is unavailable", initialHostError);
   }
 
-  // 业务数据与 Agent 凭据由所有 Controller 共享；实例租约和未来外观设置留在 Desktop 专有目录。
-  const sharedControllerDataRoot = process.env.SEASHARD_DATA_DIR
-    ? join(dataRoot, "controller")
-    : join(userDataRoot, "controller");
-  const desktopControllerDataRoot =
-    process.env.SEASHARD_DESKTOP_DATA_DIR ??
-    (process.env.SEASHARD_DATA_DIR
-      ? join(dataRoot, "desktop-controller")
-      : join(userDataRoot, "desktop-controller"));
   const databaseWorkerEntry = join(moduleDirectory, "../../../database-worker/dist/index.js");
   const activeControllerRuntime = await startSeaShardController({
     dataRoot: sharedControllerDataRoot,

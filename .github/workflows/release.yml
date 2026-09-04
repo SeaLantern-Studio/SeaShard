@@ -206,6 +206,9 @@ jobs:
         shell: bash
         run: |
           chmod +x \
+            scripts/uninstall-seashard.sh \
+            scripts/install-macos-uninstaller-app.sh \
+            build/macos-controller-scripts/postinstall \
             build/macos-host-scripts/postinstall \
             build/linux-host-after-install.tpl \
             build/linux-host-before-remove.sh \
@@ -374,7 +377,11 @@ jobs:
         run: |
           cp scripts/install-server.sh release-assets/install-server.sh
           cp scripts/uninstall-server.sh release-assets/uninstall-server.sh
-          chmod +x release-assets/install-server.sh release-assets/uninstall-server.sh
+          cp scripts/uninstall-seashard.sh release-assets/uninstall-seashard.sh
+          chmod +x \
+            release-assets/install-server.sh \
+            release-assets/uninstall-server.sh \
+            release-assets/uninstall-seashard.sh
           node scripts/generate-homebrew-formula.mjs \
             --version="$VERSION" \
             --repository="$GITHUB_REPOSITORY" \
@@ -408,6 +415,7 @@ jobs:
             release-assets/seashard-* \
             release-assets/install-server.sh \
             release-assets/uninstall-server.sh \
+            release-assets/uninstall-seashard.sh \
             release-assets/latest*.yml \
             release-assets/latest-release.json \
             --repo "$GITHUB_REPOSITORY" \
