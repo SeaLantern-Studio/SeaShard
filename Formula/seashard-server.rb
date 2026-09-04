@@ -1,26 +1,26 @@
 class SeashardServer < Formula
   desc "Headless Minecraft Server Controller for SeaShard"
   homepage "https://github.com/SeaLantern-Studio/SeaShard"
-  version "0.8.0"
+  version "0.8.1"
   license :cannot_represent
   on_macos do
     on_intel do
-      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.0/SeaShard-Server-0.8.0-macos-x64.tar.gz"
-      sha256 "63d5ae69dbcd7927b973b0b880c60d03a159214345ecce6e669537c2ce935291"
+      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.1/SeaShard-Server-0.8.1-macos-x64.tar.gz"
+      sha256 "d5af18c3bfaa6da44f94754e4e51865b9503aff4b4a91bacb96aa8b381b00f24"
     end
     on_arm do
-      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.0/SeaShard-Server-0.8.0-macos-arm64.tar.gz"
-      sha256 "468aeb80b360a9b10f2bc5e231fa92d043951bfc0b56e7536f814a073f4f406f"
+      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.1/SeaShard-Server-0.8.1-macos-arm64.tar.gz"
+      sha256 "d526b8d5a241e8dc9b7709e6fe8ee9f8fbb5993f80ae63ad39f2f0cabe47de4a"
     end
   end
   on_linux do
     on_intel do
-      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.0/SeaShard-Server-0.8.0-linux-x64.tar.gz"
-      sha256 "7eb92e7be43d6f7bcb3084a9416047880307106b566a109a115b7e272c0d7c63"
+      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.1/SeaShard-Server-0.8.1-linux-x64.tar.gz"
+      sha256 "0a90d12bc30bd076c9542f8521395fb496f8c4ad750d2444831b2d44fb7084ff"
     end
     on_arm do
-      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.0/SeaShard-Server-0.8.0-linux-arm64.tar.gz"
-      sha256 "23ef0fd824acb1412b1f340e853ae246e428171218ffb1032f3c217de023a32a"
+      url "https://github.com/SeaLantern-Studio/SeaShard/releases/download/v0.8.1/SeaShard-Server-0.8.1-linux-arm64.tar.gz"
+      sha256 "a158bb25f4f65fe3a06fa7b1e024cff2463e78546c687ebaf54073f0e95a6a43"
     end
   end
 
