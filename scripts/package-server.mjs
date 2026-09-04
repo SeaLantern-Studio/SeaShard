@@ -26,6 +26,11 @@ const portableRoot = join(buildRoot, portableName);
 await rm(buildRoot, { recursive: true, force: true });
 await mkdir(portableRoot, { recursive: true });
 await mkdir(outputRoot, { recursive: true });
+// Git Bash 会把 Windows 路径中的盘符解释成远程主机；固定系统 bsdtar 后，zip 与绝对路径都由同一实现处理。
+const archiveTool =
+  process.platform === "win32"
+    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
 await copyServerRuntime(portableRoot);
 await writePortableLauncher(portableRoot);
 await writeFile(
@@ -45,10 +50,10 @@ await writeFile(
 );
 if (platform === "windows") {
   const archive = join(outputRoot, `SeaShard-Server-${version}-windows-${architecture}.zip`);
-  await run("tar", ["-a", "-cf", archive, "-C", buildRoot, portableName]);
+  await run(archiveTool, ["-a", "-cf", archive, "-C", buildRoot, portableName]);
 } else {
   const archive = join(outputRoot, `SeaShard-Server-${version}-${platform}-${architecture}.tar.gz`);
-  await run("tar", ["-czf", archive, "-C", buildRoot, portableName]);
+  await run(archiveTool, ["-czf", archive, "-C", buildRoot, portableName]);
   if (platform === "macos") await createMacPackage();
   else {
     await createDebPackage();
