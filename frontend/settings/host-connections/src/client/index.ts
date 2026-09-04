@@ -1,19 +1,16 @@
-import type { SeaShardDesktopApi } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { Network } from "lucide-vue-next";
 import { defineComponent, h } from "vue";
+import { hostConnectionsUiServiceContract, type HostConnectionsUiService } from "../service";
 import HostConnectionsPage from "./HostConnectionsPage.vue";
-
-const HostConnectionsFeaturePage = defineComponent({
-  name: "HostConnectionsFeaturePage",
-  setup: () => {
-    const desktopApi = (window as Window & { seashard: SeaShardDesktopApi }).seashard;
-    return () => h(HostConnectionsPage, { hosts: desktopApi.hosts });
-  },
-});
 
 export default defineClientUiModule({
   apply(context) {
+    const hosts = context.service<HostConnectionsUiService>(hostConnectionsUiServiceContract);
+    const page = defineComponent({
+      name: "HostConnectionsFeaturePage",
+      setup: () => () => h(HostConnectionsPage, { hosts }),
+    });
     context.slots.register(
       {
         name: "navigation.page",
@@ -27,7 +24,7 @@ export default defineClientUiModule({
         placement: "settings",
         settingsGroup: "software",
       },
-      HostConnectionsFeaturePage,
+      page,
     );
   },
 });

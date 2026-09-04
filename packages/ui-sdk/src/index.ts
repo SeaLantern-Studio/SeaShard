@@ -25,6 +25,8 @@ export interface UiAppearanceSettings {
 }
 
 export interface UiAppearanceService {
+  /** 当前壳层是否能呈现 Desktop 窗口材质；Web 页面据此隐藏亚克力设置。 */
+  readonly supportsAcrylic?: boolean;
   readonly settings: Readonly<Ref<Readonly<UiAppearanceSettings>>>;
   update(patch: Partial<UiAppearanceSettings>): void;
   reset(): void;

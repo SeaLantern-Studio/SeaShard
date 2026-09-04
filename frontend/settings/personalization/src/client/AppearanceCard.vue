@@ -6,6 +6,7 @@ import BackgroundSettings from "./BackgroundSettings.vue";
 
 const props = defineProps<{
   settings: Readonly<UiAppearanceSettings>;
+  supportsAcrylic: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -108,30 +109,32 @@ function updateFontSize(event: Event): void {
         </div>
       </div>
 
-      <div class="settings-entry">
-        <div class="settings-entry-info">
-          <span class="settings-entry-title">高级材质</span>
-          <span class="settings-entry-desc">开启半透明材质和窗口融合效果</span>
-        </div>
-        <Cmz_Switch
-          :model-value="props.settings.acrylicEnabled"
-          @update:model-value="emit('change', { acrylicEnabled: $event })"
-        />
-      </div>
-
-      <div v-if="props.settings.acrylicEnabled" class="settings-entry">
-        <div class="settings-entry-info">
-          <span class="settings-entry-title">亚克力模糊强度</span>
-          <span class="settings-entry-desc">调整高级材质的背景模糊</span>
-        </div>
-        <div class="sl-input-md">
-          <Cmz_Select
-            :model-value="props.settings.acrylicBlurLevel"
-            :options="acrylicBlurOptions"
-            @update:model-value="updateBlur"
+      <template v-if="props.supportsAcrylic">
+        <div class="settings-entry">
+          <div class="settings-entry-info">
+            <span class="settings-entry-title">高级材质</span>
+            <span class="settings-entry-desc">开启半透明材质和窗口融合效果</span>
+          </div>
+          <Cmz_Switch
+            :model-value="props.settings.acrylicEnabled"
+            @update:model-value="emit('change', { acrylicEnabled: $event })"
           />
         </div>
-      </div>
+
+        <div v-if="props.settings.acrylicEnabled" class="settings-entry">
+          <div class="settings-entry-info">
+            <span class="settings-entry-title">亚克力模糊强度</span>
+            <span class="settings-entry-desc">调整高级材质的背景模糊</span>
+          </div>
+          <div class="sl-input-md">
+            <Cmz_Select
+              :model-value="props.settings.acrylicBlurLevel"
+              :options="acrylicBlurOptions"
+              @update:model-value="updateBlur"
+            />
+          </div>
+        </div>
+      </template>
 
       <div class="settings-entry">
         <div class="settings-entry-info">

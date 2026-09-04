@@ -1,6 +1,7 @@
 import {
   serverWebApiVersion,
   type ServerWebApiError,
+  type ServerWebAppearanceSnapshot,
   type ServerWebBootstrapSnapshot,
   type ServerWebClientBootstrap,
   type ServerWebClientServiceRequest,
@@ -35,6 +36,7 @@ import { ServerWebStateCoordinator, WebStateError, type ServerWebHostSource } fr
 
 const defaultPort = 18_127;
 const maximumRequestBytes = 64 * 1024;
+const maximumAppearanceRequestBytes = 12 * 1024 * 1024;
 const statePublishIntervalMilliseconds = 2_000;
 const eventHeartbeatMilliseconds = 15_000;
 const failedLoginWindowMilliseconds = 5 * 60 * 1_000;
@@ -51,8 +53,15 @@ interface ServerWebServiceControl {
   readonly startedAt: string;
   requestShutdown(): void;
 }
+export interface ServerWebAppearanceSource {
+  get(): Promise<ServerWebAppearanceSnapshot>;
+  update(patch: unknown): Promise<ServerWebAppearanceSnapshot>;
+  reset(): Promise<ServerWebAppearanceSnapshot>;
+}
 export interface StartServerWebOptions {
   readonly dataRoot: string;
+  readonly controllerVersion: string;
+  readonly appearance: ServerWebAppearanceSource;
   readonly publicRoot: string;
   readonly localHost?: ServerWebHostSource;
   readonly controller?: PluginKernel;
@@ -81,6 +90,7 @@ export class ServerWebRuntime {
     private readonly stateTimer: ReturnType<typeof setInterval>,
     private readonly heartbeatTimer: ReturnType<typeof setInterval>,
     private readonly stopAgentModelConfiguration: (() => void) | undefined,
+    private readonly stopClientEntries: (() => void) | undefined,
   ) {}
 
   dispose(): Promise<void> {
@@ -88,6 +98,7 @@ export class ServerWebRuntime {
       clearInterval(this.stateTimer);
       clearInterval(this.heartbeatTimer);
       this.stopAgentModelConfiguration?.();
+      this.stopClientEntries?.();
       this.state.dispose();
       for (const response of this.eventResponses) response.end();
       this.eventResponses.clear();
@@ -130,6 +141,9 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
       );
     },
   );
+  const stopClientEntries = options.controller?.onClientEntriesChanged(() => {
+    state.publishClientBootstrap(createClientBootstrap(options.controller!));
+  });
   const eventResponses = new Set<ServerResponse>();
   const failedLogins = new Map<string, number[]>();
   const requestHandler = (request: IncomingMessage, response: ServerResponse) => {
@@ -139,6 +153,8 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
       publicRoot,
       controller: options.controller,
       auth,
+      controllerVersion: options.controllerVersion,
+      appearance: options.appearance,
       state,
       secure,
       eventResponses,
@@ -155,6 +171,7 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
   } catch (error) {
     state.dispose();
     stopAgentModelConfiguration?.();
+    stopClientEntries?.();
     throw error;
   }
   const address = server.address();
@@ -184,6 +201,7 @@ export async function startServerWeb(options: StartServerWebOptions): Promise<Se
     stateTimer,
     heartbeatTimer,
     stopAgentModelConfiguration,
+    stopClientEntries,
   );
 }
 
@@ -192,6 +210,8 @@ interface RequestContext {
   readonly response: ServerResponse;
   readonly publicRoot: string;
   readonly controller?: PluginKernel;
+  readonly controllerVersion: string;
+  readonly appearance: ServerWebAppearanceSource;
   readonly auth: ServerAdministratorAuth;
   readonly state: ServerWebStateCoordinator;
   readonly secure: boolean;
@@ -227,6 +247,7 @@ async function routeRequest(context: RequestContext): Promise<void> {
     return writeJson(response, 200, {
       apiVersion: serverWebApiVersion,
       setupRequired: !(await auth.isConfigured()),
+      controllerVersion: context.controllerVersion,
       authenticated: Boolean(session),
       ...(session ? { username: session.username } : {}),
     } satisfies ServerWebBootstrapSnapshot);
@@ -244,6 +265,7 @@ async function routeRequest(context: RequestContext): Promise<void> {
     return writeJson(response, 201, {
       apiVersion: serverWebApiVersion,
       setupRequired: false,
+      controllerVersion: context.controllerVersion,
       authenticated: true,
       username: session.username,
     } satisfies ServerWebBootstrapSnapshot);
@@ -261,6 +283,7 @@ async function routeRequest(context: RequestContext): Promise<void> {
       return writeJson(response, 200, {
         apiVersion: serverWebApiVersion,
         setupRequired: false,
+        controllerVersion: context.controllerVersion,
         authenticated: true,
         username: String(body.username).trim(),
       } satisfies ServerWebBootstrapSnapshot);
@@ -280,6 +303,43 @@ async function routeRequest(context: RequestContext): Promise<void> {
   const session = auth.authenticate(request.headers.cookie);
   if (url.pathname.startsWith("/api/") && !session) {
     throw new HttpError(401, "AUTH_REQUIRED", "请先登录 Server Controller");
+  }
+
+  if (url.pathname === "/api/appearance" && method === "GET") {
+    return writeJson(response, 200, await context.appearance.get());
+  }
+  if (url.pathname === "/api/appearance" && method === "PATCH") {
+    requireSameOrigin(request, secure);
+    try {
+      return writeJson(
+        response,
+        200,
+        await context.appearance.update(await readJsonBody(request, maximumAppearanceRequestBytes)),
+      );
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new HttpError(400, "INVALID_APPEARANCE", error.message);
+      }
+      throw error;
+    }
+  }
+  if (url.pathname === "/api/appearance" && method === "DELETE") {
+    requireSameOrigin(request, secure);
+    return writeJson(response, 200, await context.appearance.reset());
+  }
+
+  const hostControlRoute = matchHostControlRoute(url.pathname);
+  if (hostControlRoute && method === "POST") {
+    requireSameOrigin(request, secure);
+    const body = await readJsonBody(request);
+    return writeJson(
+      response,
+      200,
+      await context.state.mutateHostControl(
+        hostControlRoute,
+        typeof body.requestId === "string" ? body.requestId : undefined,
+      ),
+    );
   }
 
   if (url.pathname.startsWith("/api/server-assets/") && (method === "GET" || method === "HEAD")) {
@@ -581,6 +641,13 @@ async function serveFile(
   response.end(body);
 }
 
+function matchHostControlRoute(
+  pathname: string,
+): "request" | "confirm" | "reject" | "release" | undefined {
+  const match = /^\/api\/host-control\/(request|confirm|reject|release)$/u.exec(pathname);
+  return match?.[1] as "request" | "confirm" | "reject" | "release" | undefined;
+}
+
 function matchInstanceRoute(
   pathname: string,
 ): { readonly instanceId: string; readonly operation: string } | undefined {
@@ -593,13 +660,16 @@ function matchInstanceRoute(
   }
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJsonBody(
+  request: IncomingMessage,
+  maximumBytes = maximumRequestBytes,
+): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > maximumRequestBytes) {
+    if (size > maximumBytes) {
       throw new HttpError(413, "BODY_TOO_LARGE", "请求内容过大");
     }
     chunks.push(buffer);
@@ -753,7 +823,7 @@ function readSequence(value: string | string[] | null | undefined): number {
 function applySecurityHeaders(response: ServerResponse): void {
   response.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   );
   response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   response.setHeader("Referrer-Policy", "no-referrer");

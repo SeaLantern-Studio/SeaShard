@@ -10,18 +10,21 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerServerAgentFeatures } from "./agent-features";
+import { registerServerSoftwareClientFeatures } from "./client-features";
 import { prepareServerLocalHost } from "./host-setup";
 import { ServerHostAgentExtensionGateway } from "./host-agent-extension-gateway";
 import { ServerHostServiceGateway } from "./host-service-gateway";
 import { ServerLocalHostConnection } from "./local-host";
 import { ServerControllerLogger } from "./logger";
 import { resolveServerControllerPaths } from "./paths";
+import { registerServerPluginFeatures } from "./plugin-features";
 import { ServerControllerProcessLease } from "./runtime-control";
 import {
   ServerControllerServiceManager,
   type ServerLaunchCommand,
   type ServerServiceStatus,
 } from "./service-manager";
+import { ServerWebAppearanceStore } from "./web/appearance-store";
 import { startServerWeb, type ServerWebRuntime } from "./web/server";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -122,13 +125,16 @@ async function runServerController(options: RunOptions): Promise<void> {
       hostProfile: "node",
       clientTarget: "web",
     });
+    const appearance = await ServerWebAppearanceStore.create(runtime.database);
     await registerServerAgentFeatures({
       kernel: runtime.kernel,
       sharedDataRoot: paths.userDataRoot,
       legacyCredentialDataRoot: paths.controllerDataRoot,
     });
+    await registerServerPluginFeatures(runtime.kernel);
     await registerAgentClientFeatures(runtime.kernel);
     await registerServerClientFeatures(runtime.kernel);
+    await registerServerSoftwareClientFeatures(runtime.kernel);
     if (localHost) {
       hostServices = await ServerHostServiceGateway.register(runtime.kernel, localHost);
       hostWorkers = new ControllerHostWorkerDeployments(runtime.kernel, () =>
@@ -161,6 +167,8 @@ async function runServerController(options: RunOptions): Promise<void> {
     }
     web = await startServerWeb({
       dataRoot: paths.controllerDataRoot,
+      controllerVersion: seaShardVersion,
+      appearance,
       controller: runtime.kernel,
       publicRoot: process.env.SEASHARD_SERVER_WEB_PUBLIC_ROOT ?? join(moduleDirectory, "public"),
       ...(localHost ? { localHost } : {}),

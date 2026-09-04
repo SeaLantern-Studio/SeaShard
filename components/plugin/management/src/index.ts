@@ -13,7 +13,7 @@ export const pluginManagementManifest: PluginManifest = {
       runtime: "host",
       execution: "controller",
       module: "./dist/host.js",
-      hostProfiles: ["electron"],
+      hostProfiles: ["electron", "node"],
       activationScopes: ["global"],
       permissions: [],
     },

@@ -84,6 +84,18 @@ try {
   const cookie = setup.headers.get("set-cookie")?.split(";", 1)[0];
   assert.ok(cookie);
 
+  const appearanceUpdate = await fetch(`${ready.url}/api/appearance`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Cookie: cookie, Origin: ready.url },
+    body: JSON.stringify({ color: "ocean", theme: "dark" }),
+  });
+  assert.equal(appearanceUpdate.status, 200);
+  const appearanceSnapshot: unknown = await appearanceUpdate.json();
+  assert.ok(isRecord(appearanceSnapshot));
+  assert.ok(isRecord(appearanceSnapshot.settings));
+  assert.equal(appearanceSnapshot.settings.color, "ocean");
+  assert.equal(appearanceSnapshot.settings.theme, "dark");
+
   const state = await fetch(`${ready.url}/api/state`, { headers: { Cookie: cookie } });
   assert.equal(state.status, 200);
   const snapshot: unknown = await state.json();
@@ -101,6 +113,11 @@ try {
     "seashard.agent-conversation-ui",
     "seashard.agent-settings-ui",
     "seashard.agent-settings-provider-ui",
+    "seashard.plugin-market-ui",
+    "seashard.host-connections-ui",
+    "seashard.plugin-settings-ui",
+    "seashard.personalization-ui",
+    "seashard.about-ui",
     "seashard.game-settings-ui",
     "seashard.server-download-servercore-ui",
     "seashard.server-overview-ui",
@@ -196,6 +213,30 @@ try {
   assert.ok(
     isRecord(
       await callClientService(ready.url, cookie, serverSettings, "seashard.server-settings", "get"),
+    ),
+  );
+  const pluginSettings = requireClientEntry(entries, "seashard.plugin-settings-ui");
+  assert.ok(
+    Array.isArray(
+      await callClientService(
+        ready.url,
+        cookie,
+        pluginSettings,
+        "seashard.plugin-management",
+        "list",
+      ),
+    ),
+  );
+  const pluginMarket = requireClientEntry(entries, "seashard.plugin-market-ui");
+  assert.ok(
+    Array.isArray(
+      await callClientService(
+        ready.url,
+        cookie,
+        pluginMarket,
+        "seashard.plugin-market-install",
+        "list",
+      ),
     ),
   );
 

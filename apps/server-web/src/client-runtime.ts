@@ -15,10 +15,13 @@ import {
 import type { JsonValue } from "@seashard/plugin-sdk";
 import type {
   ServerWebApiError,
-  ServerWebClientBootstrap,
+  ServerWebAppearanceSettings,
+  ServerWebAppearanceSnapshot,
   ServerWebBootstrapSnapshot,
+  ServerWebClientBootstrap,
   ServerWebClientServiceResponse,
   ServerWebEvent,
+  ServerWebStateSnapshot,
 } from "@seashard/server-web-api";
 import type {
   ClientUiPackageModuleLoader,
@@ -189,10 +192,32 @@ function serverWebAssetUrl(value: string): string {
 
 export class ServerWebEvents {
   private readonly consoleListeners = new Set<(line: ServerConsoleLine) => void>();
+  private readonly stateListeners = new Set<(state: ServerWebStateSnapshot) => void>();
+  private readonly clientBootstrapListeners = new Set<
+    (bootstrap: ServerWebClientBootstrap) => void
+  >();
   private readonly agentModelConfigurationListeners = new Set<
     (configuration: AgentModelConfigurationSnapshot) => void
   >();
   private source?: EventSource;
+
+  subscribeState(listener: (state: ServerWebStateSnapshot) => void): () => void {
+    this.stateListeners.add(listener);
+    this.ensureConnected();
+    return () => {
+      this.stateListeners.delete(listener);
+      this.closeWhenUnused();
+    };
+  }
+
+  subscribeClientBootstrap(listener: (bootstrap: ServerWebClientBootstrap) => void): () => void {
+    this.clientBootstrapListeners.add(listener);
+    this.ensureConnected();
+    return () => {
+      this.clientBootstrapListeners.delete(listener);
+      this.closeWhenUnused();
+    };
+  }
 
   subscribeConsole(listener: (line: ServerConsoleLine) => void): () => void {
     this.consoleListeners.add(listener);
@@ -220,7 +245,12 @@ export class ServerWebEvents {
   }
 
   private closeWhenUnused(): void {
-    if (this.consoleListeners.size === 0 && this.agentModelConfigurationListeners.size === 0) {
+    if (
+      this.stateListeners.size === 0 &&
+      this.clientBootstrapListeners.size === 0 &&
+      this.consoleListeners.size === 0 &&
+      this.agentModelConfigurationListeners.size === 0
+    ) {
       this.close();
     }
   }
@@ -229,6 +259,18 @@ export class ServerWebEvents {
     if (this.source) return;
     const source = new EventSource("/api/events");
     this.source = source;
+    source.addEventListener("state", (message) => {
+      if (!(message instanceof MessageEvent)) return;
+      const event = parseServerWebEvent(message.data);
+      if (event?.type !== "state") return;
+      for (const listener of this.stateListeners) listener(event.state);
+    });
+    source.addEventListener("client-bootstrap", (message) => {
+      if (!(message instanceof MessageEvent)) return;
+      const event = parseServerWebEvent(message.data);
+      if (event?.type !== "client-bootstrap") return;
+      for (const listener of this.clientBootstrapListeners) listener(event.bootstrap);
+    });
     source.addEventListener("console-line", (message) => {
       if (!(message instanceof MessageEvent)) return;
       const event = parseServerWebEvent(message.data);
@@ -246,8 +288,41 @@ export class ServerWebEvents {
   }
 }
 
+export const serverWebEvents = new ServerWebEvents();
+
 export async function loadServerClientBootstrap(): Promise<ServerWebClientBootstrap> {
   return parseClientBootstrap(await requestJson("/api/client/bootstrap"));
+}
+
+export async function loadServerWebState(): Promise<ServerWebStateSnapshot> {
+  return parseServerWebState(await requestJson("/api/state"));
+}
+
+export async function loadServerAppearance(): Promise<ServerWebAppearanceSnapshot> {
+  return parseServerAppearance(await requestJson("/api/appearance"));
+}
+
+export async function updateServerAppearance(
+  patch: Readonly<Partial<ServerWebAppearanceSettings>>,
+): Promise<ServerWebAppearanceSnapshot> {
+  return parseServerAppearance(
+    await requestJson("/api/appearance", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  );
+}
+
+export async function mutateServerHostControl(
+  action: "request" | "confirm" | "reject" | "release",
+  requestId?: string,
+): Promise<ServerWebStateSnapshot> {
+  return parseServerWebState(
+    await requestJson(`/api/host-control/${action}`, {
+      method: "POST",
+      body: JSON.stringify(requestId ? { requestId } : {}),
+    }),
+  );
 }
 
 export async function loadServerWebAuthentication(): Promise<ServerWebBootstrapSnapshot> {
@@ -305,6 +380,8 @@ function parseAuthenticationBootstrap(value: unknown): ServerWebBootstrapSnapsho
   const record = requireRecord(value, "Authentication bootstrap");
   if (
     record.apiVersion !== 1 ||
+    typeof record.controllerVersion !== "string" ||
+    !record.controllerVersion ||
     typeof record.setupRequired !== "boolean" ||
     typeof record.authenticated !== "boolean" ||
     (record.username !== undefined && typeof record.username !== "string")
@@ -313,6 +390,7 @@ function parseAuthenticationBootstrap(value: unknown): ServerWebBootstrapSnapsho
   }
   return {
     apiVersion: 1,
+    controllerVersion: record.controllerVersion,
     setupRequired: record.setupRequired,
     authenticated: record.authenticated,
     ...(typeof record.username === "string" ? { username: record.username } : {}),
@@ -398,6 +476,12 @@ function parseServerWebEvent(source: string): ServerWebEvent | undefined {
     return undefined;
   }
   if (!isRecord(value)) return undefined;
+  if (value.type === "state") {
+    return { type: "state", state: parseServerWebState(value.state) };
+  }
+  if (value.type === "client-bootstrap") {
+    return { type: "client-bootstrap", bootstrap: parseClientBootstrap(value.bootstrap) };
+  }
   if (value.type === "agent-model-configuration") {
     return {
       type: "agent-model-configuration",
@@ -444,6 +528,109 @@ function parseAgentModelConfiguration(value: unknown): AgentModelConfigurationSn
     throw new TypeError("Agent model configuration event is invalid");
   }
   return configuration as unknown as AgentModelConfigurationSnapshot;
+}
+
+function parseServerAppearance(value: unknown): ServerWebAppearanceSnapshot {
+  const snapshot = requireRecord(parseJsonValue(value, 0), "Server appearance");
+  const settings = requireRecord(snapshot.settings, "Server appearance settings");
+  if (
+    !Number.isSafeInteger(snapshot.revision) ||
+    (snapshot.revision as number) < 0 ||
+    (snapshot.updatedAt !== undefined && typeof snapshot.updatedAt !== "string")
+  ) {
+    throw new TypeError("Server appearance snapshot is invalid");
+  }
+  return {
+    settings: {
+      color: requireOneOf(
+        settings.color,
+        ["default", "ocean", "rose", "sunset", "midnight"] as const,
+        "appearance color",
+      ),
+      theme: requireOneOf(settings.theme, ["auto", "light", "dark"] as const, "appearance theme"),
+      fontSize: requireBoundedNumber(settings.fontSize, 12, 24, "appearance font size"),
+      fontFamily: requireStringAllowEmpty(settings.fontFamily, "appearance font family"),
+      minimalMode: requireBoolean(settings.minimalMode, "appearance minimal mode"),
+      backgroundImage: requireStringAllowEmpty(
+        settings.backgroundImage,
+        "appearance background image",
+      ),
+      backgroundOpacity: requireBoundedNumber(
+        settings.backgroundOpacity,
+        0,
+        1,
+        "appearance background opacity",
+      ),
+      backgroundBlur: requireBoundedNumber(
+        settings.backgroundBlur,
+        0,
+        20,
+        "appearance background blur",
+      ),
+      backgroundBrightness: requireBoundedNumber(
+        settings.backgroundBrightness,
+        0,
+        2,
+        "appearance background brightness",
+      ),
+      backgroundSize: requireOneOf(
+        settings.backgroundSize,
+        ["cover", "contain", "fill", "auto"] as const,
+        "appearance background size",
+      ),
+    },
+    revision: snapshot.revision as number,
+    ...(typeof snapshot.updatedAt === "string" ? { updatedAt: snapshot.updatedAt } : {}),
+  };
+}
+
+function parseServerWebState(value: unknown): ServerWebStateSnapshot {
+  const state = requireRecord(parseJsonValue(value, 0), "Server state");
+  const host = requireRecord(state.host, "Server Host state");
+  if (
+    state.apiVersion !== 1 ||
+    typeof state.generatedAt !== "string" ||
+    !Array.isArray(state.instances) ||
+    !Array.isArray(state.tasks) ||
+    typeof host.connected !== "boolean" ||
+    typeof host.hasControl !== "boolean" ||
+    !Number.isSafeInteger(host.revision) ||
+    typeof host.controllerSessionId !== "string"
+  ) {
+    throw new TypeError("Server state snapshot is invalid");
+  }
+  return state as unknown as ServerWebStateSnapshot;
+}
+
+function requireOneOf<const TValue extends string>(
+  value: unknown,
+  allowed: readonly TValue[],
+  label: string,
+): TValue {
+  if (typeof value === "string" && allowed.includes(value as TValue)) return value as TValue;
+  throw new TypeError(`${label} is invalid`);
+}
+
+function requireBoundedNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum) {
+    return value;
+  }
+  throw new TypeError(`${label} is invalid`);
+}
+
+function requireStringAllowEmpty(value: unknown, label: string): string {
+  if (typeof value === "string") return value;
+  throw new TypeError(`${label} must be a string`);
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value === "boolean") return value;
+  throw new TypeError(`${label} must be a boolean`);
 }
 
 function parseJsonValue(value: unknown, depth: number): JsonValue {

@@ -1,19 +1,16 @@
-import type { SeaShardDesktopApi } from "@seashard/contracts";
 import { defineClientUiModule } from "@seashard/ui-sdk";
 import { Info } from "lucide-vue-next";
 import { defineComponent, h } from "vue";
+import { aboutUiServiceContract, type AboutUiService } from "../service";
 import AboutPage from "./AboutPage.vue";
-
-const AboutFeaturePage = defineComponent({
-  name: "AboutFeaturePage",
-  setup: () => {
-    const desktopApi = (window as Window & { seashard: SeaShardDesktopApi }).seashard;
-    return () => h(AboutPage, { updates: desktopApi.updates });
-  },
-});
 
 export default defineClientUiModule({
   apply(context) {
+    const service = context.service<AboutUiService>(aboutUiServiceContract);
+    const page = defineComponent({
+      name: "AboutFeaturePage",
+      setup: () => () => h(AboutPage, { service }),
+    });
     context.slots.register(
       {
         name: "navigation.page",
@@ -27,7 +24,7 @@ export default defineClientUiModule({
         placement: "settings",
         settingsGroup: "software",
       },
-      AboutFeaturePage,
+      page,
     );
   },
 });

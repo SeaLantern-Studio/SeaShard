@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@seashard/bootstrap-runtime": "workspace:*",
+    "@seashard/database": "workspace:*",
     "@seashard/database-sqlite": "workspace:*",
     "@seashard/host-control": "workspace:*",
     "@seashard/plugin-foundation": "workspace:*",

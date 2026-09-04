@@ -10,6 +10,8 @@ import {
   type HostAgentExtensionDirectory,
   type HostControlClient,
   type HostControllerIdentity,
+  type HostControlRequestSnapshot,
+  type HostControllerSnapshot,
   type HostServiceDescriptor,
 } from "@seashard/host-control";
 import type {
@@ -32,6 +34,10 @@ export interface ConnectServerLocalHostOptions {
 
 export interface ServerLocalHostSnapshot {
   readonly id: "local";
+  readonly revision: number;
+  readonly controllerSessionId: string;
+  readonly holder?: HostControllerSnapshot;
+  readonly pending?: HostControlRequestSnapshot;
   readonly hasControl: boolean;
   readonly hostVersion?: string;
   readonly packageType?: string;
@@ -70,9 +76,33 @@ export class ServerLocalHostConnection {
       id: "local",
       hasControl: this.client.hasControl,
       connectedControllers: control.controllers.length,
+      revision: control.revision,
+      controllerSessionId: this.client.identity.sessionId,
+      ...(control.holder ? { holder: control.holder } : {}),
+      ...(control.pending ? { pending: control.pending } : {}),
       ...(this.client.hostVersion ? { hostVersion: this.client.hostVersion } : {}),
       ...(this.client.hostPackageType ? { packageType: this.client.hostPackageType } : {}),
     };
+  }
+
+  requestControl(): Promise<unknown> {
+    this.assertConnected();
+    return this.client.requestControl();
+  }
+
+  confirmControl(requestId: string): Promise<unknown> {
+    this.assertConnected();
+    return this.client.confirmControl(requestId);
+  }
+
+  rejectControl(requestId: string): Promise<unknown> {
+    this.assertConnected();
+    return this.client.rejectControl(requestId);
+  }
+
+  releaseControl(): Promise<unknown> {
+    this.assertConnected();
+    return this.client.releaseControl();
   }
   /** Host Worker 部署器复用同一条已认证控制连接，不另建会话或争抢控制权。 */
   workerDeploymentClient(): HostControlClient {

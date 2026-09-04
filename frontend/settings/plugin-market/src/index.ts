@@ -10,7 +10,7 @@ export const pluginMarketUiManifest: PluginManifest = {
       id: "plugin-market.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
         [pluginMarketContract]: ["search"],

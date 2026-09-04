@@ -1,18 +1,14 @@
 <script setup lang="ts">
-import type {
-  DesktopHostConnection,
-  DesktopHostConnectionsClientService,
-  DesktopHostConnectionsSnapshot,
-} from "@seashard/contracts";
+import type { DesktopHostConnection, DesktopHostConnectionsSnapshot } from "@seashard/contracts";
 import { Cmz_Button, Cmz_Spinner, useToast } from "cmzya-modern-ui";
 import { Cable, Monitor, RotateCw, ShieldCheck, ShieldOff } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import "./HostConnectionsPage.css";
+import type { HostConnectionsUiService } from "../service";
 
 const props = defineProps<{
-  hosts: DesktopHostConnectionsClientService;
+  hosts: HostConnectionsUiService;
 }>();
-
 const toast = useToast();
 const snapshot = shallowRef<DesktopHostConnectionsSnapshot>();
 const loading = ref(true);
@@ -66,6 +62,18 @@ function statusIcon(host: DesktopHostConnection) {
 
 function isOwnRequest(host: DesktopHostConnection): boolean {
   return host.pending?.requester.sessionId === controllerSessionId.value;
+}
+
+function hasAvailableAction(host: DesktopHostConnection): boolean {
+  if (host.installation === "missing") return Boolean(props.hosts.install);
+  if (host.state === "error" || host.state === "disconnected") return Boolean(props.hosts.retry);
+  if (host.pending) return Boolean(props.hosts.confirmControl && props.hosts.rejectControl);
+  if (host.state === "read-only") {
+    return Boolean(props.hosts.requestControl || props.hosts.disconnect);
+  }
+  return host.state === "control"
+    ? Boolean(props.hosts.releaseControl || props.hosts.disconnect)
+    : false;
 }
 
 async function execute(
@@ -138,30 +146,39 @@ function notifyFailure(title: string, error: unknown): void {
           <div v-if="host.error" class="host-connection-error">{{ host.error }}</div>
         </div>
 
-        <div class="host-connection-actions">
+        <div v-if="hasAvailableAction(host)" class="host-connection-actions">
           <Cmz_Button
-            v-if="host.installation === 'missing'"
+            v-if="host.installation === 'missing' && props.hosts.install"
             size="sm"
             :loading="workingHostId === host.id"
-            @click="execute(host, () => props.hosts.install(host.id))"
+            @click="execute(host, () => props.hosts.install!(host.id))"
           >
             获取 Host
           </Cmz_Button>
           <Cmz_Button
-            v-else-if="host.state === 'error' || host.state === 'disconnected'"
+            v-else-if="
+              (host.state === 'error' || host.state === 'disconnected') && props.hosts.retry
+            "
             size="sm"
             :loading="workingHostId === host.id"
-            @click="execute(host, () => props.hosts.retry(host.id))"
+            @click="execute(host, () => props.hosts.retry!(host.id))"
           >
             重新连接
           </Cmz_Button>
 
-          <template v-else-if="host.pending && isOwnRequest(host)">
+          <template
+            v-else-if="
+              host.pending &&
+              isOwnRequest(host) &&
+              props.hosts.confirmControl &&
+              props.hosts.rejectControl
+            "
+          >
             <Cmz_Button
               size="sm"
               :loading="workingHostId === host.id"
               @click="
-                execute(host, () => props.hosts.confirmControl(host.id, host.pending!.requestId))
+                execute(host, () => props.hosts.confirmControl!(host.id, host.pending!.requestId))
               "
             >
               确认接管
@@ -171,19 +188,26 @@ function notifyFailure(title: string, error: unknown): void {
               size="sm"
               :disabled="Boolean(workingHostId)"
               @click="
-                execute(host, () => props.hosts.rejectControl(host.id, host.pending!.requestId))
+                execute(host, () => props.hosts.rejectControl!(host.id, host.pending!.requestId))
               "
             >
               保持只读
             </Cmz_Button>
           </template>
 
-          <template v-else-if="host.pending && host.state === 'control'">
+          <template
+            v-else-if="
+              host.pending &&
+              host.state === 'control' &&
+              props.hosts.confirmControl &&
+              props.hosts.rejectControl
+            "
+          >
             <Cmz_Button
               size="sm"
               :loading="workingHostId === host.id"
               @click="
-                execute(host, () => props.hosts.confirmControl(host.id, host.pending!.requestId))
+                execute(host, () => props.hosts.confirmControl!(host.id, host.pending!.requestId))
               "
             >
               允许接管
@@ -193,7 +217,7 @@ function notifyFailure(title: string, error: unknown): void {
               size="sm"
               :disabled="Boolean(workingHostId)"
               @click="
-                execute(host, () => props.hosts.rejectControl(host.id, host.pending!.requestId))
+                execute(host, () => props.hosts.rejectControl!(host.id, host.pending!.requestId))
               "
             >
               保持控制
@@ -201,20 +225,32 @@ function notifyFailure(title: string, error: unknown): void {
           </template>
 
           <Cmz_Button
-            v-else-if="host.state === 'read-only'"
+            v-else-if="host.state === 'read-only' && props.hosts.requestControl"
             size="sm"
             :loading="workingHostId === host.id"
-            @click="execute(host, () => props.hosts.requestControl(host.id))"
+            @click="execute(host, () => props.hosts.requestControl!(host.id))"
           >
             请求接管
           </Cmz_Button>
 
           <Cmz_Button
-            v-if="host.state === 'control' || host.state === 'read-only'"
+            v-if="host.state === 'control' && props.hosts.releaseControl"
+            variant="outline"
+            size="sm"
+            :loading="workingHostId === host.id"
+            @click="execute(host, () => props.hosts.releaseControl!(host.id))"
+          >
+            释放控制
+          </Cmz_Button>
+
+          <Cmz_Button
+            v-if="
+              (host.state === 'control' || host.state === 'read-only') && props.hosts.disconnect
+            "
             variant="outline"
             size="sm"
             :disabled="Boolean(workingHostId)"
-            @click="execute(host, () => props.hosts.disconnect(host.id))"
+            @click="execute(host, () => props.hosts.disconnect!(host.id))"
           >
             断开
           </Cmz_Button>

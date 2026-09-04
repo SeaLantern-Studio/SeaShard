@@ -21,7 +21,11 @@ function updateAppearance(patch: Partial<UiAppearanceSettings>): void {
 <template>
   <div class="settings-view animate-stagger-in">
     <ColorThemeCard :color="settings.color" @change="updateColor" />
-    <AppearanceCard :settings="settings" @change="updateAppearance" />
+    <AppearanceCard
+      :settings="settings"
+      :supports-acrylic="appearance.supportsAcrylic !== false"
+      @change="updateAppearance"
+    />
   </div>
 </template>
 

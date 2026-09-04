@@ -10,9 +10,45 @@ import type { JsonValue } from "@seashard/plugin-sdk";
 
 export const serverWebApiVersion = 1;
 
+export type ServerWebAppearanceTheme = "auto" | "light" | "dark";
+export type ServerWebAppearanceColor = "default" | "ocean" | "rose" | "sunset" | "midnight";
+export type ServerWebBackgroundSize = "cover" | "contain" | "fill" | "auto";
+
+/** Server Controller 统一保存的网页外观；窗口材质字段有意不进入该边界。 */
+export interface ServerWebAppearanceSettings {
+  readonly color: ServerWebAppearanceColor;
+  readonly theme: ServerWebAppearanceTheme;
+  readonly fontSize: number;
+  readonly fontFamily: string;
+  readonly minimalMode: boolean;
+  readonly backgroundImage: string;
+  readonly backgroundOpacity: number;
+  readonly backgroundBlur: number;
+  readonly backgroundBrightness: number;
+  readonly backgroundSize: ServerWebBackgroundSize;
+}
+
+export interface ServerWebAppearanceSnapshot {
+  readonly settings: ServerWebAppearanceSettings;
+  readonly revision: number;
+  readonly updatedAt?: string;
+}
+
+export interface ServerWebHostControllerSnapshot {
+  readonly sessionId: string;
+  readonly label: string;
+}
+
+export interface ServerWebHostControlRequestSnapshot {
+  readonly requestId: string;
+  readonly requester: ServerWebHostControllerSnapshot;
+  readonly requestedAt: string;
+}
+
 export interface ServerWebBootstrapSnapshot {
   readonly apiVersion: typeof serverWebApiVersion;
   readonly setupRequired: boolean;
+  readonly controllerVersion: string;
   readonly authenticated: boolean;
   readonly username?: string;
 }
@@ -24,6 +60,10 @@ export interface ServerWebHostSnapshot {
   readonly hostVersion?: string;
   readonly packageType?: string;
   readonly connectedControllers: number;
+  readonly revision: number;
+  readonly controllerSessionId: string;
+  readonly holder?: ServerWebHostControllerSnapshot;
+  readonly pending?: ServerWebHostControlRequestSnapshot;
 }
 
 export interface ServerWebInstanceSnapshot {
@@ -69,6 +109,7 @@ export type ServerWebEvent =
       readonly type: "agent-model-configuration";
       readonly configuration: AgentModelConfigurationSnapshot;
     }
+  | { readonly type: "client-bootstrap"; readonly bootstrap: ServerWebClientBootstrap }
   | { readonly type: "task"; readonly task: ServerWebTaskSnapshot };
 
 export interface ServerWebEventEnvelope {

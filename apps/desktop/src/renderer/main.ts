@@ -1,3 +1,5 @@
+import { aboutUiServiceContract, type AboutUiService } from "@seashard/about-ui";
+import { hostConnectionsUiServiceContract } from "@seashard/host-connections-ui";
 import {
   agentInvocationContract,
   agentModelConfigurationContract,
@@ -26,6 +28,13 @@ import App from "./App.vue";
 import { builtInClientModuleLoaders } from "./client-modules";
 import { router } from "./router";
 import "./style.css";
+
+const desktopAboutUiService: AboutUiService = {
+  target: "desktop",
+  technology: "Electron + Vue 3",
+  updates: window.seashard.updates,
+  getCurrentVersion: async () => (await window.seashard.updates.getSnapshot()).currentVersion,
+};
 
 const runtime = new ClientUiRuntime({
   router,
@@ -58,6 +67,8 @@ const runtime = new ClientUiRuntime({
     [serverConfigurationContract]: window.seashard.serverConfiguration,
     [serverRuntimeContract]: window.seashard.serverRuntime,
     [javaRuntimeManagerContract]: window.seashard.javaRuntime,
+    [hostConnectionsUiServiceContract]: window.seashard.hosts,
+    [aboutUiServiceContract]: desktopAboutUiService,
     [uiAppearanceContract]: appearanceService,
   },
 });

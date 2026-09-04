@@ -1,4 +1,5 @@
 import { BootstrapLoader } from "@seashard/bootstrap-runtime";
+import type { DatabaseService } from "@seashard/database";
 import { createSQLiteBootstrapDescriptor } from "@seashard/database-sqlite";
 import { createPluginFoundationBootstrapDescriptor } from "@seashard/plugin-foundation";
 import { PluginKernel, type PluginKernelOptions } from "@seashard/plugin-system";
@@ -31,6 +32,7 @@ export class SeaShardControllerRuntime {
   private disposeTask?: Promise<void>;
 
   constructor(
+    readonly database: DatabaseService,
     readonly dataRoot: string,
     readonly root: Context,
     readonly kernel: PluginKernel,
@@ -98,7 +100,13 @@ export async function startSeaShardController(
       pluginStorage: root["plugin-foundation"].storage,
       executionLocation: "controller",
     });
-    return new SeaShardControllerRuntime(options.dataRoot, root, kernel, bootstrapLoader);
+    return new SeaShardControllerRuntime(
+      root.database,
+      options.dataRoot,
+      root,
+      kernel,
+      bootstrapLoader,
+    );
   } catch (error) {
     await kernel?.dispose().catch(() => undefined);
     await bootstrapLoader.dispose().catch(() => undefined);

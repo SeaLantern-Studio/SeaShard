@@ -1,4 +1,5 @@
 import type { PluginManifest } from "@seashard/plugin-sdk";
+export { aboutUiServiceContract, type AboutUiService } from "./service";
 
 export const aboutUiManifest: PluginManifest = {
   id: "seashard.about-ui",
@@ -9,7 +10,7 @@ export const aboutUiManifest: PluginManifest = {
       id: "about.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
       permissions: [],
     },

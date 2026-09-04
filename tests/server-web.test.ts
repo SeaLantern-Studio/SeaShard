@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { SQLiteDatabaseBroker } from "../components/data/database-sqlite/src/index.ts";
 import {
   serverCoreIconHost,
   serverCoreIconScheme,
@@ -14,6 +15,8 @@ import {
   type ServerRuntimeSnapshot,
 } from "../packages/contracts/src/index.ts";
 import type {
+  ServerWebAppearanceSettings,
+  ServerWebAppearanceSnapshot,
   ServerWebBootstrapSnapshot,
   ServerWebStateSnapshot,
 } from "../packages/server-web-api/src/index.ts";
@@ -24,15 +27,22 @@ import {
   ServerWebEvents,
 } from "../apps/server-web/src/client-runtime.ts";
 import { ServerAdministratorAuth } from "../apps/server/src/web/auth.ts";
-import { startServerWeb } from "../apps/server/src/web/server.ts";
+import {
+  defaultServerWebAppearanceSettings,
+  ServerWebAppearanceStore,
+} from "../apps/server/src/web/appearance-store.ts";
+import { startServerWeb, type ServerWebAppearanceSource } from "../apps/server/src/web/server.ts";
 import type { ServerWebHostSource } from "../apps/server/src/web/state.ts";
 
 const password = "seashard-test-password";
+const controllerVersion = "0.7.0-test";
 
 await test("Server Web defaults to loopback and completes administrator setup", async () => {
   const fixture = await createFixture();
   const web = await startServerWeb({
     dataRoot: fixture.dataRoot,
+    controllerVersion,
+    appearance: createMemoryAppearanceSource(),
     publicRoot: fixture.publicRoot,
     port: 0,
   });
@@ -45,6 +55,7 @@ await test("Server Web defaults to loopback and completes administrator setup", 
     assert.deepEqual(bootstrap.value, {
       apiVersion: 1,
       setupRequired: true,
+      controllerVersion,
       authenticated: false,
     });
 
@@ -61,6 +72,23 @@ await test("Server Web defaults to loopback and completes administrator setup", 
     assert.equal(setup.value.authenticated, true);
     assert.equal(setup.value.username, "admin");
     const cookie = requireSessionCookie(setup.response);
+
+    const appearance = await fetchJson(web.address.url, "/api/appearance", {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(appearance.response.status, 200);
+    assert.deepEqual(
+      (appearance.value as ServerWebAppearanceSnapshot).settings,
+      defaultServerWebAppearanceSettings,
+    );
+    const updatedAppearance = await fetchJson(web.address.url, "/api/appearance", {
+      method: "PATCH",
+      headers: { Cookie: cookie, Origin: web.address.url },
+      body: JSON.stringify({ color: "ocean", theme: "dark" }),
+    });
+    assert.equal(updatedAppearance.response.status, 200);
+    assert.equal((updatedAppearance.value as ServerWebAppearanceSnapshot).settings.color, "ocean");
+    assert.equal((updatedAppearance.value as ServerWebAppearanceSnapshot).revision, 1);
 
     const state = await fetchJson(web.address.url, "/api/state", {
       headers: { Cookie: cookie },
@@ -97,6 +125,82 @@ await test("Server Web defaults to loopback and completes administrator setup", 
   }
 });
 
+await test("Server Web appearance persists in its dedicated SQLite table", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "seashard-server-appearance-"));
+  const databasePath = join(directory, "seashard.sqlite3");
+  const workerEntry = new URL("../apps/database-worker/dist/index.js", import.meta.url);
+  let broker: SQLiteDatabaseBroker | undefined;
+  try {
+    broker = await SQLiteDatabaseBroker.create({ databasePath, workerEntry, readWorkers: 1 });
+    let store = await ServerWebAppearanceStore.create(broker);
+    const first = await store.update({
+      color: "midnight",
+      theme: "dark",
+      fontSize: 18,
+      minimalMode: true,
+    });
+    assert.equal(first.revision, 1);
+    await broker.close();
+
+    broker = await SQLiteDatabaseBroker.create({ databasePath, workerEntry, readWorkers: 1 });
+    store = await ServerWebAppearanceStore.create(broker);
+    const restored = await store.get();
+    assert.equal(restored.settings.color, "midnight");
+    assert.equal(restored.settings.theme, "dark");
+    assert.equal(restored.settings.fontSize, 18);
+    assert.equal(restored.settings.minimalMode, true);
+    assert.equal(restored.revision, 1);
+  } finally {
+    await broker?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+await test("Server Web streams Client Entry enable and disable changes", async () => {
+  const fixture = await createFixture();
+  const fakeController = createFakeClientEntryController();
+  const web = await startServerWeb({
+    dataRoot: fixture.dataRoot,
+    controllerVersion,
+    appearance: createMemoryAppearanceSource(),
+    publicRoot: fixture.publicRoot,
+    controller: fakeController.controller,
+    port: 0,
+  });
+  const abort = new AbortController();
+  try {
+    const setup = await fetchJson(web.address.url, "/api/setup", {
+      method: "POST",
+      headers: { Origin: web.address.url },
+      body: JSON.stringify({ username: "operator", password }),
+    });
+    const cookie = requireSessionCookie(setup.response);
+    const stream = await fetch(`${web.address.url}/api/events`, {
+      headers: { Cookie: cookie },
+      signal: abort.signal,
+    });
+    assert.equal(stream.status, 200);
+    const reader = stream.body!.getReader();
+    assert.match(await readStreamChunk(reader), /event: state/u);
+
+    fakeController.publish(1, true);
+    const enabled = await readStreamChunk(reader);
+    assert.match(enabled, /event: client-bootstrap/u);
+    assert.match(enabled, /"revision":1/u);
+    assert.match(enabled, /seashard-plugin\.scheduled-commands/u);
+
+    fakeController.publish(2, false);
+    const disabled = await readStreamChunk(reader);
+    assert.match(disabled, /event: client-bootstrap/u);
+    assert.match(disabled, /"revision":2/u);
+    assert.match(disabled, /"entries":\[\]/u);
+  } finally {
+    abort.abort();
+    await web.dispose();
+    await fixture.dispose();
+  }
+});
+
 await test("Server Web exposes health and protects local lifecycle control", async () => {
   const fixture = await createFixture();
   let shutdownRequested = false;
@@ -104,6 +208,8 @@ await test("Server Web exposes health and protects local lifecycle control", asy
   const token = "a".repeat(64);
   const web = await startServerWeb({
     dataRoot: fixture.dataRoot,
+    controllerVersion,
+    appearance: createMemoryAppearanceSource(),
     publicRoot: fixture.publicRoot,
     port: 0,
     serviceControl: {
@@ -146,6 +252,8 @@ await test("Server Web publishes Host state, operations, logs, and reconnect sna
   const fakeHost = createFakeHost();
   const web = await startServerWeb({
     dataRoot: fixture.dataRoot,
+    controllerVersion,
+    appearance: createMemoryAppearanceSource(),
     publicRoot: fixture.publicRoot,
     localHost: fakeHost.source,
     port: 0,
@@ -222,6 +330,7 @@ await test("Server Web projects and serves authenticated Host image assets", asy
   const sha256 = "b".repeat(64);
   const controller = {
     events: { on: () => () => undefined },
+    onClientEntriesChanged: () => () => undefined,
     service: (contract: string) => ({
       resolveIconPath: async (identity: string) => {
         if (contract === serverCoreSourceContract && identity === sha256) return imagePath;
@@ -233,6 +342,8 @@ await test("Server Web projects and serves authenticated Host image assets", asy
   } as unknown as PluginKernel;
   const web = await startServerWeb({
     dataRoot: fixture.dataRoot,
+    controllerVersion,
+    appearance: createMemoryAppearanceSource(),
     publicRoot: fixture.publicRoot,
     controller,
     port: 0,
@@ -327,6 +438,8 @@ await test("Server Web rejects remote listening before TLS and administrator set
     await assert.rejects(
       startServerWeb({
         dataRoot: fixture.dataRoot,
+        controllerVersion,
+        appearance: createMemoryAppearanceSource(),
         publicRoot: fixture.publicRoot,
         host: "0.0.0.0",
         port: 0,
@@ -336,6 +449,8 @@ await test("Server Web rejects remote listening before TLS and administrator set
     await assert.rejects(
       startServerWeb({
         dataRoot: fixture.dataRoot,
+        controllerVersion,
+        appearance: createMemoryAppearanceSource(),
         publicRoot: fixture.publicRoot,
         host: "0.0.0.0",
         port: 0,
@@ -409,6 +524,78 @@ async function createFixture(): Promise<{
   };
 }
 
+function createFakeClientEntryController(): {
+  readonly controller: PluginKernel;
+  publish(revision: number, enabled: boolean): void;
+} {
+  type ClientEntrySnapshot = ReturnType<PluginKernel["clientEntrySnapshot"]>;
+  type ClientEntryListener = Parameters<PluginKernel["onClientEntriesChanged"]>[0];
+  const entry = {
+    id: "scheduler.client",
+    runtime: "client",
+    module: "./dist/client.js",
+    targets: ["web"],
+    activationScopes: ["global"],
+    uses: {},
+    permissions: [],
+  };
+  const activeEntry = {
+    package: {
+      manifest: {
+        id: "seashard-plugin.scheduled-commands",
+        version: "0.2.2",
+        publisher: "seashard-plugin",
+        entries: [entry],
+        compatibility: { seaShard: ">=0.0.0 <1.0.0", clientProtocol: ">=1 <2" },
+      },
+      digest: "a".repeat(64),
+      rootPath: "builtin:scheduled-commands",
+      source: "builtin",
+      trust: "builtin",
+      installedAt: "2026-09-03T00:00:00.000Z",
+    },
+    entry,
+    binding: {
+      id: "test.scheduled-commands.client",
+      pluginId: "seashard-plugin.scheduled-commands",
+      entryId: entry.id,
+      scopeType: "global",
+      scopeId: "global",
+      enabled: true,
+      config: {},
+    },
+    runtimeId: "test.scheduled-commands.client",
+    host: "client",
+  };
+  let snapshot = { revision: 0, entries: [] } as unknown as ClientEntrySnapshot;
+  let listener: ClientEntryListener | undefined;
+  return {
+    controller: {
+      events: { on: () => () => undefined },
+      clientEntrySnapshot: () => snapshot,
+      onClientEntriesChanged: (nextListener: ClientEntryListener) => {
+        listener = nextListener;
+        return () => {
+          if (listener === nextListener) listener = undefined;
+        };
+      },
+    } as unknown as PluginKernel,
+    publish(revision, enabled) {
+      snapshot = {
+        revision,
+        entries: enabled ? [activeEntry] : [],
+      } as unknown as ClientEntrySnapshot;
+      listener?.(snapshot);
+    },
+  };
+}
+
+async function readStreamChunk(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const chunk = await reader.read();
+  assert.equal(chunk.done, false);
+  return new TextDecoder().decode(chunk.value);
+}
+
 function createFakeHost(): {
   readonly source: ServerWebHostSource;
   readonly calls: { start: number };
@@ -445,6 +632,8 @@ function createFakeHost(): {
         id: "local",
         hasControl: true,
         connectedControllers: 1,
+        revision: 1,
+        controllerSessionId: "server-controller",
         hostVersion: "0.0.0",
         packageType: "development",
       }),
@@ -476,6 +665,10 @@ function createFakeHost(): {
       },
       getLogs: async () => lines,
       onConsoleLine: () => () => undefined,
+      requestControl: async () => undefined,
+      confirmControl: async () => undefined,
+      rejectControl: async () => undefined,
+      releaseControl: async () => undefined,
     },
   };
 }
@@ -493,6 +686,7 @@ async function fetchJson(
 function assertBootstrap(value: unknown): asserts value is ServerWebBootstrapSnapshot {
   assert.ok(isRecord(value));
   assert.equal(value.apiVersion, 1);
+  assert.equal(typeof value.controllerVersion, "string");
   assert.equal(typeof value.setupRequired, "boolean");
   assert.equal(typeof value.authenticated, "boolean");
   if (value.username !== undefined) assert.equal(typeof value.username, "string");
@@ -503,8 +697,37 @@ function assertState(value: unknown): asserts value is ServerWebStateSnapshot {
   assert.equal(value.apiVersion, 1);
   assert.ok(isRecord(value.host));
   assert.equal(typeof value.host.connected, "boolean");
+  assert.equal(typeof value.host.revision, "number");
+  assert.equal(typeof value.host.controllerSessionId, "string");
   assert.ok(Array.isArray(value.instances));
   assert.ok(Array.isArray(value.tasks));
+}
+
+function createMemoryAppearanceSource(): ServerWebAppearanceSource {
+  let snapshot: ServerWebAppearanceSnapshot = {
+    settings: { ...defaultServerWebAppearanceSettings },
+    revision: 0,
+  };
+  return {
+    get: async () => snapshot,
+    update: async (value) => {
+      const patch = value as Partial<ServerWebAppearanceSettings>;
+      snapshot = {
+        settings: { ...snapshot.settings, ...patch },
+        revision: snapshot.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      return snapshot;
+    },
+    reset: async () => {
+      snapshot = {
+        settings: { ...defaultServerWebAppearanceSettings },
+        revision: snapshot.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      return snapshot;
+    },
+  };
 }
 
 function assertConsoleHistory(

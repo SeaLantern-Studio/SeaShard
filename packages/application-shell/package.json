@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./style.css": "./src/style.css",
+    "./appearance-core": "./src/appearance-core.ts",
     "./logo.svg": "./src/assets/logo.svg"
   },
   "dependencies": {

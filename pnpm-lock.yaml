@@ -243,6 +243,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@seashard/about-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/about
       '@seashard/agent-client-features':
         specifier: workspace:*
         version: link:../../frontend/agent/client-features
@@ -255,6 +258,12 @@ importers:
       '@seashard/controller-runtime':
         specifier: workspace:*
         version: link:../../packages/controller-runtime
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@seashard/host-connections-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/host-connections
       '@seashard/host-control':
         specifier: workspace:*
         version: link:../../packages/host-control
@@ -264,9 +273,24 @@ importers:
       '@seashard/local-host-installer':
         specifier: workspace:*
         version: link:../../packages/local-host-installer
+      '@seashard/personalization-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/personalization
+      '@seashard/plugin-management':
+        specifier: workspace:*
+        version: link:../../components/plugin/management
+      '@seashard/plugin-market':
+        specifier: workspace:*
+        version: link:../../components/plugin/market
+      '@seashard/plugin-market-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin-market
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk/dist
+      '@seashard/plugin-settings-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin
       '@seashard/plugin-system':
         specifier: workspace:*
         version: link:../../packages/plugin-system
@@ -285,6 +309,9 @@ importers:
 
   apps/server-web:
     dependencies:
+      '@seashard/about-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/about
       '@seashard/agent-client-features':
         specifier: workspace:*
         version: link:../../frontend/agent/client-features
@@ -294,9 +321,21 @@ importers:
       '@seashard/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts/dist
+      '@seashard/host-connections-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/host-connections
+      '@seashard/personalization-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/personalization
+      '@seashard/plugin-market-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin-market
       '@seashard/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk/dist
+      '@seashard/plugin-settings-ui':
+        specifier: workspace:*
+        version: link:../../frontend/settings/plugin
       '@seashard/server-client-features':
         specifier: workspace:*
         version: link:../../frontend/server/client-features
@@ -312,6 +351,9 @@ importers:
       '@seashard/ui-runtime':
         specifier: workspace:*
         version: link:../../packages/ui-runtime
+      '@seashard/ui-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ui-sdk/dist
       cmzya-modern-ui:
         specifier: 0.7.1
         version: 0.7.1(lucide-vue-next@0.400.0(vue@3.5.41(typescript@5.9.3)))(vue@3.5.41(typescript@5.9.3))
@@ -1345,6 +1387,9 @@ importers:
       '@seashard/bootstrap-runtime':
         specifier: workspace:*
         version: link:../bootstrap-runtime
+      '@seashard/database':
+        specifier: workspace:*
+        version: link:../database
       '@seashard/database-sqlite':
         specifier: workspace:*
         version: link:../../components/data/database-sqlite

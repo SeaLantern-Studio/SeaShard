@@ -4,7 +4,6 @@ import {
   ApplicationSidebar,
   PageExtensionRoot,
   UiEntryBoundary,
-  appearanceService,
   createWorkspaceRouteHistory,
   rememberWorkspaceRoute,
   resolveWorkspaceRoute,
@@ -28,6 +27,12 @@ import {
   watch,
   type Component,
 } from "vue";
+import { acceptServerControllerVersion } from "./about";
+import {
+  hydrateServerAppearance,
+  onServerAppearancePersistenceError,
+  serverAppearanceService,
+} from "./appearance";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import {
   authenticateServerWeb,
@@ -35,6 +40,7 @@ import {
   loadServerWebAuthentication,
   logoutServerWeb,
   onServerWebAuthenticationRequired,
+  serverWebEvents,
   type ServerWebCredentials,
 } from "./client-runtime";
 
@@ -49,6 +55,8 @@ const setupRequired = ref(false);
 const authenticationBusy = ref(false);
 const appContent = ref<HTMLElement>();
 let disposeAuthenticationRequired: (() => void) | undefined;
+let disposeAppearancePersistenceError: (() => void) | undefined;
+let disposeClientBootstrap: (() => void) | undefined;
 
 const activeRuntimeId = computed(() =>
   typeof route.meta.runtimeId === "string" ? route.meta.runtimeId : undefined,
@@ -90,6 +98,9 @@ const retainedRouteComponentNames = computed(() => {
 });
 
 onMounted(() => {
+  disposeAppearancePersistenceError = onServerAppearancePersistenceError((error) => {
+    notifyError("保存外观设置失败", error);
+  });
   disposeAuthenticationRequired = onServerWebAuthenticationRequired(() => {
     if (authenticationState.value === "authenticated") {
       toast.info({ title: "登录已过期" });
@@ -101,6 +112,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposeAuthenticationRequired?.();
+  disposeAppearancePersistenceError?.();
+  disposeClientBootstrap?.();
 });
 
 watch(
@@ -129,7 +142,17 @@ watch(
 
 /** 登录成功后才装载 Client Entry，未鉴权浏览器接触不到页面清单与调用身份。 */
 async function enterApplication(snapshot: ServerWebBootstrapSnapshot): Promise<void> {
+  acceptServerControllerVersion(snapshot.controllerVersion);
+  try {
+    await hydrateServerAppearance();
+  } catch (error) {
+    notifyError("读取外观设置失败", error);
+  }
   await runtime.reconcile(await loadServerClientBootstrap());
+  disposeClientBootstrap?.();
+  disposeClientBootstrap = serverWebEvents.subscribeClientBootstrap((bootstrap) => {
+    void runtime.reconcile(bootstrap).catch((error) => runtime.failBootstrap(error));
+  });
   setupRequired.value = snapshot.setupRequired;
   authenticationState.value = "authenticated";
 
@@ -198,6 +221,8 @@ async function logout(): Promise<void> {
 async function showAuthentication(nextSetupRequired: boolean): Promise<void> {
   setupRequired.value = nextSetupRequired;
   authenticationState.value = "guest";
+  disposeClientBootstrap?.();
+  disposeClientBootstrap = undefined;
   await router.replace("/");
   await runtime.dispose();
 }
@@ -237,8 +262,8 @@ function notifyError(title: string, error: unknown): void {
         :workspace="workspace"
         :workspaces="['agent', 'server']"
         :settings-mode="settingsMode"
-        :theme="appearanceService.settings.value.theme"
-        @update:theme="appearanceService.update({ theme: $event })"
+        :theme="serverAppearanceService.settings.value.theme"
+        @update:theme="serverAppearanceService.update({ theme: $event })"
         @update:workspace="updateWorkspace"
       >
         <template #actions>

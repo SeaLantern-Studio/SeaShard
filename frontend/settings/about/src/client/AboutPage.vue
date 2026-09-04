@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type {
-  DesktopUpdateClientService,
   DesktopUpdateFinishResult,
   DesktopUpdateRestartRequirement,
   DesktopUpdateSnapshot,
@@ -8,11 +7,14 @@ import type {
 import { Cmz_Button, Cmz_Modal, useToast } from "cmzya-modern-ui";
 import { Download, ExternalLink, RefreshCw } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import type { AboutUiService } from "../service";
 
 const props = defineProps<{
-  updates: DesktopUpdateClientService;
+  service: AboutUiService;
 }>();
 
+const updates = props.service.updates;
+const currentVersion = ref("—");
 const toast = useToast();
 const snapshot = shallowRef<DesktopUpdateSnapshot>();
 const restartRequirement = shallowRef<DesktopUpdateRestartRequirement>();
@@ -98,14 +100,22 @@ const progressPercent = computed(() =>
 );
 
 onMounted(async () => {
-  disposeSnapshotListener = props.updates.onSnapshotChanged((value) => {
+  if (!updates) {
+    try {
+      currentVersion.value = await props.service.getCurrentVersion();
+    } catch (error) {
+      toast.error({ title: "读取版本信息失败", description: errorMessage(error) });
+    }
+    return;
+  }
+  disposeSnapshotListener = updates.onSnapshotChanged((value) => {
     snapshot.value = value;
     if (value.state !== "restart-required" && value.state !== "host-install-ready") {
       restartRequirement.value = undefined;
     }
   });
   try {
-    snapshot.value = await props.updates.getSnapshot();
+    snapshot.value = await updates.getSnapshot();
   } catch (error) {
     toast.error({ title: "读取更新状态失败", description: errorMessage(error) });
   }
@@ -123,7 +133,7 @@ async function checkOrInstall(): Promise<void> {
   if (current.state === "available") {
     const hostOnly = localHostUpdateAvailable.value && !controllerUpdateAvailable.value;
     try {
-      const result = await props.updates.apply();
+      const result = await updates!.apply();
       handleFinishResult(result);
       if (manualDownload.value) {
         toast.info({ title: "已打开 macOS 下载页" });
@@ -144,7 +154,7 @@ async function checkOrInstall(): Promise<void> {
   }
 
   try {
-    const result = await props.updates.check();
+    const result = await updates!.check();
     if (result.state === "available") {
       const labels = (result.availableComponents ?? []).map((component) =>
         component === "controller" ? "Controller" : "本机 Host",
@@ -172,7 +182,7 @@ async function finishUpdate(stopRunningServers: boolean): Promise<void> {
     snapshot.value?.state === "host-install-ready" && !controllerUpdateAvailable.value;
   restartWorking.value = true;
   try {
-    const result = await props.updates.finish({
+    const result = await updates!.finish({
       stopRunningServers,
       afterInstall: "restart",
     });
@@ -237,19 +247,19 @@ function errorMessage(error: unknown): string {
       <div class="about-product-copy">
         <h2 id="about-product-name">SeaShard</h2>
       </div>
-      <span class="about-version">v{{ snapshot?.currentVersion ?? "—" }}</span>
+      <span class="about-version">v{{ snapshot?.currentVersion ?? currentVersion }}</span>
     </section>
 
     <dl class="about-details">
       <div>
-        <dt>桌面技术</dt>
-        <dd>Electron + Vue 3</dd>
+        <dt>{{ props.service.target === "desktop" ? "桌面技术" : "服务器技术" }}</dt>
+        <dd>{{ props.service.technology }}</dd>
       </div>
       <div>
         <dt>运行时设计</dt>
         <dd>一切皆组件</dd>
       </div>
-      <div class="about-update-row">
+      <div v-if="updates" class="about-update-row">
         <dt>软件更新</dt>
         <dd class="about-update-control">
           <div class="about-update-action">

@@ -10,7 +10,7 @@ export const personalizationUiManifest: PluginManifest = {
       id: "personalization.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
       permissions: [uiAppearanceContract],
     },

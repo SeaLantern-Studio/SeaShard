@@ -6,6 +6,7 @@ import type {
 } from "@seashard/contracts";
 import {
   serverWebApiVersion,
+  type ServerWebClientBootstrap,
   type ServerWebEvent,
   type ServerWebEventEnvelope,
   type ServerWebHostSnapshot,
@@ -37,6 +38,10 @@ export interface ServerWebHostSource {
   sendCommand(instanceId: string, command: string): Promise<void>;
   getLogs(instanceId: string, afterSequence?: number): Promise<readonly ServerConsoleLine[]>;
   onConsoleLine(listener: (line: ServerConsoleLine) => void): () => void;
+  requestControl(): Promise<unknown>;
+  confirmControl(requestId: string): Promise<unknown>;
+  rejectControl(requestId: string): Promise<unknown>;
+  releaseControl(): Promise<unknown>;
 }
 
 /** 汇集 Host 事实、服务器任务和实时日志，HTTP 层只负责鉴权与传输。 */
@@ -47,6 +52,7 @@ export class ServerWebStateCoordinator {
   private readonly stopConsole?: () => void;
   private sequence = 0;
   private disposed = false;
+  private hostMutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: ServerWebHostSource | undefined) {
     this.stopConsole = host?.onConsoleLine((line) => {
@@ -63,6 +69,8 @@ export class ServerWebStateCoordinator {
           connected: false,
           hasControl: false,
           connectedControllers: 0,
+          revision: 0,
+          controllerSessionId: "",
         };
     const instances = host ? await host.listInstances() : [];
     const runtimes = await Promise.all(
@@ -122,6 +130,10 @@ export class ServerWebStateCoordinator {
     return this.publish({ type: "agent-model-configuration", configuration });
   }
 
+  publishClientBootstrap(bootstrap: ServerWebClientBootstrap): ServerWebEventEnvelope {
+    return this.publish({ type: "client-bootstrap", bootstrap });
+  }
+
   startTask(kind: ServerWebTaskKind, instanceId: string): ServerWebTaskSnapshot {
     this.requireHost();
     const task: ServerWebTaskSnapshot = {
@@ -148,6 +160,32 @@ export class ServerWebStateCoordinator {
       requireInstanceId(instanceId),
       requireSequence(afterSequence),
     );
+  }
+
+  mutateHostControl(
+    action: "request" | "confirm" | "reject" | "release",
+    requestId?: string,
+  ): Promise<ServerWebStateSnapshot> {
+    const task = this.hostMutationQueue.then(async () => {
+      const host = this.requireHost();
+      if (action === "request") {
+        await host.requestControl();
+      } else if (action === "release") {
+        await host.releaseControl();
+      } else if (action === "confirm") {
+        await host.confirmControl(requireControlRequestId(requestId));
+      } else {
+        await host.rejectControl(requireControlRequestId(requestId));
+      }
+      const snapshot = await this.snapshot();
+      this.publish({ type: "state", state: snapshot });
+      return snapshot;
+    });
+    this.hostMutationQueue = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
   }
 
   dispose(): void {
@@ -209,6 +247,13 @@ export class ServerWebStateCoordinator {
     if (!this.host) throw new WebStateError("HOST_UNAVAILABLE", "本机 Host 当前不可用");
     return this.host;
   }
+}
+
+function requireControlRequestId(value: string | undefined): string {
+  if (!value || value.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(value)) {
+    throw new WebStateError("INVALID_CONTROL_REQUEST", "Host 接管请求标识无效");
+  }
+  return value;
 }
 
 export class WebStateError extends Error {

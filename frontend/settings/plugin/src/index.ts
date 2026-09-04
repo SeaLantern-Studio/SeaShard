@@ -10,7 +10,7 @@ export const pluginSettingsUiManifest: PluginManifest = {
       id: "plugin-settings.client",
       runtime: "client",
       module: "./dist/client.js",
-      targets: ["desktop"],
+      targets: ["desktop", "web"],
       activationScopes: ["global"],
       uses: {
         [pluginManagementContract]: ["list", "setEnabled", "uninstall"],
