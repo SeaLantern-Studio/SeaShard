@@ -179,9 +179,10 @@ await test("release notes map every supported platform and include the complete 
   assert.match(notes, /fix\(runtime\): 修复重载/u);
   assert.match(notes, /compare\/v1\.2\.2\.\.\.v1\.2\.3/u);
   assert.match(notes, /当前构建未进行商业代码签名/u);
-  assert.match(notes, /npm install --global @seashard\/server/u);
-  assert.match(notes, /brew tap sealantern-studio\/seashard/u);
-  assert.match(notes, /install-server\.sh/u);
+  assert.match(notes, /### 手动安装文件/u);
+  assert.doesNotMatch(notes, /npm install --global @seashard\/server/u);
+  assert.doesNotMatch(notes, /brew tap sealantern-studio\/seashard/u);
+  assert.doesNotMatch(notes, /install-server\.sh/u);
 });
 
 await test("first release notes include repository history without a previous comparison tag", () => {

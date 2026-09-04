@@ -48,11 +48,77 @@ SeaShard 希望把常见的服务端管理流程集中到一套桌面界面中�
 - Agent Tool 用于执行操作，Resource URI 用于按需读取领域信息；
 - 工具、资源及其帮助信息随所属组件和插件的生命周期动态更新。
 
-## 下载与安装
+## 安装
+
+### Desktop Controller
 
 前往 [GitHub Releases](https://github.com/SeaLantern-Studio/SeaShard/releases) 下载 SeaShard，并按照对应 Release 中的平台选择表获取安装包。
 
 安装完成后，可在 **设置 → 关于** 中手动检查新版本。Windows 与 Linux 安装包可以直接下载、安装和重启；macOS 会打开对应的 GitHub Release 下载页。
+
+### Server Controller
+
+Server Controller 提供以下三种命令行安装方式，请根据运行环境选择其中一种。卸载默认保留 Host、服务器实例和 Controller 用户数据。
+
+#### 安装脚本
+
+适用于 Linux 和 macOS。脚本会下载当前 Release 对应的 Server Runtime，校验文件后登记并启动当前用户的后台服务。
+
+安装：
+
+```sh
+curl -fsSL https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/install-server.sh | sh
+```
+
+卸载：
+
+```sh
+server_command="${XDG_BIN_HOME:-$HOME/.local/bin}/seashard-server"
+case "$(uname -s)" in
+  Linux) installation_root="${XDG_DATA_HOME:-$HOME/.local/share}/SeaShard/server" ;;
+  Darwin) installation_root="$HOME/Library/Application Support/SeaShard/server" ;;
+  *) echo "Unsupported operating system: $(uname -s)" >&2; exit 1 ;;
+esac
+"$server_command" service uninstall
+rm -f "$server_command"
+rm -rf "$installation_root"
+```
+
+#### npm
+
+需要 Node.js `>= 24.11.0`。全局安装时会登记并启动当前用户的后台服务。
+
+安装：
+
+```sh
+npm install --global @seashard/server
+```
+
+卸载：
+
+```sh
+npm uninstall --global @seashard/server
+```
+
+#### Homebrew
+
+适用于 Linux 和 macOS。安装 Formula 后，通过 Homebrew Services 启动后台服务。
+
+安装：
+
+```sh
+brew tap sealantern-studio/seashard https://github.com/SeaLantern-Studio/SeaShard.git
+brew install seashard-server
+brew services start seashard-server
+```
+
+卸载：
+
+```sh
+brew services stop seashard-server
+brew uninstall seashard-server
+brew untap sealantern-studio/seashard
+```
 
 ## 快速开始
 

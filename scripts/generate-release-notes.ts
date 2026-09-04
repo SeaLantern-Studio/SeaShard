@@ -241,15 +241,6 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     : "这是首个公开 Release，以下内容包含当前仓库历史中的全部提交。";
 
   const serverDownloads = [
-    "### 命令安装",
-    "",
-    "```sh",
-    "curl -fsSL https://github.com/SeaLantern-Studio/SeaShard/releases/latest/download/install-server.sh | sh",
-    "npm install --global @seashard/server",
-    "brew tap sealantern-studio/seashard https://github.com/SeaLantern-Studio/SeaShard.git",
-    "brew install seashard-server",
-    "```",
-    "",
     "### 手动安装文件",
     "",
     `- Windows x64：${asset(`SeaShard-Server-${input.version}-windows-x64.zip`)}`,
