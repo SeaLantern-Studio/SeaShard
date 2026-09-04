@@ -41,7 +41,12 @@ const archive = await downloadBytes(`${baseUrl}/${archiveName}`);
 const actual = createHash("sha256").update(archive).digest("hex");
 if (actual !== expected) throw new Error(`Node.js Runtime 摘要校验失败：${archiveName}`);
 await writeFile(archivePath, archive);
-await run("tar", ["-xf", archiveName, "-C", "."], distributionRoot);
+// Git Bash 会优先解析无法读取 zip 的 GNU tar；Windows 固定调用系统 bsdtar，避免 PATH 改变解压行为。
+const archiveExtractor =
+  platform === "windows"
+    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
+await run(archiveExtractor, ["-xf", archiveName, "-C", "."], distributionRoot);
 const executable = resolve(
   distributionRoot,
   directoryName,
