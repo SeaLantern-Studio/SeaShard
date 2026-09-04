@@ -3,28 +3,82 @@ set -eu
 
 repository="SeaLantern-Studio/SeaShard"
 catalog_url="${SEASHARD_RELEASE_CATALOG_URL:-https://github.com/$repository/releases/latest/download/latest-release.json}"
+installation_owner="seashard-install-script-v1"
+
+fail() {
+  echo "SeaShard Server install refused: $1" >&2
+  exit 1
+}
+
+require_safe_base() {
+  label="$1"
+  value="$2"
+  case "$value" in
+    /*) ;;
+    *) fail "$label must be an absolute path" ;;
+  esac
+  [ "$value" != "/" ] || fail "$label cannot be the filesystem root"
+}
+
+home_directory="${HOME:-}"
+[ -n "$home_directory" ] || fail "HOME is empty"
 case "$(uname -s)" in
   Linux)
     platform=linux
-    config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-    data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+    config_home="${XDG_CONFIG_HOME:-$home_directory/.config}"
+    data_home="${XDG_DATA_HOME:-$home_directory/.local/share}"
     ;;
   Darwin)
     platform=macos
-    config_home="$HOME/Library/Application Support"
-    data_home="$HOME/Library/Application Support"
+    config_home="$home_directory/Library/Application Support"
+    data_home="$home_directory/Library/Application Support"
     ;;
   *)
-    echo "Unsupported operating system: $(uname -s)" >&2
-    exit 1
+    fail "unsupported operating system: $(uname -s)"
     ;;
 esac
-bin_home="${XDG_BIN_HOME:-$HOME/.local/bin}"
+bin_home="${XDG_BIN_HOME:-$home_directory/.local/bin}"
+
+require_safe_base "HOME" "$home_directory"
+require_safe_base "data home" "$data_home"
+require_safe_base "config home" "$config_home"
+require_safe_base "binary home" "$bin_home"
+[ -d "$home_directory" ] || fail "HOME does not exist: $home_directory"
+mkdir -p "$data_home" "$config_home" "$bin_home"
+home_directory="$(cd -P "$home_directory" && pwd)"
+data_home="$(cd -P "$data_home" && pwd)"
+config_home="$(cd -P "$config_home" && pwd)"
+bin_home="$(cd -P "$bin_home" && pwd)"
+[ ! -L "$data_home/SeaShard" ] || fail "data root cannot be a symbolic link"
+[ ! -L "$data_home/SeaShard/server" ] || fail "installation root cannot be a symbolic link"
+[ ! -L "$config_home/SeaShard" ] || fail "config root cannot be a symbolic link"
+
 installation_root="$data_home/SeaShard/server"
 runtime_root="$installation_root/runtime"
 staging_root="$installation_root/.runtime-install-$$"
 backup_root="$installation_root/.runtime-backup-$$"
+ownership_file="$installation_root/.install-source"
+[ ! -L "$ownership_file" ] || fail "installation ownership file cannot be a symbolic link"
+shared_data_root="$config_home/SeaShard"
+controller_data_root="$shared_data_root/server-controller"
+host_data_root="$shared_data_root/core"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/seashard-server-install.XXXXXX")"
+
+install_service() {
+  env \
+    -u SEASHARD_SHARED_DATA_DIR \
+    -u SEASHARD_HOST_DATA_DIR \
+    -u SEASHARD_DATA_DIR \
+    -u SEASHARD_CONTROLLER_DATA_DIR \
+    -u SEASHARD_SERVER_DATA_DIR \
+    HOME="$home_directory" \
+    XDG_CONFIG_HOME="$config_home" \
+    XDG_DATA_HOME="$data_home" \
+    "$1" service install \
+    "--shared-data-root=$shared_data_root" \
+    "--data-root=$controller_data_root" \
+    "--host-data-root=$host_data_root"
+}
 
 cleanup() {
   rm -rf -- "$temporary_root" "$staging_root"
@@ -120,16 +174,17 @@ if ! mv "$staging_root" "$runtime_root"; then
   exit 1
 fi
 ln -sfn "$runtime_root/seashard-server" "$bin_home/seashard-server"
-if ! "$runtime_root/seashard-server" service install; then
+if ! install_service "$runtime_root/seashard-server"; then
   rm -rf -- "$runtime_root"
   if [ -e "$backup_root" ]; then
     mv "$backup_root" "$runtime_root"
     ln -sfn "$runtime_root/seashard-server" "$bin_home/seashard-server"
-    "$runtime_root/seashard-server" service install || true
+    install_service "$runtime_root/seashard-server" || true
   fi
   echo "SeaShard Server service installation failed; previous Runtime restored." >&2
   exit 1
 fi
+printf '%s\n' "$installation_owner" > "$ownership_file"
 rm -rf -- "$backup_root"
 trap - EXIT HUP INT TERM
 rm -rf -- "$temporary_root"
