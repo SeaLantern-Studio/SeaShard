@@ -20,6 +20,18 @@ await test("manual release accepts only unprefixed three-part numeric versions",
     assert.throws(() => assertReleaseVersion(invalid), /不带 v 的三段数字格式/u);
   }
 });
+await test("release workflow builds the Server npm archive once and uploads it", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/release.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    workflow,
+    /if: matrix\.platform == 'linux' && matrix\.arch == 'x64'[\s\S]*node scripts\/package-server-npm\.mjs[\s\S]*--version=\$\{\{ inputs\.version \}\}[\s\S]*npm pack build\/server-npm --pack-destination release/u,
+  );
+  assert.match(workflow, /release\/seashard-server-\$\{\{ inputs\.version \}\}\.tgz/u);
+});
 
 await test("release bundle includes installers and supported updater metadata", () => {
   const bundle = expectedReleaseBundleNames("1.2.3");

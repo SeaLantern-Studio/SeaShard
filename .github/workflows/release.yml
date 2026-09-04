@@ -303,6 +303,15 @@ jobs:
                 --appimage-tool=build/appimagetool.AppImage
               ;;
           esac
+      # npm 归档与平台无关，只在 Linux x64 构建一次，避免六个矩阵任务生成同名资产。
+      - name: 构建 Server npm 归档
+        if: matrix.platform == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          node scripts/package-server-npm.mjs \
+            --version=${{ inputs.version }} \
+            --output=build/server-npm
+          npm pack build/server-npm --pack-destination release
 
       - name: 构建平台安装包
         shell: bash
@@ -334,6 +343,7 @@ jobs:
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.pkg
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.AppImage
             release/SeaShard-Server-${{ inputs.version }}-${{ matrix.asset_key }}.deb
+            release/seashard-server-${{ inputs.version }}.tgz
           if-no-files-found: error
           retention-days: 1
 
